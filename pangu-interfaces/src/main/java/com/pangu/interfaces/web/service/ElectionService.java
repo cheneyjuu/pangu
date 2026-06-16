@@ -5,6 +5,7 @@ import com.pangu.domain.policy.AbacPolicyEngine;
 import com.pangu.domain.policy.EvaluationResult;
 import com.pangu.infrastructure.persistence.handler.DataScopeInterceptor.UserSecurityContext;
 import com.pangu.interfaces.web.controller.AppException;
+import com.pangu.interfaces.web.controller.dto.CandidateQualificationResult;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -27,7 +28,7 @@ public class ElectionService {
      * @param userCtx 当前已认证用户的安全上下文
      * @return 资格通过后的描述数据
      */
-    public Map<String, Object> checkCandidateQualification(UserSecurityContext userCtx) {
+    public CandidateQualificationResult checkCandidateQualification(UserSecurityContext userCtx) {
         if (userCtx == null) {
             throw new AppException(401, "无访问权限：认证失效，请重新登录");
         }
@@ -54,11 +55,11 @@ public class ElectionService {
             ));
         }
 
-        // 3. 校验通过，返回资格合格的成功声明
-        return Map.of(
-                "uid", uid,
-                "tenant_id", tenantId,
-                "is_eligible", true
-        );
+        // 3. 校验通过，返回强类型资格结果
+        return CandidateQualificationResult.builder()
+                .uid(uid)
+                .tenantId(tenantId)
+                .eligible(true)
+                .build();
     }
 }

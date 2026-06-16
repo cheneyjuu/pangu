@@ -137,11 +137,12 @@ public class ControllerIntegrationTest {
         // 张三 (uid=101) 状态正常，校验应该通过
         String token = jwtTokenProvider.generateToken(101L, 9001L, List.of("grid_manager"), List.of("election:vote", "repair:view"), 1);
 
-        mockMvc.perform(get("/api/v1/election/candidate/check-qualification")
+        mockMvc.perform(get("/api/v1/election/candidates/me/eligibility")
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code", is(200)))
-                .andExpect(jsonPath("$.data.is_eligible", is(true)));
+                .andExpect(jsonPath("$.msg", is("资格校验完成")))
+                .andExpect(jsonPath("$.data.eligible", is(true)));
     }
 
     @Test
@@ -149,7 +150,7 @@ public class ControllerIntegrationTest {
         // 王五 (uid=103) 名下有欠费房产，在 SCHEME_C 限制下应该被拦截并返回 403 Forbidden
         String token = jwtTokenProvider.generateToken(103L, 9001L, List.of(), List.of("election:vote"), 1);
 
-        mockMvc.perform(get("/api/v1/election/candidate/check-qualification")
+        mockMvc.perform(get("/api/v1/election/candidates/me/eligibility")
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isForbidden()) // 403
                 .andExpect(jsonPath("$.code", is(403)))
