@@ -2,6 +2,9 @@ package com.pangu.bootstrap.config;
 
 import com.pangu.domain.policy.AbacPolicyEngine;
 import com.pangu.domain.policy.impl.DefaultAbacPolicyEngine;
+import com.pangu.domain.model.voting.ElectionVotingEngine;
+import com.pangu.domain.model.voting.GeneralDecisionEngine;
+import com.pangu.domain.model.voting.MajorDecisionEngine;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -15,5 +18,20 @@ public class DomainConfig {
     @Bean
     public AbacPolicyEngine abacPolicyEngine() {
         return new DefaultAbacPolicyEngine();
+    }
+
+    @Bean
+    public GeneralDecisionEngine generalDecisionEngine() {
+        return new GeneralDecisionEngine();
+    }
+
+    @Bean
+    public MajorDecisionEngine majorDecisionEngine() {
+        return new MajorDecisionEngine();
+    }
+
+    @Bean
+    public ElectionVotingEngine electionVotingEngine() {
+        return new ElectionVotingEngine();
     }
 }

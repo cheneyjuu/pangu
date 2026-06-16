@@ -21,6 +21,12 @@ public class VoteItem {
     /** 投票人业主身份 ID (OPID) */
     private Long opid;
 
+    /** 关联的全局自然人 ID (UID) */
+    private Long uid;
+
+    /** 投票人选择的目标（如候选人 ID，或决议选项 ID） */
+    private Long targetId;
+
     /** 投票对应的房产计票面积 */
     private BigDecimal propertyArea;
 

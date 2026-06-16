@@ -3,6 +3,8 @@ package com.pangu.domain.model.voting;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.List;
+import java.util.Set;
+import java.util.HashSet;
 
 /**
  * 计票与表决结算引擎抽象类 (使用模板方法模式与函数式编程)
@@ -27,13 +29,22 @@ public abstract class AbstractVotingEngine<S extends VotingSubject, R extends Vo
             throw new IllegalArgumentException("结算参数不合规：表决项列表、小区面积或总人数无效。");
         }
 
-        // 1. 基于 Stream 函数式累加参会专有建筑面积
-        BigDecimal participatingArea = validVotes.stream()
-                .map(VoteItem::getPropertyArea)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        // 1. 基于双重去重机制，精准计算实际参会业主的“总建筑面积（不同房屋累加，同房屋候选人票不累加）”与“总人数（合并一户多房/开发商存量房）”
+        Set<Long> uniqueUids = new HashSet<>();
+        Set<String> uniqueUidAndOpid = new HashSet<>();
+        BigDecimal participatingArea = BigDecimal.ZERO;
 
-        // 2. 参会业主总人数 (传入的有效票已在应用层去重合并，一张有效票代表一个独立参与主体)
-        long participatingOwnerCount = validVotes.size();
+        for (VoteItem vote : validVotes) {
+            // 通过 "uid-opid" 组合去重累加参会房产的有效面积
+            if (uniqueUidAndOpid.add(vote.getUid() + "-" + vote.getOpid())) {
+                participatingArea = participatingArea.add(vote.getPropertyArea());
+            }
+            // 收集所有去重的独立自然人 ID (UID)
+            uniqueUids.add(vote.getUid());
+        }
+
+        // 2. 实际参会独立业主总数（一户多套/开发商合并算作 1 人）
+        long participatingOwnerCount = uniqueUids.size();
 
         // 3. 校验双参与门槛 (2/3)
         boolean quorumSatisfied = checkQuorum(participatingArea, totalArea, participatingOwnerCount, totalOwnerCount);
