@@ -46,6 +46,7 @@ mybatis:
   configuration:
     map-underscore-to-camel-case: true
     cache-enabled: true
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
 
 # 平台业务与安全策略参数
 platform:

@@ -29,4 +29,9 @@ public interface UserMapper {
      * 更新实名认证层级
      */
     int updateAuthLevel(@Param("uid") Long uid, @Param("authLevel") int authLevel);
+
+    /**
+     * 根据自然人 UID 查询其系统角色的 role_key 列表
+     */
+    java.util.List<String> selectRolesByUid(@Param("uid") Long uid);
 }

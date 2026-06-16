@@ -3,8 +3,6 @@ package com.pangu.infrastructure.persistence.handler;
 import com.pangu.infrastructure.security.crypto.Sm4Util;
 import org.apache.ibatis.type.BaseTypeHandler;
 import org.apache.ibatis.type.JdbcType;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Component;
 
 import java.sql.CallableStatement;
 import java.sql.PreparedStatement;
@@ -15,11 +13,13 @@ import java.sql.SQLException;
  * 国密 SM4 透明加解密 MyBatis 类型处理器
  * 用于对敏感属性（如姓名、身份证号）进行落盘自动加密、读取自动解密
  */
-@Component
 public class Sm4EncryptTypeHandler extends BaseTypeHandler<String> {
 
-    @Value("${platform.security.sm4-key-hex}")
-    private String sm4KeyHex;
+    private static String sm4KeyHex;
+
+    public static void setSm4KeyHex(String key) {
+        sm4KeyHex = key;
+    }
 
     @Override
     public void setNonNullParameter(PreparedStatement ps, int i, String parameter, JdbcType jdbcType) throws SQLException {
@@ -30,7 +30,9 @@ public class Sm4EncryptTypeHandler extends BaseTypeHandler<String> {
     @Override
     public String getNullableResult(ResultSet rs, String columnName) throws SQLException {
         // 从数据库读取密文并执行解密
-        return Sm4Util.decryptHex(rs.getString(columnName), sm4KeyHex);
+        String val = rs.getString(columnName);
+        System.out.println("====== [TYPE HANDLER] decrypting hexCipher: " + val + ", key: " + sm4KeyHex);
+        return Sm4Util.decryptHex(val, sm4KeyHex);
     }
 
     @Override

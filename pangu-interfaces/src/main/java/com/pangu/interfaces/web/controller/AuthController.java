@@ -6,7 +6,6 @@ import com.pangu.domain.model.user.NaturalPerson;
 import com.pangu.domain.model.asset.PropertyOwnership;
 import com.pangu.interfaces.security.JwtTokenProvider;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.*;
@@ -17,7 +16,7 @@ import java.util.stream.Collectors;
  */
 @RestController
 @RequestMapping("/api/v1/auth")
-public class AuthController {
+public class AuthController extends BaseController {
 
     @Autowired
     private JwtTokenProvider jwtTokenProvider;
@@ -32,29 +31,21 @@ public class AuthController {
      * 1. 双端统一登录认证接口 (通过手机号从数据库加载用户数据)
      */
     @PostMapping("/login")
-    public ResponseEntity<Map<String, Object>> login(@RequestBody LoginRequest request) {
+    public Result<Map<String, Object>> login(@RequestBody LoginRequest request) {
         // 从 Postgres 数据库中检索该手机号注册的自然人用户
         NaturalPerson person = userGateway.getByPhone(request.getUsername());
 
         if (person == null) {
-            return ResponseEntity.status(401).body(Map.of(
-                    "code", 401,
-                    "msg", "认证失败：该手机号未注册，请前往居委会完成线下实名核验登记"
-            ));
+            throw new AppException(401, "认证失败：该手机号未注册，请前往居委会完成线下实名核验登记");
         }
 
         // 获取该用户的默认小区 ID (取其名下第一套绑定房产的小区 ID，若无则默认为 9001)
         Long defaultTenantId = 9001L;
         List<PropertyOwnership> ownerships = propertyGateway.getOwnerships(person.getUid(), defaultTenantId);
         
-        // 角色与权限装配 (实际开发会通过部门和用户类型查询 sys_user 关联角色，此处为方便测试做兼容装配)
-        List<String> roles = new ArrayList<>();
-        List<String> permissions = List.of("election:vote"); // 默认拥有业主投票权
-        
-        if ("13800138000".equals(request.getUsername())) {
-            roles = List.of("grid_manager");
-            permissions = List.of("repair:view", "election:vote");
-        }
+        // 角色与权限从数据库真实装配
+        List<String> roles = userGateway.getRolesByUid(person.getUid());
+        List<String> permissions = userGateway.getPermissionsByRoles(roles);
 
         // 签发真实 JWT 安全 Token
         String token = jwtTokenProvider.generateToken(
@@ -75,28 +66,24 @@ public class AuthController {
                 )
         );
 
-        return ResponseEntity.ok(Map.of(
-                "code", 200,
-                "msg", "success",
-                "data", data
-        ));
+        return success(data);
     }
 
     /**
      * 2. C端业主跨小区多租户切换接口 (基于数据库房产数据动态切换)
      */
     @PostMapping("/switch-tenant")
-    public ResponseEntity<Map<String, Object>> switchTenant(
+    public Result<Map<String, Object>> switchTenant(
             @RequestHeader("Authorization") String authHeader,
             @RequestBody SwitchTenantRequest request) {
 
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
-            return ResponseEntity.status(401).body(Map.of("code", 401, "msg", "无访问权限：请携带 Token"));
+            throw new AppException(401, "无访问权限：请携带 Token");
         }
 
         String token = authHeader.substring(7);
         if (!jwtTokenProvider.validateToken(token)) {
-            return ResponseEntity.status(401).body(Map.of("code", 401, "msg", "认证失效，请重新登录"));
+            throw new AppException(401, "认证失效，请重新登录");
         }
 
         Long uid = jwtTokenProvider.getUidFromToken(token);
@@ -105,19 +92,12 @@ public class AuthController {
         // 真实性验证：从数据库查询当前用户在目标小区是否确有房产所有权绑定记录
         List<PropertyOwnership> targetOwnerships = propertyGateway.getOwnerships(uid, targetTenantId);
         if (targetOwnerships == null || targetOwnerships.isEmpty()) {
-            return ResponseEntity.status(403).body(Map.of(
-                    "code", 403,
-                    "msg", "越权访问：您在目标小区名下没有绑定的房产，拒绝切换"
-            ));
+            throw new AppException(403, "越权访问：您在目标小区名下没有绑定的房产，拒绝切换");
         }
 
         // 动态加载用户在该小区下的角色与权限列表
-        List<String> newRoles = new ArrayList<>();
-        List<String> newPermissions = List.of("election:vote");
-        if (uid == 101L && targetTenantId == 9001L) {
-            newRoles = List.of("grid_manager");
-            newPermissions = List.of("repair:view", "election:vote");
-        }
+        List<String> newRoles = userGateway.getRolesByUid(uid);
+        List<String> newPermissions = userGateway.getPermissionsByRoles(newRoles);
 
         // 收集该小区名下的活动房产 OPID 列表
         List<Long> activeOpidList = targetOwnerships.stream()
@@ -132,11 +112,7 @@ public class AuthController {
                 "active_opid_list", activeOpidList
         );
 
-        return ResponseEntity.ok(Map.of(
-                "code", 200,
-                "msg", "切换成功",
-                "data", data
-        ));
+        return success("切换成功", data);
     }
 
     // ===================================================================

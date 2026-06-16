@@ -6,9 +6,9 @@
 -- 密码/证书加密密钥使用 0123456789abcdeffedcba9876543210 模拟
 INSERT INTO c_user (uid, phone, real_name, id_card_type, id_card_no, auth_level, face_status, create_time)
 VALUES 
-(101, '13800138000', '4fe67ee27f4da7e743d5483253b27bcf', 1, '5064e4517b6294715f5c404618e4ee64db555be9d21b76426ff0fb5c4cb03e48', 3, 1, CURRENT_TIMESTAMP), -- 张三, L3 活体已认证
-(102, '13900139000', 'de251c6b1625946cf6177b94924b17bd', 1, 'e064e4517b6294715f5c404618e4ee64db555be9d21b76426ff0fb5c4cb03e48', 1, 0, CURRENT_TIMESTAMP), -- 李四, L1 基础绑定
-(103, '15000150000', 'df172ea27f4da7e743d5483253b27bcf', 1, 'a064e4517b6294715f5c404618e4ee64db555be9d21b76426ff0fb5c4cb03e48', 4, 1, CURRENT_TIMESTAMP); -- 王五(法人代表), L4 级认证
+(101, '13800138000', '8e6d95a4b4b29a57d845dbd096e40f5d', 1, '837ecc582e3f689801bdac613ee8cf869f6704ad87aaedc48d0ea66c693ba3a8', 3, 1, CURRENT_TIMESTAMP), -- 张三, L3 活体已认证
+(102, '13900139000', 'e75d67462f2a8f2d858e0f42837fc8eb', 1, '5532bee8e9154cf8e73241b431b252cca1a8b02e10952851c1dd87ea27012008', 1, 0, CURRENT_TIMESTAMP), -- 李四, L1 基础绑定
+(103, '15000150000', '6dc0c1f473d64bcef93c818a37aec832', 1, '5871a356e061944549b0c075b3a9f05b1d8097c4cfd99f4d33d42d89fd21b87b', 4, 1, CURRENT_TIMESTAMP); -- 王五(法人代表), L4 级认证
 
 -- 重设 Serial 自增主键起始值
 ALTER SEQUENCE c_user_uid_seq RESTART WITH 104;

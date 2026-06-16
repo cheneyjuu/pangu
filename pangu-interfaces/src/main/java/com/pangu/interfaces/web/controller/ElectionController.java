@@ -4,8 +4,6 @@ import com.pangu.domain.gateway.PropertyGateway;
 import com.pangu.domain.policy.AbacPolicyEngine;
 import com.pangu.domain.policy.EvaluationResult;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -18,7 +16,7 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/api/v1/election")
-public class ElectionController {
+public class ElectionController extends BaseController {
 
     @Autowired
     private AbacPolicyEngine abacPolicyEngine;
@@ -30,7 +28,7 @@ public class ElectionController {
      * 业委会选举参选资格前置拦截校验 (方案C执行接口)
      */
     @GetMapping("/candidate/check-qualification")
-    public ResponseEntity<Map<String, Object>> checkQualification(
+    public Result<Map<String, Object>> checkQualification(
             @RequestParam("tenant_id") Long tenantId,
             @RequestParam("uid") Long uid) {
 
@@ -42,27 +40,19 @@ public class ElectionController {
         EvaluationResult result = abacPolicyEngine.evaluateCandidacy(uid, tenantId, hasUnpaidFees, "SCHEME_C");
 
         if (!result.isAllowed()) {
-            // 被拦截，返回符合 PRD 要求的 403 详细报文
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of(
-                    "code", 403,
-                    "msg", result.getMessage(),
-                    "data", Map.of(
-                            "policy_type", result.getPolicyType(),
-                            "restriction_target", result.getRestrictionTarget(),
-                            "is_voting_rights_retained", result.isVotingRightsRetained()
-                    )
+            // 被拦截，抛出带详细数据的 403 AppException，由全局异常处理器捕获
+            throw new AppException(403, result.getMessage(), Map.of(
+                    "policy_type", result.getPolicyType(),
+                    "restriction_target", result.getRestrictionTarget(),
+                    "is_voting_rights_retained", result.isVotingRightsRetained()
             ));
         }
 
         // 校验放行
-        return ResponseEntity.ok(Map.of(
-                "code", 200,
-                "msg", "资格校验通过，允许申报参选业委会委员",
-                "data", Map.of(
-                        "uid", uid,
-                        "tenant_id", tenantId,
-                        "is_eligible", true
-                )
+        return success("资格校验通过，允许申报参选业委会委员", Map.of(
+                "uid", uid,
+                "tenant_id", tenantId,
+                "is_eligible", true
         ));
     }
 }
