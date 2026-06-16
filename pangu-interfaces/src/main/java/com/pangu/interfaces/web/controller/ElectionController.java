@@ -1,5 +1,6 @@
 package com.pangu.interfaces.web.controller;
 
+import com.pangu.domain.gateway.PropertyGateway;
 import com.pangu.domain.policy.AbacPolicyEngine;
 import com.pangu.domain.policy.EvaluationResult;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -22,6 +23,9 @@ public class ElectionController {
     @Autowired
     private AbacPolicyEngine abacPolicyEngine;
 
+    @Autowired
+    private PropertyGateway propertyGateway;
+
     /**
      * 业委会选举参选资格前置拦截校验 (方案C执行接口)
      */
@@ -30,13 +34,11 @@ public class ElectionController {
             @RequestParam("tenant_id") Long tenantId,
             @RequestParam("uid") Long uid) {
 
-        // 模拟从数据库中查询欠费状态：
-        // 依照我们 V1.1__seed_mock_data.sql 播种数据：
-        // 王五 (uid = 103) 名下的 opid 5003 房产状态 account_status = 2 (欠费挂起)
-        // 张三 (101) 和 李四 (102) 状态均为正常 (1)
-        boolean hasUnpaidFees = (uid == 103L);
+        // 动态数据查询：从数据库查询该业主名下绑定的任意房产是否处于非正常/欠费状态
+        // 依照我们 seed-data 数据：王五(uid=103)的名下拥有一套 account_status=2 的欠费房产
+        boolean hasUnpaidFees = propertyGateway.hasUnpaidFees(uid, tenantId);
 
-        // 调用领域层 ABAC 策略评估引擎判定
+        // 调用领域层 ABAC 策略评估引擎进行判定
         EvaluationResult result = abacPolicyEngine.evaluateCandidacy(uid, tenantId, hasUnpaidFees, "SCHEME_C");
 
         if (!result.isAllowed()) {

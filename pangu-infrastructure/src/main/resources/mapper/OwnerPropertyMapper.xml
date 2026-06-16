@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pangu.infrastructure.persistence.mapper.OwnerPropertyMapper">
+
+    <!-- 房产所有权映射 ResultMap -->
+    <resultMap id="PropertyOwnershipResultMap" type="com.pangu.domain.model.asset.PropertyOwnership">
+        <result property="roomId" column="room_id"/>
+        <result property="opid" column="opid"/>
+        <result property="isVotingRepresentative" column="is_voting_delegate" javaType="boolean"/>
+        <result property="accountStatus" column="account_status"/>
+    </resultMap>
+
+    <!-- 根据 UID 与租户 ID 查询所有绑定的房产所有权关系 -->
+    <select id="selectOwnershipsByUid" resultMap="PropertyOwnershipResultMap">
+        SELECT
+            opid,
+            room_id,
+            is_voting_delegate,
+            account_status
+        FROM c_owner_property
+        WHERE uid = #{uid} AND tenant_id = #{tenantId}
+    </select>
+
+    <!-- 统计某自然人在小区内非正常的欠费房产套数 (account_status != 1 视为欠费/冻结) -->
+    <select id="countUnpaidProperties" resultType="int">
+        SELECT COUNT(1)
+        FROM c_owner_property
+        WHERE uid = #{uid} 
+          AND tenant_id = #{tenantId} 
+          AND account_status != 1
+    </select>
+
+    <!-- 根据 opid 查询单一绑定 -->
+    <select id="selectByOpid" resultMap="PropertyOwnershipResultMap">
+        SELECT
+            opid,
+            room_id,
+            is_voting_delegate,
+            account_status
+        FROM c_owner_property
+        WHERE opid = #{opid}
+    </select>
+
+</mapper>

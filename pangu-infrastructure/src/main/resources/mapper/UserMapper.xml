@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pangu.infrastructure.persistence.mapper.UserMapper">
+
+    <!-- 字段映射 ResultMap -->
+    <resultMap id="UserResultMap" type="com.pangu.domain.model.user.NaturalPerson">
+        <id property="uid" column="uid"/>
+        <result property="phone" column="phone"/>
+        <!-- 敏感字段，使用国密 SM4 自动加解密 TypeHandler -->
+        <result property="realName" column="real_name"
+                typeHandler="com.pangu.infrastructure.persistence.handler.Sm4EncryptTypeHandler"/>
+        <result property="idCardType" column="id_card_type"/>
+        <!-- 敏感字段，使用国密 SM4 自动加解密 TypeHandler -->
+        <result property="idCardNo" column="id_card_no"
+                typeHandler="com.pangu.infrastructure.persistence.handler.Sm4EncryptTypeHandler"/>
+        <!-- 枚举转换 TypeHandler -->
+        <result property="authLevel" column="auth_level"
+                typeHandler="com.pangu.infrastructure.persistence.handler.AuthenticationLevelTypeHandler"/>
+        <result property="faceStatus" column="face_status"/>
+        <result property="createTime" column="create_time"/>
+    </resultMap>
+
+    <sql id="Base_Column_List">
+        uid, phone, real_name, id_card_type, id_card_no, auth_level, face_status, create_time
+    </sql>
+
+    <!-- 根据 UID 查询 -->
+    <select id="selectByUid" resultMap="UserResultMap">
+        SELECT
+        <include refid="Base_Column_List"/>
+        FROM c_user
+        WHERE uid = #{uid}
+    </select>
+
+    <!-- 根据手机号查询 -->
+    <select id="selectByPhone" resultMap="UserResultMap">
+        SELECT
+        <include refid="Base_Column_List"/>
+        FROM c_user
+        WHERE phone = #{phone}
+    </select>
+
+    <!-- 插入自然人用户 (写入加密字段时显式指定 SM4 TypeHandler) -->
+    <insert id="insert" useGeneratedKeys="true" keyProperty="uid">
+        INSERT INTO c_user (
+            phone,
+            real_name,
+            id_card_type,
+            id_card_no,
+            auth_level,
+            face_status,
+            create_time
+        ) VALUES (
+            #{phone},
+            #{realName, typeHandler=com.pangu.infrastructure.persistence.handler.Sm4EncryptTypeHandler},
+            #{idCardType},
+            #{idCardNo, typeHandler=com.pangu.infrastructure.persistence.handler.Sm4EncryptTypeHandler},
+            #{authLevel, typeHandler=com.pangu.infrastructure.persistence.handler.AuthenticationLevelTypeHandler},
+            #{faceStatus},
+            CURRENT_TIMESTAMP
+        )
+    </insert>
+
+    <!-- 更新认证层级 -->
+    <update id="updateAuthLevel">
+        UPDATE c_user
+        SET auth_level = #{authLevel}
+        WHERE uid = #{uid}
+    </update>
+
+</mapper>
