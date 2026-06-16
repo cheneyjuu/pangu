@@ -29,6 +29,9 @@ public class AuthService {
     @Autowired
     private PropertyGateway propertyGateway;
 
+    @Autowired
+    private SmsVerificationStrategy smsVerificationStrategy;
+
     /**
      * 用户登录认证核心业务
      */
@@ -40,10 +43,8 @@ public class AuthService {
             throw new AppException(401, "认证失败：该手机号未注册，请前往居委会完成线下实名核验登记");
         }
 
-        // 安全审计：校验短信验证码（开发/测试环境 Mock 统一验证码为 123456）
-        if (request.getSmsCode() == null || !"123456".equals(request.getSmsCode())) {
-            throw new AppException(401, "认证失败：短信验证码无效或已过期");
-        }
+        // 根据当前激活的 profile 所匹配的短信策略执行验证码校验
+        smsVerificationStrategy.validate(request.getUsername(), request.getSmsCode());
 
         // 获取该用户的默认小区 ID (取其名下第一套绑定房产的小区 ID，若无则默认为 9001)
         Long defaultTenantId = 9001L;
