@@ -44,16 +44,14 @@ public class UserGatewayImpl implements UserGateway {
     @Override
     public List<String> getPermissionsByRoles(List<String> roles) {
         List<String> permissions = new ArrayList<>();
-        permissions.add("election:vote"); // 默认拥有业主投票权
-        if (roles != null) {
-            for (String role : roles) {
-                if ("grid_manager".equals(role)) {
-                    if (!permissions.contains("repair:view")) {
-                        permissions.add("repair:view");
-                    }
-                } else if ("admin".equals(role)) {
-                    if (!permissions.contains("*:*")) {
-                        permissions.add("*:*");
+        permissions.add("election:vote"); // 默认拥有业主表决投票权
+
+        if (roles != null && !roles.isEmpty()) {
+            List<String> dbPermissions = userMapper.selectPermissionsByRoles(roles);
+            if (dbPermissions != null) {
+                for (String perm : dbPermissions) {
+                    if (!permissions.contains(perm)) {
+                        permissions.add(perm);
                     }
                 }
             }

@@ -45,6 +45,11 @@ public interface UserMapper {
      */
     java.util.List<Long> selectBuildingIdsByUserId(@Param("userId") Long userId);
 
+    /**
+     * 根据角色 Key 列表查询关联的权限标识列表
+     */
+    java.util.List<String> selectPermissionsByRoles(@Param("roles") java.util.List<String> roles);
+
     @lombok.Data
     public static class SysUserDto {
         private Long userId;

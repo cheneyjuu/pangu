@@ -95,4 +95,17 @@
         WHERE user_id = #{userId}
     </select>
 
+    <!-- 根据角色 Key 列表查询关联的权限标识列表 -->
+    <select id="selectPermissionsByRoles" resultType="java.lang.String">
+        SELECT DISTINCT m.perms
+        FROM sys_menu m
+        INNER JOIN sys_role_menu rm ON m.menu_id = rm.menu_id
+        INNER JOIN sys_role r ON rm.role_id = r.role_id
+        WHERE r.role_key IN
+        <foreach collection="roles" item="roleKey" open="(" separator="," close=")">
+            #{roleKey}
+        </foreach>
+        AND m.status = '0' AND r.status = '0' AND m.perms IS NOT NULL
+    </select>
+
 </mapper>
