@@ -42,7 +42,6 @@ public class AuthService {
 
         // 获取该用户的默认小区 ID (取其名下第一套绑定房产的小区 ID，若无则默认为 9001)
         Long defaultTenantId = 9001L;
-        List<PropertyOwnership> ownerships = propertyGateway.getOwnerships(person.getUid(), defaultTenantId);
         
         // 角色与权限从数据库真实装配
         List<String> roles = userGateway.getRolesByUid(person.getUid());
