@@ -6,6 +6,7 @@ import com.pangu.domain.policy.EvaluationResult;
 import com.pangu.infrastructure.persistence.handler.DataScopeInterceptor.UserSecurityContext;
 import com.pangu.interfaces.web.controller.AppException;
 import com.pangu.interfaces.web.controller.dto.CandidateQualificationResult;
+import com.pangu.interfaces.security.SecurityUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -28,7 +29,7 @@ public class ElectionService {
      * @return 资格通过后的描述数据
      */
     public CandidateQualificationResult checkCandidateQualification() {
-        UserSecurityContext userCtx = com.pangu.interfaces.security.SecurityUtils.getUserContext();
+        UserSecurityContext userCtx = SecurityUtils.getUserContext();
         if (userCtx == null) {
             throw new AppException(401, "无访问权限：认证失效，请重新登录");
         }
