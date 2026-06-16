@@ -1,6 +1,7 @@
 package com.pangu.infrastructure.persistence.mapper;
 
 import com.pangu.domain.model.asset.PropertyOwnership;
+import com.pangu.infrastructure.persistence.annotation.DataScope;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
@@ -27,4 +28,10 @@ public interface OwnerPropertyMapper {
      * 根据 opid 查询特定房产绑定关系
      */
     PropertyOwnership selectByOpid(@Param("opid") Long opid);
+
+    /**
+     * 管理端网格员根据楼栋管辖范围查询房产关系列表 (行级数据范围过滤)
+     */
+    @DataScope(buildingAlias = "op")
+    List<PropertyOwnership> selectOwnershipsByBuilding(@Param("tenantId") Long tenantId);
 }

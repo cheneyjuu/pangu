@@ -36,7 +36,10 @@ public class ControllerIntegrationTest {
     @Test
     public void testLoginAndRolesGridManager() throws Exception {
         // 13800138000 是网格员王小二绑定的自然人手机号
-        Map<String, Object> request = Map.of("username", "13800138000");
+        Map<String, Object> request = Map.of(
+                "username", "13800138000",
+                "smsCode", "123456"
+        );
 
         String responseJson = mockMvc.perform(post("/api/v1/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -67,7 +70,10 @@ public class ControllerIntegrationTest {
     @Test
     public void testLoginWithNormalUser() throws Exception {
         // 13900139000 是普通业主李四的手机号，名下无任何管理端 sys_user 绑定
-        Map<String, Object> request = Map.of("username", "13900139000");
+        Map<String, Object> request = Map.of(
+                "username", "13900139000",
+                "smsCode", "123456"
+        );
 
         String responseJson = mockMvc.perform(post("/api/v1/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -96,7 +102,10 @@ public class ControllerIntegrationTest {
 
     @Test
     public void testLoginWithUnregisteredUser() throws Exception {
-        Map<String, Object> request = Map.of("username", "18888888888");
+        Map<String, Object> request = Map.of(
+                "username", "18888888888",
+                "smsCode", "123456"
+        );
 
         mockMvc.perform(post("/api/v1/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -108,11 +117,28 @@ public class ControllerIntegrationTest {
     }
 
     @Test
+    public void testLoginWithInvalidSmsCode() throws Exception {
+        Map<String, Object> request = Map.of(
+                "username", "13800138000",
+                "smsCode", "invalid_code"
+        );
+
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andDo(print())
+                .andExpect(status().isUnauthorized()) // 401
+                .andExpect(jsonPath("$.code", is(401)))
+                .andExpect(jsonPath("$.msg", containsString("验证码")));
+    }
+
+    @Test
     public void testCheckQualificationSuccess() throws Exception {
         // 张三 (uid=101) 状态正常，校验应该通过
+        String token = jwtTokenProvider.generateToken(101L, 9001L, List.of("grid_manager"), List.of("election:vote", "repair:view"), 1);
+
         mockMvc.perform(get("/api/v1/election/candidate/check-qualification")
-                        .param("tenant_id", "9001")
-                        .param("uid", "101"))
+                        .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code", is(200)))
                 .andExpect(jsonPath("$.data.is_eligible", is(true)));
@@ -121,9 +147,10 @@ public class ControllerIntegrationTest {
     @Test
     public void testCheckQualificationFailedForArrears() throws Exception {
         // 王五 (uid=103) 名下有欠费房产，在 SCHEME_C 限制下应该被拦截并返回 403 Forbidden
+        String token = jwtTokenProvider.generateToken(103L, 9001L, List.of(), List.of("election:vote"), 1);
+
         mockMvc.perform(get("/api/v1/election/candidate/check-qualification")
-                        .param("tenant_id", "9001")
-                        .param("uid", "103"))
+                        .header("Authorization", "Bearer " + token))
                 .andExpect(status().isForbidden()) // 403
                 .andExpect(jsonPath("$.code", is(403)))
                 .andExpect(jsonPath("$.data.policy_type", is("SCHEME_C")))

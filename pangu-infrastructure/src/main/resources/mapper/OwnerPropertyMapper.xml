@@ -42,4 +42,15 @@
         WHERE opid = #{opid}
     </select>
 
+    <!-- 管理端网格员根据楼栋管辖范围查询房产关系列表 -->
+    <select id="selectOwnershipsByBuilding" resultMap="PropertyOwnershipResultMap">
+        SELECT
+            op.opid,
+            op.room_id,
+            op.is_voting_delegate,
+            op.account_status
+        FROM c_owner_property op
+        WHERE op.tenant_id = #{tenantId}
+    </select>
+
 </mapper>

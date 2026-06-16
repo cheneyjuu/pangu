@@ -78,4 +78,21 @@
         WHERE u.uid = #{uid} AND u.status = '0' AND r.status = '0'
     </select>
 
+    <!-- 根据自然人 UID 查询其后台关联的系统用户信息及角色数据范围 -->
+    <select id="selectSysUserByUid" resultType="com.pangu.infrastructure.persistence.mapper.UserMapper$SysUserDto">
+        SELECT u.user_id as userId, u.dept_id as deptId, r.data_scope as dataScope
+        FROM sys_user u
+        LEFT JOIN sys_user_role ur ON u.user_id = ur.user_id
+        LEFT JOIN sys_role r ON ur.role_id = r.role_id AND r.status = '0'
+        WHERE u.uid = #{uid} AND u.status = '0'
+        LIMIT 1
+    </select>
+
+    <!-- 根据后台用户 ID 查询其管辖的自定义楼栋 ID 列表 -->
+    <select id="selectBuildingIdsByUserId" resultType="java.lang.Long">
+        SELECT building_id
+        FROM sys_user_building
+        WHERE user_id = #{userId}
+    </select>
+
 </mapper>

@@ -1,5 +1,7 @@
 package com.pangu.interfaces.web.config;
 
+import com.pangu.interfaces.security.JwtAuthenticationFilter;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
@@ -8,6 +10,7 @@ import org.springframework.security.config.annotation.web.configuration.EnableWe
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
 /**
  * Spring Security 安全配置类
@@ -16,6 +19,9 @@ import org.springframework.security.web.SecurityFilterChain;
 @EnableWebSecurity
 @EnableMethodSecurity
 public class SecurityConfig {
+
+    @Autowired
+    private JwtAuthenticationFilter jwtAuthenticationFilter;
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
@@ -28,9 +34,11 @@ public class SecurityConfig {
             .authorizeHttpRequests(authorize -> authorize
                 // 允许匿名公开登录接口
                 .requestMatchers("/api/v1/auth/login").permitAll()
-                // 其他接口暂时放行，由自定义租户拦截器解析 Token、后续阶段加入的具体认证过滤器做精细拦截
-                .anyRequest().permitAll()
-            );
+                // 其他接口均需要经过 JWT 身份认证
+                .anyRequest().authenticated()
+            )
+            // 在 UsernamePasswordAuthenticationFilter 之前插入自定义的 JWT 认证过滤器
+            .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
     }

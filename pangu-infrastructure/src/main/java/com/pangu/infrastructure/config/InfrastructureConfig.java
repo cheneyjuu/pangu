@@ -16,7 +16,6 @@ public class InfrastructureConfig {
 
     @PostConstruct
     public void init() {
-        System.out.println("====== [INFRA CONFIG] init sm4KeyHex: " + sm4KeyHex);
         // 将解密密钥注入到透明加解密类型处理器中
         Sm4EncryptTypeHandler.setSm4KeyHex(sm4KeyHex);
     }

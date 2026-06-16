@@ -160,6 +160,8 @@ public class DataScopeInterceptor implements Interceptor {
                 .deptId(104L)
                 .dataScope(DataScopeType.CUSTOM_BUILDING.getValue()) // 自定义楼栋
                 .authorizedBuildingIds(List.of(10001L, 10002L))
+                .uid(101L)
+                .tenantId(9001L)
                 .build();
     }
 
@@ -181,5 +183,7 @@ public class DataScopeInterceptor implements Interceptor {
         private Long deptId;
         private String dataScope;
         private List<Long> authorizedBuildingIds;
+        private Long uid;
+        private Long tenantId;
     }
 }

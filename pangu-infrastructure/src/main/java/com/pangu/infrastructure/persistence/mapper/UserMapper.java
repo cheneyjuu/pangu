@@ -34,4 +34,21 @@ public interface UserMapper {
      * 根据自然人 UID 查询其系统角色的 role_key 列表
      */
     java.util.List<String> selectRolesByUid(@Param("uid") Long uid);
+
+    /**
+     * 根据自然人 UID 查询其后台关联的系统用户信息及角色数据范围
+     */
+    SysUserDto selectSysUserByUid(@Param("uid") Long uid);
+
+    /**
+     * 根据后台用户 ID 查询其管辖的自定义楼栋 ID 列表
+     */
+    java.util.List<Long> selectBuildingIdsByUserId(@Param("userId") Long userId);
+
+    @lombok.Data
+    public static class SysUserDto {
+        private Long userId;
+        private Long deptId;
+        private String dataScope;
+    }
 }

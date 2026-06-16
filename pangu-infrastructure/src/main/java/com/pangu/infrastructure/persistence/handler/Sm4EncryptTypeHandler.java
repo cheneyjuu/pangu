@@ -31,7 +31,6 @@ public class Sm4EncryptTypeHandler extends BaseTypeHandler<String> {
     public String getNullableResult(ResultSet rs, String columnName) throws SQLException {
         // 从数据库读取密文并执行解密
         String val = rs.getString(columnName);
-        System.out.println("====== [TYPE HANDLER] decrypting hexCipher: " + val + ", key: " + sm4KeyHex);
         return Sm4Util.decryptHex(val, sm4KeyHex);
     }
 
