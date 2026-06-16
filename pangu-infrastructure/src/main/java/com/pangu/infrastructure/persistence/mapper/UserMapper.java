@@ -1,6 +1,7 @@
 package com.pangu.infrastructure.persistence.mapper;
 
 import com.pangu.domain.model.user.NaturalPerson;
+import java.util.List;
 import lombok.Data;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -34,7 +35,7 @@ public interface UserMapper {
     /**
      * 根据自然人 UID 查询其系统角色的 role_key 列表
      */
-    java.util.List<String> selectRolesByUid(@Param("uid") Long uid);
+    List<String> selectRolesByUid(@Param("uid") Long uid);
 
     /**
      * 根据自然人 UID 查询其后台关联的系统用户信息及角色数据范围
@@ -44,12 +45,12 @@ public interface UserMapper {
     /**
      * 根据后台用户 ID 查询其管辖的自定义楼栋 ID 列表
      */
-    java.util.List<Long> selectBuildingIdsByUserId(@Param("userId") Long userId);
+    List<Long> selectBuildingIdsByUserId(@Param("userId") Long userId);
 
     /**
      * 根据角色 Key 列表查询关联的权限标识列表
      */
-    java.util.List<String> selectPermissionsByRoles(@Param("roles") java.util.List<String> roles);
+    List<String> selectPermissionsByRoles(@Param("roles") List<String> roles);
 
     @Data
     class SysUserDto {

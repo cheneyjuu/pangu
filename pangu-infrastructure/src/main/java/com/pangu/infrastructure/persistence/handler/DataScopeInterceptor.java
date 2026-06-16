@@ -21,6 +21,11 @@ import java.lang.reflect.Method;
 import java.sql.Connection;
 import java.util.*;
 import java.util.stream.Collectors;
+import lombok.Getter;
+import lombok.Setter;
+import lombok.Builder;
+import lombok.NoArgsConstructor;
+import lombok.AllArgsConstructor;
 
 /**
  * MyBatis 动态 SQL 数据权限拦截器 (ABAC 行级数据隔离核心组件)
@@ -173,11 +178,11 @@ public class DataScopeInterceptor implements Interceptor {
     // ===================================================================
     // 数据权限安全上下文内部载体 (供安全与 MyBatis 共用)
     // ===================================================================
-    @lombok.Getter
-    @lombok.Setter
-    @lombok.Builder
-    @lombok.NoArgsConstructor
-    @lombok.AllArgsConstructor
+    @Getter
+    @Setter
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class UserSecurityContext {
         private Long userId;
         private Long deptId;
