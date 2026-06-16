@@ -1,0 +1,63 @@
+server:
+  port: 8080
+  servlet:
+    context-path: /pangu
+
+spring:
+  application:
+    name: pangu-backend
+  profiles:
+    active: dev
+
+  # Postgres 数据源配置
+  datasource:
+    url: jdbc:postgresql://localhost:5432/pangu_db?useSSL=false&characterEncoding=utf8
+    username: postgres
+    password: password
+    driver-class-name: org.postgresql.Driver
+
+  # Flyway 数据库版本迁移配置
+  flyway:
+    enabled: true
+    clean-disabled: true
+    baseline-on-migrate: true
+    baseline-version: 1
+    locations: classpath:db/migration
+
+  # Redis 缓存配置
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      database: 0
+      password: 
+      timeout: 5000ms
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 8
+          min-idle: 0
+          max-wait: -1ms
+
+# MyBatis 配置
+mybatis:
+  mapper-locations: classpath*:mapper/**/*.xml
+  type-aliases-package: com.pangu.infrastructure.persistence.entity
+  configuration:
+    map-underscore-to-camel-case: true
+    cache-enabled: true
+
+# 平台业务与安全策略参数
+platform:
+  security:
+    # JWT 秘钥（SM2 或 HMAC-SHA256 秘钥占位，开发环境使用默认，生产通过环境变量替换）
+    jwt-secret: pangu-secure-jwt-token-secret-key-32-chars-minimum
+    jwt-expiration-seconds: 7200
+    # 国密 SM4 16字节(128位) 对称加解密密钥十六进制字符串
+    sm4-key-hex: 0123456789abcdeffedcba9876543210
+  ali-oss:
+    endpoint: oss-cn-hangzhou.aliyuncs.com
+    bucket-name: pangu-residents-private
+    public-bucket-name: pangu-residents-public
+    access-key-id: DUMMY_KEY_ID_FOR_DEV
+    access-key-secret: DUMMY_KEY_SECRET_FOR_DEV

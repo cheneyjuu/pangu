@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.pangu</groupId>
+    <artifactId>pangu-parent</artifactId>
+    <version>1.0.0-SNAPSHOT</version>
+    <packaging>pom</packaging>
+
+    <name>pangu-parent</name>
+    <description>Smart Community Governance and Owner Autonomy SaaS Platform Parent POM</description>
+
+    <properties>
+        <java.version>21</java.version>
+        <maven.compiler.source>21</maven.compiler.source>
+        <maven.compiler.target>21</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+
+        <!-- Spring Boot Version -->
+        <spring-boot.version>3.2.5</spring-boot.version>
+
+        <!-- Database & ORM -->
+        <postgresql.version>42.7.3</postgresql.version>
+        <mybatis-starter.version>3.0.3</mybatis-starter.version>
+        <jsqlparser.version>4.8</jsqlparser.version>
+        <flyway.version>9.22.3</flyway.version>
+
+        <!-- Security & Utilities -->
+        <bouncycastle.version>1.78.1</bouncycastle.version>
+        <jwt.version>0.12.5</jwt.version>
+        <lombok.version>1.18.32</lombok.version>
+        <aliyun-oss.version>3.17.4</aliyun-oss.version>
+    </properties>
+
+    <!-- 声明子模块 -->
+    <modules>
+        <module>pangu-domain</module>
+        <module>pangu-application</module>
+        <module>pangu-infrastructure</module>
+        <module>pangu-interfaces</module>
+        <module>pangu-bootstrap</module>
+    </modules>
+
+    <dependencyManagement>
+        <dependencies>
+            <!-- Spring Boot Dependencies Bom -->
+            <dependency>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-dependencies</artifactId>
+                <version>${spring-boot.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+
+            <!-- 内部模块依赖 -->
+            <dependency>
+                <groupId>com.pangu</groupId>
+                <artifactId>pangu-domain</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.pangu</groupId>
+                <artifactId>pangu-application</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.pangu</groupId>
+                <artifactId>pangu-infrastructure</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.pangu</groupId>
+                <artifactId>pangu-interfaces</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
+            <!-- MyBatis Starter -->
+            <dependency>
+                <groupId>org.mybatis.spring.boot</groupId>
+                <artifactId>mybatis-spring-boot-starter</artifactId>
+                <version>${mybatis-starter.version}</version>
+            </dependency>
+
+            <!-- SQL Parser (for ABAC data scope modification) -->
+            <dependency>
+                <groupId>com.github.jsqlparser</groupId>
+                <artifactId>jsqlparser</artifactId>
+                <version>${jsqlparser.version}</version>
+            </dependency>
+
+            <!-- Bouncy Castle (for Guomi SM2/SM3/SM4) -->
+            <dependency>
+                <groupId>org.bouncycastle</groupId>
+                <artifactId>bcprov-jdk18on</artifactId>
+                <version>${bouncycastle.version}</version>
+            </dependency>
+
+            <!-- JJWT (for Authentication) -->
+            <dependency>
+                <groupId>io.jsonwebtoken</groupId>
+                <artifactId>jjwt-api</artifactId>
+                <version>${jwt.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.jsonwebtoken</groupId>
+                <artifactId>jjwt-impl</artifactId>
+                <version>${jwt.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.jsonwebtoken</groupId>
+                <artifactId>jjwt-jackson</artifactId>
+                <version>${jwt.version}</version>
+            </dependency>
+
+            <!-- Aliyun OSS SDK -->
+            <dependency>
+                <groupId>com.aliyun.oss</groupId>
+                <artifactId>aliyun-sdk-oss</artifactId>
+                <version>${aliyun-oss.version}</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <dependencies>
+        <!-- 所有模块共享的公共工具类依赖 -->
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <version>${lombok.version}</version>
+            <scope>provided</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-compiler-plugin</artifactId>
+                    <version>3.11.0</version>
+                    <configuration>
+                        <source>${java.version}</source>
+                        <target>${java.version}</target>
+                        <compilerArgs>
+                            <arg>-parameters</arg>
+                        </compilerArgs>
+                    </configuration>
+                </plugin>
+            </plugins>
+        </pluginManagement>
+    </build>
+</project>

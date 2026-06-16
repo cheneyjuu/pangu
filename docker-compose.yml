@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  # Postgres 数据库服务
+  pangu-db:
+    image: postgres:15-alpine
+    container_name: pangu-postgres
+    environment:
+      POSTGRES_DB: pangu_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5432:5432"
+    volumes:
+      - pangu_postgres_data:/var/lib/postgresql/data
+    restart: always
+
+  # Redis 缓存服务
+  pangu-redis:
+    image: redis:7-alpine
+    container_name: pangu-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - pangu_redis_data:/data
+    restart: always
+
+volumes:
+  pangu_postgres_data:
+    driver: local
+  pangu_redis_data:
+    driver: local
