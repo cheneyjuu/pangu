@@ -13,9 +13,6 @@ import java.util.HashSet;
  */
 public abstract class AbstractVotingEngine<S extends VotingSubject, R extends VotingResult<S>> {
 
-    /** 判定双参与通过所需要的法定基准比率 (2/3 = 0.6667) */
-    private static final BigDecimal QUORUM_RATIO_THRESHOLD = new BigDecimal("2").divide(new BigDecimal("3"), 4, RoundingMode.HALF_UP);
-
     /**
      * 结算模板方法：锁定外部流程，计算双参与参与率并回调业务表决逻辑
      * @param subject 表决议题
@@ -59,13 +56,14 @@ public abstract class AbstractVotingEngine<S extends VotingSubject, R extends Vo
      */
     private boolean checkQuorum(BigDecimal participatingArea, BigDecimal totalArea, 
                                  long participatingOwnerCount, long totalOwnerCount) {
-        BigDecimal areaRatio = participatingArea.divide(totalArea, 4, RoundingMode.HALF_UP);
-        BigDecimal ownerRatio = BigDecimal.valueOf(participatingOwnerCount)
-                .divide(BigDecimal.valueOf(totalOwnerCount), 4, RoundingMode.HALF_UP);
+        // 专有面积参与率 >= 2/3，即 3 * participatingArea >= 2 * totalArea
+        boolean areaQuorum = participatingArea.multiply(new BigDecimal("3"))
+                .compareTo(totalArea.multiply(new BigDecimal("2"))) >= 0;
 
-        // 必须同时满足：面积参与率 >= 2/3 且 人数参与率 >= 2/3
-        return areaRatio.compareTo(QUORUM_RATIO_THRESHOLD) >= 0 
-                && ownerRatio.compareTo(QUORUM_RATIO_THRESHOLD) >= 0;
+        // 人数参与率 >= 2/3，即 3 * participatingOwnerCount >= 2 * totalOwnerCount
+        boolean ownerQuorum = participatingOwnerCount * 3 >= totalOwnerCount * 2;
+
+        return areaQuorum && ownerQuorum;
     }
 
     /**

@@ -10,8 +10,6 @@ import java.util.List;
  */
 public class MajorDecisionEngine extends AbstractVotingEngine<VotingSubject, VotingResult<VotingSubject>> {
 
-    private static final BigDecimal THREE_QUARTERS_THRESHOLD = new BigDecimal("0.75");
-
     @Override
     protected VotingResult<VotingSubject> calculateResult(VotingSubject subject, List<VoteItem> validVotes, 
                                                           BigDecimal totalArea, long totalOwnerCount, 
@@ -32,14 +30,13 @@ public class MajorDecisionEngine extends AbstractVotingEngine<VotingSubject, Vot
         boolean passed = false;
 
         if (quorumSatisfied && participatingOwnerCount > 0 && participatingArea.compareTo(BigDecimal.ZERO) > 0) {
-            // 赞成面积比率必须达到 3/4 极其以上 (>= 75%)
-            BigDecimal supportAreaRatio = supportArea.divide(participatingArea, 4, RoundingMode.HALF_UP);
-            // 赞成人数比率必须达到 3/4 极其以上 (>= 75%)
-            BigDecimal supportOwnerRatio = BigDecimal.valueOf(supportOwnerCount)
-                    .divide(BigDecimal.valueOf(participatingOwnerCount), 4, RoundingMode.HALF_UP);
+            // 赞成面积比率必须达到 3/4 及以上 (>= 75%)，即 4 * supportArea >= 3 * participatingArea
+            boolean areaPassed = supportArea.multiply(new BigDecimal("4"))
+                    .compareTo(participatingArea.multiply(new BigDecimal("3"))) >= 0;
+            // 赞成人数比率必须达到 3/4 及以上 (>= 75%)，即 4 * supportOwnerCount >= 3 * participatingOwnerCount
+            boolean ownerPassed = supportOwnerCount * 4 >= participatingOwnerCount * 3;
 
-            passed = supportAreaRatio.compareTo(THREE_QUARTERS_THRESHOLD) >= 0 
-                    && supportOwnerRatio.compareTo(THREE_QUARTERS_THRESHOLD) >= 0;
+            passed = areaPassed && ownerPassed;
         }
 
         return VotingResult.<VotingSubject>builder()

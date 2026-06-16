@@ -9,8 +9,6 @@ import java.util.List;
  */
 public class GeneralDecisionEngine extends AbstractVotingEngine<VotingSubject, VotingResult<VotingSubject>> {
 
-    private static final BigDecimal HALF_THRESHOLD = new BigDecimal("0.5");
-
     @Override
     protected VotingResult<VotingSubject> calculateResult(VotingSubject subject, List<VoteItem> validVotes, 
                                                           BigDecimal totalArea, long totalOwnerCount, 
@@ -31,14 +29,12 @@ public class GeneralDecisionEngine extends AbstractVotingEngine<VotingSubject, V
         boolean passed = false;
 
         if (quorumSatisfied && participatingOwnerCount > 0 && participatingArea.compareTo(BigDecimal.ZERO) > 0) {
-            // 赞成面积比率必须过半数 (> 50%)
-            BigDecimal supportAreaRatio = supportArea.divide(participatingArea, 4, RoundingMode.HALF_UP);
-            // 赞成人数比率必须过半数 (> 50%)
-            BigDecimal supportOwnerRatio = BigDecimal.valueOf(supportOwnerCount)
-                    .divide(BigDecimal.valueOf(participatingOwnerCount), 4, RoundingMode.HALF_UP);
+            // 赞成面积比率必须过半数 (> 50%)，即 2 * supportArea > participatingArea
+            boolean areaPassed = supportArea.multiply(new BigDecimal("2")).compareTo(participatingArea) > 0;
+            // 赞成人数比率必须过半数 (> 50%)，即 2 * supportOwnerCount > participatingOwnerCount
+            boolean ownerPassed = supportOwnerCount * 2 > participatingOwnerCount;
 
-            passed = supportAreaRatio.compareTo(HALF_THRESHOLD) > 0 
-                    && supportOwnerRatio.compareTo(HALF_THRESHOLD) > 0;
+            passed = areaPassed && ownerPassed;
         }
 
         return VotingResult.<VotingSubject>builder()

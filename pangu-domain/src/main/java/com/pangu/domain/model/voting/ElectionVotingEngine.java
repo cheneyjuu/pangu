@@ -10,8 +10,6 @@ import java.util.stream.Collectors;
  */
 public class ElectionVotingEngine extends AbstractVotingEngine<ElectionSubject, ElectionVotingResult> {
 
-    private static final BigDecimal HALF_THRESHOLD = new BigDecimal("0.5");
-
     @Override
     protected ElectionVotingResult calculateResult(ElectionSubject subject, List<VoteItem> validVotes, 
                                                     BigDecimal totalArea, long totalOwnerCount, 
@@ -19,7 +17,6 @@ public class ElectionVotingEngine extends AbstractVotingEngine<ElectionSubject, 
                                                     boolean quorumSatisfied) {
         
         List<CandidateElectionResult> candidateResults = new ArrayList<>();
-        Random random = new Random();
 
         if (quorumSatisfied && participatingOwnerCount > 0 && participatingArea.compareTo(BigDecimal.ZERO) > 0) {
             // 1. 针对每一个候选人分别统计得票
@@ -38,19 +35,19 @@ public class ElectionVotingEngine extends AbstractVotingEngine<ElectionSubject, 
                 // 累加赞成人数
                 long supportOwnerCount = supportVotes.size();
 
-                // 检查是否双过半 (占参会专有总面积及参会业主总人数的半数以上)
+                // 检查是否双过半 (赞成面积 > 参会总面积的 50% 且 赞成人数 > 参会总人数的 50%)
+                // 精确的代数比例判定，避免除法精度截断误差
+                boolean passedHalf = supportArea.multiply(new BigDecimal("2")).compareTo(participatingArea) > 0
+                        && supportOwnerCount * 2 > participatingOwnerCount;
+
+                // 计算综合分值 Score = 面积占比 + 人数占比 (用于差额选举排序)
                 BigDecimal areaRatio = supportArea.divide(participatingArea, 4, RoundingMode.HALF_UP);
                 BigDecimal ownerRatio = BigDecimal.valueOf(supportOwnerCount)
                         .divide(BigDecimal.valueOf(participatingOwnerCount), 4, RoundingMode.HALF_UP);
-
-                boolean passedHalf = areaRatio.compareTo(HALF_THRESHOLD) > 0 
-                        && ownerRatio.compareTo(HALF_THRESHOLD) > 0;
-
-                // 计算综合分值 Score = 面积占比 + 人数占比
                 BigDecimal score = areaRatio.add(ownerRatio);
 
-                // 生成随机抽签值，用于极端的双平票情况下的系统仲裁
-                int drawValue = random.nextInt(10000);
+                // 生成随机抽签值，用于极端的双平票情况下的系统仲裁 (避免频繁创建 Random)
+                int drawValue = java.util.concurrent.ThreadLocalRandom.current().nextInt(10000);
 
                 candidateResults.add(CandidateElectionResult.builder()
                         .candidate(candidate)
