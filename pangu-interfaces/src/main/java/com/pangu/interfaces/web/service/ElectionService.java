@@ -25,10 +25,10 @@ public class ElectionService {
 
     /**
      * 校验业委会委员候选人参选资格
-     * @param userCtx 当前已认证用户的安全上下文
      * @return 资格通过后的描述数据
      */
-    public CandidateQualificationResult checkCandidateQualification(UserSecurityContext userCtx) {
+    public CandidateQualificationResult checkCandidateQualification() {
+        UserSecurityContext userCtx = com.pangu.interfaces.security.SecurityUtils.getUserContext();
         if (userCtx == null) {
             throw new AppException(401, "无访问权限：认证失效，请重新登录");
         }
