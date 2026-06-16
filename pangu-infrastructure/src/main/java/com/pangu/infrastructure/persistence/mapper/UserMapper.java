@@ -1,6 +1,7 @@
 package com.pangu.infrastructure.persistence.mapper;
 
 import com.pangu.domain.model.user.NaturalPerson;
+import lombok.Data;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
@@ -50,8 +51,8 @@ public interface UserMapper {
      */
     java.util.List<String> selectPermissionsByRoles(@Param("roles") java.util.List<String> roles);
 
-    @lombok.Data
-    public static class SysUserDto {
+    @Data
+    class SysUserDto {
         private Long userId;
         private Long deptId;
         private String dataScope;
