@@ -21,6 +21,11 @@ public @interface DataScope {
     String userAlias() default "";
 
     /**
+     * 用户身份列名（默认 user_id；c_owner_property 等业主表请显式指定 "uid"）
+     */
+    String userColumn() default "user_id";
+
+    /**
      * 物理楼栋表/字段的别名 (如 "b" 或 "")，对应 SQL 中的 building_id 过滤
      */
     String buildingAlias() default "";

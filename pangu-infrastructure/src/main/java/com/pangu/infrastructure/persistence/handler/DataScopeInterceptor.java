@@ -13,6 +13,7 @@ import org.apache.ibatis.mapping.MappedStatement;
 import org.apache.ibatis.plugin.*;
 import org.apache.ibatis.reflection.MetaObject;
 import org.apache.ibatis.reflection.SystemMetaObject;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
@@ -21,11 +22,12 @@ import java.lang.reflect.Method;
 import java.sql.Connection;
 import java.util.*;
 import java.util.stream.Collectors;
-import lombok.Getter;
-import lombok.Setter;
-import lombok.Builder;
-import lombok.NoArgsConstructor;
 import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * MyBatis 动态 SQL 数据权限拦截器 (ABAC 行级数据隔离核心组件)
@@ -34,8 +36,18 @@ import lombok.AllArgsConstructor;
 @Intercepts({
     @Signature(type = StatementHandler.class, method = "prepare", args = {Connection.class, Integer.class})
 })
+@Slf4j
 @Component
 public class DataScopeInterceptor implements Interceptor {
+
+    /**
+     * 非生产环境兜底：注入 {@link MockDataScopeUserSecurityContextProvider} 提供 mock 上下文。
+     * 生产环境（{@code spring.profiles.active=prod}）下该 Bean 不存在，
+     * {@link #fetchUserSecurityContext()} 在 SecurityContext 缺失时直接返回 null，
+     * 由 {@link #intercept} 按「无权限」拒绝放行。
+     */
+    @Autowired(required = false)
+    private MockDataScopeUserSecurityContextProvider mockProvider;
 
     @Override
     public Object intercept(Invocation invocation) throws Exception {
@@ -52,10 +64,15 @@ public class DataScopeInterceptor implements Interceptor {
             return invocation.proceed(); // 无注解，直接放行
         }
 
-        // 2. 获取当前登录用户的数据权限属性（对接 Spring Security 并提供开发兜底）
+        // 2. 获取当前登录用户的数据权限属性（生产路径强制要求 SecurityContext 命中）
         UserSecurityContext userCtx = fetchUserSecurityContext();
-        if (userCtx == null || DataScopeType.ALL.getValue().equals(userCtx.getDataScope())) {
-            return invocation.proceed(); // 超级管理员或未登录，不限制数据范围
+        if (userCtx == null) {
+            // 生产环境无 mock 兜底：上下文缺失即拒绝放行（反向漏洞修补）
+            throw new IllegalStateException(
+                    "数据权限上下文缺失，拒绝访问受保护查询：mappedId=" + mappedId);
+        }
+        if (DataScopeType.ALL.getValue().equals(userCtx.getDataScope())) {
+            return invocation.proceed(); // 超级管理员不限制数据范围
         }
 
         // 3. 解析并重写 SQL
@@ -105,13 +122,22 @@ public class DataScopeInterceptor implements Interceptor {
             else if (DataScopeType.SELF.getValue().equals(userCtx.getDataScope())) {
                 String userAlias = dataScopeAnno.userAlias();
                 String prefix = userAlias.isEmpty() ? "" : userAlias + ".";
-                conditionBuilder.append(" ").append(prefix).append("user_id = ").append(userCtx.getUserId()).append(" ");
+                String userColumn = dataScopeAnno.userColumn();
+                // c_owner_property 业主表用 uid 字段，业务表用 user_id；通过 @DataScope(userColumn=...) 显式指定
+                conditionBuilder.append(" ").append(prefix).append(userColumn)
+                        .append(" = ").append(userCtx.getUid()).append(" ");
+            }
+            else {
+                // CUSTOM_DEPT / OWN_DEPT 等尚未实现的 dataScope 路径：受保护查询无法生成约束条件，
+                // 拒绝放行原 SQL，避免「无 WHERE 条件 → 全表扫描 → 越权读」的硬性安全漏洞。
+                throw new IllegalStateException(
+                        "未实现的 dataScope 类型，受保护查询不能放行原 SQL: dataScope=" + userCtx.getDataScope());
             }
 
             if (conditionBuilder.length() > 0) {
                 Expression originalWhere = plainSelect.getWhere();
                 Expression scopeExpression = CCJSqlParserUtil.parseCondExpression(conditionBuilder.toString());
-                
+
                 if (originalWhere == null) {
                     plainSelect.setWhere(scopeExpression);
                 } else {
@@ -119,11 +145,18 @@ public class DataScopeInterceptor implements Interceptor {
                 }
                 return selectStatement.toString();
             }
+            // 理论上不可达——所有 dataScope 分支要么填 conditionBuilder 要么直接 throw
+            throw new IllegalStateException(
+                    "DataScope SQL 重写后 conditionBuilder 为空，拒绝放行原 SQL: dataScope=" + userCtx.getDataScope());
+        } catch (IllegalStateException e) {
+            // 已经是显式拒绝放行的状态，直接向上抛
+            throw e;
         } catch (Exception e) {
-            // 解析 SQL 发生异常时，安全退回原 SQL，避免影响系统正常执行
-            System.err.println("DataScope SQL 重写失败: " + e.getMessage());
+            // 解析失败不再静默放行——审计能看到失败而非默默放行原 SQL，
+            // 由上层 GlobalExceptionHandler 转化为 500 系统错误（Phase 6 将映射至 ElectionErrorCode.DATA_SCOPE_PARSE_FAILED）
+            log.error("DataScope SQL 重写失败，拒绝放行原 SQL：mappedId 由调用方记录, sql={}", sql, e);
+            throw new IllegalStateException("数据权限 SQL 重写失败: " + e.getMessage(), e);
         }
-        return sql;
     }
 
     /**
@@ -150,24 +183,22 @@ public class DataScopeInterceptor implements Interceptor {
     }
 
     /**
-     * 从 Spring Security 获取上下文或 Mock 单元测试数据
+     * 从 Spring Security 获取上下文，缺失时根据 profile 走 mock 或返回 null。
+     *
+     * <p>生产环境（无 {@link MockDataScopeUserSecurityContextProvider} Bean）下，
+     * 当 SecurityContext 缺失或 principal 类型不符时返回 null，
+     * 由 {@link #intercept} 按「无权限」拒绝放行。
      */
     private UserSecurityContext fetchUserSecurityContext() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         if (auth != null && auth.getPrincipal() instanceof UserSecurityContext) {
             return (UserSecurityContext) auth.getPrincipal();
         }
-
-        // 开发环境 Mock 兜底数据：如果未进行安全拦截测试，且检测到当前上下文，我们返回王小二的网格员身份数据
-        // 王小二 (user_id = 202, dept_id = 104, role = GRID_MANAGER, data_scope = 6, 楼栋 = [10001, 10002])
-        return UserSecurityContext.builder()
-                .userId(202L)
-                .deptId(104L)
-                .dataScope(DataScopeType.CUSTOM_BUILDING.getValue()) // 自定义楼栋
-                .authorizedBuildingIds(List.of(10001L, 10002L))
-                .uid(101L)
-                .tenantId(9001L)
-                .build();
+        // 仅非生产环境（@Profile("!prod")）注入 mockProvider；生产环境直接返回 null
+        if (mockProvider != null) {
+            return mockProvider.provide();
+        }
+        return null;
     }
 
     @Override
