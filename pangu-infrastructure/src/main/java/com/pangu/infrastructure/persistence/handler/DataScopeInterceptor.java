@@ -217,6 +217,11 @@ public class DataScopeInterceptor implements Interceptor {
     public static class UserSecurityContext {
         private Long userId;
         private Long deptId;
+        /**
+         * 部门类型（来自 sys_dept.dept_type）：1=街道办，2=居委会，3=物业，
+         * 业主等无 sys_user 绑定的纯 C 端用户为 null。
+         */
+        private Integer deptType;
         private String dataScope;
         private List<Long> authorizedBuildingIds;
         private Long uid;

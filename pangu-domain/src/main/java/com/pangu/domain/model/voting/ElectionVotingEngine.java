@@ -29,7 +29,7 @@ public class ElectionVotingEngine extends AbstractVotingEngine<ElectionSubject, 
                 List<VoteItem> supportVotes = validVotes.stream()
                         .filter(vote -> candidate.getCandidateId().equals(vote.getTargetId())
                                 && vote.getChoice() == VoteChoice.SUPPORT)
-                        .collect(Collectors.toList());
+                        .toList();
 
                 BigDecimal supportArea = supportVotes.stream()
                         .map(VoteItem::getPropertyArea)
@@ -64,7 +64,7 @@ public class ElectionVotingEngine extends AbstractVotingEngine<ElectionSubject, 
             List<CandidateElectionResult> eligibleResults = candidateResults.stream()
                     .filter(CandidateElectionResult::isPassedHalf)
                     .sorted(this::compareByMultiTier)
-                    .collect(Collectors.toList());
+                    .toList();
 
             int targetWinnerCount = Math.min(subject.getMaxWinners(), eligibleResults.size());
 
@@ -75,7 +75,7 @@ public class ElectionVotingEngine extends AbstractVotingEngine<ElectionSubject, 
 
                 List<CandidateElectionResult> nonPartyPool = eligibleResults.stream()
                         .filter(r -> !r.getCandidate().isPartyMember())
-                        .collect(Collectors.toList());
+                        .toList();
 
                 // 党员席位下限：CEILING(targetWinnerCount * effectiveRatio)
                 BigDecimal effectiveRatio = subject.getEffectivePartyRatioFloor();

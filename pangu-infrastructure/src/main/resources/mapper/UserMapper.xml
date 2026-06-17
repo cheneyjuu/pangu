@@ -80,8 +80,9 @@
 
     <!-- 根据自然人 UID 查询其后台关联的系统用户信息及角色数据范围 -->
     <select id="selectSysUserByUid" resultType="com.pangu.infrastructure.persistence.mapper.UserMapper$SysUserDto">
-        SELECT u.user_id as userId, u.dept_id as deptId, r.data_scope as dataScope
+        SELECT u.user_id as userId, u.dept_id as deptId, d.dept_type as deptType, r.data_scope as dataScope
         FROM sys_user u
+        LEFT JOIN sys_dept d ON u.dept_id = d.dept_id
         LEFT JOIN sys_user_role ur ON u.user_id = ur.user_id
         LEFT JOIN sys_role r ON ur.role_id = r.role_id AND r.status = '0'
         WHERE u.uid = #{uid} AND u.status = '0'

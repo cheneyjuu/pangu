@@ -35,4 +35,20 @@ public class SecurityUtils {
         UserSecurityContext ctx = getUserContext();
         return ctx != null ? ctx.getTenantId() : null;
     }
+
+    /**
+     * 获取当前用户的后台用户 ID（sys_user.user_id）；纯 C 端业主无 sys_user 时退化为 uid。
+     */
+    public static Long getUserId() {
+        UserSecurityContext ctx = getUserContext();
+        return ctx != null ? ctx.getUserId() : null;
+    }
+
+    /**
+     * 获取当前用户的部门类型 (sys_dept.dept_type)：1=街道办，2=居委会，3=物业，业主等纯 C 端为 null。
+     */
+    public static Integer getDeptType() {
+        UserSecurityContext ctx = getUserContext();
+        return ctx != null ? ctx.getDeptType() : null;
+    }
 }

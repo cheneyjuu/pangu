@@ -20,11 +20,12 @@ import java.util.List;
 @Profile("!prod")
 public class MockDataScopeUserSecurityContextProvider {
 
-    /** 王小二（user_id = 202, dept_id = 104, GRID_MANAGER, 楼栋 = [10001, 10002]）。 */
+    /** 王小二（user_id = 202, dept_id = 104, dept_type = 4 网格部门, GRID_MANAGER, 楼栋 = [10001, 10002]）。 */
     public DataScopeInterceptor.UserSecurityContext provide() {
         return DataScopeInterceptor.UserSecurityContext.builder()
                 .userId(202L)
                 .deptId(104L)
+                .deptType(4)
                 .dataScope(DataScopeType.CUSTOM_BUILDING.getValue())
                 .authorizedBuildingIds(List.of(10001L, 10002L))
                 .uid(101L)

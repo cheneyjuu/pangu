@@ -56,6 +56,8 @@ public interface UserMapper {
     class SysUserDto {
         private Long userId;
         private Long deptId;
+        /** sys_dept.dept_type：1=街道办、2=居委会、3=物业等。 */
+        private Integer deptType;
         private String dataScope;
     }
 }
