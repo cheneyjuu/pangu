@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pangu.infrastructure.persistence.mapper.PartyRatioPolicyMapper">
+
+    <resultMap id="WaiverPolicyRowMap"
+               type="com.pangu.infrastructure.persistence.entity.WaiverPolicyRow">
+        <id property="waiverId" column="waiver_id"/>
+        <result property="requestedRatio" column="requested_ratio"/>
+        <result property="recordedPartyCount" column="party_pool_size"/>
+        <result property="recordedEligibleCount" column="total_eligible_size"/>
+        <result property="status" column="status"/>
+    </resultMap>
+
+    <resultMap id="CandidatePoolCountMap"
+               type="com.pangu.infrastructure.persistence.entity.CandidatePoolCount">
+        <result property="partyCount" column="party_count"/>
+        <result property="eligibleCount" column="eligible_count"/>
+    </resultMap>
+
+    <select id="selectEffectiveWaiver" resultMap="WaiverPolicyRowMap">
+        SELECT
+            waiver_id,
+            requested_ratio,
+            party_pool_size,
+            total_eligible_size,
+            status
+        FROM t_party_ratio_waiver
+        WHERE subject_id = #{subjectId}
+          AND status = #{approvedStatus}
+        ORDER BY update_time DESC, waiver_id DESC
+        LIMIT 1
+    </select>
+
+    <select id="countCurrentCandidatePool" resultMap="CandidatePoolCountMap">
+        SELECT
+            COALESCE(SUM(CASE WHEN is_party_member = 1 THEN 1 ELSE 0 END), 0) AS party_count,
+            COUNT(1) AS eligible_count
+        FROM t_election_candidate
+        WHERE subject_id = #{subjectId}
+          AND qualification_status = 2
+    </select>
+
+    <update id="revokeWaiverBySystem">
+        UPDATE t_party_ratio_waiver
+        SET status      = #{revokedStatus},
+            update_time = CURRENT_TIMESTAMP,
+            version     = version + 1
+        WHERE waiver_id = #{waiverId}
+          AND status = #{approvedStatus}
+    </update>
+
+    <insert id="insertComparison"
+            parameterType="com.pangu.infrastructure.persistence.entity.WaiverSnapshotComparisonRow"
+            useGeneratedKeys="true"
+            keyProperty="comparisonId"
+            keyColumn="comparison_id">
+        INSERT INTO t_waiver_snapshot_comparison (
+            waiver_id, subject_id, trigger_phase,
+            recorded_party_count, recorded_eligible_count, recorded_ratio,
+            current_party_count, current_eligible_count, current_natural_ratio,
+            delta_party, delta_eligible, action_taken, audit_hash
+        ) VALUES (
+            #{waiverId}, #{subjectId}, #{triggerPhase},
+            #{recordedPartyCount}, #{recordedEligibleCount}, #{recordedRatio},
+            #{currentPartyCount}, #{currentEligibleCount}, #{currentNaturalRatio},
+            #{deltaParty}, #{deltaEligible}, #{actionTaken}, #{auditHash}
+        )
+    </insert>
+
+</mapper>

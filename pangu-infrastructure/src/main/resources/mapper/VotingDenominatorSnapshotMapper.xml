@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pangu.infrastructure.persistence.mapper.VotingDenominatorSnapshotMapper">
+
+    <resultMap id="DenominatorItemRowMap"
+               type="com.pangu.infrastructure.persistence.entity.DenominatorItemRow">
+        <result property="roomId" column="room_id"/>
+        <result property="buildingId" column="building_id"/>
+        <result property="certifiedArea" column="certified_area"/>
+        <result property="primaryOwnerUid" column="primary_owner_uid"/>
+        <result property="coOwnerUids" column="co_owner_uids"/>
+        <result property="eligibilityFlag" column="eligibility_flag"/>
+    </resultMap>
+
+    <!--
+        双重去重查询：
+        - 第一层 scoped：按 tenantId + scope 过滤 c_owner_property
+        - 第二层 ranked_room：按 (tenant_id, room_id) 分组，
+          以 (is_voting_delegate DESC, opid ASC) 排序，挑出 row_rn=1 的代表 owner
+        - co_owners：聚合 room 内所有 uid（用于审计还原共有产权列表）
+        - eligibility_flag：account_status=1 → ELIGIBLE(1)，否则 EXCLUDED_OTHER(4)
+          其余精细分级（RESTRICTED_BY_FEE/EXCLUDED_PARKING）待物业费/车位规则上线后扩展
+    -->
+    <select id="selectDenominatorItems" resultMap="DenominatorItemRowMap">
+        WITH scoped AS (
+            SELECT
+                op.opid,
+                op.uid,
+                op.tenant_id,
+                op.building_id,
+                op.room_id,
+                op.build_area,
+                op.is_voting_delegate,
+                op.account_status,
+                CASE
+                    WHEN op.account_status = 1 THEN 1
+                    ELSE 4
+                END AS eligibility_flag
+            FROM c_owner_property op
+            WHERE op.tenant_id = #{tenantId}
+              AND op.account_status = 1
+            <if test="scope == 2">
+                AND op.building_id = #{scopeReferenceId}
+            </if>
+        ),
+        ranked_room AS (
+            SELECT
+                s.*,
+                ROW_NUMBER() OVER (
+                    PARTITION BY s.tenant_id, s.room_id
+                    ORDER BY s.is_voting_delegate DESC, s.opid ASC
+                ) AS room_rn
+            FROM scoped s
+        ),
+        co_owners AS (
+            SELECT
+                tenant_id,
+                room_id,
+                STRING_AGG(uid::TEXT, ',' ORDER BY uid) AS co_owner_uids
+            FROM scoped
+            GROUP BY tenant_id, room_id
+        )
+        SELECT
+            rr.room_id,
+            rr.building_id,
+            rr.build_area AS certified_area,
+            rr.uid        AS primary_owner_uid,
+            co.co_owner_uids,
+            rr.eligibility_flag
+        FROM ranked_room rr
+        INNER JOIN co_owners co
+            ON co.tenant_id = rr.tenant_id
+           AND co.room_id   = rr.room_id
+        WHERE rr.room_rn = 1
+        ORDER BY rr.building_id, rr.room_id
+    </select>
+
+    <select id="upsertSnapshot" resultType="java.lang.Long">
+        INSERT INTO t_voting_denominator_snapshot (
+            subject_id, scope, scope_reference_id,
+            total_area, total_owner_count, item_count,
+            aggregate_hash, snapshot_at
+        ) VALUES (
+            #{subjectId}, #{scope}, #{scopeReferenceId},
+            #{totalArea}, #{totalOwnerCount}, #{itemCount},
+            #{aggregateHash}, CURRENT_TIMESTAMP
+        )
+        ON CONFLICT (subject_id) DO UPDATE SET
+            scope              = EXCLUDED.scope,
+            scope_reference_id = EXCLUDED.scope_reference_id,
+            total_area         = EXCLUDED.total_area,
+            total_owner_count  = EXCLUDED.total_owner_count,
+            item_count         = EXCLUDED.item_count,
+            aggregate_hash     = EXCLUDED.aggregate_hash,
+            snapshot_at        = EXCLUDED.snapshot_at
+        RETURNING snapshot_id
+    </select>
+
+    <delete id="deleteItemsBySnapshotId">
+        DELETE FROM t_voting_denominator_item_snapshot
+        WHERE snapshot_id = #{snapshotId}
+    </delete>
+
+    <insert id="insertItems">
+        INSERT INTO t_voting_denominator_item_snapshot (
+            snapshot_id, room_id, building_id, certified_area,
+            primary_owner_uid, co_owner_uids, eligibility_flag, row_hash
+        ) VALUES
+        <foreach collection="items" item="item" separator=",">
+            (#{snapshotId}, #{item.roomId}, #{item.buildingId}, #{item.certifiedArea},
+             #{item.primaryOwnerUid}, #{item.coOwnerUids}, #{item.eligibilityFlag}, #{item.rowHash})
+        </foreach>
+    </insert>
+
+</mapper>

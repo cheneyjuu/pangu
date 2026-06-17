@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pangu.infrastructure.persistence.mapper.OutboxEventMapper">
+
+    <insert id="insert"
+            parameterType="com.pangu.infrastructure.persistence.entity.OutboxEventRow"
+            useGeneratedKeys="true"
+            keyProperty="eventId"
+            keyColumn="event_id">
+        INSERT INTO t_outbox_event (
+            event_type, business_ref_id, tenant_id, payload_json, status
+        ) VALUES (
+            #{eventType}, #{businessRefId}, #{tenantId},
+            CAST(#{payloadJson} AS JSONB), #{status}
+        )
+    </insert>
+
+</mapper>
