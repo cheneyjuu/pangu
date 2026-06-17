@@ -14,10 +14,14 @@
     <description>Bootstrap Module - Application Configurations, Flyway, and Main Entrypoint</description>
 
     <dependencies>
-        <!-- 依赖接口表现层和基础设施层 -->
+        <!-- 依赖接口表现层、应用层和基础设施层 -->
         <dependency>
             <groupId>com.pangu</groupId>
             <artifactId>pangu-interfaces</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.pangu</groupId>
+            <artifactId>pangu-application</artifactId>
         </dependency>
         <dependency>
             <groupId>com.pangu</groupId>

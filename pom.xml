@@ -33,6 +33,9 @@
         <jwt.version>0.12.5</jwt.version>
         <lombok.version>1.18.32</lombok.version>
         <aliyun-oss.version>3.17.4</aliyun-oss.version>
+
+        <!-- Distributed Lock -->
+        <redisson.version>3.27.2</redisson.version>
     </properties>
 
     <!-- 声明子模块 -->
@@ -120,6 +123,13 @@
                 <groupId>com.aliyun.oss</groupId>
                 <artifactId>aliyun-sdk-oss</artifactId>
                 <version>${aliyun-oss.version}</version>
+            </dependency>
+
+            <!-- Redisson (Distributed Lock) -->
+            <dependency>
+                <groupId>org.redisson</groupId>
+                <artifactId>redisson-spring-boot-starter</artifactId>
+                <version>${redisson.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
