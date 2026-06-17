@@ -12,8 +12,10 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(AppException.class)
     public Result<Object> handleAppException(AppException ex, HttpServletResponse response) {
-        int httpStatus = ex.getErrorCode() != null ? ex.getErrorCode().getHttpStatus() : HttpServletResponse.SC_INTERNAL_SERVER_ERROR;
+        ErrorCode errCode = ex.getErrorCode();
+        int httpStatus = errCode != null ? errCode.getHttpStatus() : HttpServletResponse.SC_INTERNAL_SERVER_ERROR;
+        String errorType = errCode != null ? errCode.getErrorType() : "SYSTEM";
         response.setStatus(httpStatus);
-        return Result.fail(ex.getCode(), ex.getMessage(), ex.getData());
+        return Result.fail(ex.getCode(), ex.getMessage(), ex.getData(), errorType, ex.isNeedRetry());
     }
 }
