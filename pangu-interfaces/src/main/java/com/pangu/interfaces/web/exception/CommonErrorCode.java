@@ -1,4 +1,4 @@
-package com.pangu.interfaces.web.controller;
+package com.pangu.interfaces.web.exception;
 
 /**
  * 常用错误码枚举，对齐大厂主流异常规范

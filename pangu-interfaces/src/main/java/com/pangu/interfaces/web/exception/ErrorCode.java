@@ -1,10 +1,10 @@
-package com.pangu.interfaces.web.controller;
+package com.pangu.interfaces.web.exception;
 
 /**
  * 错误码契约接口，参考 lmpromotion 体系对齐大厂主流异常规范
  */
 public interface ErrorCode {
-    
+
     /**
      * 获取业务错误码
      */
@@ -33,7 +33,7 @@ public interface ErrorCode {
     }
 
     /**
-     * 该错误是否支持/需要客户端或网关层进行重试 (如乐观锁冲突、临时并发故障等)
+     * 该错误是否支持/需要客户端进行重试 (如乐观锁冲突、临时并发故障等)
      */
     boolean isNeedRetry();
 }

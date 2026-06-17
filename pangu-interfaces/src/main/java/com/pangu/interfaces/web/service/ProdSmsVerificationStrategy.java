@@ -1,7 +1,7 @@
 package com.pangu.interfaces.web.service;
 
-import com.pangu.interfaces.web.controller.AppException;
-import com.pangu.interfaces.web.controller.CommonErrorCode;
+import com.pangu.interfaces.web.exception.AppException;
+import com.pangu.interfaces.web.exception.CommonErrorCode;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Profile;
 import org.springframework.data.redis.core.StringRedisTemplate;

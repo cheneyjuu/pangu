@@ -1,4 +1,4 @@
-package com.pangu.interfaces.web.controller;
+package com.pangu.interfaces.web.exception;
 
 /**
  * 错误大类，用于区分业务、系统和外部依赖错误。
