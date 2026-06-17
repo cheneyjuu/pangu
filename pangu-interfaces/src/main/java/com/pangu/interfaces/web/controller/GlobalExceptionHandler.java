@@ -24,4 +24,12 @@ public class GlobalExceptionHandler {
 
         return Result.fail(ex.getCode(), ex.getMessage(), responseData, errorType, ex.isNeedRetry());
     }
+
+    @ExceptionHandler(Exception.class)
+    public Result<Object> handleUnexpectedException(Exception ex, HttpServletResponse response) {
+        CommonErrorCode errorCode = CommonErrorCode.SYSTEM_ERROR;
+        response.setStatus(errorCode.getHttpStatus());
+        return Result.fail(errorCode.getCode(), errorCode.getMessage(), null,
+                errorCode.getErrorType(), errorCode.isNeedRetry());
+    }
 }

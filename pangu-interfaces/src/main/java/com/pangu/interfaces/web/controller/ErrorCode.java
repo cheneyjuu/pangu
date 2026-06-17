@@ -26,6 +26,13 @@ public interface ErrorCode {
     String getErrorType();
 
     /**
+     * 获取类型安全的错误大类。
+     */
+    default ErrorType getType() {
+        return ErrorType.fromCode(getErrorType());
+    }
+
+    /**
      * 该错误是否支持/需要客户端或网关层进行重试 (如乐观锁冲突、临时并发故障等)
      */
     boolean isNeedRetry();
