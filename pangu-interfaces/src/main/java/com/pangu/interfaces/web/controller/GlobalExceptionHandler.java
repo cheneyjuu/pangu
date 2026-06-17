@@ -16,6 +16,12 @@ public class GlobalExceptionHandler {
         int httpStatus = errCode != null ? errCode.getHttpStatus() : HttpServletResponse.SC_INTERNAL_SERVER_ERROR;
         String errorType = errCode != null ? errCode.getErrorType() : "SYSTEM";
         response.setStatus(httpStatus);
-        return Result.fail(ex.getCode(), ex.getMessage(), ex.getData(), errorType, ex.isNeedRetry());
+
+        Object responseData = null;
+        if (ex instanceof CandidacyRestrictedException restrictedEx) {
+            responseData = restrictedEx.getRestrictionDetails();
+        }
+
+        return Result.fail(ex.getCode(), ex.getMessage(), responseData, errorType, ex.isNeedRetry());
     }
 }

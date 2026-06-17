@@ -5,6 +5,7 @@ import com.pangu.domain.policy.AbacPolicyEngine;
 import com.pangu.domain.policy.EvaluationResult;
 import com.pangu.infrastructure.persistence.handler.DataScopeInterceptor.UserSecurityContext;
 import com.pangu.interfaces.web.controller.AppException;
+import com.pangu.interfaces.web.controller.CandidacyRestrictedException;
 import com.pangu.interfaces.web.controller.CommonErrorCode;
 import com.pangu.interfaces.web.controller.dto.CandidateQualificationResult;
 import com.pangu.interfaces.security.SecurityUtils;
@@ -49,8 +50,8 @@ public class ElectionService {
         EvaluationResult result = abacPolicyEngine.evaluateCandidacy(uid, tenantId, hasUnpaidFees, "SCHEME_C");
 
         if (!result.isAllowed()) {
-            // 被拦截，抛出带详细限制元数据的 403 AppException，由全局异常处理器捕获返回给客户端
-            throw new AppException(CommonErrorCode.FORBIDDEN, Map.of(
+            // 被拦截，抛出带详细限制元数据的 403 业务异常，由全局异常处理器捕获返回给客户端
+            throw new CandidacyRestrictedException(CommonErrorCode.FORBIDDEN, Map.of(
                     "policy_type", result.getPolicyType(),
                     "restriction_target", result.getRestrictionTarget(),
                     "is_voting_rights_retained", result.isVotingRightsRetained()

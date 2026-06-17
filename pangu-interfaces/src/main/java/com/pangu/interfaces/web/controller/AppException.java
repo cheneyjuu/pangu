@@ -9,7 +9,6 @@ import java.util.List;
  */
 public class AppException extends RuntimeException {
     private final ErrorCode errorCode;
-    private final Object data;
     private final boolean needRetry;
     private final List<ErrorCode> errorChain;
 
@@ -19,7 +18,6 @@ public class AppException extends RuntimeException {
     public AppException(ErrorCode errorCode) {
         super(errorCode.getMessage());
         this.errorCode = errorCode;
-        this.data = null;
         this.needRetry = errorCode.isNeedRetry();
         this.errorChain = new ArrayList<>();
         this.errorChain.add(errorCode);
@@ -31,7 +29,6 @@ public class AppException extends RuntimeException {
     public AppException(ErrorCode errorCode, String message) {
         super(message);
         this.errorCode = errorCode;
-        this.data = null;
         this.needRetry = errorCode.isNeedRetry();
         this.errorChain = new ArrayList<>();
         this.errorChain.add(errorCode);
@@ -43,7 +40,6 @@ public class AppException extends RuntimeException {
     public AppException(ErrorCode errorCode, String messagePattern, Object... args) {
         super(safeFormat(messagePattern, args));
         this.errorCode = errorCode;
-        this.data = null;
         this.needRetry = errorCode.isNeedRetry();
         this.errorChain = new ArrayList<>();
         this.errorChain.add(errorCode);
@@ -56,7 +52,6 @@ public class AppException extends RuntimeException {
     public AppException(ErrorCode errorCode, Throwable cause) {
         super(errorCode.getMessage(), cause);
         this.errorCode = errorCode;
-        this.data = null;
         this.errorChain = new ArrayList<>();
         if (cause instanceof AppException) {
             AppException causeAppEx = (AppException) cause;
@@ -74,7 +69,6 @@ public class AppException extends RuntimeException {
     public AppException(ErrorCode errorCode, Throwable cause, String messagePattern, Object... args) {
         super(safeFormat(messagePattern, args), cause);
         this.errorCode = errorCode;
-        this.data = null;
         this.errorChain = new ArrayList<>();
         if (cause instanceof AppException) {
             AppException causeAppEx = (AppException) cause;
@@ -87,50 +81,12 @@ public class AppException extends RuntimeException {
     }
 
     /**
-     * 基于 ErrorCode 且附带额外数据的构造函数
-     */
-    public AppException(ErrorCode errorCode, Object data) {
-        super(errorCode.getMessage());
-        this.errorCode = errorCode;
-        this.data = data;
-        this.needRetry = errorCode.isNeedRetry();
-        this.errorChain = new ArrayList<>();
-        this.errorChain.add(errorCode);
-    }
-
-    /**
-     * 基于 ErrorCode、附带额外数据且支持动态参数格式化错误文案的构造函数
-     */
-    public AppException(ErrorCode errorCode, Object data, String messagePattern, Object... args) {
-        super(safeFormat(messagePattern, args));
-        this.errorCode = errorCode;
-        this.data = data;
-        this.needRetry = errorCode.isNeedRetry();
-        this.errorChain = new ArrayList<>();
-        this.errorChain.add(errorCode);
-    }
-
-    /**
      * 兼容老代码的构造函数
      */
     @Deprecated
     public AppException(int code, String message) {
         super(message);
         this.errorCode = new CustomErrorCode(code, message, code, "BIZ", false);
-        this.data = null;
-        this.needRetry = false;
-        this.errorChain = new ArrayList<>();
-        this.errorChain.add(this.errorCode);
-    }
-
-    /**
-     * 兼容老代码的构造函数
-     */
-    @Deprecated
-    public AppException(int code, String message, Object data) {
-        super(message);
-        this.errorCode = new CustomErrorCode(code, message, code, "BIZ", false);
-        this.data = data;
         this.needRetry = false;
         this.errorChain = new ArrayList<>();
         this.errorChain.add(this.errorCode);
@@ -142,10 +98,6 @@ public class AppException extends RuntimeException {
 
     public int getCode() {
         return errorCode != null ? errorCode.getCode() : 500;
-    }
-
-    public Object getData() {
-        return data;
     }
 
     public boolean isNeedRetry() {
