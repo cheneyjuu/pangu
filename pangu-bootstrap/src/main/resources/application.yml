@@ -30,7 +30,8 @@ spring:
       host: localhost
       port: 6379
       database: 0
-      password: 
+      # 留空表示无密码；自定义 RedissonConfig 会跳过 AUTH 命令
+      password:
       timeout: 5000ms
       lettuce:
         pool:
@@ -62,3 +63,6 @@ platform:
     public-bucket-name: pangu-residents-public
     access-key-id: DUMMY_KEY_ID_FOR_DEV
     access-key-secret: DUMMY_KEY_SECRET_FOR_DEV
+  voting:
+    deadline-cron: "0 * * * * *"   # 每分钟整扫一次到期议题
+    deadline-batch-size: 100
