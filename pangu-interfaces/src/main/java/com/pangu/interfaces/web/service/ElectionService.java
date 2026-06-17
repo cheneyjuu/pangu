@@ -5,6 +5,7 @@ import com.pangu.domain.policy.AbacPolicyEngine;
 import com.pangu.domain.policy.EvaluationResult;
 import com.pangu.infrastructure.persistence.handler.DataScopeInterceptor.UserSecurityContext;
 import com.pangu.interfaces.web.controller.AppException;
+import com.pangu.interfaces.web.controller.CommonErrorCode;
 import com.pangu.interfaces.web.controller.dto.CandidateQualificationResult;
 import com.pangu.interfaces.security.SecurityUtils;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -31,14 +32,14 @@ public class ElectionService {
     public CandidateQualificationResult checkCandidateQualification() {
         UserSecurityContext userCtx = SecurityUtils.getUserContext();
         if (userCtx == null) {
-            throw new AppException(401, "无访问权限：认证失效，请重新登录");
+            throw new AppException(CommonErrorCode.UNAUTHORIZED, "无访问权限：认证失效，请重新登录");
         }
 
         Long uid = userCtx.getUid();
         Long tenantId = userCtx.getTenantId();
 
         if (uid == null || tenantId == null) {
-            throw new AppException(400, "参数错误：无法确定您的用户身份或当前所属小区");
+            throw new AppException(CommonErrorCode.PARAM_ERROR, "参数错误：无法确定您的用户身份或当前所属小区");
         }
 
         // 1. 动态数据查询：从数据库查询该业主名下绑定的任意房产是否处于非正常/欠费状态
@@ -49,11 +50,11 @@ public class ElectionService {
 
         if (!result.isAllowed()) {
             // 被拦截，抛出带详细限制元数据的 403 AppException，由全局异常处理器捕获返回给客户端
-            throw new AppException(403, result.getMessage(), Map.of(
+            throw new AppException(CommonErrorCode.FORBIDDEN, Map.of(
                     "policy_type", result.getPolicyType(),
                     "restriction_target", result.getRestrictionTarget(),
                     "is_voting_rights_retained", result.isVotingRightsRetained()
-            ));
+            ), result.getMessage());
         }
 
         // 3. 校验通过，返回强类型资格结果

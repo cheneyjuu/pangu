@@ -6,6 +6,7 @@ import com.pangu.domain.model.user.NaturalPerson;
 import com.pangu.domain.model.asset.PropertyOwnership;
 import com.pangu.interfaces.security.JwtTokenProvider;
 import com.pangu.interfaces.web.controller.AppException;
+import com.pangu.interfaces.web.controller.CommonErrorCode;
 import com.pangu.interfaces.web.controller.dto.LoginRequest;
 import com.pangu.interfaces.web.controller.dto.SwitchTenantRequest;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -40,7 +41,7 @@ public class AuthService {
         NaturalPerson person = userGateway.getByPhone(request.getUsername());
 
         if (person == null) {
-            throw new AppException(401, "认证失败：该手机号未注册，请前往居委会完成线下实名核验登记");
+            throw new AppException(CommonErrorCode.USER_NOT_REGISTERED);
         }
 
         // 根据当前激活的 profile 所匹配的短信策略执行验证码校验
@@ -78,12 +79,12 @@ public class AuthService {
      */
     public Map<String, Object> switchTenant(String authHeader, SwitchTenantRequest request) {
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
-            throw new AppException(401, "无访问权限：请携带 Token");
+            throw new AppException(CommonErrorCode.TOKEN_MISSING);
         }
 
         String token = authHeader.substring(7);
         if (!jwtTokenProvider.validateToken(token)) {
-            throw new AppException(401, "认证失效，请重新登录");
+            throw new AppException(CommonErrorCode.UNAUTHORIZED, "认证失效，请重新登录");
         }
 
         Long uid = jwtTokenProvider.getUidFromToken(token);
@@ -92,7 +93,7 @@ public class AuthService {
         // 真实性验证：从数据库查询当前用户在目标小区是否确有房产所有权绑定记录
         List<PropertyOwnership> targetOwnerships = propertyGateway.getOwnerships(uid, targetTenantId);
         if (targetOwnerships == null || targetOwnerships.isEmpty()) {
-            throw new AppException(403, "越权访问：您在目标小区名下没有绑定的房产，拒绝切换");
+            throw new AppException(CommonErrorCode.UNAUTHORIZED_TENANT);
         }
 
         // 动态加载用户在该小区下的角色与权限列表

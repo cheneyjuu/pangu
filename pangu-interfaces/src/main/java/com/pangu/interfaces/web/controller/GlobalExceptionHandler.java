@@ -12,7 +12,8 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(AppException.class)
     public Result<Object> handleAppException(AppException ex, HttpServletResponse response) {
-        response.setStatus(ex.getCode());
+        int httpStatus = ex.getErrorCode() != null ? ex.getErrorCode().getHttpStatus() : HttpServletResponse.SC_INTERNAL_SERVER_ERROR;
+        response.setStatus(httpStatus);
         return Result.fail(ex.getCode(), ex.getMessage(), ex.getData());
     }
 }

@@ -1,6 +1,7 @@
 package com.pangu.interfaces.web.service;
 
 import com.pangu.interfaces.web.controller.AppException;
+import com.pangu.interfaces.web.controller.CommonErrorCode;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
@@ -18,7 +19,7 @@ public class MockSmsVerificationStrategy implements SmsVerificationStrategy {
     @Override
     public void validate(String phone, String smsCode) {
         if (smsCode == null || !mockSmsCode.equals(smsCode)) {
-            throw new AppException(401, "认证失败：短信验证码无效或已过期");
+            throw new AppException(CommonErrorCode.SMS_CODE_INVALID);
         }
     }
 }
