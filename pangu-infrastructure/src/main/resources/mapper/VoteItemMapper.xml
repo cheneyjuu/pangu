@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pangu.infrastructure.persistence.mapper.VoteItemMapper">
+
+    <resultMap id="VoteItemRowMap"
+               type="com.pangu.infrastructure.persistence.entity.VoteItemRow">
+        <id property="voteId" column="vote_id"/>
+        <result property="subjectId" column="subject_id"/>
+        <result property="opid" column="opid"/>
+        <result property="uid" column="uid"/>
+        <result property="targetId" column="target_id"/>
+        <result property="propertyArea" column="property_area"/>
+        <result property="choice" column="choice"/>
+        <result property="votedAt" column="voted_at"/>
+        <result property="signatureHash" column="signature_hash"/>
+    </resultMap>
+
+    <select id="selectBySubjectId" resultMap="VoteItemRowMap">
+        SELECT vote_id, subject_id, opid, uid, target_id, property_area,
+               choice, voted_at, signature_hash
+        FROM t_vote_item
+        WHERE subject_id = #{subjectId}
+    </select>
+
+</mapper>

@@ -3,6 +3,7 @@ package com.pangu.bootstrap;
 import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.transaction.annotation.EnableTransactionManagement;
 
 /**
@@ -12,6 +13,7 @@ import org.springframework.transaction.annotation.EnableTransactionManagement;
 @SpringBootApplication(scanBasePackages = "com.pangu")
 @MapperScan("com.pangu.infrastructure.persistence.mapper")
 @EnableTransactionManagement
+@EnableScheduling
 public class PanguApplication {
 
     public static void main(String[] args) {

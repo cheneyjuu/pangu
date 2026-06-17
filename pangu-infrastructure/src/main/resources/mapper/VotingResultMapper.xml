@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pangu.infrastructure.persistence.mapper.VotingResultMapper">
+
+    <resultMap id="VotingResultRowMap"
+               type="com.pangu.infrastructure.persistence.entity.VotingResultRow">
+        <id property="resultId" column="result_id"/>
+        <result property="subjectId" column="subject_id"/>
+        <result property="settleVersion" column="settle_version"/>
+        <result property="totalArea" column="total_area"/>
+        <result property="totalOwnerCount" column="total_owner_count"/>
+        <result property="participatingArea" column="participating_area"/>
+        <result property="participatingOwnerCount" column="participating_owner_count"/>
+        <result property="quorumSatisfied" column="quorum_satisfied"/>
+        <result property="passed" column="passed"/>
+        <result property="resultPayload" column="result_payload"/>
+        <result property="denominatorSnapshotId" column="denominator_snapshot_id"/>
+        <result property="attestationTxHash" column="attestation_tx_hash"/>
+        <result property="settledAt" column="settled_at"/>
+    </resultMap>
+
+    <select id="selectBySubjectId" resultMap="VotingResultRowMap">
+        SELECT result_id, subject_id, settle_version,
+               total_area, total_owner_count, participating_area, participating_owner_count,
+               quorum_satisfied, passed, result_payload::text AS result_payload,
+               denominator_snapshot_id, attestation_tx_hash, settled_at
+        FROM t_voting_result
+        WHERE subject_id = #{subjectId}
+    </select>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="resultId" keyColumn="result_id">
+        INSERT INTO t_voting_result (
+            subject_id, settle_version,
+            total_area, total_owner_count, participating_area, participating_owner_count,
+            quorum_satisfied, passed, result_payload,
+            denominator_snapshot_id, attestation_tx_hash
+        ) VALUES (
+            #{subjectId}, #{settleVersion},
+            #{totalArea}, #{totalOwnerCount}, #{participatingArea}, #{participatingOwnerCount},
+            #{quorumSatisfied}, #{passed},
+            <choose>
+                <when test="resultPayload != null">CAST(#{resultPayload} AS JSONB)</when>
+                <otherwise>NULL</otherwise>
+            </choose>,
+            #{denominatorSnapshotId}, #{attestationTxHash}
+        )
+    </insert>
+
+    <update id="updateSnapshot">
+        UPDATE t_voting_result
+        SET settle_version          = #{settleVersion},
+            total_area               = #{totalArea},
+            total_owner_count        = #{totalOwnerCount},
+            participating_area       = #{participatingArea},
+            participating_owner_count= #{participatingOwnerCount},
+            quorum_satisfied         = #{quorumSatisfied},
+            passed                   = #{passed},
+            result_payload           =
+                <choose>
+                    <when test="resultPayload != null">CAST(#{resultPayload} AS JSONB)</when>
+                    <otherwise>NULL</otherwise>
+                </choose>,
+            denominator_snapshot_id  = #{denominatorSnapshotId},
+            attestation_tx_hash      = #{attestationTxHash},
+            settled_at               = CURRENT_TIMESTAMP
+        WHERE subject_id = #{subjectId}
+    </update>
+
+</mapper>

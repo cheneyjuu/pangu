@@ -34,6 +34,12 @@ public class VotingSubject {
     /** 议题名称/表决标题。 */
     private String title;
 
+    /** 议题类型（决定结算引擎）。 */
+    private SubjectType subjectType;
+
+    /** 议题状态（DRAFT/PUBLISHED/VOTING/CLOSED/SETTLED）。 */
+    private SubjectStatus status;
+
     /** 分母范围（默认社区级）。 */
     private VotingScope scope;
 
@@ -48,6 +54,9 @@ public class VotingSubject {
      * 写入本字段后再交给引擎；引擎自身只读不算。
      */
     private BigDecimal partyRatioFloor;
+
+    /** 乐观锁版本号（来自 t_voting_subject.version）。 */
+    private long version;
 
     /**
      * @return 安全获取 partyRatioFloor，未设置时返回默认 0.50

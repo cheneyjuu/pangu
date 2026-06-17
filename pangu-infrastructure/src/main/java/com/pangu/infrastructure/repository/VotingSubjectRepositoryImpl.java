@@ -1,5 +1,7 @@
 package com.pangu.infrastructure.repository;
 
+import com.pangu.domain.model.voting.SubjectStatus;
+import com.pangu.domain.model.voting.SubjectType;
 import com.pangu.domain.model.voting.VotingScope;
 import com.pangu.domain.model.voting.VotingSubject;
 import com.pangu.domain.repository.VotingSubjectRepository;
@@ -55,9 +57,12 @@ public class VotingSubjectRepositoryImpl implements VotingSubjectRepository {
                 .subjectId(r.getSubjectId())
                 .tenantId(r.getTenantId())
                 .title(r.getTitle())
+                .subjectType(r.getSubjectType() == null ? null : SubjectType.fromDbValue(r.getSubjectType()))
+                .status(r.getStatus() == null ? null : SubjectStatus.fromDbValue(r.getStatus()))
                 .scope(r.getScope() == null ? VotingScope.COMMUNITY : VotingScope.fromDbValue(r.getScope()))
                 .scopeReferenceId(r.getScopeReferenceId())
                 .partyRatioFloor(r.getPartyRatioFloor())
+                .version(r.getVersion())
                 .build();
     }
 }
