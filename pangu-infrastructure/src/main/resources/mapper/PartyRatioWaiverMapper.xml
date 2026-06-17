@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pangu.infrastructure.persistence.mapper.PartyRatioWaiverMapper">
+
+    <resultMap id="WaiverFullRowMap"
+               type="com.pangu.infrastructure.persistence.entity.PartyRatioWaiverRow">
+        <id property="waiverId" column="waiver_id"/>
+        <result property="subjectId" column="subject_id"/>
+        <result property="tenantId" column="tenant_id"/>
+        <result property="initiatorUserId" column="initiator_user_id"/>
+        <result property="requestedRatio" column="requested_ratio"/>
+        <result property="partyPoolSize" column="party_pool_size"/>
+        <result property="totalEligibleSize" column="total_eligible_size"/>
+        <result property="reasonText" column="reason_text"/>
+        <result property="reasonEvidenceKeys" column="reason_evidence_keys"/>
+        <result property="status" column="status"/>
+        <result property="committeeApprover" column="committee_approver"/>
+        <result property="committeeApprovalAt" column="committee_approval_at"/>
+        <result property="committeeOpinion" column="committee_opinion"/>
+        <result property="streetApprover" column="street_approver"/>
+        <result property="streetApprovalAt" column="street_approval_at"/>
+        <result property="streetOpinion" column="street_opinion"/>
+        <result property="appliedAt" column="applied_at"/>
+        <result property="localPayloadHash" column="local_payload_hash"/>
+        <result property="localPayloadLockedAt" column="local_payload_locked_at"/>
+        <result property="blockchainTxHash" column="blockchain_tx_hash"/>
+        <result property="blockchainChainProvider" column="blockchain_chain_provider"/>
+        <result property="chainAttestStatus" column="chain_attest_status"/>
+        <result property="chainAttestAttempts" column="chain_attest_attempts"/>
+        <result property="chainAttestLastError" column="chain_attest_last_error"/>
+        <result property="chainConfirmedAt" column="chain_confirmed_at"/>
+        <result property="version" column="version"/>
+        <result property="createTime" column="create_time"/>
+        <result property="updateTime" column="update_time"/>
+    </resultMap>
+
+    <sql id="all_columns">
+        waiver_id, subject_id, tenant_id, initiator_user_id,
+        requested_ratio, party_pool_size, total_eligible_size,
+        reason_text, reason_evidence_keys, status,
+        committee_approver, committee_approval_at, committee_opinion,
+        street_approver, street_approval_at, street_opinion,
+        applied_at,
+        local_payload_hash, local_payload_locked_at,
+        blockchain_tx_hash, blockchain_chain_provider,
+        chain_attest_status, chain_attest_attempts, chain_attest_last_error, chain_confirmed_at,
+        version, create_time, update_time
+    </sql>
+
+    <select id="selectById" resultMap="WaiverFullRowMap">
+        SELECT <include refid="all_columns"/>
+        FROM t_party_ratio_waiver
+        WHERE waiver_id = #{waiverId}
+    </select>
+
+    <select id="selectByIdForUpdate" resultMap="WaiverFullRowMap">
+        SELECT <include refid="all_columns"/>
+        FROM t_party_ratio_waiver
+        WHERE waiver_id = #{waiverId}
+        FOR UPDATE
+    </select>
+
+    <!-- 活跃 = status IN (1 DRAFT, 2 PENDING_COMMITTEE, 3 PENDING_STREET, 4 APPROVED) -->
+    <select id="selectActiveBySubjectIdForUpdate" resultMap="WaiverFullRowMap">
+        SELECT <include refid="all_columns"/>
+        FROM t_party_ratio_waiver
+        WHERE subject_id = #{subjectId}
+          AND status IN (1, 2, 3, 4)
+        ORDER BY waiver_id DESC
+        LIMIT 1
+        FOR UPDATE
+    </select>
+
+    <insert id="insert"
+            parameterType="com.pangu.infrastructure.persistence.entity.PartyRatioWaiverRow"
+            useGeneratedKeys="true"
+            keyProperty="waiverId"
+            keyColumn="waiver_id">
+        INSERT INTO t_party_ratio_waiver (
+            subject_id, tenant_id, initiator_user_id,
+            requested_ratio, party_pool_size, total_eligible_size,
+            reason_text, reason_evidence_keys, status,
+            committee_approver, committee_approval_at, committee_opinion,
+            street_approver, street_approval_at, street_opinion,
+            applied_at,
+            local_payload_hash, local_payload_locked_at,
+            blockchain_tx_hash, blockchain_chain_provider,
+            chain_attest_status, chain_attest_attempts, chain_attest_last_error, chain_confirmed_at,
+            version
+        ) VALUES (
+            #{subjectId}, #{tenantId}, #{initiatorUserId},
+            #{requestedRatio}, #{partyPoolSize}, #{totalEligibleSize},
+            #{reasonText}, #{reasonEvidenceKeys}, #{status},
+            #{committeeApprover}, #{committeeApprovalAt}, #{committeeOpinion},
+            #{streetApprover}, #{streetApprovalAt}, #{streetOpinion},
+            #{appliedAt},
+            #{localPayloadHash}, #{localPayloadLockedAt},
+            #{blockchainTxHash}, #{blockchainChainProvider},
+            #{chainAttestStatus}, #{chainAttestAttempts}, #{chainAttestLastError}, #{chainConfirmedAt},
+            #{version}
+        )
+    </insert>
+
+    <!-- 乐观锁：WHERE version = #{version}；version + 1 一并 set。
+         注意：不写 subject_id/tenant_id/initiator_user_id（这些是不可变创建时字段） -->
+    <update id="update"
+            parameterType="com.pangu.infrastructure.persistence.entity.PartyRatioWaiverRow">
+        UPDATE t_party_ratio_waiver
+        SET requested_ratio = #{requestedRatio},
+            party_pool_size = #{partyPoolSize},
+            total_eligible_size = #{totalEligibleSize},
+            reason_text = #{reasonText},
+            reason_evidence_keys = #{reasonEvidenceKeys},
+            status = #{status},
+            committee_approver = #{committeeApprover},
+            committee_approval_at = #{committeeApprovalAt},
+            committee_opinion = #{committeeOpinion},
+            street_approver = #{streetApprover},
+            street_approval_at = #{streetApprovalAt},
+            street_opinion = #{streetOpinion},
+            applied_at = #{appliedAt},
+            local_payload_hash = #{localPayloadHash},
+            local_payload_locked_at = #{localPayloadLockedAt},
+            blockchain_tx_hash = #{blockchainTxHash},
+            blockchain_chain_provider = #{blockchainChainProvider},
+            chain_attest_status = #{chainAttestStatus},
+            chain_attest_attempts = #{chainAttestAttempts},
+            chain_attest_last_error = #{chainAttestLastError},
+            chain_confirmed_at = #{chainConfirmedAt},
+            version = version + 1,
+            update_time = CURRENT_TIMESTAMP
+        WHERE waiver_id = #{waiverId}
+          AND version = #{version}
+    </update>
+
+</mapper>

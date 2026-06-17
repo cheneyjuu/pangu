@@ -1,27 +1,29 @@
 package com.pangu.infrastructure.validator;
 
+import com.pangu.domain.policy.ReasonTextPolicy;
+import org.springframework.stereotype.Component;
+
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Map;
-import java.util.Set;
 
 /**
- * Waiver 申请理由水文检测器（纯 Java，不依赖 LLM）。
+ * Waiver 申请理由水文检测器（纯 Java，不依赖 LLM）—— {@link ReasonTextPolicy} 默认实现。
  *
  * <p>三层防线（任一不达标即拒绝）：
  * <ol>
- *   <li>实质字符占比 ≥ 80%（去除空白/标点后字符数与原长度比）</li>
- *   <li>香农熵 ≥ 阈值（衡量字符分布多样性）</li>
- *   <li>3-gram 重复率 ≤ 阈值（衡量短语重复）</li>
+ *   <li>实质字符占比 ≥ {@value #MIN_SUBSTANTIVE_RATIO}（去除空白/标点后字符数与原长度比）</li>
+ *   <li>香农熵 ≥ {@value #MIN_SHANNON_ENTROPY}（衡量字符分布多样性）</li>
+ *   <li>3-gram 重复率 ≤ {@value #MAX_TRIGRAM_REPETITION}（衡量短语重复）</li>
  * </ol>
  *
  * <p>设计原则：
  * <ul>
- *   <li>只做检测，不抛业务异常——异常类型由调用方决定（避免 infrastructure 依赖 interfaces）</li>
+ *   <li>只做检测，不抛业务异常——异常类型由调用方决定（保持 infrastructure 不依赖 interfaces）</li>
  *   <li>阈值参数化：未来可改为可配置 properties，本期固化常量便于审计</li>
  * </ul>
  */
-public final class ReasonTextValidator {
+@Component
+public class ReasonTextValidator implements ReasonTextPolicy {
 
     /** 最少实质字符数（去除空白与标点）。 */
     public static final int MIN_SUBSTANTIVE_CHARS = 50;
@@ -35,11 +37,9 @@ public final class ReasonTextValidator {
     /** 3-gram 重复率上限。 */
     public static final double MAX_TRIGRAM_REPETITION = 0.30;
 
-    private ReasonTextValidator() {
-    }
-
-    public static ValidationResult validate(String text) {
-        if (text == null) {
+    @Override
+    public ValidationResult validate(String text) {
+        if (text == null || text.isBlank()) {
             return ValidationResult.fail(FailureReason.NULL_OR_EMPTY, "理由不能为空");
         }
         // 1. 实质字符占比
@@ -71,8 +71,7 @@ public final class ReasonTextValidator {
     private static String stripNonSubstantive(String text) {
         StringBuilder sb = new StringBuilder(text.length());
         text.codePoints().forEach(cp -> {
-            if (!Character.isWhitespace(cp)
-                    && !isPunctuation(cp)) {
+            if (!Character.isWhitespace(cp) && !isPunctuation(cp)) {
                 sb.appendCodePoint(cp);
             }
         });
@@ -126,23 +125,5 @@ public final class ReasonTextValidator {
             }
         }
         return (double) repeated / totalTrigrams;
-    }
-
-    public enum FailureReason {
-        NULL_OR_EMPTY,
-        TOO_SHORT,
-        LOW_SUBSTANTIVE_RATIO,
-        LOW_ENTROPY,
-        HIGH_REPETITION
-    }
-
-    public record ValidationResult(boolean valid, FailureReason failureReason, String message) {
-        public static ValidationResult success() {
-            return new ValidationResult(true, null, null);
-        }
-
-        public static ValidationResult fail(FailureReason reason, String message) {
-            return new ValidationResult(false, reason, message);
-        }
     }
 }
