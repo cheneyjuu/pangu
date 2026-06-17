@@ -73,8 +73,13 @@ public class ElectionVotingEngineTest {
             }
         }
 
-        // 3. 执行计票引擎结算
-        ElectionVotingResult result = electionVotingEngine.settle(subject, votes, totalArea, totalOwnerCount);
+        // 3. 执行计票引擎结算（使用 Phase 3 引入的 Denominator record；测试场景下用零哈希占位）
+        Denominator denominator = new Denominator(
+                totalArea,
+                totalOwnerCount,
+                "0".repeat(64),
+                1L);
+        ElectionVotingResult result = electionVotingEngine.settle(subject, votes, denominator);
 
         // 4. 验证结算结果
         assertTrue(result.isQuorumSatisfied(), "双参与比例应该满足限制");

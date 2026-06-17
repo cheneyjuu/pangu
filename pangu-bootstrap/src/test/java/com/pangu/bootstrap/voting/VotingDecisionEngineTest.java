@@ -20,6 +20,11 @@ public class VotingDecisionEngineTest {
     @Autowired
     private MajorDecisionEngine majorDecisionEngine;
 
+    /** 测试用 Denominator：占位 snapshot 哈希 + ID，不参与引擎逻辑断言。 */
+    private static Denominator denom(BigDecimal totalArea, long totalOwnerCount) {
+        return new Denominator(totalArea, totalOwnerCount, "0".repeat(64), 1L);
+    }
+
     /**
      * 测试普通决议引擎的计票判定逻辑 (双参与 && 参会双过半数通过)
      */
@@ -45,7 +50,7 @@ public class VotingDecisionEngineTest {
             votes.add(new VoteItem(Long.valueOf(opid), uid, 3001L, area, choice));
         }
 
-        VotingResult<VotingSubject> result = generalDecisionEngine.settle(subject, votes, totalArea, totalOwnerCount);
+        VotingResult<VotingSubject> result = generalDecisionEngine.settle(subject, votes, denom(totalArea, totalOwnerCount));
         assertTrue(result.isQuorumSatisfied(), "双参与开会率应该满足");
         assertTrue(result.isPassed(), "5票赞成/8票参与，应该判定表决通过");
 
@@ -58,7 +63,7 @@ public class VotingDecisionEngineTest {
             votesHalf.add(new VoteItem(Long.valueOf(opid), uid, 3001L, area, choice));
         }
 
-        VotingResult<VotingSubject> resultHalf = generalDecisionEngine.settle(subject, votesHalf, totalArea, totalOwnerCount);
+        VotingResult<VotingSubject> resultHalf = generalDecisionEngine.settle(subject, votesHalf, denom(totalArea, totalOwnerCount));
         assertTrue(resultHalf.isQuorumSatisfied());
         assertFalse(resultHalf.isPassed(), "4票赞成/8票参与，赞成刚好等于50%未过半数，应当判定通过失败");
     }
@@ -87,7 +92,7 @@ public class VotingDecisionEngineTest {
             votesExact.add(new VoteItem(Long.valueOf(opid), uid, 4001L, area, choice));
         }
 
-        VotingResult<VotingSubject> resultExact = majorDecisionEngine.settle(subject, votesExact, totalArea, totalOwnerCount);
+        VotingResult<VotingSubject> resultExact = majorDecisionEngine.settle(subject, votesExact, denom(totalArea, totalOwnerCount));
         assertTrue(resultExact.isQuorumSatisfied());
         assertTrue(resultExact.isPassed(), "6票赞成/8票参与，刚好是75%比例，满足双3/4压线通过门槛");
 
@@ -100,7 +105,7 @@ public class VotingDecisionEngineTest {
             votesFail.add(new VoteItem(Long.valueOf(opid), uid, 4001L, area, choice));
         }
 
-        VotingResult<VotingSubject> resultFail = majorDecisionEngine.settle(subject, votesFail, totalArea, totalOwnerCount);
+        VotingResult<VotingSubject> resultFail = majorDecisionEngine.settle(subject, votesFail, denom(totalArea, totalOwnerCount));
         assertTrue(resultFail.isQuorumSatisfied());
         assertFalse(resultFail.isPassed(), "5票赞成/8票参与，未达到3/4比例，应当判定通过失败");
     }
