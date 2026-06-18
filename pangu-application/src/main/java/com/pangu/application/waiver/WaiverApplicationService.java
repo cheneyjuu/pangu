@@ -6,6 +6,7 @@ import com.pangu.application.waiver.command.RevokeWaiverCommand;
 import com.pangu.application.waiver.command.StreetReviewCommand;
 import com.pangu.application.waiver.command.SubmitDraftCommand;
 import com.pangu.domain.lock.DistributedLockTemplate;
+import com.pangu.domain.lock.DistributedLockTemplate.DistributedLockAcquisitionException;
 import com.pangu.domain.model.voting.CandidatePoolSnapshot;
 import com.pangu.domain.model.voting.VotingSubject;
 import com.pangu.domain.model.waiver.PartyRatioWaiver;
@@ -104,8 +105,16 @@ public class WaiverApplicationService {
         // 锁外发起 → 锁内开事务 → 事务提交后释放锁。
         // 用 TransactionTemplate 而非 @Transactional 是为绕开 Spring 自调用代理失效问题：
         // 在锁回调里通过 this.method() 调用一个带 @Transactional 的方法，AOP advice 不会被触发。
-        return lockTemplate.executeWithLock(lockKey, WAIVER_LOCK_TTL, () ->
-                transactionTemplate.execute(status -> doSubmitDraftWithinTx(cmd)));
+        try {
+            return lockTemplate.executeWithLock(lockKey, WAIVER_LOCK_TTL, () ->
+                    transactionTemplate.execute(status -> doSubmitDraftWithinTx(cmd)));
+        } catch (DistributedLockAcquisitionException e) {
+            // 锁被另一线程占用 → 语义上等同于「同议题已有一份正在提交/活跃」
+            // 三层防御里第①层即被拦下，对客户端统一为 WAIVER_ALREADY_PENDING 友好错误码。
+            throw new WaiverApplicationException(
+                    WaiverApplicationException.Reason.WAIVER_ALREADY_PENDING,
+                    "本议题已有另一份放宽申请正在提交中，请稍后再试", e);
+        }
     }
 
     /**
