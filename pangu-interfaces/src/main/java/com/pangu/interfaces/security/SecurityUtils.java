@@ -1,54 +1,56 @@
 package com.pangu.interfaces.security;
 
-import com.pangu.infrastructure.persistence.handler.DataScopeInterceptor.UserSecurityContext;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
+import com.pangu.domain.context.UserContext;
+import com.pangu.domain.context.UserContextHolder;
 
 /**
- * 安全上下文操作工具类 (解耦表现层与安全框架核心细节)
+ * 安全上下文操作工具类（M1 RBAC 重构后版本）。
+ *
+ * <p>设计职责：把 {@link UserContextHolder}（ThreadLocal Bean）封装为静态访问入口，
+ * 让 controller / service 无需直接 import Holder Bean 即可读取上下文。
+ *
+ * <p>历史包袱：曾经直接读 Spring Security {@code SecurityContextHolder} 中的
+ * {@code DataScopeInterceptor.UserSecurityContext}；M1 已剥离该内部类，
+ * 改为以 {@link UserContext} 作为唯一上下文契约。
  */
-public class SecurityUtils {
+public final class SecurityUtils {
 
-    /**
-     * 获取当前登录用户的安全上下文 UserSecurityContext
-     */
-    public static UserSecurityContext getUserContext() {
-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        if (auth != null && auth.getPrincipal() instanceof UserSecurityContext) {
-            return (UserSecurityContext) auth.getPrincipal();
-        }
-        return null;
-    }
-    
-    /**
-     * 获取当前登录用户的自然人 UID
-     */
-    public static Long getUid() {
-        UserSecurityContext ctx = getUserContext();
-        return ctx != null ? ctx.getUid() : null;
+    private static UserContextHolder holder;
+
+    /** Spring 启动时由 {@link SecurityUtilsHolderInjector} 注入。 */
+    static void inject(UserContextHolder injected) {
+        SecurityUtils.holder = injected;
     }
 
-    /**
-     * 获取当前用户的租户 ID
-     */
-    public static Long getTenantId() {
-        UserSecurityContext ctx = getUserContext();
-        return ctx != null ? ctx.getTenantId() : null;
+    private SecurityUtils() {
     }
 
-    /**
-     * 获取当前用户的后台用户 ID（sys_user.user_id）；纯 C 端业主无 sys_user 时退化为 uid。
-     */
+    /** @return 当前上下文；未登录时为 null。 */
+    public static UserContext getUserContext() {
+        return holder != null ? holder.current() : null;
+    }
+
+    /** @return 自然人 {@code account_id}（JWT sub）；未登录时为 null。 */
+    public static Long getAccountId() {
+        UserContext ctx = getUserContext();
+        return ctx != null ? ctx.accountId() : null;
+    }
+
+    /** @return 当前活跃 {@code sys_user.user_id}；非 SYS_USER 身份返回 null。 */
     public static Long getUserId() {
-        UserSecurityContext ctx = getUserContext();
-        return ctx != null ? ctx.getUserId() : null;
+        UserContext ctx = getUserContext();
+        return ctx != null ? ctx.userId() : null;
     }
 
-    /**
-     * 获取当前用户的部门类型 (sys_dept.dept_type)：1=街道办，2=居委会，3=物业，业主等纯 C 端为 null。
-     */
-    public static Integer getDeptType() {
-        UserSecurityContext ctx = getUserContext();
-        return ctx != null ? ctx.getDeptType() : null;
+    /** @return 当前活跃 {@code c_user.uid}；非 C_USER 身份返回 null。 */
+    public static Long getUid() {
+        UserContext ctx = getUserContext();
+        return ctx != null ? ctx.uid() : null;
+    }
+
+    /** @return 当前激活的小区租户 ID；街道办俯瞰场景为 null。 */
+    public static Long getTenantId() {
+        UserContext ctx = getUserContext();
+        return ctx != null ? ctx.tenantId() : null;
     }
 }

@@ -1,26 +1,41 @@
 package com.pangu.interfaces.security;
 
-import com.pangu.domain.model.user.DataScopeType;
-import com.pangu.infrastructure.persistence.handler.DataScopeInterceptor.UserSecurityContext;
-import com.pangu.infrastructure.persistence.mapper.UserMapper;
-import com.pangu.infrastructure.persistence.mapper.UserMapper.SysUserDto;
+import com.pangu.domain.context.UserContext;
+import com.pangu.domain.context.UserContextHolder;
+import com.pangu.domain.context.UserContextLoader;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
-import java.util.Collections;
 import java.util.List;
 
 /**
- * JWT 认证过滤器，用于解析 Authorization 请求头并构建 Spring Security 上下文
+ * JWT 认证过滤器（M1 RBAC 重构后版本）。
+ *
+ * <p>职责：
+ * <ol>
+ *   <li>解析 {@code Authorization: Bearer ...} 请求头；</li>
+ *   <li>校验 JWT 签名 + 过期；</li>
+ *   <li>调用 {@link UserContextLoader#load(Long, UserContext.IdentityType, Long, Long)}
+ *       基于 JWT 三元组（accountId / identityType / activeIdentityId）+ tenantId 提示
+ *       一次性装配 {@link UserContext}；</li>
+ *   <li>把 UserContext 写入 {@link UserContextHolder}（ThreadLocal），
+ *       并将其 {@code permissions} 转换为 {@link SimpleGrantedAuthority}
+ *       注入 Spring Security {@code Authentication}，让
+ *       {@code @PreAuthorize("hasAuthority('waiver:approve:committee')")} 工作；</li>
+ *   <li>过滤链处理完后在 finally 调用 {@link UserContextHolder#clear()}
+ *       避免线程池泄漏。</li>
+ * </ol>
  */
 @Component
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
@@ -29,65 +44,61 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private JwtTokenProvider jwtTokenProvider;
 
     @Autowired
-    private UserMapper userMapper;
+    private UserContextLoader userContextLoader;
+
+    @Autowired
+    private UserContextHolder userContextHolder;
 
     @Override
-    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
-            throws ServletException, IOException {
-        String authHeader = request.getHeader("Authorization");
-        if (authHeader != null && authHeader.startsWith("Bearer ")) {
-            String token = authHeader.substring(7);
-            try {
-                if (jwtTokenProvider.validateToken(token)) {
-                    Long uid = jwtTokenProvider.getUidFromToken(token);
-                    Long tenantId = jwtTokenProvider.getTenantIdFromToken(token);
-                    if (uid != null && SecurityContextHolder.getContext().getAuthentication() == null) {
-                        // 1. 根据 UID 查验是否有绑定的后台管理账号和对应的数据范围
-                        SysUserDto sysUser = userMapper.selectSysUserByUid(uid);
-                        UserSecurityContext userCtx;
+    protected void doFilterInternal(HttpServletRequest request,
+                                     HttpServletResponse response,
+                                     FilterChain filterChain) throws ServletException, IOException {
+        boolean populated = false;
+        try {
+            String authHeader = request.getHeader("Authorization");
+            if (authHeader != null && authHeader.startsWith("Bearer ")) {
+                String token = authHeader.substring(7);
+                if (jwtTokenProvider.validateToken(token)
+                        && SecurityContextHolder.getContext().getAuthentication() == null) {
+                    Long accountId = jwtTokenProvider.getAccountIdFromToken(token);
+                    String identityTypeStr = jwtTokenProvider.getIdentityTypeFromToken(token);
+                    Long activeIdentityId = jwtTokenProvider.getActiveIdentityIdFromToken(token);
+                    Long tenantIdHint = jwtTokenProvider.getTenantIdFromToken(token);
 
-                        if (sysUser != null) {
-                            // 2. 网格员、物业管理员等 B/G 端用户
-                            List<Long> buildingIds = Collections.emptyList();
-                            if (DataScopeType.CUSTOM_BUILDING.getValue().equals(sysUser.getDataScope())) {
-                                buildingIds = userMapper.selectBuildingIdsByUserId(sysUser.getUserId());
+                    if (accountId != null && identityTypeStr != null && activeIdentityId != null) {
+                        UserContext.IdentityType identityType = parseIdentityType(identityTypeStr);
+                        if (identityType != null) {
+                            UserContext ctx = userContextLoader.load(
+                                    accountId, identityType, activeIdentityId, tenantIdHint);
+                            if (ctx != null) {
+                                userContextHolder.set(ctx);
+                                populated = true;
+                                List<GrantedAuthority> authorities = ctx.permissions().stream()
+                                        .map(p -> (GrantedAuthority) new SimpleGrantedAuthority(p))
+                                        .toList();
+                                UsernamePasswordAuthenticationToken authentication =
+                                        new UsernamePasswordAuthenticationToken(ctx, token, authorities);
+                                authentication.setDetails(
+                                        new WebAuthenticationDetailsSource().buildDetails(request));
+                                SecurityContextHolder.getContext().setAuthentication(authentication);
                             }
-                            userCtx = UserSecurityContext.builder()
-                                    .userId(sysUser.getUserId())
-                                    .deptId(sysUser.getDeptId())
-                                    .deptType(sysUser.getDeptType())
-                                    .dataScope(sysUser.getDataScope())
-                                    .authorizedBuildingIds(buildingIds)
-                                    .uid(uid)
-                                    .tenantId(tenantId)
-                                    .build();
-                        } else {
-                            // 3. 纯 C 端业主，兜底为仅本人数据权限，userId 赋为 uid
-                            userCtx = UserSecurityContext.builder()
-                                    .userId(uid)
-                                    .deptId(null)
-                                    .deptType(null)
-                                    .dataScope(DataScopeType.SELF.getValue())
-                                    .authorizedBuildingIds(Collections.emptyList())
-                                    .uid(uid)
-                                    .tenantId(tenantId)
-                                    .build();
                         }
-
-                        // 4. 构建 Spring Security 的认证上下文，并在 credentials 处传入 token (供下游审计或微调)
-                        UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
-                                userCtx,
-                                token,
-                                Collections.emptyList()
-                        );
-                        authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
-                        SecurityContextHolder.getContext().setAuthentication(authentication);
                     }
                 }
-            } catch (Exception e) {
-                // 静默处理，认证失败由 Security 或者是具体的 Controller 拦截判定
+            }
+            filterChain.doFilter(request, response);
+        } finally {
+            if (populated) {
+                userContextHolder.clear();
             }
         }
-        filterChain.doFilter(request, response);
+    }
+
+    private UserContext.IdentityType parseIdentityType(String s) {
+        try {
+            return UserContext.IdentityType.valueOf(s);
+        } catch (IllegalArgumentException ex) {
+            return null;
+        }
     }
 }

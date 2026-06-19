@@ -51,15 +51,15 @@ CREATE INDEX idx_waiver_tenant ON t_party_ratio_waiver(tenant_id);
 CREATE INDEX idx_waiver_status ON t_party_ratio_waiver(status);
 
 COMMENT ON TABLE t_party_ratio_waiver IS '党员比例放宽申请表（G 端刚性前置审批状态机）';
-COMMENT ON COLUMN t_party_ratio_waiver.initiator_user_id IS '申请发起人（必须 dept_type=2 居委会）';
+COMMENT ON COLUMN t_party_ratio_waiver.initiator_user_id IS '申请发起人 sys_user_id（应用层基于 hasAuthority(''waiver:submit'') 校验）';
 COMMENT ON COLUMN t_party_ratio_waiver.requested_ratio IS '申请放宽至的党员比例（0.00 ~ 0.50，不含 0.50）';
 COMMENT ON COLUMN t_party_ratio_waiver.party_pool_size IS '申报时的党员池快照（候选人池中的党员人数）';
 COMMENT ON COLUMN t_party_ratio_waiver.total_eligible_size IS '申报时的合格候选人池快照';
 COMMENT ON COLUMN t_party_ratio_waiver.reason_text IS '申请理由（实质字符 ≥ 50；纯 Java 香农熵+3-gram 重复率校验）';
 COMMENT ON COLUMN t_party_ratio_waiver.reason_evidence_keys IS 'OSS 证据材料 key 列表（逗号分隔字符串，避免 PG 数组跨库兼容）';
 COMMENT ON COLUMN t_party_ratio_waiver.status IS '状态：1-DRAFT, 2-PENDING_COMMITTEE, 3-PENDING_STREET, 4-APPROVED, 5-REJECTED, 6-REVOKED, 7-REVOKED_BY_SYSTEM, 8-APPLIED';
-COMMENT ON COLUMN t_party_ratio_waiver.committee_approver IS '居委会初审人（dept_type=2）';
-COMMENT ON COLUMN t_party_ratio_waiver.street_approver IS '街道办终审人（dept_type=1）；与 committee_approver 不可相同';
+COMMENT ON COLUMN t_party_ratio_waiver.committee_approver IS '居委会初审人 sys_user_id（应用层基于 hasAuthority(''waiver:approve:committee'') 校验）';
+COMMENT ON COLUMN t_party_ratio_waiver.street_approver IS '街道办终审人 sys_user_id（应用层基于 hasAuthority(''waiver:approve:street'') 校验）；与 committee_approver 不可相同';
 COMMENT ON COLUMN t_party_ratio_waiver.local_payload_hash IS 'APPROVED 瞬间锁定的本地 payload SHA256（64 hex）';
 COMMENT ON COLUMN t_party_ratio_waiver.blockchain_tx_hash IS '司法链回执 hash（异步反填；stub 阶段为 STUB-{eventId}）';
 COMMENT ON COLUMN t_party_ratio_waiver.chain_attest_status IS '链上存证状态：1-PENDING, 2-SUBMITTED, 3-CONFIRMED, 4-FAILED';

@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pangu.infrastructure.persistence.mapper.UserContextMapper">
+
+    <!--
+        装配管理端身份上下文。
+        - sys_user → t_account（自然人主体 ID）
+        - sys_user → sys_dept（dept_category / dept.tenant_id）
+        - sys_user → sys_user_role → sys_role（role_key + effective_data_scope）
+        - effective_data_scope 优先级：sys_user_role.effective_data_scope（如设置）→ sys_role.fixed_data_scope → sys_role.default_data_scope
+    -->
+    <select id="loadSysUserContext"
+            resultType="com.pangu.infrastructure.persistence.mapper.UserContextMapper$SysUserContextRow">
+        SELECT
+            u.user_id        AS userId,
+            u.account_id     AS accountId,
+            u.dept_id        AS deptId,
+            d.tenant_id      AS deptTenantId,
+            d.dept_category  AS deptCategory,
+            r.role_id        AS roleId,
+            r.role_key       AS roleKey,
+            COALESCE(ur.effective_data_scope, r.fixed_data_scope, r.default_data_scope) AS effectiveDataScope
+        FROM sys_user u
+        LEFT JOIN sys_dept d        ON u.dept_id = d.dept_id
+        LEFT JOIN sys_user_role ur  ON u.user_id = ur.user_id
+        LEFT JOIN sys_role r        ON ur.role_id = r.role_id AND r.status = '0'
+        WHERE u.user_id = #{userId}
+          AND u.status = '0'
+        LIMIT 1
+    </select>
+
+    <!-- 装配业主端身份上下文（auth_level 实际位于 c_user，不在 t_account；t_account 仅做存在性 JOIN）。 -->
+    <select id="loadCUserContext"
+            resultType="com.pangu.infrastructure.persistence.mapper.UserContextMapper$CUserContextRow">
+        SELECT
+            c.uid         AS uid,
+            c.account_id  AS accountId,
+            c.auth_level  AS authLevel
+        FROM c_user c
+        INNER JOIN t_account a ON c.account_id = a.account_id
+        WHERE c.uid = #{uid}
+        LIMIT 1
+    </select>
+
+    <!-- 给定角色反查能力点（permission_key）集合。 -->
+    <select id="selectPermissionsByRoleId" resultType="java.lang.String">
+        SELECT permission_key
+        FROM sys_role_permission
+        WHERE role_id = #{roleId}
+    </select>
+
+    <!-- 给定 sys_user.user_id 反查授权楼栋（仅 status=1 活跃记录）。 -->
+    <select id="selectAuthorizedBuildingIds" resultType="java.lang.Long">
+        SELECT building_id
+        FROM sys_user_building
+        WHERE user_id = #{userId}
+          AND status = 1
+    </select>
+
+</mapper>

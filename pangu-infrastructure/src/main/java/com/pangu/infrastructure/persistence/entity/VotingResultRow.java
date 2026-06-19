@@ -13,7 +13,7 @@ public class VotingResultRow {
 
     private Long resultId;
     private Long subjectId;
-    private Integer settleVersion;
+    private Integer statisticsVersion;
 
     private BigDecimal totalArea;
     private Long totalOwnerCount;

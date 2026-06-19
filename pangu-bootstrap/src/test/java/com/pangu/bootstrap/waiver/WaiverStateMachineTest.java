@@ -83,11 +83,11 @@ public class WaiverStateMachineTest {
         w.transitionTo(WaiverStatus.PENDING_COMMITTEE);
         assertEquals(WaiverStatus.PENDING_COMMITTEE, w.getStatus());
 
-        w.approveByCommittee(COMMITTEE_APPROVER, 2, "情况属实");
+        w.approveByCommittee(COMMITTEE_APPROVER, "情况属实");
         assertEquals(WaiverStatus.PENDING_STREET, w.getStatus());
         assertEquals(COMMITTEE_APPROVER, w.getCommitteeApprover());
 
-        w.approveByStreet(STREET_APPROVER, 1, "终审通过");
+        w.approveByStreet(STREET_APPROVER, "终审通过");
         assertEquals(WaiverStatus.APPROVED, w.getStatus());
         assertEquals(STREET_APPROVER, w.getStreetApprover());
 
@@ -133,7 +133,7 @@ public class WaiverStateMachineTest {
     public void cannotTransitionFromTerminalRejected() {
         PartyRatioWaiver w = newDraft();
         w.transitionTo(WaiverStatus.PENDING_COMMITTEE);
-        w.reject(COMMITTEE_APPROVER, 2, "材料不全");
+        w.reject(COMMITTEE_APPROVER, "材料不全");
         assertEquals(WaiverStatus.REJECTED, w.getStatus());
         assertTrue(w.getStatus().isTerminal());
         // 任何后续流转都应被拒
@@ -147,8 +147,8 @@ public class WaiverStateMachineTest {
     public void cannotTransitionFromAppliedTerminal() {
         PartyRatioWaiver w = newDraft();
         w.transitionTo(WaiverStatus.PENDING_COMMITTEE);
-        w.approveByCommittee(COMMITTEE_APPROVER, 2, "ok");
-        w.approveByStreet(STREET_APPROVER, 1, "ok");
+        w.approveByCommittee(COMMITTEE_APPROVER, "ok");
+        w.approveByStreet(STREET_APPROVER, "ok");
         w.apply();
         assertTrue(w.getStatus().isTerminal());
         assertThrows(IllegalStateException.class,
@@ -164,46 +164,22 @@ public class WaiverStateMachineTest {
     }
 
     // ===== 审批人 dept_type 校验 =====
-
-    @Test
-    public void committeeApprover_mustBeDept2() {
-        PartyRatioWaiver w = newDraft();
-        w.transitionTo(WaiverStatus.PENDING_COMMITTEE);
-        // dept_type=1 (街道办) 不能做居委会初审
-        assertThrows(IllegalStateException.class,
-                () -> w.approveByCommittee(COMMITTEE_APPROVER, 1, "ok"));
-        // dept_type=null
-        assertThrows(IllegalStateException.class,
-                () -> w.approveByCommittee(COMMITTEE_APPROVER, null, "ok"));
-        // dept_type=3 (物业) 不能做居委会初审
-        assertThrows(IllegalStateException.class,
-                () -> w.approveByCommittee(COMMITTEE_APPROVER, 3, "ok"));
-    }
-
-    @Test
-    public void streetApprover_mustBeDept1() {
-        PartyRatioWaiver w = newDraft();
-        w.transitionTo(WaiverStatus.PENDING_COMMITTEE);
-        w.approveByCommittee(COMMITTEE_APPROVER, 2, "ok");
-        // dept_type=2 (居委会) 不能做街道办终审
-        assertThrows(IllegalStateException.class,
-                () -> w.approveByStreet(STREET_APPROVER, 2, "ok"));
-        // dept_type=null
-        assertThrows(IllegalStateException.class,
-                () -> w.approveByStreet(STREET_APPROVER, null, "ok"));
-    }
+    // M1 RBAC 重构后，dept_type 校验已下沉至 controller 层 @PreAuthorize
+    // (waiver:approve:committee / waiver:approve:street)，聚合根不再校验 dept_type。
+    // 原 committeeApprover_mustBeDept2 / streetApprover_mustBeDept1 单测已删除，
+    // 由 PreAuthorizeMatrixTest（Task #21）覆盖 RBAC 拒绝路径。
 
     @Test
     public void approvalRequiresPendingState() {
         PartyRatioWaiver w = newDraft();
         // DRAFT 状态不能直接走 approveByCommittee（必须先 transitionTo PENDING_COMMITTEE）
         assertThrows(IllegalStateException.class,
-                () -> w.approveByCommittee(COMMITTEE_APPROVER, 2, "ok"));
+                () -> w.approveByCommittee(COMMITTEE_APPROVER, "ok"));
 
         w.transitionTo(WaiverStatus.PENDING_COMMITTEE);
         // PENDING_COMMITTEE 状态不能直接走 approveByStreet
         assertThrows(IllegalStateException.class,
-                () -> w.approveByStreet(STREET_APPROVER, 1, "ok"));
+                () -> w.approveByStreet(STREET_APPROVER, "ok"));
     }
 
     // ===== 双签强制（同一审批人不可初/终签） =====
@@ -212,10 +188,10 @@ public class WaiverStateMachineTest {
     public void committeeAndStreetApproverCannotBeSamePerson_evenIfDeptOk() {
         PartyRatioWaiver w = newDraft();
         w.transitionTo(WaiverStatus.PENDING_COMMITTEE);
-        w.approveByCommittee(COMMITTEE_APPROVER, 2, "ok");
+        w.approveByCommittee(COMMITTEE_APPROVER, "ok");
         // 居委会审批人 7002 试图作为街道办终审人（即使 dept_type 传 1）
         IllegalStateException ex = assertThrows(IllegalStateException.class,
-                () -> w.approveByStreet(COMMITTEE_APPROVER, 1, "ok"));
+                () -> w.approveByStreet(COMMITTEE_APPROVER, "ok"));
         assertTrue(ex.getMessage().contains("终审与初审审批人不能为同一人"));
     }
 
@@ -223,10 +199,10 @@ public class WaiverStateMachineTest {
     public void rejectAtStreet_alsoForbidsSameApproverAsCommittee() {
         PartyRatioWaiver w = newDraft();
         w.transitionTo(WaiverStatus.PENDING_COMMITTEE);
-        w.approveByCommittee(COMMITTEE_APPROVER, 2, "ok");
+        w.approveByCommittee(COMMITTEE_APPROVER, "ok");
         // 终审驳回也走双签校验（防止同一人初审通过又终审驳回）
         assertThrows(IllegalStateException.class,
-                () -> w.reject(COMMITTEE_APPROVER, 1, "驳回"));
+                () -> w.reject(COMMITTEE_APPROVER, "驳回"));
     }
 
     // ===== 系统断路器自动撤销 =====
@@ -240,8 +216,8 @@ public class WaiverStateMachineTest {
         // PENDING_COMMITTEE 不能 revokeBySystem
         assertThrows(IllegalStateException.class, w::revokeBySystem);
 
-        w.approveByCommittee(COMMITTEE_APPROVER, 2, "ok");
-        w.approveByStreet(STREET_APPROVER, 1, "ok");
+        w.approveByCommittee(COMMITTEE_APPROVER, "ok");
+        w.approveByStreet(STREET_APPROVER, "ok");
         // APPROVED 阶段允许
         w.revokeBySystem();
         assertEquals(WaiverStatus.REVOKED_BY_SYSTEM, w.getStatus());
@@ -257,8 +233,8 @@ public class WaiverStateMachineTest {
         assertThrows(IllegalStateException.class, () -> w.lockLocalPayloadHash("a".repeat(64)));
 
         w.transitionTo(WaiverStatus.PENDING_COMMITTEE);
-        w.approveByCommittee(COMMITTEE_APPROVER, 2, "ok");
-        w.approveByStreet(STREET_APPROVER, 1, "ok");
+        w.approveByCommittee(COMMITTEE_APPROVER, "ok");
+        w.approveByStreet(STREET_APPROVER, "ok");
 
         // hash 长度错误
         assertThrows(IllegalArgumentException.class, () -> w.lockLocalPayloadHash("abc"));

@@ -75,12 +75,8 @@ public class WaiverApplicationService {
      * </ul>
      */
     public PartyRatioWaiver submitDraft(SubmitDraftCommand cmd) {
-        // 0. dept_type 校验前置（避免无谓抢锁）
-        if (cmd.initiatorDeptType() == null || cmd.initiatorDeptType() != 2) {
-            throw new WaiverApplicationException(
-                    WaiverApplicationException.Reason.INITIATOR_NOT_COMMITTEE,
-                    "申请发起人必须是居委会用户（dept_type=2），当前=" + cmd.initiatorDeptType());
-        }
+        // 0. dept_type 校验已迁移到 controller 层 @PreAuthorize('waiver:submit')
+        //    本服务只负责状态机 + 业务规则编排。
 
         // 1. 水文检测（拒在锁外，避免长事务持锁）
         ReasonTextPolicy.ValidationResult vr = reasonTextPolicy.validate(cmd.reasonText());
@@ -162,9 +158,9 @@ public class WaiverApplicationService {
         PartyRatioWaiver waiver = loadForUpdate(cmd.waiverId());
         try {
             if (cmd.approve()) {
-                waiver.approveByCommittee(cmd.approverUserId(), cmd.approverDeptType(), cmd.opinion());
+                waiver.approveByCommittee(cmd.approverUserId(), cmd.opinion());
             } else {
-                waiver.reject(cmd.approverUserId(), cmd.approverDeptType(), cmd.opinion());
+                waiver.reject(cmd.approverUserId(), cmd.opinion());
             }
         } catch (IllegalStateException e) {
             throw mapStateException(e);
@@ -188,11 +184,11 @@ public class WaiverApplicationService {
         PartyRatioWaiver waiver = loadForUpdate(cmd.waiverId());
         try {
             if (cmd.approve()) {
-                waiver.approveByStreet(cmd.approverUserId(), cmd.approverDeptType(), cmd.opinion());
+                waiver.approveByStreet(cmd.approverUserId(), cmd.opinion());
                 String hash = payloadHasher.hashWaiverApproval(waiver);
                 waiver.lockLocalPayloadHash(hash);
             } else {
-                waiver.reject(cmd.approverUserId(), cmd.approverDeptType(), cmd.opinion());
+                waiver.reject(cmd.approverUserId(), cmd.opinion());
             }
         } catch (IllegalStateException e) {
             throw mapStateException(e);
@@ -241,10 +237,6 @@ public class WaiverApplicationService {
 
     private WaiverApplicationException mapStateException(IllegalStateException e) {
         String msg = e.getMessage() == null ? "" : e.getMessage();
-        if (msg.contains("部门类型不符")) {
-            return new WaiverApplicationException(
-                    WaiverApplicationException.Reason.APPROVER_DEPT_INVALID, msg, e);
-        }
         if (msg.contains("终审与初审审批人不能为同一人")) {
             return new WaiverApplicationException(
                     WaiverApplicationException.Reason.APPROVER_CONFLICT, msg, e);

@@ -7,7 +7,7 @@
                type="com.pangu.infrastructure.persistence.entity.VotingResultRow">
         <id property="resultId" column="result_id"/>
         <result property="subjectId" column="subject_id"/>
-        <result property="settleVersion" column="settle_version"/>
+        <result property="statisticsVersion" column="statistics_version"/>
         <result property="totalArea" column="total_area"/>
         <result property="totalOwnerCount" column="total_owner_count"/>
         <result property="participatingArea" column="participating_area"/>
@@ -21,7 +21,7 @@
     </resultMap>
 
     <select id="selectBySubjectId" resultMap="VotingResultRowMap">
-        SELECT result_id, subject_id, settle_version,
+        SELECT result_id, subject_id, statistics_version,
                total_area, total_owner_count, participating_area, participating_owner_count,
                quorum_satisfied, passed, result_payload::text AS result_payload,
                denominator_snapshot_id, attestation_tx_hash, settled_at
@@ -31,12 +31,12 @@
 
     <insert id="insert" useGeneratedKeys="true" keyProperty="resultId" keyColumn="result_id">
         INSERT INTO t_voting_result (
-            subject_id, settle_version,
+            subject_id, statistics_version,
             total_area, total_owner_count, participating_area, participating_owner_count,
             quorum_satisfied, passed, result_payload,
             denominator_snapshot_id, attestation_tx_hash
         ) VALUES (
-            #{subjectId}, #{settleVersion},
+            #{subjectId}, #{statisticsVersion},
             #{totalArea}, #{totalOwnerCount}, #{participatingArea}, #{participatingOwnerCount},
             #{quorumSatisfied}, #{passed},
             <choose>
@@ -49,7 +49,7 @@
 
     <update id="updateSnapshot">
         UPDATE t_voting_result
-        SET settle_version          = #{settleVersion},
+        SET statistics_version          = #{statisticsVersion},
             total_area               = #{totalArea},
             total_owner_count        = #{totalOwnerCount},
             participating_area       = #{participatingArea},
