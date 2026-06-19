@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pangu.infrastructure.persistence.mapper.DisclosureCompareMapper">
+
+    <resultMap id="DisclosureCompareRowMap"
+               type="com.pangu.infrastructure.persistence.entity.DisclosureCompareRow">
+        <id property="compareId" column="compare_id"/>
+        <result property="tenantId" column="tenant_id"/>
+        <result property="prevSnapshotId" column="prev_snapshot_id"/>
+        <result property="currSnapshotId" column="curr_snapshot_id"/>
+        <result property="diffJson" column="diff_json"/>
+        <result property="writeCount" column="write_count"/>
+        <result property="readCount" column="read_count"/>
+        <result property="noChangeCount" column="no_change_count"/>
+        <result property="auditedByUserId" column="audited_by_user_id"/>
+        <result property="auditedAt" column="audited_at"/>
+        <result property="createTime" column="create_time"/>
+    </resultMap>
+
+    <sql id="all_columns">
+        compare_id, tenant_id, prev_snapshot_id, curr_snapshot_id,
+        diff_json::text AS diff_json,
+        write_count, read_count, no_change_count,
+        audited_by_user_id, audited_at, create_time
+    </sql>
+
+    <select id="selectByPair" resultMap="DisclosureCompareRowMap">
+        SELECT <include refid="all_columns"/>
+        FROM t_disclosure_audit_compare
+        WHERE prev_snapshot_id = #{prevSnapshotId}
+          AND curr_snapshot_id = #{currSnapshotId}
+        LIMIT 1
+    </select>
+
+    <insert id="insert"
+            parameterType="com.pangu.infrastructure.persistence.entity.DisclosureCompareRow"
+            useGeneratedKeys="true"
+            keyProperty="compareId"
+            keyColumn="compare_id">
+        INSERT INTO t_disclosure_audit_compare (
+            tenant_id, prev_snapshot_id, curr_snapshot_id, diff_json,
+            write_count, read_count, no_change_count,
+            audited_by_user_id, audited_at
+        ) VALUES (
+            #{tenantId}, #{prevSnapshotId}, #{currSnapshotId},
+            CAST(#{diffJson} AS JSONB),
+            #{writeCount}, #{readCount}, #{noChangeCount},
+            #{auditedByUserId}, #{auditedAt}
+        )
+    </insert>
+
+</mapper>

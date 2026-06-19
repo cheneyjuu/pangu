@@ -1,5 +1,6 @@
 package com.pangu.interfaces.web.exception;
 
+import com.pangu.application.disclosure.FinanceDisclosureApplicationException;
 import com.pangu.application.lock.GovernanceLockApplicationException;
 import com.pangu.application.voting.VotingApplicationException;
 import com.pangu.application.waiver.WaiverApplicationException;
@@ -92,6 +93,24 @@ public class GlobalExceptionHandler {
         LockErrorCode errorCode = GovernanceLockExceptionTranslator.translate(ex);
         response.setStatus(errorCode.getHttpStatus());
         log.info("GovernanceLock business exception reason={} code={} msg={}",
+                ex.getReason(), errorCode.getCode(), ex.getMessage());
+        return Result.fail(
+                errorCode.getCode(),
+                ex.getMessage() != null ? ex.getMessage() : errorCode.getMessage(),
+                null,
+                errorCode.getErrorType(),
+                errorCode.isNeedRetry());
+    }
+
+    /**
+     * 财务公示应用层业务异常 → DisclosureErrorCode。
+     */
+    @ExceptionHandler(FinanceDisclosureApplicationException.class)
+    public Result<Object> handleFinanceDisclosureApplicationException(FinanceDisclosureApplicationException ex,
+                                                                       HttpServletResponse response) {
+        DisclosureErrorCode errorCode = DisclosureExceptionTranslator.translate(ex);
+        response.setStatus(errorCode.getHttpStatus());
+        log.info("FinanceDisclosure business exception reason={} code={} msg={}",
                 ex.getReason(), errorCode.getCode(), ex.getMessage());
         return Result.fail(
                 errorCode.getCode(),
