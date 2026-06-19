@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pangu.infrastructure.persistence.mapper.FundLedgerQueryMapper">
+
+    <!--
+        FundLedgerSnapshotData.AccountBalance / EntrySummary 是 record，
+        必须用 <constructor> 走构造器映射。
+    -->
+    <resultMap id="AccountBalanceMap"
+               type="com.pangu.domain.model.disclosure.FundLedgerSnapshotData$AccountBalance">
+        <constructor>
+            <idArg column="account_id"      javaType="java.lang.Long"/>
+            <arg   column="account_level"   javaType="java.lang.Integer"/>
+            <arg   column="reference_id"    javaType="java.lang.Long"/>
+            <arg   column="total_balance"   javaType="java.math.BigDecimal"/>
+            <arg   column="frozen_balance"  javaType="java.math.BigDecimal"/>
+        </constructor>
+    </resultMap>
+
+    <resultMap id="EntrySummaryMap"
+               type="com.pangu.domain.model.disclosure.FundLedgerSnapshotData$EntrySummary">
+        <constructor>
+            <idArg column="business_type"   javaType="java.lang.Integer"/>
+            <arg   column="direction"       javaType="java.lang.Integer"/>
+            <arg   column="entry_count"     javaType="java.lang.Long"/>
+            <arg   column="total_amount"    javaType="java.math.BigDecimal"/>
+        </constructor>
+    </resultMap>
+
+    <select id="selectAccountBalances" resultMap="AccountBalanceMap">
+        SELECT account_id, account_level, reference_id,
+               total_balance, frozen_balance
+        FROM t_maintenance_fund_account
+        WHERE tenant_id = #{tenantId}
+        ORDER BY account_level, account_id
+    </select>
+
+    <select id="selectEntrySummariesInWindow" resultMap="EntrySummaryMap">
+        SELECT e.business_type,
+               e.direction,
+               COUNT(*)    AS entry_count,
+               SUM(e.amount) AS total_amount
+        FROM t_fund_ledger_entry e
+        JOIN t_maintenance_fund_account a ON a.account_id = e.account_id
+        WHERE a.tenant_id = #{tenantId}
+          AND e.occurred_at &gt;= #{startTs}
+          AND e.occurred_at &lt;  #{endTs}
+        GROUP BY e.business_type, e.direction
+        ORDER BY e.business_type, e.direction
+    </select>
+
+</mapper>
