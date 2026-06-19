@@ -15,15 +15,16 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * 党员比例放宽 (Waiver) 申请的 RESTful 入口。
+ * 党员比例放宽 (Waiver) 申请的 RESTful 入口（M1 RBAC 重构后版本）。
  *
  * <p>API 路径：
  * <ul>
@@ -34,17 +35,16 @@ import org.springframework.web.bind.annotation.RestController;
  *   <li>{@code GET  /api/v1/waivers/{waiverId}} —— 获取详情。</li>
  * </ul>
  *
- * <p>鉴权策略：
+ * <p>鉴权策略（M1 重构后）：
+ * 全部走 Spring Security {@code @PreAuthorize("hasAuthority('<permission_key>')")}：
  * <ul>
- *   <li>本控制器所有写接口都需要 dept_type 校验，但 dept_type 为强业务字段，
- *       未走 Spring Security GrantedAuthority 注入路径，
- *       因此走 application 层显式校验（{@link WaiverApplicationException.Reason#INITIATOR_NOT_COMMITTEE}
- *       / {@code APPROVER_DEPT_INVALID}）。</li>
- *   <li>Spring Security 默认要求登录态（除 {@code /auth/login}），未登录会被 SecurityFilterChain
- *       直接拒绝，不会进入控制器。</li>
+ *   <li>{@code waiver:submit}            —— 居委会发起；</li>
+ *   <li>{@code waiver:approve:committee} —— 居委会初审；</li>
+ *   <li>{@code waiver:approve:street}    —— 街道办终审；</li>
+ *   <li>{@code waiver:revoke}            —— 人工撤销；</li>
+ *   <li>{@code waiver:read}              —— GET 详情。</li>
  * </ul>
- *
- * <p>HTTP 状态：写接口成功返回 201/200；失败由 {@code GlobalExceptionHandler} 翻译。
+ * 权限来自 {@code sys_role_permission}；JWT 不嵌权限，由 {@code UserContextLoader} 实时反查。
  */
 @RestController
 @RequestMapping("/api/v1")
@@ -53,13 +53,9 @@ public class WaiverController extends BaseController {
 
     private final WaiverApplicationService waiverApplicationService;
 
-    /**
-     * 居委会发起 waiver 草稿并直接进入初审待审。
-     *
-     * <p>SecurityContext 上下文必备字段：{@code uid / tenantId / userId / deptType}。
-     * 本接口要求 {@code deptType=2}（居委会），由 application 层强校验。
-     */
+    /** 居委会发起 waiver 草稿并直接进入初审待审。 */
     @PostMapping("/elections/{subjectId}/waivers")
+    @PreAuthorize("hasAuthority('waiver:submit')")
     public ResponseEntity<Result<WaiverResponse>> submitWaiver(
             @PathVariable("subjectId") Long subjectId,
             @Valid @RequestBody SubmitWaiverRequest request) {
@@ -67,7 +63,6 @@ public class WaiverController extends BaseController {
                 subjectId,
                 requireTenantId(),
                 requireUserId(),
-                SecurityUtils.getDeptType(),
                 request.requestedRatio(),
                 request.reasonText(),
                 request.reasonEvidenceKeys());
@@ -76,19 +71,15 @@ public class WaiverController extends BaseController {
                 .body(success("申请已提交，等待居委会初审", WaiverResponse.from(waiver)));
     }
 
-    /**
-     * 居委会初审。{@link ReviewWaiverRequest#approve()} 决定通过 → PENDING_STREET 或驳回 → REJECTED。
-     *
-     * <p>app 层会校验 {@code approverDeptType=2}（居委会），不符合返回 {@code WAIVER_APPROVER_DEPT_INVALID}。
-     */
+    /** 居委会初审。 */
     @PostMapping("/waivers/{waiverId}/committee-review")
+    @PreAuthorize("hasAuthority('waiver:approve:committee')")
     public Result<WaiverResponse> reviewByCommittee(
             @PathVariable("waiverId") Long waiverId,
             @Valid @RequestBody ReviewWaiverRequest request) {
         CommitteeReviewCommand cmd = new CommitteeReviewCommand(
                 waiverId,
                 requireUserId(),
-                SecurityUtils.getDeptType(),
                 Boolean.TRUE.equals(request.approve()),
                 request.opinion());
         PartyRatioWaiver waiver = waiverApplicationService.reviewByCommittee(cmd);
@@ -96,19 +87,15 @@ public class WaiverController extends BaseController {
                 WaiverResponse.from(waiver));
     }
 
-    /**
-     * 街道办终审。通过 → APPROVED + 锁 payloadHash + outbox 上链 stub；驳回 → REJECTED。
-     *
-     * <p>app 层会校验 {@code approverDeptType=1}（街道办），且终审人不可与初审人相同。
-     */
+    /** 街道办终审。通过 → APPROVED + 锁 payloadHash + outbox 上链 stub；驳回 → REJECTED。 */
     @PostMapping("/waivers/{waiverId}/street-review")
+    @PreAuthorize("hasAuthority('waiver:approve:street')")
     public Result<WaiverResponse> reviewByStreet(
             @PathVariable("waiverId") Long waiverId,
             @Valid @RequestBody ReviewWaiverRequest request) {
         StreetReviewCommand cmd = new StreetReviewCommand(
                 waiverId,
                 requireUserId(),
-                SecurityUtils.getDeptType(),
                 Boolean.TRUE.equals(request.approve()),
                 request.opinion());
         PartyRatioWaiver waiver = waiverApplicationService.reviewByStreet(cmd);
@@ -116,21 +103,18 @@ public class WaiverController extends BaseController {
                 WaiverResponse.from(waiver));
     }
 
-    /**
-     * 人工撤销。允许 DRAFT / PENDING_* / APPROVED 阶段调用，终止态调用会返回
-     * {@code WAIVER_INVALID_TRANSITION}。
-     */
+    /** 人工撤销。允许 DRAFT / PENDING_* / APPROVED 阶段调用。 */
     @PostMapping("/waivers/{waiverId}/revoke")
+    @PreAuthorize("hasAuthority('waiver:revoke')")
     public Result<WaiverResponse> revoke(@PathVariable("waiverId") Long waiverId) {
         RevokeWaiverCommand cmd = new RevokeWaiverCommand(waiverId, requireUserId());
         PartyRatioWaiver waiver = waiverApplicationService.revoke(cmd);
         return success("Waiver 已撤销", WaiverResponse.from(waiver));
     }
 
-    /**
-     * GET 详情。不存在时返回 {@code WAIVER_NOT_FOUND}。
-     */
+    /** GET 详情。 */
     @GetMapping("/waivers/{waiverId}")
+    @PreAuthorize("hasAuthority('waiver:read')")
     public Result<WaiverResponse> findById(@PathVariable("waiverId") Long waiverId) {
         return waiverApplicationService.findById(waiverId)
                 .map(w -> success(WaiverResponse.from(w)))

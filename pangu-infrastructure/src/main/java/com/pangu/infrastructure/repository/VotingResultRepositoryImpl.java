@@ -11,7 +11,7 @@ import java.util.Optional;
 /**
  * {@link VotingResultRepository} 默认实现。
  *
- * <p>{@link #upsert} 行为：先 SELECT 是否存在 → 存在则 UPDATE（递增 settle_version），
+ * <p>{@link #upsert} 行为：先 SELECT 是否存在 → 存在则 UPDATE（递增 statistics_version），
  * 否则 INSERT。需在调用方包裹事务（或对 t_voting_subject 做 SELECT FOR UPDATE）以保证
  * 重复结算的并发正确性。
  */
@@ -28,7 +28,7 @@ public class VotingResultRepositoryImpl implements VotingResultRepository {
         if (existing == null) {
             mapper.insert(row);
         } else {
-            // 调用方传入的 settleVersion 即新版本（已经 +1）；UPDATE 直接覆盖。
+            // 调用方传入的 statisticsVersion 即新版本（已经 +1）；UPDATE 直接覆盖。
             mapper.updateSnapshot(row);
         }
     }
@@ -42,7 +42,7 @@ public class VotingResultRepositoryImpl implements VotingResultRepository {
     private VotingResultRow toRow(Snapshot s) {
         VotingResultRow row = new VotingResultRow();
         row.setSubjectId(s.subjectId());
-        row.setSettleVersion(s.settleVersion());
+        row.setStatisticsVersion(s.statisticsVersion());
         row.setTotalArea(s.totalArea());
         row.setTotalOwnerCount(s.totalOwnerCount());
         row.setParticipatingArea(s.participatingArea());
@@ -58,7 +58,7 @@ public class VotingResultRepositoryImpl implements VotingResultRepository {
     private Snapshot toSnapshot(VotingResultRow row) {
         return new Snapshot(
                 row.getSubjectId(),
-                row.getSettleVersion() == null ? 1 : row.getSettleVersion(),
+                row.getStatisticsVersion() == null ? 1 : row.getStatisticsVersion(),
                 row.getTotalArea(),
                 row.getTotalOwnerCount() == null ? 0L : row.getTotalOwnerCount(),
                 row.getParticipatingArea(),

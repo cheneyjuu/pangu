@@ -90,12 +90,12 @@ COMMENT ON COLUMN t_vote_item.signature_hash IS '电子签名摘要（可选）'
 
 -- ===================================================================
 -- 4. 表决结果快照表 (t_voting_result)
---    settle 完写入；可重复 settle 但需带 settle_version 保护
+--    settle 完写入；可重复 settle 但需带 statistics_version 保护
 -- ===================================================================
 CREATE TABLE t_voting_result (
     result_id BIGSERIAL PRIMARY KEY,
     subject_id BIGINT NOT NULL UNIQUE REFERENCES t_voting_subject(subject_id),
-    settle_version INT NOT NULL DEFAULT 1,
+    statistics_version INT NOT NULL DEFAULT 1,
     total_area DECIMAL(14,2) NOT NULL,
     total_owner_count BIGINT NOT NULL,
     participating_area DECIMAL(14,2) NOT NULL,
@@ -113,7 +113,7 @@ CREATE TABLE t_voting_result (
 CREATE INDEX idx_voting_result_settled_at ON t_voting_result(settled_at);
 
 COMMENT ON TABLE t_voting_result IS '表决结果快照表（一议题最多一行）';
-COMMENT ON COLUMN t_voting_result.settle_version IS '结算版本（重新结算时递增）';
+COMMENT ON COLUMN t_voting_result.statistics_version IS '统计版本（重新结算时递增；为 M2 statistics_version 注册中心预留命名）';
 COMMENT ON COLUMN t_voting_result.quorum_satisfied IS '法定人数/面积是否双过 2/3：0-未达, 1-达标';
 COMMENT ON COLUMN t_voting_result.passed IS '议题是否通过：0-未通过, 1-通过';
 COMMENT ON COLUMN t_voting_result.result_payload IS '强类型结果序列化（候选人当选名单/赞成数等）';

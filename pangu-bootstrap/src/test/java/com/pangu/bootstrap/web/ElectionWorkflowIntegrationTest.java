@@ -103,14 +103,22 @@ public class ElectionWorkflowIntegrationTest {
         jdbcTemplate.update("DELETE FROM t_voting_subject WHERE tenant_id = ?", TEST_TENANT_ID);
         jdbcTemplate.update("DELETE FROM c_owner_property WHERE tenant_id = ?", TEST_TENANT_ID);
         // 测试用户 phone 以 770/770 开头共 11 位；和生产数据隔离开
-        jdbcTemplate.update("DELETE FROM c_user WHERE phone LIKE '770%' AND length(phone) = 11");
+        // M1 RBAC 重构后：phone 在 t_account；先删 c_user 再删 t_account
+        jdbcTemplate.update(
+                "DELETE FROM c_user WHERE account_id IN ("
+                        + "SELECT account_id FROM t_account WHERE phone LIKE '770%' AND length(phone) = 11)");
+        jdbcTemplate.update("DELETE FROM t_account WHERE phone LIKE '770%' AND length(phone) = 11");
         jdbcTemplate.update("DELETE FROM t_outbox_event WHERE tenant_id = ?", TEST_TENANT_ID);
     }
 
     private Long insertUser(String phone) {
-        return jdbcTemplate.queryForObject(
-                "INSERT INTO c_user(phone, auth_level) VALUES(?, 1) RETURNING uid",
+        Long accountId = jdbcTemplate.queryForObject(
+                "INSERT INTO t_account(phone, real_name, real_name_verified, status) "
+                        + "VALUES(?, '测试用户', 0, 1) RETURNING account_id",
                 Long.class, phone);
+        return jdbcTemplate.queryForObject(
+                "INSERT INTO c_user(account_id, auth_level) VALUES(?, 1) RETURNING uid",
+                Long.class, accountId);
     }
 
     private Long insertElectionSubject() {
@@ -161,8 +169,7 @@ public class ElectionWorkflowIntegrationTest {
 
         // 2. 居委会发起 waiver（状态 → PENDING_COMMITTEE）
         SubmitDraftCommand draftCmd = new SubmitDraftCommand(
-                subjectId, TEST_TENANT_ID, INITIATOR, 2,
-                new BigDecimal("0.30"),
+                subjectId, TEST_TENANT_ID, INITIATOR, new BigDecimal("0.30"),
                 "本小区共有产权房比例较高党员人数严重不足经多次组织居民代表协商发动报名仍无法凑足候选人池所需的党员数量特申请将党员比例下限放宽至30%恳请居委会及街道办予以审议批准",
                 null
         );
@@ -174,14 +181,14 @@ public class ElectionWorkflowIntegrationTest {
 
         // 3. 居委会初审通过（不同审批人，dept_type=2）→ PENDING_STREET
         PartyRatioWaiver afterCommittee = waiverApplicationService.reviewByCommittee(
-                new CommitteeReviewCommand(submitted.getWaiverId(), COMMITTEE_APPROVER, 2, true, "情况属实"));
+                new CommitteeReviewCommand(submitted.getWaiverId(), COMMITTEE_APPROVER, true, "情况属实"));
         assertEquals(WaiverStatus.PENDING_STREET, afterCommittee.getStatus());
         assertEquals(COMMITTEE_APPROVER, afterCommittee.getCommitteeApprover());
         assertNotNull(afterCommittee.getCommitteeApprovalAt());
 
         // 4. 街道办终审通过（dept_type=1）→ APPROVED + payloadHash 锁定
         PartyRatioWaiver afterStreet = waiverApplicationService.reviewByStreet(
-                new StreetReviewCommand(submitted.getWaiverId(), STREET_APPROVER, 1, true, "终审通过"));
+                new StreetReviewCommand(submitted.getWaiverId(), STREET_APPROVER, true, "终审通过"));
         assertEquals(WaiverStatus.APPROVED, afterStreet.getStatus());
         assertEquals(STREET_APPROVER, afterStreet.getStreetApprover());
         assertNotNull(afterStreet.getStreetApprovalAt());
@@ -229,7 +236,7 @@ public class ElectionWorkflowIntegrationTest {
         assertTrue(snapshot.passed(), "GENERAL 议题全员赞成必通过");
         assertEquals(0, new BigDecimal("300.00").compareTo(snapshot.participatingArea()));
         assertEquals(3L, snapshot.participatingOwnerCount());
-        assertEquals(1, snapshot.settleVersion());
+        assertEquals(1, snapshot.statisticsVersion());
         assertNotNull(snapshot.denominatorSnapshotId());
 
         // 6. 司法链 stub：tx_hash 形如 "STUB-{eventId}"，且对应 outbox 行已落
@@ -254,7 +261,7 @@ public class ElectionWorkflowIntegrationTest {
                 new SettleSubjectCommand(subjectId, "MANUAL"));
         assertEquals(snapshot.attestationTxHash(), second.attestationTxHash(),
                 "已 SETTLED 的议题再次调用应返回历史 tx_hash（幂等）");
-        assertEquals(snapshot.settleVersion(), second.settleVersion());
+        assertEquals(snapshot.statisticsVersion(), second.statisticsVersion());
     }
 
     @Test

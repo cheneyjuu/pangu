@@ -118,7 +118,7 @@ public class VotingApplicationService {
 
         // 6. 司法链 stub 上链
         int newSettleVersion = resultRepository.findBySubjectId(cmd.subjectId())
-                .map(s -> s.settleVersion() + 1)
+                .map(s -> s.statisticsVersion() + 1)
                 .orElse(1);
         String payloadJson = serializeResult(result, effectiveRatio, denom, newSettleVersion);
         String localHash = PayloadHasher.sha256Hex(payloadJson);
@@ -152,7 +152,7 @@ public class VotingApplicationService {
                     "议题在结算过程中被并发修改 subjectId=" + cmd.subjectId());
         }
 
-        log.info("Subject settled subjectId={} type={} settleVersion={} passed={} txHash={}",
+        log.info("Subject settled subjectId={} type={} statisticsVersion={} passed={} txHash={}",
                 cmd.subjectId(), subject.getSubjectType(), newSettleVersion,
                 snapshot.passed(), receipt.txHash());
 
@@ -166,13 +166,13 @@ public class VotingApplicationService {
     private String serializeResult(VotingResult<? extends VotingSubject> result,
                                     BigDecimal effectiveRatio,
                                     Denominator denom,
-                                    int settleVersion) {
+                                    int statisticsVersion) {
         StringBuilder sb = new StringBuilder(256);
         sb.append('{');
         appendJson(sb, "subjectId", result.getSubject().getSubjectId()); sb.append(',');
         appendJson(sb, "subjectType", result.getSubject().getSubjectType() == null
                 ? null : result.getSubject().getSubjectType().name()); sb.append(',');
-        appendJson(sb, "settleVersion", settleVersion); sb.append(',');
+        appendJson(sb, "statisticsVersion", statisticsVersion); sb.append(',');
         appendJson(sb, "totalArea", result.getTotalArea() == null ? null : result.getTotalArea().toPlainString()); sb.append(',');
         appendJson(sb, "totalOwnerCount", result.getTotalOwnerCount()); sb.append(',');
         appendJson(sb, "participatingArea", result.getParticipatingArea() == null ? null : result.getParticipatingArea().toPlainString()); sb.append(',');
@@ -191,12 +191,12 @@ public class VotingApplicationService {
     private Map<String, Object> buildBusinessPayload(VotingResult<? extends VotingSubject> result,
                                                       BigDecimal effectiveRatio,
                                                       Denominator denom,
-                                                      int settleVersion) {
+                                                      int statisticsVersion) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("subjectId", result.getSubject().getSubjectId());
         payload.put("subjectType", result.getSubject().getSubjectType() == null
                 ? null : result.getSubject().getSubjectType().name());
-        payload.put("settleVersion", settleVersion);
+        payload.put("statisticsVersion", statisticsVersion);
         payload.put("passed", result.isPassed());
         payload.put("quorumSatisfied", result.isQuorumSatisfied());
         payload.put("effectivePartyRatioFloor", effectiveRatio.toPlainString());

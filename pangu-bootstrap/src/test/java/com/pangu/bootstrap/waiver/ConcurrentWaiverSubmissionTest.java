@@ -100,7 +100,6 @@ public class ConcurrentWaiverSubmissionTest {
                 subjectId,
                 TEST_TENANT_ID,
                 7001L,           // initiatorUserId
-                2,               // initiatorDeptType=2 居委会
                 new BigDecimal("0.30"),
                 "本小区共有产权房比例较高党员人数严重不足经多次组织居民代表协商发动报名仍无法凑足候选人池所需的党员数量特申请将党员比例下限放宽至30%恳请居委会及街道办予以审议批准",
                 null
@@ -179,8 +178,7 @@ public class ConcurrentWaiverSubmissionTest {
     public void sequentialSecondSubmission_alsoBlockedByActiveWaiver() {
         // 顺序场景作对照：第一次成功后，第二次（即使锁/事务都已释放）仍应被同议题活跃 waiver 拒绝
         SubmitDraftCommand cmd = new SubmitDraftCommand(
-                subjectId, TEST_TENANT_ID, 7001L, 2,
-                new BigDecimal("0.30"),
+                subjectId, TEST_TENANT_ID, 7001L, new BigDecimal("0.30"),
                 "本小区共有产权房比例较高党员人数严重不足经多次组织居民代表协商发动报名仍无法凑足候选人池所需的党员数量特申请将党员比例下限放宽至30%恳请居委会及街道办予以审议批准",
                 null
         );

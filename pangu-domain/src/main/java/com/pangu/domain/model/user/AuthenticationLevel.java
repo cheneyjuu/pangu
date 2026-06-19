@@ -6,6 +6,8 @@ package com.pangu.domain.model.user;
 public enum AuthenticationLevel {
     /** L1: 基础绑定 (手机号+短信) */
     L1(1),
+    /** L2: 实名身份认证 (姓名+身份证号比对) */
+    L2(2),
     /** L3: 实名活体认证 (姓名+身份证号+人脸识别) */
     L3(3),
     /** L4: 司法级认证 (L3 + 企业营业执照/涉外证件人工联审) */

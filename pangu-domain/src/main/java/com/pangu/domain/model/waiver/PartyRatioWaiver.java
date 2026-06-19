@@ -131,12 +131,14 @@ public class PartyRatioWaiver {
     /**
      * 居委会初审通过：流转到 PENDING_STREET。
      *
+     * <p>调用方在 controller 层已通过 {@code @PreAuthorize("hasAuthority('waiver:approve:committee')")}
+     * 完成权限校验；本聚合仅校验状态机 + 审批人非空。
+     *
      * @param approverUserId 审批人 sys_user.user_id
-     * @param approverDeptType 审批人部门类型（必须 = 2 居委会）
      * @param opinion 意见
      */
-    public void approveByCommittee(Long approverUserId, Integer approverDeptType, String opinion) {
-        requireApprover(approverUserId, approverDeptType, 2, "居委会初审人");
+    public void approveByCommittee(Long approverUserId, String opinion) {
+        requireApprover(approverUserId, "居委会初审人");
         if (status != WaiverStatus.PENDING_COMMITTEE) {
             throw new IllegalStateException("Only PENDING_COMMITTEE can be approved by committee, current=" + status);
         }
@@ -149,11 +151,13 @@ public class PartyRatioWaiver {
     /**
      * 街道办终审通过：流转到 APPROVED。
      *
+     * <p>调用方在 controller 层已通过 {@code @PreAuthorize("hasAuthority('waiver:approve:street')")}
+     * 完成权限校验；本聚合仅校验状态机 + 审批人不与初审人重合。
+     *
      * @param approverUserId 审批人 sys_user.user_id（必须与初审人不同）
-     * @param approverDeptType 审批人部门类型（必须 = 1 街道办）
      */
-    public void approveByStreet(Long approverUserId, Integer approverDeptType, String opinion) {
-        requireApprover(approverUserId, approverDeptType, 1, "街道办终审人");
+    public void approveByStreet(Long approverUserId, String opinion) {
+        requireApprover(approverUserId, "街道办终审人");
         if (status != WaiverStatus.PENDING_STREET) {
             throw new IllegalStateException("Only PENDING_STREET can be approved by street, current=" + status);
         }
@@ -168,15 +172,18 @@ public class PartyRatioWaiver {
 
     /**
      * 拒绝：流转到 REJECTED（终止态），可在 PENDING_COMMITTEE / PENDING_STREET 阶段调用。
+     *
+     * <p>权限由 controller 层 {@code @PreAuthorize} 校验：PENDING_COMMITTEE 阶段
+     * 需 {@code waiver:approve:committee}；PENDING_STREET 阶段需 {@code waiver:approve:street}。
      */
-    public void reject(Long approverUserId, Integer approverDeptType, String opinion) {
+    public void reject(Long approverUserId, String opinion) {
         if (status == WaiverStatus.PENDING_COMMITTEE) {
-            requireApprover(approverUserId, approverDeptType, 2, "居委会初审人");
+            requireApprover(approverUserId, "居委会初审人");
             this.committeeApprover = approverUserId;
             this.committeeApprovalAt = Instant.now();
             this.committeeOpinion = opinion;
         } else if (status == WaiverStatus.PENDING_STREET) {
-            requireApprover(approverUserId, approverDeptType, 1, "街道办终审人");
+            requireApprover(approverUserId, "街道办终审人");
             if (committeeApprover != null && committeeApprover.equals(approverUserId)) {
                 throw new IllegalStateException("终审与初审审批人不能为同一人");
             }
@@ -234,14 +241,9 @@ public class PartyRatioWaiver {
         transitionTo(WaiverStatus.APPLIED);
     }
 
-    private void requireApprover(Long approverUserId, Integer actualDeptType,
-                                  int expectedDeptType, String label) {
+    private void requireApprover(Long approverUserId, String label) {
         if (approverUserId == null) {
             throw new IllegalArgumentException(label + " 必须提供");
-        }
-        if (actualDeptType == null || actualDeptType != expectedDeptType) {
-            throw new IllegalStateException(
-                    label + " 部门类型不符（期望 " + expectedDeptType + "，实际 " + actualDeptType + "）");
         }
     }
 

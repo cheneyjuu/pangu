@@ -70,14 +70,22 @@ public class DefaultVotingDenominatorResolverTest {
         jdbcTemplate.update("DELETE FROM t_voting_subject WHERE tenant_id = ?", TEST_TENANT_ID);
         jdbcTemplate.update("DELETE FROM c_owner_property WHERE tenant_id = ?", TEST_TENANT_ID);
         // 测试用户 phone 形如 88xxxxxxxxx（11 位），生产/mock 数据 phone 通常不在该段位
-        jdbcTemplate.update("DELETE FROM c_user WHERE phone LIKE '880%' AND length(phone) = 11");
+        // M1 RBAC 重构后：phone 在 t_account；先删 c_user 再删 t_account（外键级联）
+        jdbcTemplate.update(
+                "DELETE FROM c_user WHERE account_id IN ("
+                        + "SELECT account_id FROM t_account WHERE phone LIKE '880%' AND length(phone) = 11)");
+        jdbcTemplate.update("DELETE FROM t_account WHERE phone LIKE '880%' AND length(phone) = 11");
     }
 
-    /** 创建一个 c_user，返回回填的 uid。 */
+    /** 创建一条 t_account + c_user，返回回填的 uid。 */
     private Long insertUser(String phone) {
-        return jdbcTemplate.queryForObject(
-                "INSERT INTO c_user(phone, auth_level) VALUES(?, 1) RETURNING uid",
+        Long accountId = jdbcTemplate.queryForObject(
+                "INSERT INTO t_account(phone, real_name, real_name_verified, status) "
+                        + "VALUES(?, '测试用户', 0, 1) RETURNING account_id",
                 Long.class, phone);
+        return jdbcTemplate.queryForObject(
+                "INSERT INTO c_user(account_id, auth_level) VALUES(?, 1) RETURNING uid",
+                Long.class, accountId);
     }
 
     /**

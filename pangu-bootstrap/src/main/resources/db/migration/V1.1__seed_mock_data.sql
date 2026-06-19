@@ -1,57 +1,100 @@
 -- ===================================================================
--- 导入基础 Mock 种子数据
+-- V1.1 — 求是小区 mock 数据 (tenant_id=10001)
+-- 详见：M1权限体系重构设计.md §附录C
+-- 测试隔离：本 seed 使用 tenant_id=10001 + account/user/dept 主键 100xxx 段；
+-- 集成测试使用 99001-99003 段，互不干扰。
 -- ===================================================================
 
--- 1. 写入 C端自然人数据 (真实姓名和身份证号均采用国密 SM4 加密后的密文占位，开发阶段可用明文解密匹配)
--- 密码/证书加密密钥使用 0123456789abcdeffedcba9876543210 模拟
-INSERT INTO c_user (uid, phone, real_name, id_card_type, id_card_no, auth_level, face_status, create_time)
-VALUES 
-(101, '13800138000', '8e6d95a4b4b29a57d845dbd096e40f5d', 1, '837ecc582e3f689801bdac613ee8cf869f6704ad87aaedc48d0ea66c693ba3a8', 3, 1, CURRENT_TIMESTAMP), -- 张三, L3 活体已认证
-(102, '13900139000', 'e75d67462f2a8f2d858e0f42837fc8eb', 1, '5532bee8e9154cf8e73241b431b252cca1a8b02e10952851c1dd87ea27012008', 1, 0, CURRENT_TIMESTAMP), -- 李四, L1 基础绑定
-(103, '15000150000', '6dc0c1f473d64bcef93c818a37aec832', 1, '5871a356e061944549b0c075b3a9f05b1d8097c4cfd99f4d33d42d89fd21b87b', 4, 1, CURRENT_TIMESTAMP); -- 王五(法人代表), L4 级认证
+-- -------------------------------------------------------------------
+-- 1. t_account（自然人主体）
+--    real_name / id_card_encrypted 用 'MOCK_*' 占位，开发阶段免 SM4 解密；
+--    生产由 Sm4EncryptTypeHandler 自动加密。
+-- -------------------------------------------------------------------
+INSERT INTO t_account (account_id, phone, real_name, id_card_encrypted, real_name_verified, status) VALUES
+    -- G 端工作账号
+    (999801, '13800000001', 'MOCK_王街道',  'MOCK_ID_999801', 1, 1),
+    (999802, '13800000002', 'MOCK_李书记',  'MOCK_ID_999802', 1, 1),
+    (999803, '13800000003', 'MOCK_刘主任',  'MOCK_ID_999803', 1, 1),
+    (999804, '13800000004', 'MOCK_陈网格员','MOCK_ID_999804', 1, 1),
+    -- B 端业委会 / 业主代表 / 志愿者
+    (999811, '13800000011', 'MOCK_周主任',  'MOCK_ID_999811', 1, 1),
+    (999813, '13800000013', 'MOCK_钱委员',  'MOCK_ID_999813', 1, 1),
+    (999812, '13800000012', 'MOCK_张三',    'MOCK_ID_999812', 1, 1),  -- 同时是业主代表 + C 端业主
+    (999814, '13800000014', 'MOCK_孙志愿者','MOCK_ID_999814', 1, 1),
+    -- S 端物业
+    (999821, '13800000021', 'MOCK_赵经理',  'MOCK_ID_999821', 1, 1),
+    (999822, '13800000022', 'MOCK_朱员工',  'MOCK_ID_999822', 1, 1),
+    -- 纯 C 端业主
+    (999913, '13800000113', 'MOCK_李四',    'MOCK_ID_999913', 1, 1);
+SELECT setval('t_account_account_id_seq', 1000000, false);
 
--- 重设 Serial 自增主键起始值
-ALTER SEQUENCE c_user_uid_seq RESTART WITH 104;
+-- -------------------------------------------------------------------
+-- 2. sys_dept（部门树）
+--    1   ─ 街道办（tenant_id=NULL，跨租户根，G）
+--    105 ── 求是党组织（tenant_id=10001, G, 党建引领核心）
+--    101 ─── 求是居委会（tenant_id=10001, G）
+--    104 ──── 求是第一网格（tenant_id=10001, G）
+--    103 ─── 求是业委会（tenant_id=10001, B）
+--    106 ──── 求是志愿队（tenant_id=10001, B）
+--    110 ─── 求是业主代表团（tenant_id=10001, B，独立于业委会，挂党组织下）
+--    102 ─── 求是物业项目部（tenant_id=10001, S）
+-- -------------------------------------------------------------------
+INSERT INTO sys_dept (dept_id, parent_id, ancestors, dept_name, dept_type, dept_category, tenant_id, order_num) VALUES
+    (1,   NULL, '',            '某市某区某街道办',  1,  'G', NULL,  10),
+    (105, 1,    '1',           '求是党组织',        6,  'G', 10001, 20),
+    (101, 105,  '1,105',       '求是居委会',        2,  'G', 10001, 30),
+    (104, 101,  '1,105,101',   '求是第一网格',      5,  'G', 10001, 31),
+    (103, 105,  '1,105',       '求是业委会',        4,  'B', 10001, 40),
+    (106, 103,  '1,105,103',   '求是志愿队',        10, 'B', 10001, 41),
+    (110, 105,  '1,105',       '求是业主代表团',    11, 'B', 10001, 42),
+    (102, 105,  '1,105',       '求是物业项目部',    3,  'S', 10001, 50);
+SELECT setval('sys_dept_dept_id_seq', 1000, false);
 
--- 2. 写入房产专有部分与绑定关系 (租户小区 ID 设为 9001)
--- 物理单元及面积数据
-INSERT INTO c_owner_property (opid, uid, tenant_id, building_id, room_id, build_area, is_joint_ownership, is_voting_delegate, account_status)
-VALUES 
-(5001, 101, 9001, 10001, 10001101, 120.50, 0, 1, 1), -- 张三拥有 1栋101室 (独立产权, 代表, 状态正常)
-(5002, 102, 9001, 10001, 10001102, 89.30, 1, 1, 1),  -- 李四拥有 1栋102室 (共有产权, 被推选为投票代表)
-(5003, 103, 9001, 10002, 10002201, 350.00, 0, 1, 2); -- 王五拥有 2栋201室 (独立产权, 欠费状态, 用于测试方案C拦截)
+-- -------------------------------------------------------------------
+-- 3. sys_user（管理端工作账号 / 影子分身）
+-- -------------------------------------------------------------------
+INSERT INTO sys_user (user_id, account_id, dept_id, user_name, nick_name, status) VALUES
+    (800001, 999801, 1,   'wang_street',     '王街道',     '0'),
+    (800002, 999802, 105, 'li_secretary',    '李书记',     '0'),
+    (800003, 999803, 101, 'liu_director',    '刘主任',     '0'),
+    (800004, 999804, 104, 'chen_grid',       '陈网格员',   '0'),
+    (800101, 999811, 103, 'zhou_director',   '周主任',     '0'),
+    (800103, 999813, 103, 'qian_member',     '钱委员',     '0'),
+    (800102, 999812, 110, 'zhang_san_rep',   '张三(代表)', '0'),
+    (800104, 999814, 106, 'sun_volunteer',   '孙志愿者',   '0'),
+    (800201, 999821, 102, 'zhao_manager',    '赵经理',     '0'),
+    (800202, 999822, 102, 'zhu_staff',       '朱员工',     '0');
+SELECT setval('sys_user_user_id_seq', 1000000, false);
 
-ALTER SEQUENCE c_owner_property_opid_seq RESTART WITH 5004;
+-- -------------------------------------------------------------------
+-- 4. c_user（C 端业主身份）
+--    张三既是业主代表（sys_user=800102）又是业主自然人（c_user=70001）
+--    李四纯业主，无 sys_user 分身
+-- -------------------------------------------------------------------
+INSERT INTO c_user (uid, account_id, auth_level, last_active_tenant_id) VALUES
+    (70001, 999812, 3, 10001),
+    (70002, 999913, 2, 10001);
+SELECT setval('c_user_uid_seq', 100000, false);
 
--- 3. 写入 B/G端管理部门树 (支持五级监管：1-街道办, 2-居委会, 3-物业公司, 4-业委会, 5-网格)
-INSERT INTO sys_dept (dept_id, tenant_id, parent_id, ancestors, dept_name, dept_type, order_num)
-VALUES 
-(100, 9001, 0, '0', '西湖街道办事处', 1, 1),
-(101, 9001, 100, '0,100', '求是社区居委会', 2, 1),
-(102, 9001, 101, '0,100,101', '求是小区物业公司', 3, 2),
-(103, 9001, 101, '0,100,101', '求是小区第一届业委会', 4, 3),
-(104, 9001, 101, '0,100,101', '求是小区第一网格片区', 5, 4);
+-- -------------------------------------------------------------------
+-- 5. t_account.last_active_identity 回填（指向默认登录身份）
+-- -------------------------------------------------------------------
+UPDATE t_account SET last_active_identity_id = 800001, last_active_identity_type = 'SYS_USER' WHERE account_id = 999801;
+UPDATE t_account SET last_active_identity_id = 800002, last_active_identity_type = 'SYS_USER' WHERE account_id = 999802;
+UPDATE t_account SET last_active_identity_id = 800003, last_active_identity_type = 'SYS_USER' WHERE account_id = 999803;
+UPDATE t_account SET last_active_identity_id = 800004, last_active_identity_type = 'SYS_USER' WHERE account_id = 999804;
+UPDATE t_account SET last_active_identity_id = 800101, last_active_identity_type = 'SYS_USER' WHERE account_id = 999811;
+UPDATE t_account SET last_active_identity_id = 800103, last_active_identity_type = 'SYS_USER' WHERE account_id = 999813;
+UPDATE t_account SET last_active_identity_id = 800102, last_active_identity_type = 'SYS_USER' WHERE account_id = 999812;  -- 张三默认走业主代表分身
+UPDATE t_account SET last_active_identity_id = 800104, last_active_identity_type = 'SYS_USER' WHERE account_id = 999814;
+UPDATE t_account SET last_active_identity_id = 800201, last_active_identity_type = 'SYS_USER' WHERE account_id = 999821;
+UPDATE t_account SET last_active_identity_id = 800202, last_active_identity_type = 'SYS_USER' WHERE account_id = 999822;
+UPDATE t_account SET last_active_identity_id = 70002,  last_active_identity_type = 'C_USER'   WHERE account_id = 999913;
 
-ALTER SEQUENCE sys_dept_dept_id_seq RESTART WITH 105;
-
--- 4. 写入 B/G端管理用户 (密码均为 BCrypt 加密密文，明文为 "admin123")
-INSERT INTO sys_user (user_id, dept_id, username, password, nick_name, phone, user_type, status, uid)
-VALUES 
-(201, 102, 'property_admin', '$2a$10$vEpx.cW7eO2H8i/R.mSveun9zS.GZ0yG1R3M2Wp2qR3KqFvT.5S.G', '物业管理员', '13500135000', 1, '0', NULL), -- 物业管理员
-(202, 104, 'grid_wang', '$2a$10$vEpx.cW7eO2H8i/R.mSveun9zS.GZ0yG1R3M2Wp2qR3KqFvT.5S.G', '网格员王小二', '13800138000', 3, '0', 101); -- 网格员王小二，互联张三的自然人UID
-
-ALTER SEQUENCE sys_user_user_id_seq RESTART WITH 203;
-
--- 5. 写入角色权限 (网格员角色，具有楼栋自定义数据过滤权限 data_scope = '6')
-INSERT INTO sys_role (role_id, role_name, role_key, data_scope, status)
-VALUES 
-(1, '超级管理员', 'admin', '1', '0'),
-(2, '求是小区网格员', 'grid_manager', '6', '0');
-
-ALTER SEQUENCE sys_role_role_id_seq RESTART WITH 3;
-
--- 6. 分配网格员管辖楼栋 (王小二管辖 10001 与 10002 两个物理楼栋)
-INSERT INTO sys_user_building (user_id, building_id, assigned_time)
-VALUES 
-(202, 10001, CURRENT_TIMESTAMP),
-(202, 10002, CURRENT_TIMESTAMP);
+-- -------------------------------------------------------------------
+-- 6. c_owner_property（业主房产）— 求是 3 栋 101（张三）/ 1 栋 502 + 5 栋 201（李四）
+-- -------------------------------------------------------------------
+INSERT INTO c_owner_property (uid, tenant_id, building_id, room_id, build_area, is_voting_delegate, account_status) VALUES
+    (70001, 10001, 30001, 30001101, 100.00, 1, 1),  -- 张三 3 栋 101
+    (70002, 10001, 30002, 30002502,  85.00, 1, 1),  -- 李四 1 栋 502
+    (70002, 10001, 30005, 30005201,  90.00, 1, 1);  -- 李四 5 栋 201

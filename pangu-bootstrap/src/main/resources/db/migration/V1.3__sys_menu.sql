@@ -1,47 +1,35 @@
 -- ===================================================================
--- 8. 系统菜单与权限标识表 (sys_menu)
+-- V1.3 — sys_menu / sys_role_menu （前端导航占位，权限拉取走 V1.4 sys_permission）
+-- 详见：M1权限体系重构设计.md §5.5 + §10.1 — Permission 模型完全替代旧的
+-- "perms 字符串放在 menu 表里" 模式；本文件保留 sys_menu 仅作前端导航树占位，
+-- 不再用于鉴权决策；@PreAuthorize 一律走 hasAuthority(permission_key)。
 -- ===================================================================
+
 CREATE TABLE sys_menu (
     menu_id BIGSERIAL PRIMARY KEY,
+    parent_id BIGINT NOT NULL DEFAULT 0,
     menu_name VARCHAR(50) NOT NULL,
-    perms VARCHAR(100) DEFAULT NULL,
-    status CHAR(1) DEFAULT '0'
+    path VARCHAR(200),
+    component VARCHAR(255),
+    icon VARCHAR(100),
+    order_num INT NOT NULL DEFAULT 0,
+    visible SMALLINT NOT NULL DEFAULT 1,                   -- 1=显示, 0=隐藏
+    status CHAR(1) NOT NULL DEFAULT '0',                   -- 0=正常, 1=停用
+    create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE INDEX idx_sys_menu_parent ON sys_menu(parent_id);
 
-COMMENT ON TABLE sys_menu IS '系统权限与菜单资源表';
-COMMENT ON COLUMN sys_menu.menu_id IS '菜单/权限ID';
-COMMENT ON COLUMN sys_menu.menu_name IS '权限或菜单名称';
-COMMENT ON COLUMN sys_menu.perms IS '权限字符标识 (如 election:vote)';
-COMMENT ON COLUMN sys_menu.status IS '资源状态：0-正常, 1-停用';
+COMMENT ON TABLE sys_menu IS '前端导航菜单树（不参与鉴权；鉴权走 sys_permission/sys_role_permission）';
+COMMENT ON COLUMN sys_menu.menu_id IS '菜单 ID';
+COMMENT ON COLUMN sys_menu.parent_id IS '父菜单 ID，0=根';
+COMMENT ON COLUMN sys_menu.path IS '路由 path';
+COMMENT ON COLUMN sys_menu.visible IS '1=显示, 0=隐藏';
 
--- ===================================================================
--- 9. 角色与权限菜单关联表 (sys_role_menu)
--- ===================================================================
-CREATE TABLE sys_role_menu (
-    role_id BIGINT NOT NULL REFERENCES sys_role(role_id) ON DELETE CASCADE,
-    menu_id BIGINT NOT NULL REFERENCES sys_menu(menu_id) ON DELETE CASCADE,
-    PRIMARY KEY (role_id, menu_id)
-);
-
-COMMENT ON TABLE sys_role_menu IS '角色与权限菜单多对多关联映射表';
-COMMENT ON COLUMN sys_role_menu.role_id IS '角色ID';
-COMMENT ON COLUMN sys_role_menu.menu_id IS '菜单资源ID';
-
--- ===================================================================
--- 导入基础权限配置与关联关系
--- ===================================================================
-INSERT INTO sys_menu (menu_id, menu_name, perms, status)
-VALUES
-(1, '业主表决投票', 'election:vote', '0'),
-(2, '居民工单查看', 'repair:view', '0'),
-(3, '平台管理员超级权限', '*:*', '0');
-
--- 重置主键序列，防止自增冲突
-ALTER SEQUENCE sys_menu_menu_id_seq RESTART WITH 4;
-
-INSERT INTO sys_role_menu (role_id, menu_id)
-VALUES
-(1, 1), -- 超级管理员拥有投票权
-(1, 3), -- 超级管理员拥有管理员权限
-(2, 1), -- 求是小区网格员拥有投票权
-(2, 2); -- 求是小区网格员拥有工单查看权
+-- 简单种子（仅用于前端导航，实际权限由 V1.4 sys_permission 决定）
+INSERT INTO sys_menu (menu_id, parent_id, menu_name, path, order_num) VALUES
+    (1, 0, '工作台',     '/dashboard', 10),
+    (2, 0, '议题中心',   '/voting',    20),
+    (3, 0, '资金账户',   '/fund',      30),
+    (4, 0, '审批中心',   '/waiver',    40),
+    (5, 0, '系统管理',   '/admin',     90);
+SELECT setval('sys_menu_menu_id_seq', 100, false);

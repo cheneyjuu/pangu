@@ -12,7 +12,7 @@ import java.math.BigDecimal;
  */
 public record VotingResultResponse(
         Long subjectId,
-        int settleVersion,
+        int statisticsVersion,
         BigDecimal totalArea,
         long totalOwnerCount,
         BigDecimal participatingArea,
@@ -26,7 +26,7 @@ public record VotingResultResponse(
     public static VotingResultResponse from(VotingResultRepository.Snapshot snapshot) {
         return new VotingResultResponse(
                 snapshot.subjectId(),
-                snapshot.settleVersion(),
+                snapshot.statisticsVersion(),
                 snapshot.totalArea(),
                 snapshot.totalOwnerCount(),
                 snapshot.participatingArea(),

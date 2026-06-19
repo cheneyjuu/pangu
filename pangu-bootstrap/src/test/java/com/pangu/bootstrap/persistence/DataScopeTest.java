@@ -1,101 +1,113 @@
 package com.pangu.bootstrap.persistence;
 
+import com.pangu.domain.context.UserContext;
+import com.pangu.domain.context.UserContextHolder;
 import com.pangu.domain.model.asset.PropertyOwnership;
+import com.pangu.domain.model.user.AuthenticationLevel;
 import com.pangu.domain.model.user.DataScopeType;
-import com.pangu.infrastructure.persistence.handler.DataScopeInterceptor.UserSecurityContext;
 import com.pangu.infrastructure.persistence.mapper.OwnerPropertyMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.context.SecurityContextHolder;
 
-import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+/**
+ * {@code DataScopeInterceptor} 端到端 SQL 重写测试（M1 RBAC 重构后版本）。
+ *
+ * <p>本测试**不再走** {@code SecurityContextHolder} +
+ * {@code DataScopeInterceptor.UserSecurityContext}（旧契约已剥离），
+ * 改为直接操作 {@link UserContextHolder} ThreadLocal Bean，模拟 JWT 过滤器装配后的请求线程态。
+ *
+ * <p>所依赖的 V1.1 seed 数据（{@code c_owner_property}，tenant_id=10001）：
+ * <pre>
+ *   uid=70001 / building=30001 / room=30001101 / area=100
+ *   uid=70002 / building=30002 / room=30002502 / area=85
+ *   uid=70002 / building=30005 / room=30005201 / area=90
+ * </pre>
+ */
 @SpringBootTest
 public class DataScopeTest {
 
     @Autowired
     private OwnerPropertyMapper ownerPropertyMapper;
 
+    @Autowired
+    private UserContextHolder userContextHolder;
+
     @AfterEach
     public void tearDown() {
-        SecurityContextHolder.clearContext();
+        userContextHolder.clear();
     }
 
+    /**
+     * {@link DataScopeType#ALL_COMMUNITY}：社区全量视野（业委会主任 / 街道办 / 党组织书记），
+     * 拦截器直接放行，应返回 tenant 内全部 3 条记录。
+     */
     @Test
-    public void testDataScopeForGridManager() {
-        // 1. 模拟网格员王小二的安全上下文 (管辖楼栋 10001 与 10002)
-        UserSecurityContext userCtx = UserSecurityContext.builder()
-                .userId(202L)
-                .deptId(104L)
-                .dataScope(DataScopeType.CUSTOM_BUILDING.getValue()) // 自定义楼栋 (6)
-                .authorizedBuildingIds(List.of(10001L, 10002L))
-                .uid(101L)
-                .tenantId(9001L)
-                .build();
+    public void allCommunityScope_returnsAllRows() {
+        userContextHolder.set(buildSysUserCtx(
+                DataScopeType.ALL_COMMUNITY,
+                Set.of()
+        ));
 
-        UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(userCtx, null, Collections.emptyList());
-        SecurityContextHolder.getContext().setAuthentication(auth);
-
-        // 2. 调用带有 @DataScope 注解的查询方法
-        // 根据 V1.1 种子数据，求是小区(tenant_id=9001)名下一共有 4 份绑定资产：
-        // opid=5001 (building_id=10001), opid=5002 (building_id=10001)
-        // opid=5003 (building_id=10002), opid=5004 (building_id=10003)
-        // 网格员王小二仅管辖 10001 和 10002 楼栋，因此 opid=5004 必须被 MyBatis 自动拦截过滤掉！
-        List<PropertyOwnership> list = ownerPropertyMapper.selectOwnershipsByBuilding(9001L);
+        List<PropertyOwnership> list = ownerPropertyMapper.selectOwnershipsByBuilding(10001L);
 
         assertNotNull(list);
-        assertEquals(3, list.size(), "王小二应该只查询到管辖楼栋范围内的 3 套房产关系，5004 被自动过滤");
-
-        List<Long> opids = list.stream().map(PropertyOwnership::getOpid).toList();
-        assertTrue(opids.contains(5001L));
-        assertTrue(opids.contains(5002L));
-        assertTrue(opids.contains(5003L));
-        assertFalse(opids.contains(5004L), "opid 5004 位于 10003 栋，超出管辖，必须被过滤");
+        assertEquals(3, list.size(), "ALL_COMMUNITY 应返回 tenant 全量房产关系");
     }
 
+    /**
+     * {@link DataScopeType#OWNER_GROUP}：业主集合（网格员 / 业主代表），
+     * 拦截器附加 {@code building_id IN (...)} 过滤；管辖 30001/30002 时应只返回 2 条。
+     */
     @Test
-    public void testDataScopeForNormalUser() {
-        // 1. 模拟普通业主李四的安全上下文 (没有管理端权限，只管本人 SELF)
-        UserSecurityContext userCtx = UserSecurityContext.builder()
-                .userId(102L)
-                .deptId(null)
-                .dataScope(DataScopeType.SELF.getValue()) // 仅本人 (5)
-                .authorizedBuildingIds(Collections.emptyList())
-                .uid(102L)
-                .tenantId(9001L)
-                .build();
+    public void ownerGroupScope_filtersByAuthorizedBuildings() {
+        userContextHolder.set(buildSysUserCtx(
+                DataScopeType.OWNER_GROUP,
+                Set.of(30001L, 30002L)
+        ));
 
-        UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(userCtx, null, Collections.emptyList());
-        SecurityContextHolder.getContext().setAuthentication(auth);
+        List<PropertyOwnership> list = ownerPropertyMapper.selectOwnershipsByBuilding(10001L);
 
-        // 2. 调用带有 @DataScope(userAlias="op") 的查询。
-        // 由于 DataScopeInterceptor 对于 SELF 范围，会在 SQL 尾部拼上 "op.user_id = 102"
-        // 从而进行过滤。等下，在我们刚才添加的 @DataScope(buildingAlias = "op") 里，因为没有配置 userAlias，
-        // 那么在 interceptor 中，会使用默认值。我们来看看 DataScope.java 中：
-        // String userAlias() default "";
-        // 它的默认值是 ""。所以如果 userAlias 是 "", 拼接的是 "user_id = 102"。
-        // 让我们看看 c_owner_property 中是否有 user_id 字段。
-        // 在 schema 中，列名是 uid，而不是 user_id。
-        // 如果拼上 user_id = 102，可能会导致 Postgres 执行报错 (找不到 user_id 列)。
-        // 这是一个极好的发现！这属于 DataScopeInterceptor 默认行为的兼容性隐患。
-        // 既然我们的表名是 c_owner_property，在 XML 中别名是 "op"：
-        // 如果我们把注解改为：@DataScope(buildingAlias = "op", userAlias = "op")
-        // 那么在拦截器中：
-        // conditionBuilder.append(" ").append(prefix).append("user_id = ").append(userCtx.getUserId()).append(" ");
-        // 依旧会拼成 "op.user_id = 102"。但表 c_owner_property 的列名是 uid。
-        // 怎么解决呢？
-        // 其实对于 OwnerPropertyMapper 这种仅供管理端查询的接口，如果是 SELF 范围（普通业主），其实可以直接返回空 list，
-        // 或者抛出权限异常，因为非网格员/管理端用户原则上不允许使用这种管理端批量房产查询接口。
-        // 让我们看一下 DataScopeInterceptor 中：
-        // 如果是 SELF，它直接硬编码追加了 user_id 过滤。由于这个接口本来设计就是提供给管理人员使用的（buildingAlias = "op"），
-        // 我们可以限制普通业主李四执行该方法时会被安全判定为“无权限”，或者直接查出空。
-        // 我们可以直接捕获异常或是在测试里验证：普通业主不应该有管辖范围的数据。
-        // 为了使这套逻辑正常，我们先运行测试，确认数据库的行为。
+        assertNotNull(list);
+        assertEquals(2, list.size(), "OWNER_GROUP 应仅返回授权楼栋内的 2 条记录");
+    }
+
+    /**
+     * {@link DataScopeType#OWNER_GROUP} + 空管辖楼栋：拦截器应附加
+     * {@code building_id IN (-1)} 截流，返回 0 条。
+     */
+    @Test
+    public void ownerGroupScope_emptyAuthorizedBuildings_returnsEmpty() {
+        userContextHolder.set(buildSysUserCtx(
+                DataScopeType.OWNER_GROUP,
+                Set.of()
+        ));
+
+        List<PropertyOwnership> list = ownerPropertyMapper.selectOwnershipsByBuilding(10001L);
+
+        assertNotNull(list);
+        assertEquals(0, list.size(), "OWNER_GROUP 无授权楼栋应被 IN (-1) 截流");
+    }
+
+    private UserContext buildSysUserCtx(DataScopeType scope, Set<Long> authorizedBuildingIds) {
+        return new UserContext(
+                999803L,                                  // accountId（V1.1 刘主任）
+                UserContext.IdentityType.SYS_USER,
+                800003L,                                  // sys_user.user_id
+                10001L,                                   // tenantId
+                101L,                                     // deptId（求是居委会）
+                UserContext.DeptCategory.G,
+                scope,
+                AuthenticationLevel.L1,
+                "TEST_ROLE",
+                Set.of(),
+                authorizedBuildingIds
+        );
     }
 }
