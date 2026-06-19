@@ -1,5 +1,6 @@
 package com.pangu.interfaces.web.exception;
 
+import com.pangu.application.lock.GovernanceLockApplicationException;
 import com.pangu.application.voting.VotingApplicationException;
 import com.pangu.application.waiver.WaiverApplicationException;
 import com.pangu.interfaces.web.controller.Result;
@@ -73,6 +74,24 @@ public class GlobalExceptionHandler {
         ElectionErrorCode errorCode = ElectionExceptionTranslator.translate(ex);
         response.setStatus(errorCode.getHttpStatus());
         log.info("Voting business exception reason={} code={} msg={}",
+                ex.getReason(), errorCode.getCode(), ex.getMessage());
+        return Result.fail(
+                errorCode.getCode(),
+                ex.getMessage() != null ? ex.getMessage() : errorCode.getMessage(),
+                null,
+                errorCode.getErrorType(),
+                errorCode.isNeedRetry());
+    }
+
+    /**
+     * 治理锁应用层业务异常 → LockErrorCode。
+     */
+    @ExceptionHandler(GovernanceLockApplicationException.class)
+    public Result<Object> handleGovernanceLockApplicationException(GovernanceLockApplicationException ex,
+                                                                    HttpServletResponse response) {
+        LockErrorCode errorCode = GovernanceLockExceptionTranslator.translate(ex);
+        response.setStatus(errorCode.getHttpStatus());
+        log.info("GovernanceLock business exception reason={} code={} msg={}",
                 ex.getReason(), errorCode.getCode(), ex.getMessage());
         return Result.fail(
                 errorCode.getCode(),
