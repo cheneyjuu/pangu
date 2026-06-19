@@ -14,10 +14,11 @@
     <description>Infrastructure Layer - MyBatis, Redis, Ali OSS, and Cryptography</description>
 
     <dependencies>
-        <!-- 依赖应用层 -->
+        <!-- 直接依赖 domain（domain port + 聚合根 + 值对象）；
+             M2-5.1 起不再经由 pangu-application 间接引入，避免反向依赖。 -->
         <dependency>
             <groupId>com.pangu</groupId>
-            <artifactId>pangu-application</artifactId>
+            <artifactId>pangu-domain</artifactId>
         </dependency>
 
         <!-- MyBatis Spring Boot Starter -->

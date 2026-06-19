@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pangu.infrastructure.persistence.mapper.SysRolePermissionMapper">
+
+    <insert id="insert">
+        INSERT INTO sys_role_permission (role_id, permission_key, granted_by)
+        VALUES (#{roleId}, #{permissionKey}, #{grantedBy})
+    </insert>
+
+    <delete id="delete">
+        DELETE FROM sys_role_permission
+        WHERE role_id = #{roleId} AND permission_key = #{permissionKey}
+    </delete>
+
+    <select id="countByRole" resultType="long">
+        SELECT COUNT(*) FROM sys_role_permission WHERE role_id = #{roleId}
+    </select>
+
+</mapper>
