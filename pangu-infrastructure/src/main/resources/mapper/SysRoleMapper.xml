@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pangu.infrastructure.persistence.mapper.SysRoleMapper">
+
+    <resultMap id="SysRoleRowMap"
+               type="com.pangu.infrastructure.persistence.entity.SysRoleRow">
+        <id property="roleId" column="role_id"/>
+        <result property="roleName" column="role_name"/>
+        <result property="roleKey" column="role_key"/>
+        <result property="allowedDeptCategory" column="allowed_dept_category"/>
+        <result property="fixedDataScope" column="fixed_data_scope"/>
+        <result property="defaultDataScope" column="default_data_scope"/>
+        <result property="isSystem" column="is_system"/>
+        <result property="status" column="status"/>
+        <result property="createTime" column="create_time"/>
+        <result property="updateTime" column="update_time"/>
+    </resultMap>
+
+    <sql id="all_columns">
+        role_id, role_name, role_key, allowed_dept_category,
+        fixed_data_scope, default_data_scope, is_system, status,
+        create_time, update_time
+    </sql>
+
+    <select id="selectById" resultMap="SysRoleRowMap">
+        SELECT <include refid="all_columns"/>
+        FROM sys_role
+        WHERE role_id = #{roleId}
+    </select>
+
+    <select id="selectByRoleKey" resultMap="SysRoleRowMap">
+        SELECT <include refid="all_columns"/>
+        FROM sys_role
+        WHERE role_key = #{roleKey}
+    </select>
+
+    <!-- SaaS 管理员只能新建 is_system=0；fixed_data_scope 允许 null，由 db CHECK 约束兜底 -->
+    <insert id="insert"
+            parameterType="com.pangu.infrastructure.persistence.entity.SysRoleRow"
+            useGeneratedKeys="true"
+            keyProperty="roleId"
+            keyColumn="role_id">
+        INSERT INTO sys_role (
+            role_name, role_key, allowed_dept_category,
+            fixed_data_scope, default_data_scope, is_system
+        ) VALUES (
+            #{roleName}, #{roleKey}, #{allowedDeptCategory},
+            #{fixedDataScope}, #{defaultDataScope}, #{isSystem}
+        )
+    </insert>
+
+    <delete id="deleteById">
+        DELETE FROM sys_role WHERE role_id = #{roleId}
+    </delete>
+
+</mapper>

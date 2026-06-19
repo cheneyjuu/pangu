@@ -1,0 +1,23 @@
+# ===================================================================
+# application-prod.yml — 生产 profile 占位（M2-5.2 cleanup）
+#
+# 历史背景：M1 重构以前，DataScopeInterceptor 在上下文缺失时会回退到
+# Mock 王小二上下文以便本地联调。生产环境若误用此回退即构成"反向漏洞"。
+# M1 重构后已移除 mock 兜底（见 DataScopeInterceptor#intercept），
+# 本文件仅作为 prod profile 的存在证据 + ProductionEmptyContextTest
+# 的激活载体；继承 application.yml 的 datasource / redis 默认值。
+#
+# 注意：Spring Boot 不允许在 profile-specific 文件里设置 spring.profiles.active；
+# 该字段必须留在主 application.yml 或通过 SPRING_PROFILES_ACTIVE 环境变量传入。
+# 测试通过 @ActiveProfiles("prod") 激活本 profile。
+#
+# 生产部署时由真实部署文件 / 环境变量覆盖本文件，禁止把生产 secret
+# 落到 src/test/resources。
+# ===================================================================
+
+# 当前 prod profile 不需要任何 mock 路径相关的开关 —— mock 兜底
+# 已经从代码中物理移除。本文件保留仅作为回归保护（让
+# ProductionEmptyContextTest 显式锁定生产 profile 的行为契约）。
+spring:
+  flyway:
+    enabled: true

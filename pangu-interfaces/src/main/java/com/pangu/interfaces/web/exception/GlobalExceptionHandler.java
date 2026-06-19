@@ -1,5 +1,6 @@
 package com.pangu.interfaces.web.exception;
 
+import com.pangu.application.admin.RoleAdminApplicationException;
 import com.pangu.application.disclosure.FinanceDisclosureApplicationException;
 import com.pangu.application.dispute.DisputeApplicationException;
 import com.pangu.application.lock.GovernanceLockApplicationException;
@@ -130,6 +131,24 @@ public class GlobalExceptionHandler {
         DisputeErrorCode errorCode = DisputeExceptionTranslator.translate(ex);
         response.setStatus(errorCode.getHttpStatus());
         log.info("Dispute business exception reason={} code={} msg={}",
+                ex.getReason(), errorCode.getCode(), ex.getMessage());
+        return Result.fail(
+                errorCode.getCode(),
+                ex.getMessage() != null ? ex.getMessage() : errorCode.getMessage(),
+                null,
+                errorCode.getErrorType(),
+                errorCode.isNeedRetry());
+    }
+
+    /**
+     * SaaS 角色管理应用层业务异常 → RoleAdminErrorCode（M2-4）。
+     */
+    @ExceptionHandler(RoleAdminApplicationException.class)
+    public Result<Object> handleRoleAdminApplicationException(RoleAdminApplicationException ex,
+                                                               HttpServletResponse response) {
+        RoleAdminErrorCode errorCode = RoleAdminExceptionTranslator.translate(ex);
+        response.setStatus(errorCode.getHttpStatus());
+        log.info("RoleAdmin business exception reason={} code={} msg={}",
                 ex.getReason(), errorCode.getCode(), ex.getMessage());
         return Result.fail(
                 errorCode.getCode(),
