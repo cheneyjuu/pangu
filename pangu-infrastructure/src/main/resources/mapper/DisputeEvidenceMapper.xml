@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pangu.infrastructure.persistence.mapper.DisputeEvidenceMapper">
+
+    <resultMap id="DisputeEvidenceRowMap"
+               type="com.pangu.infrastructure.persistence.entity.DisputeEvidenceRow">
+        <id property="evidenceId" column="evidence_id"/>
+        <result property="disputeId" column="dispute_id"/>
+        <result property="evidenceKind" column="evidence_kind"/>
+        <result property="contentUrl" column="content_url"/>
+        <result property="description" column="description"/>
+        <result property="uploadedAt" column="uploaded_at"/>
+        <result property="createTime" column="create_time"/>
+    </resultMap>
+
+    <select id="selectByDisputeId" resultMap="DisputeEvidenceRowMap">
+        SELECT evidence_id, dispute_id, evidence_kind, content_url, description, uploaded_at, create_time
+        FROM t_dispute_evidence
+        WHERE dispute_id = #{disputeId}
+        ORDER BY uploaded_at ASC
+    </select>
+
+    <insert id="insert"
+            parameterType="com.pangu.infrastructure.persistence.entity.DisputeEvidenceRow"
+            useGeneratedKeys="true"
+            keyProperty="evidenceId"
+            keyColumn="evidence_id">
+        INSERT INTO t_dispute_evidence (
+            dispute_id, evidence_kind, content_url, description, uploaded_at
+        ) VALUES (
+            #{disputeId}, #{evidenceKind}, #{contentUrl}, #{description}, #{uploadedAt}
+        )
+    </insert>
+
+</mapper>
