@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pangu.infrastructure.persistence.mapper.DisputeDecisionMapper">
+
+    <resultMap id="DisputeDecisionRowMap"
+               type="com.pangu.infrastructure.persistence.entity.DisputeDecisionRow">
+        <id property="decisionId" column="decision_id"/>
+        <result property="disputeId" column="dispute_id"/>
+        <result property="reviewLevel" column="review_level"/>
+        <result property="decidedByUserId" column="decided_by_user_id"/>
+        <result property="decisionKind" column="decision_kind"/>
+        <result property="decisionContent" column="decision_content"/>
+        <result property="decisionDocUrl" column="decision_doc_url"/>
+        <result property="decidedAt" column="decided_at"/>
+        <result property="createTime" column="create_time"/>
+    </resultMap>
+
+    <select id="selectByDisputeId" resultMap="DisputeDecisionRowMap">
+        SELECT decision_id, dispute_id, review_level, decided_by_user_id,
+               decision_kind, decision_content, decision_doc_url, decided_at, create_time
+        FROM t_dispute_review_decision
+        WHERE dispute_id = #{disputeId}
+        ORDER BY review_level ASC
+    </select>
+
+    <insert id="insert"
+            parameterType="com.pangu.infrastructure.persistence.entity.DisputeDecisionRow"
+            useGeneratedKeys="true"
+            keyProperty="decisionId"
+            keyColumn="decision_id">
+        INSERT INTO t_dispute_review_decision (
+            dispute_id, review_level, decided_by_user_id,
+            decision_kind, decision_content, decision_doc_url, decided_at
+        ) VALUES (
+            #{disputeId}, #{reviewLevel}, #{decidedByUserId},
+            #{decisionKind}, #{decisionContent}, #{decisionDocUrl}, #{decidedAt}
+        )
+    </insert>
+
+</mapper>
