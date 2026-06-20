@@ -7,6 +7,7 @@ import lombok.Setter;
 import lombok.experimental.SuperBuilder;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 
 /**
  * 投票表决议题基类（泛型高层抽象）。
@@ -57,6 +58,24 @@ public class VotingSubject {
 
     /** 乐观锁版本号（来自 t_voting_subject.version）。 */
     private long version;
+
+    /** 投票开放时间（M3-2：scheduler 监听此字段从 PUBLISHED 翻 VOTING）。 */
+    private Instant voteStartAt;
+
+    /** 投票截止时间。 */
+    private Instant voteEndAt;
+
+    /** 议题发起人 sys_user.user_id（M3-2 起记录；旧记录可为 null）。 */
+    private Long proposedByUserId;
+
+    /** 撤回时间（仅 status=CANCELLED 必填）。 */
+    private Instant cancelledAt;
+
+    /** 撤回操作人 sys_user.user_id（仅 status=CANCELLED 必填）。 */
+    private Long cancelledByUserId;
+
+    /** 撤回原因（仅 status=CANCELLED 必填）。 */
+    private String cancelReason;
 
     /**
      * @return 安全获取 partyRatioFloor，未设置时返回默认 0.50

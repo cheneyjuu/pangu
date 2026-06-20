@@ -2,6 +2,7 @@ package com.pangu.infrastructure.persistence.mapper;
 
 import com.pangu.domain.model.asset.PropertyOwnership;
 import com.pangu.infrastructure.persistence.annotation.DataScope;
+import com.pangu.infrastructure.persistence.entity.OwnerPropertyVotingViewRow;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
@@ -34,4 +35,14 @@ public interface OwnerPropertyMapper {
      */
     @DataScope(buildingAlias = "op")
     List<PropertyOwnership> selectOwnershipsByBuilding(@Param("tenantId") Long tenantId);
+
+    /**
+     * M3-2 投票提交：根据 opid 查询完整投票视图（含 uid/tenant_id/building_id/build_area）。
+     */
+    OwnerPropertyVotingViewRow selectVotingViewByOpid(@Param("opid") Long opid);
+
+    /**
+     * M3-2 "我的议题"：列出某业主在某租户下涉及的全部楼栋 ID。
+     */
+    List<Long> selectBuildingIdsByUid(@Param("uid") Long uid, @Param("tenantId") Long tenantId);
 }

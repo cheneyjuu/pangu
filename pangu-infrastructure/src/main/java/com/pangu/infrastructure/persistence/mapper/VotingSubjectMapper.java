@@ -38,4 +38,32 @@ public interface VotingSubjectMapper {
      */
     List<VotingSubjectRow> selectExpiredVoting(@Param("now") Instant now,
                                                  @Param("limit") int limit);
+
+    // ============= M3-2 新增 =============
+
+    /** 立项写入。回填自增 subject_id 到 row。 */
+    int insert(VotingSubjectRow row);
+
+    /** 撤回：把 status 翻 6 + 落 cancelled_* 三件套，乐观锁 + 版本递增。 */
+    int cancel(@Param("subjectId") Long subjectId,
+                @Param("cancelledAt") Instant cancelledAt,
+                @Param("cancelledByUserId") Long cancelledByUserId,
+                @Param("cancelReason") String cancelReason,
+                @Param("expectedVersion") long expectedVersion);
+
+    /**
+     * Scheduler 扫描：{@code status = 2 (PUBLISHED) AND vote_start_at <= now()}，
+     * 按 vote_start_at 升序返回前 {@code limit} 条。
+     */
+    List<VotingSubjectRow> selectPublishedReadyForOpen(@Param("now") Instant now,
+                                                        @Param("limit") int limit);
+
+    /**
+     * "我的议题"：tenant + status 范围 + scope 过滤。当 buildingIds 为空时仅返回 COMMUNITY 议题。
+     */
+    List<VotingSubjectRow> selectVisibleForOwner(@Param("tenantId") Long tenantId,
+                                                  @Param("buildingIds") List<Long> buildingIds,
+                                                  @Param("limit") int limit,
+                                                  @Param("offset") int offset);
 }
+

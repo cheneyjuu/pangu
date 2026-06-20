@@ -23,4 +23,13 @@
         WHERE subject_id = #{subjectId}
     </select>
 
+    <!-- M3-2: 投票提交。voted_at 由 DB DEFAULT CURRENT_TIMESTAMP 兜底。 -->
+    <insert id="insert" useGeneratedKeys="true" keyProperty="voteId" keyColumn="vote_id">
+        INSERT INTO t_vote_item (
+            subject_id, opid, uid, target_id, property_area, choice, signature_hash
+        ) VALUES (
+            #{subjectId}, #{opid}, #{uid}, #{targetId}, #{propertyArea}, #{choice}, #{signatureHash}
+        )
+    </insert>
+
 </mapper>

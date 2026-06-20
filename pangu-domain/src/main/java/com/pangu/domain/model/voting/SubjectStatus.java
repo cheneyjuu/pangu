@@ -6,7 +6,11 @@ package com.pangu.domain.model.voting;
  * <p>当前期允许的状态流转（单向不可逆）：
  * <pre>
  *   DRAFT --(publish)--&gt; PUBLISHED --(open vote)--&gt; VOTING --(deadline)--&gt; CLOSED --(settle)--&gt; SETTLED
+ *   DRAFT --(cancel by proposer)--&gt; CANCELLED
+ *   PUBLISHED --(force cancel by GOV)--&gt; CANCELLED
  * </pre>
+ *
+ * <p>{@link #CANCELLED} 在 M3-2 引入，是与 SETTLED 并列的终态。一旦进入 VOTING/CLOSED/SETTLED 即不可撤回。
  */
 public enum SubjectStatus {
 
@@ -14,7 +18,8 @@ public enum SubjectStatus {
     PUBLISHED(2),
     VOTING(3),
     CLOSED(4),
-    SETTLED(5);
+    SETTLED(5),
+    CANCELLED(6);
 
     private final int dbValue;
 
