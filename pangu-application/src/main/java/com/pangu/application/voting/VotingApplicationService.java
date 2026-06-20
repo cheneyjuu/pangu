@@ -44,8 +44,9 @@ import java.util.Optional;
  *   <li>持久化 {@link VotingResult} 快照 + 议题 status -&gt; SETTLED。</li>
  * </ol>
  *
- * <p>注意：本期 ELECTION 议题尚未接入完整候选人持久化与 ElectionSubject 加载链路，
- * 仅实现 GENERAL / MAJOR；遇到 ELECTION 抛 {@link VotingApplicationException.Reason#SUBJECT_TYPE_NOT_SUPPORTED}。
+ * <p>本编排链路与议题类型无关：GENERAL / MAJOR / ELECTION 统一走上述六步，类型差异完全下沉到
+ * {@link VotingEngineRouter}（ELECTION 由 router 还原 {@code ElectionSubject} 并挂载 APPROVED 候选人后
+ * 路由进选举引擎，M3-3 接通）。
  */
 @Slf4j
 @Service

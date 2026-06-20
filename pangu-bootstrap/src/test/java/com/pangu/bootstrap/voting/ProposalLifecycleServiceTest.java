@@ -39,7 +39,7 @@ import static org.mockito.Mockito.when;
  *
  * <p>覆盖：
  * <ul>
- *   <li>立项：ELECTION 直接 reject / 非法参数翻 PROPOSE_FORBIDDEN_FOR_TYPE / GENERAL 正向落库；</li>
+ *   <li>立项：ELECTION 缺 maxWinners 拒 / ELECTION 带 maxWinners 正向 / 非法参数翻 PROPOSE_FORBIDDEN_FOR_TYPE / GENERAL 正向落库；</li>
  *   <li>公示：not-found / 非 DRAFT / 乐观锁失败；</li>
  *   <li>撤回：VOTING+ 一律拒 / DRAFT 非本人拒 / PUBLISHED 政府强撤正向；</li>
  *   <li>开票：非 PUBLISHED 拒。</li>
@@ -65,8 +65,12 @@ public class ProposalLifecycleServiceTest {
     private static final Instant END = Instant.parse("2026-07-15T00:00:00Z");
 
     private ProposeSubjectCommand proposeCmd(SubjectType type, Instant start, Instant end) {
+        return proposeCmd(type, start, end, null);
+    }
+
+    private ProposeSubjectCommand proposeCmd(SubjectType type, Instant start, Instant end, Integer maxWinners) {
         return new ProposeSubjectCommand(TENANT, type, VotingScope.COMMUNITY, null,
-                "维修资金动用议案", start, end, PROPOSER, new BigDecimal("0.50"));
+                "维修资金动用议案", start, end, PROPOSER, new BigDecimal("0.50"), maxWinners);
     }
 
     private VotingSubject draft() {
@@ -87,11 +91,25 @@ public class ProposalLifecycleServiceTest {
     // ===== propose =====
 
     @Test
-    public void propose_electionRejected() {
+    public void propose_electionWithoutMaxWinners_rejected() {
         VotingApplicationException ex = assertThrows(VotingApplicationException.class,
-                () -> service.propose(proposeCmd(SubjectType.ELECTION, START, END)));
-        assertEquals(VotingApplicationException.Reason.SUBJECT_TYPE_NOT_SUPPORTED, ex.getReason());
+                () -> service.propose(proposeCmd(SubjectType.ELECTION, START, END, null)));
+        assertEquals(VotingApplicationException.Reason.ELECTION_MAX_WINNERS_REQUIRED, ex.getReason());
         verify(subjectRepository, never()).insert(any());
+    }
+
+    @Test
+    public void propose_electionWithMaxWinners_persisted() {
+        when(subjectRepository.insert(any())).thenAnswer(inv -> {
+            VotingSubject s = inv.getArgument(0);
+            s.setSubjectId(7002L);
+            return s;
+        });
+        VotingSubject persisted = service.propose(proposeCmd(SubjectType.ELECTION, START, END, 3));
+        assertEquals(SubjectStatus.DRAFT, persisted.getStatus());
+        assertEquals(SubjectType.ELECTION, persisted.getSubjectType());
+        assertEquals(3, persisted.getMaxWinners());
+        verify(subjectRepository).insert(any());
     }
 
     @Test

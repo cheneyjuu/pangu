@@ -14,7 +14,7 @@ import java.time.Instant;
  *
  * <p>角色路由原则：
  * <ul>
- *   <li>{@link SubjectType#ELECTION}：本期一律拒绝（M3-3 放开）；</li>
+ *   <li>{@link SubjectType#ELECTION}：M3-3 起放开，必须携带 {@code maxWinners >= 1}；</li>
  *   <li>{@link SubjectType#MAJOR}：街道办 / 业委会主任；</li>
  *   <li>{@link SubjectType#GENERAL}：街道办 / 业委会主任 / 物业经理。</li>
  * </ul>
@@ -27,6 +27,7 @@ public record ProposeRequest(
         Long scopeReferenceId,
         @NotNull Instant voteStartAt,
         @NotNull Instant voteEndAt,
-        BigDecimal partyRatioFloor
+        BigDecimal partyRatioFloor,
+        Integer maxWinners
 ) {
 }

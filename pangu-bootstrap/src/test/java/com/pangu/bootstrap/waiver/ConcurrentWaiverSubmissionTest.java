@@ -59,9 +59,10 @@ public class ConcurrentWaiverSubmissionTest {
         cleanUp();
 
         // 2. 创建一个 ELECTION 议题（subject_type=1, status=2 PUBLISHED, scope=1 COMMUNITY）
+        //    max_winners=5：V3.1 trigger 13 要求 ELECTION 议题必须携带 max_winners >= 1
         subjectId = jdbcTemplate.queryForObject(
-                "INSERT INTO t_voting_subject(tenant_id, title, subject_type, scope, status, party_ratio_floor) "
-                        + "VALUES(?, ?, 1, 1, 2, 0.50) RETURNING subject_id",
+                "INSERT INTO t_voting_subject(tenant_id, title, subject_type, scope, status, party_ratio_floor, max_winners) "
+                        + "VALUES(?, ?, 1, 1, 2, 0.50, 5) RETURNING subject_id",
                 Long.class,
                 TEST_TENANT_ID, "并发测试议题-" + System.currentTimeMillis());
 

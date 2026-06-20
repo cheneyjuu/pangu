@@ -5,13 +5,17 @@ import com.pangu.domain.context.UserContext;
 import com.pangu.domain.context.UserContextHolder;
 import com.pangu.domain.model.asset.OwnerPropertyVotingView;
 import com.pangu.domain.model.user.AuthenticationLevel;
+import com.pangu.domain.model.voting.Candidate;
+import com.pangu.domain.model.voting.CandidateStatus;
 import com.pangu.domain.model.voting.SubjectStatus;
 import com.pangu.domain.model.voting.SubjectType;
+import com.pangu.domain.model.voting.VoteChoice;
 import com.pangu.domain.model.voting.VoteItem;
 import com.pangu.domain.model.voting.VotingScope;
 import com.pangu.domain.model.voting.VotingSubject;
 import com.pangu.domain.policy.AbacPolicyEngine;
 import com.pangu.domain.policy.EvaluationResult;
+import com.pangu.domain.repository.ElectionCandidateRegistry;
 import com.pangu.domain.repository.OwnerPropertyVotingRepository;
 import com.pangu.domain.repository.VoteItemRepository;
 import com.pangu.domain.repository.VotingSubjectRepository;
@@ -44,6 +48,7 @@ public class VoteSubmissionService {
     private final OwnerPropertyVotingRepository ownerPropertyVotingRepository;
     private final AbacPolicyEngine abacPolicyEngine;
     private final UserContextHolder userContextHolder;
+    private final ElectionCandidateRegistry electionCandidateRegistry;
 
     @Transactional
     public long cast(CastVoteCommand cmd) {
@@ -63,16 +68,37 @@ public class VoteSubmissionService {
                     VotingApplicationException.Reason.SUBJECT_NOT_VOTING_CASTABLE,
                     "议题不在投票中 subjectId=" + cmd.subjectId() + " status=" + subject.getStatus());
         }
-        if (subject.getSubjectType() == SubjectType.ELECTION) {
-            throw new VotingApplicationException(
-                    VotingApplicationException.Reason.SUBJECT_TYPE_NOT_SUPPORTED,
-                    "ELECTION 类型投票暂不支持，将在 M3-3 放开");
-        }
         if (!subject.getTenantId().equals(cmd.tenantId())) {
             throw new VotingApplicationException(
                     VotingApplicationException.Reason.OPID_OUT_OF_SCOPE,
                     "议题租户与当前业主租户不一致 subjectTenantId=" + subject.getTenantId()
                             + " currentTenantId=" + cmd.tenantId());
+        }
+
+        // 1.1 ELECTION 专属候选人闸门：targetId 必填 + 候选人属本议题且 APPROVED + 选择必须 SUPPORT
+        if (subject.getSubjectType() == SubjectType.ELECTION) {
+            if (cmd.targetId() == null) {
+                throw new VotingApplicationException(
+                        VotingApplicationException.Reason.ELECTION_TARGET_REQUIRED,
+                        "选举投票必须指定候选人 candidateId subjectId=" + cmd.subjectId());
+            }
+            Candidate candidate = electionCandidateRegistry.findById(cmd.targetId())
+                    .orElseThrow(() -> new VotingApplicationException(
+                            VotingApplicationException.Reason.CANDIDATE_NOT_VOTABLE,
+                            "候选人不存在 candidateId=" + cmd.targetId()));
+            if (!cmd.subjectId().equals(candidate.getSubjectId())
+                    || candidate.getQualificationStatus() != CandidateStatus.APPROVED) {
+                throw new VotingApplicationException(
+                        VotingApplicationException.Reason.CANDIDATE_NOT_VOTABLE,
+                        "候选人不可被投票 candidateId=" + cmd.targetId()
+                                + " subjectId=" + candidate.getSubjectId()
+                                + " status=" + candidate.getQualificationStatus());
+            }
+            if (cmd.choice() != VoteChoice.SUPPORT) {
+                throw new VotingApplicationException(
+                        VotingApplicationException.Reason.CANDIDATE_NOT_VOTABLE,
+                        "选举投票仅支持 SUPPORT（投候选人=支持） choice=" + cmd.choice());
+            }
         }
 
         // 2. MAJOR 议题强制 L3 face-auth；GENERAL 议题不要求（沿用现有 evaluateVoting 设计）
@@ -114,7 +140,19 @@ public class VoteSubmissionService {
                             + " subjectBuildingId=" + subject.getScopeReferenceId());
         }
 
-        // 4. 写入投票（UNIQUE 冲突 → VOTE_ALREADY_CAST）
+        // 4. ELECTION maxWinners 计数门：该 opid 已投票数不得超过应选名额（读后写软约束）
+        if (subject.getSubjectType() == SubjectType.ELECTION) {
+            long castSoFar = electionCandidateRegistry.countSupportByOpid(cmd.subjectId(), cmd.opid());
+            Integer maxWinners = subject.getMaxWinners();
+            if (maxWinners != null && castSoFar >= maxWinners) {
+                throw new VotingApplicationException(
+                        VotingApplicationException.Reason.VOTE_LIMIT_EXCEEDED,
+                        "该房产已投满应选名额 opid=" + cmd.opid() + " castSoFar=" + castSoFar
+                                + " maxWinners=" + maxWinners);
+            }
+        }
+
+        // 5. 写入投票（UNIQUE 冲突 → VOTE_ALREADY_CAST）
         VoteItem item = VoteItem.builder()
                 .opid(cmd.opid())
                 .uid(cmd.uid())

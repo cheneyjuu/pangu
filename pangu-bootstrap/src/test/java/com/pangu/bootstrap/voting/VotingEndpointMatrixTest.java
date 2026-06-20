@@ -30,7 +30,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * </ul>
  *
  * <p>断言两类码：PreAuthorize 拒绝 → {@code code=403}；通过 PreAuthorize 后命中 service
- * 业务异常 → ElectionErrorCode（SUBJECT_NOT_FOUND=40910 / SUBJECT_TYPE_NOT_SUPPORTED=40913 /
+ * 业务异常 → ElectionErrorCode（SUBJECT_NOT_FOUND=40910 / ELECTION_MAX_WINNERS_REQUIRED=40940 /
  * CANCEL_FORBIDDEN=40924 / OPID_NOT_OWNED=40331）。
  */
 @SpringBootTest
@@ -93,14 +93,14 @@ public class VotingEndpointMatrixTest {
     }
 
     @Test
-    public void communityAdminProposeElection_passesPreAuth_thenTypeNotSupported_409() throws Exception {
-        // 刘主任有 create，通过 PreAuthorize；controller 兜底拒绝 ELECTION → 40913
+    public void communityAdminProposeElectionWithoutMaxWinners_passesPreAuth_thenMaxWinnersRequired_409() throws Exception {
+        // 刘主任有 create，通过 PreAuthorize；M3-3 起 ELECTION 已放开，但缺 maxWinners → 40940
         mockMvc.perform(post("/api/v1/voting-subjects")
                         .header("Authorization", "Bearer " + sysToken(ACC_COMM, USR_COMM))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(proposeBody("ELECTION")))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code", is(40913)));
+                .andExpect(jsonPath("$.code", is(40940)));
     }
 
     // ===== 审计查看 audit =====

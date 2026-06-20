@@ -34,8 +34,9 @@ import static org.junit.jupiter.api.Assertions.*;
  *       校验 {@link VotingResultRepository.Snapshot#attestationTxHash()} 形如 STUB-{n}（司法链 outbox stub）。</li>
  * </ol>
  *
- * <p>本期 ELECTION 议题尚未接入完整 ElectionSubject 加载链路（见
- * {@code VotingApplicationService} 注释），因此结算流程使用 GENERAL 议题；
+ * <p>本类的结算链路使用 GENERAL 议题验证「投票 → 截止 → 结算 → 司法链 stub」骨架；
+ * ELECTION 选举的全流程（提名 → 资格审查 → 选举立项 → 选举投票 → 路由进 ElectionVotingEngine）
+ * 由 {@code com.pangu.bootstrap.voting.ElectionWorkflowEndToEndTest} 端到端覆盖（M3-3 接通）。
  * Waiver 流程独立验证（业务上 Waiver 主要服务 ELECTION，但应用层不限定 subject_type）。
  *
  * <p>使用真实 PostgreSQL + Redis（{@code docker compose up -d}）。

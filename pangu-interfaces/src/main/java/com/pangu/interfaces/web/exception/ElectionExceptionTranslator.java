@@ -76,6 +76,15 @@ public final class ElectionExceptionTranslator {
             case OPID_NOT_OWNED -> ElectionErrorCode.OPID_NOT_OWNED;
             case OPID_OUT_OF_SCOPE -> ElectionErrorCode.OPID_OUT_OF_SCOPE;
             case VOTE_ALREADY_CAST -> ElectionErrorCode.VOTE_ALREADY_CAST;
+            // M3-3 ELECTION 选举全流程
+            case ELECTION_MAX_WINNERS_REQUIRED -> ElectionErrorCode.ELECTION_MAX_WINNERS_REQUIRED;
+            case ELECTION_TARGET_REQUIRED -> ElectionErrorCode.ELECTION_TARGET_REQUIRED;
+            case CANDIDATE_NOT_FOUND -> ElectionErrorCode.CANDIDATE_NOT_FOUND;
+            case CANDIDATE_NOT_VOTABLE -> ElectionErrorCode.CANDIDATE_NOT_VOTABLE;
+            case CANDIDATE_ALREADY_NOMINATED -> ElectionErrorCode.CANDIDATE_ALREADY_NOMINATED;
+            case CANDIDATE_REVIEW_CONFLICT -> ElectionErrorCode.CANDIDATE_REVIEW_CONFLICT;
+            case VOTE_LIMIT_EXCEEDED -> ElectionErrorCode.VOTE_LIMIT_EXCEEDED;
+            case SUBJECT_NOT_NOMINATABLE -> ElectionErrorCode.SUBJECT_NOT_NOMINATABLE;
         };
     }
 }

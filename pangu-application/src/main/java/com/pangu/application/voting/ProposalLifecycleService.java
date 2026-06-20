@@ -37,14 +37,15 @@ public class ProposalLifecycleService {
     private final OwnerPropertyVotingRepository ownerPropertyVotingRepository;
 
     /**
-     * 立项（DRAFT 写入）。SubjectType=ELECTION 一律拒绝（M3-3 才放开）。
+     * 立项（DRAFT 写入）。M3-3 起放开 ELECTION：要求携带 maxWinners >= 1。
      */
     @Transactional
     public VotingSubject propose(ProposeSubjectCommand cmd) {
-        if (cmd.subjectType() == SubjectType.ELECTION) {
+        if (cmd.subjectType() == SubjectType.ELECTION
+                && (cmd.maxWinners() == null || cmd.maxWinners() < 1)) {
             throw new VotingApplicationException(
-                    VotingApplicationException.Reason.SUBJECT_TYPE_NOT_SUPPORTED,
-                    "ELECTION 类型立项暂不支持，将在 M3-3 放开");
+                    VotingApplicationException.Reason.ELECTION_MAX_WINNERS_REQUIRED,
+                    "ELECTION 立项必须携带 maxWinners >= 1，当前 maxWinners=" + cmd.maxWinners());
         }
         VotingSubject draft;
         try {
@@ -63,10 +64,14 @@ public class ProposalLifecycleService {
                     VotingApplicationException.Reason.PROPOSE_FORBIDDEN_FOR_TYPE,
                     "立项参数非法：" + e.getMessage(), e);
         }
+        // maxWinners 仅 ELECTION 透传落库（GENERAL/MAJOR 为 null，trigger 13 不约束非 ELECTION）
+        if (cmd.subjectType() == SubjectType.ELECTION) {
+            draft.setMaxWinners(cmd.maxWinners());
+        }
         VotingSubject persisted = subjectRepository.insert(draft);
-        log.info("Subject proposed subjectId={} type={} scope={} proposedByUserId={}",
+        log.info("Subject proposed subjectId={} type={} scope={} maxWinners={} proposedByUserId={}",
                 persisted.getSubjectId(), persisted.getSubjectType(),
-                persisted.getScope(), persisted.getProposedByUserId());
+                persisted.getScope(), persisted.getMaxWinners(), persisted.getProposedByUserId());
         return persisted;
     }
 
