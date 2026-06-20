@@ -85,6 +85,7 @@ public final class ElectionExceptionTranslator {
             case CANDIDATE_REVIEW_CONFLICT -> ElectionErrorCode.CANDIDATE_REVIEW_CONFLICT;
             case VOTE_LIMIT_EXCEEDED -> ElectionErrorCode.VOTE_LIMIT_EXCEEDED;
             case SUBJECT_NOT_NOMINATABLE -> ElectionErrorCode.SUBJECT_NOT_NOMINATABLE;
+            case PROPOSE_FROZEN_HANDOVER -> ElectionErrorCode.PROPOSE_FROZEN_HANDOVER;
         };
     }
 }

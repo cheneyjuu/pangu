@@ -58,6 +58,7 @@ public enum ElectionErrorCode implements ErrorCode {
     PROPOSE_FORBIDDEN_FOR_TYPE(40923, "当前角色不允许发起该类型议题", 403, ErrorType.BIZ, false),
     CANCEL_FORBIDDEN(40924, "当前角色或议题状态不允许撤回", 403, ErrorType.BIZ, false),
     LIFECYCLE_CONCURRENT_MODIFICATION(40925, "议题状态在并发写入下被推翻，请刷新后重试", 409, ErrorType.SYSTEM, true),
+    PROPOSE_FROZEN_HANDOVER(40926, "换届选举进行中，新议题立项已熔断", 409, ErrorType.BIZ, false),
 
     // ============ M3-2 投票提交（AUTHZ / 403 + BUSINESS / 409） ============
     AUTH_LEVEL_INSUFFICIENT(40330, "当前认证等级不足，请先完成人脸实名认证", 403, ErrorType.BIZ, false),

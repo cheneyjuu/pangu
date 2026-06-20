@@ -55,7 +55,9 @@ public class VotingApplicationException extends RuntimeException {
         /** 该 opid 在本选举已投满 maxWinners 票。 */
         VOTE_LIMIT_EXCEEDED,
         /** 议题不在可提名状态（仅 DRAFT/PUBLISHED 允许增改候选人名单）。 */
-        SUBJECT_NOT_NOMINATABLE
+        SUBJECT_NOT_NOMINATABLE,
+        /** 换届选举在途，新 GENERAL/MAJOR 立项被熔断（放行 ELECTION）。 */
+        PROPOSE_FROZEN_HANDOVER
     }
 
     private final Reason reason;
