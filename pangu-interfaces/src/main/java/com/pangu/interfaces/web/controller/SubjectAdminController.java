@@ -5,9 +5,13 @@ import com.pangu.application.voting.VotingApplicationException;
 import com.pangu.application.voting.command.CancelSubjectCommand;
 import com.pangu.application.voting.command.ProposeSubjectCommand;
 import com.pangu.application.voting.command.PublishSubjectCommand;
+import com.pangu.domain.common.Page;
+import com.pangu.domain.model.voting.SubjectStatus;
+import com.pangu.domain.model.voting.SubjectType;
 import com.pangu.domain.model.voting.VotingSubject;
 import com.pangu.domain.repository.VotingSubjectRepository;
 import com.pangu.interfaces.security.SecurityUtils;
+import com.pangu.interfaces.web.controller.dto.PageResponse;
 import com.pangu.interfaces.web.controller.dto.voting.AdminSubjectResponse;
 import com.pangu.interfaces.web.controller.dto.voting.CancelRequest;
 import com.pangu.interfaces.web.controller.dto.voting.ProposeRequest;
@@ -23,6 +27,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -102,6 +107,26 @@ public class SubjectAdminController extends BaseController {
                 subjectId, requireUserId(), request.reason(), byGovernment);
         VotingSubject subject = proposalLifecycleService.cancel(cmd);
         return success("议题已撤回", AdminSubjectResponse.from(subject));
+    }
+
+    /**
+     * 管理端议题分页列表（M4-1）。
+     *
+     * <p>租户内分页查询，可选 {@code status}/{@code type} 筛选（按枚举 name 传参，如 {@code ?status=VOTING}）。
+     * 返回统一分页契约 {@code { items, total, page, size }}。
+     */
+    @GetMapping("/voting-subjects")
+    @PreAuthorize("hasAuthority('voting:subject:audit')")
+    public Result<PageResponse<AdminSubjectResponse>> page(
+            @RequestParam(name = "page", defaultValue = "1") int page,
+            @RequestParam(name = "size", defaultValue = "20") int size,
+            @RequestParam(name = "status", required = false) SubjectStatus status,
+            @RequestParam(name = "type", required = false) SubjectType type) {
+        int safePage = Math.max(page, 1);
+        int safeSize = Math.min(Math.max(size, 1), 100);
+        Page<VotingSubject> result = votingSubjectRepository.pageForAdmin(
+                requireTenantId(), status, type, safePage, safeSize);
+        return success(PageResponse.from(result, AdminSubjectResponse::from));
     }
 
     /** 管理端议题详情（B/G 端）。 */
