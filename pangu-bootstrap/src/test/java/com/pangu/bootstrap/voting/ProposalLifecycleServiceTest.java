@@ -1,5 +1,6 @@
 package com.pangu.bootstrap.voting;
 
+import com.pangu.application.handover.HandoverCircuitBreaker;
 import com.pangu.application.voting.ProposalLifecycleService;
 import com.pangu.application.voting.VotingApplicationException;
 import com.pangu.application.voting.command.CancelSubjectCommand;
@@ -54,6 +55,9 @@ public class ProposalLifecycleServiceTest {
 
     @Mock
     private OwnerPropertyVotingRepository ownerPropertyVotingRepository;
+
+    @Mock
+    private HandoverCircuitBreaker handoverCircuitBreaker;
 
     @InjectMocks
     private ProposalLifecycleService service;
