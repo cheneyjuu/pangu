@@ -14,6 +14,7 @@ import com.pangu.domain.model.voting.VotingScope;
 import com.pangu.domain.model.voting.VotingSubject;
 import com.pangu.domain.policy.AbacPolicyEngine;
 import com.pangu.domain.policy.EvaluationResult;
+import com.pangu.domain.repository.ElectionCandidateRegistry;
 import com.pangu.domain.repository.OwnerPropertyVotingRepository;
 import com.pangu.domain.repository.VoteItemRepository;
 import com.pangu.domain.repository.VotingSubjectRepository;
@@ -43,7 +44,7 @@ import static org.mockito.Mockito.when;
  *
  * <p>覆盖 cast 流水线上每一道闸门：
  * <ul>
- *   <li>议题不存在 / 非 VOTING / ELECTION 不支持 / 租户不一致；</li>
+ *   <li>议题不存在 / 非 VOTING / ELECTION 缺 targetId / 租户不一致；</li>
  *   <li>MAJOR 议题 L3 face-auth 不足 → AUTH_LEVEL_INSUFFICIENT；</li>
  *   <li>opid 不存在 / 非本人 → OPID_NOT_OWNED；</li>
  *   <li>账户欠费冻结 / BUILDING scope 不匹配 → OPID_OUT_OF_SCOPE；</li>
@@ -65,6 +66,8 @@ public class VoteSubmissionServiceTest {
     private AbacPolicyEngine abacPolicyEngine;
     @Mock
     private UserContextHolder userContextHolder;
+    @Mock
+    private ElectionCandidateRegistry electionCandidateRegistry;
 
     @InjectMocks
     private VoteSubmissionService service;
@@ -126,12 +129,13 @@ public class VoteSubmissionServiceTest {
     }
 
     @Test
-    public void electionTypeNotSupported() {
+    public void electionMissingTargetRejected() {
+        // M3-3：ELECTION 已放开投票，但 cmd() 未带 targetId（候选人）→ ELECTION_TARGET_REQUIRED
         when(subjectRepository.findById(SUBJECT_ID))
                 .thenReturn(Optional.of(votingSubject(SubjectType.ELECTION, VotingScope.COMMUNITY, null)));
         VotingApplicationException ex = assertThrows(VotingApplicationException.class,
                 () -> service.cast(cmd()));
-        assertEquals(VotingApplicationException.Reason.SUBJECT_TYPE_NOT_SUPPORTED, ex.getReason());
+        assertEquals(VotingApplicationException.Reason.ELECTION_TARGET_REQUIRED, ex.getReason());
     }
 
     @Test
