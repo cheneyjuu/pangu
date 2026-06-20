@@ -136,4 +136,16 @@
         LIMIT #{limit} OFFSET #{offset}
     </select>
 
+    <!-- HANDOVER_LOCK: 换届熔断检测。在途换届选举 = ELECTION(1) 且 status∈{PUBLISHED(2),VOTING(3),CLOSED(4)}。
+         SETTLED(5)/CANCELLED(6) 不计入，查询返回空即自动解除熔断。 -->
+    <select id="selectActiveElectionSubjectId" resultType="java.lang.Long">
+        SELECT subject_id
+        FROM t_voting_subject
+        WHERE tenant_id = #{tenantId}
+          AND subject_type = 1
+          AND status IN (2, 3, 4)
+        ORDER BY subject_id ASC
+        LIMIT 1
+    </select>
+
 </mapper>

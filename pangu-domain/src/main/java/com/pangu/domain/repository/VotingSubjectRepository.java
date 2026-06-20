@@ -78,5 +78,16 @@ public interface VotingSubjectRepository {
      * @param offset      偏移
      */
     List<VotingSubject> findVisibleForOwner(Long tenantId, List<Long> buildingIds, int limit, int offset);
+
+    // ============= HANDOVER_LOCK 换届熔断 =============
+
+    /**
+     * 换届熔断检测：返回该租户任一在途换届选举（{@code subject_type = ELECTION}
+     * 且 {@code status ∈ {PUBLISHED, VOTING, CLOSED}}）的 subjectId，无则空。
+     *
+     * <p>SETTLED / CANCELLED 不计入「在途」——查询自然返回空即自动解除熔断，无需任何手工解锁。
+     * 这是「换届进行中」的唯一判定来源，供敏感治理动作（如财务公示发布）发起前查询。
+     */
+    Optional<Long> findActiveElectionSubjectId(Long tenantId);
 }
 
