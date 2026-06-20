@@ -1,6 +1,7 @@
 package com.pangu.application.voting;
 
 import com.pangu.application.voting.command.NominateCandidateCommand;
+import com.pangu.application.voting.command.PartyReviewCandidateCommand;
 import com.pangu.application.voting.command.ReviewCandidateCommand;
 import com.pangu.domain.model.voting.Candidate;
 import com.pangu.domain.model.voting.CandidateStatus;
@@ -20,16 +21,17 @@ import java.util.List;
 /**
  * 选举候选人编排服务（M3-3 引入）。
  *
- * <p>三条命令：
+ * <p>候选人资格审查为两段闸（本期插入党组书记前置审查）：
  * <ul>
- *   <li>{@link #nominate} —— 管理端提名（status=PENDING_REVIEW）；仅 ELECTION 且议题处于
+ *   <li>{@link #nominate} —— 管理端提名（status=PENDING_PARTY_REVIEW）；仅 ELECTION 且议题处于
  *       DRAFT/PUBLISHED（投票开始前才能改名单）；</li>
- *   <li>{@link #review} —— G 端资格审查（PENDING_REVIEW → APPROVED/REJECTED）；</li>
+ *   <li>{@link #partyReview} —— 党组书记前置审查（PENDING_PARTY_REVIEW → PENDING_COMMITTEE_REVIEW/REJECTED）；</li>
+ *   <li>{@link #review} —— 居委会资格审查（PENDING_COMMITTEE_REVIEW → APPROVED/REJECTED）；</li>
  *   <li>{@link #listCandidates} —— 候选人列表（含所有状态）。</li>
  * </ul>
  *
- * <p>角色授权由 endpoint 的 {@code @PreAuthorize} 粗筛（candidate:nominate / candidate:approve /
- * voting:subject:audit），业务约束在此服务内强校验，分层与 {@link ProposalLifecycleService} 一致。
+ * <p>角色授权由 endpoint 的 {@code @PreAuthorize} 粗筛（candidate:nominate / candidate:review:party /
+ * candidate:approve / voting:subject:audit），业务约束在此服务内强校验，分层与 {@link ProposalLifecycleService} 一致。
  */
 @Slf4j
 @Service
@@ -80,7 +82,44 @@ public class ElectionCandidateService {
     }
 
     /**
-     * 资格审查：PENDING_REVIEW → APPROVED / REJECTED。
+     * 党组书记前置审查：PENDING_PARTY_REVIEW → PENDING_COMMITTEE_REVIEW（通过）/ REJECTED（驳回）。
+     *
+     * <p>资格审查的第一道闸，必须先过此审查候选人才进入居委会资格审查。
+     */
+    @Transactional
+    public Candidate partyReview(PartyReviewCandidateCommand cmd) {
+        Candidate candidate = electionCandidateRegistry.findById(cmd.candidateId())
+                .orElseThrow(() -> new VotingApplicationException(
+                        VotingApplicationException.Reason.CANDIDATE_NOT_FOUND,
+                        "候选人不存在 candidateId=" + cmd.candidateId()));
+        CandidateStatus from = candidate.getQualificationStatus();
+        try {
+            if (cmd.approve()) {
+                ElectionCandidateActions.partyApprove(candidate);
+            } else {
+                ElectionCandidateActions.partyReject(candidate);
+            }
+        } catch (ElectionCandidateActions.IllegalCandidateTransitionException e) {
+            throw new VotingApplicationException(
+                    VotingApplicationException.Reason.CANDIDATE_REVIEW_CONFLICT, e.getMessage(), e);
+        }
+        int updated = electionCandidateRegistry.updateQualification(
+                candidate.getCandidateId(), from.getDbValue(), candidate.getQualificationStatus().getDbValue());
+        if (updated != 1) {
+            throw new VotingApplicationException(
+                    VotingApplicationException.Reason.CANDIDATE_REVIEW_CONFLICT,
+                    "候选人已被并发审查 candidateId=" + cmd.candidateId());
+        }
+        log.info("Candidate party-reviewed candidateId={} approve={} newStatus={} operatorUserId={}",
+                cmd.candidateId(), cmd.approve(), candidate.getQualificationStatus(), cmd.operatorUserId());
+        return candidate;
+    }
+
+    /**
+     * 居委会资格审查：PENDING_COMMITTEE_REVIEW → APPROVED / REJECTED。
+     *
+     * <p>候选人须已过党组书记前置审查（处于 PENDING_COMMITTEE_REVIEW）。对仍处
+     * PENDING_PARTY_REVIEW 的候选人调用本审查，DB 阶段化乐观锁命中 0 行 → CANDIDATE_REVIEW_CONFLICT。
      */
     @Transactional
     public Candidate review(ReviewCandidateCommand cmd) {
@@ -88,6 +127,7 @@ public class ElectionCandidateService {
                 .orElseThrow(() -> new VotingApplicationException(
                         VotingApplicationException.Reason.CANDIDATE_NOT_FOUND,
                         "候选人不存在 candidateId=" + cmd.candidateId()));
+        CandidateStatus from = candidate.getQualificationStatus();
         try {
             if (cmd.approve()) {
                 ElectionCandidateActions.approve(candidate);
@@ -99,7 +139,7 @@ public class ElectionCandidateService {
                     VotingApplicationException.Reason.CANDIDATE_REVIEW_CONFLICT, e.getMessage(), e);
         }
         int updated = electionCandidateRegistry.updateQualification(
-                candidate.getCandidateId(), candidate.getQualificationStatus().getDbValue());
+                candidate.getCandidateId(), from.getDbValue(), candidate.getQualificationStatus().getDbValue());
         if (updated != 1) {
             throw new VotingApplicationException(
                     VotingApplicationException.Reason.CANDIDATE_REVIEW_CONFLICT,

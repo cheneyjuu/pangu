@@ -48,7 +48,7 @@ public interface ElectionCandidateRegistry {
     Optional<Candidate> findById(Long candidateId);
 
     /**
-     * 提名候选人（status=PENDING_REVIEW）。
+     * 提名候选人（status=PENDING_PARTY_REVIEW）。
      *
      * @param subjectId   议题 ID
      * @param uid         关联业主 uid
@@ -60,13 +60,19 @@ public interface ElectionCandidateRegistry {
     Long nominate(Long subjectId, Long uid, String name, boolean partyMember);
 
     /**
-     * 资格审查落库（仅当当前状态仍为 PENDING_REVIEW 时生效）。
+     * 资格审查落库（阶段化乐观锁：仅当当前状态仍为 {@code expectedFromDbValue} 时生效）。
      *
-     * @param candidateId       候选人 ID
-     * @param newStatusDbValue  目标状态 db 值（APPROVED=2 / REJECTED=3）
-     * @return affected rows（0 表示已被并发审查，状态非 PENDING_REVIEW）
+     * <p>党组前置审查传 {@code expectedFromDbValue=PENDING_PARTY_REVIEW(1)}；
+     * 居委会资格审查传 {@code expectedFromDbValue=PENDING_COMMITTEE_REVIEW(5)}。
+     * {@code WHERE qualification_status = expectedFrom} 既防并发重复审查，
+     * 又兜底「跳过党组前置审查直接资格通过」（committee approve 命中 0 行 → 视为冲突）。
+     *
+     * @param candidateId        候选人 ID
+     * @param expectedFromDbValue 期望的当前状态 db 值（前置=1 / 资格=5）
+     * @param newStatusDbValue   目标状态 db 值（PENDING_COMMITTEE_REVIEW=5 / APPROVED=2 / REJECTED=3）
+     * @return affected rows（0 表示已被并发审查或当前状态非 expectedFrom）
      */
-    int updateQualification(Long candidateId, int newStatusDbValue);
+    int updateQualification(Long candidateId, int expectedFromDbValue, int newStatusDbValue);
 
     /**
      * 统计某 opid 在某议题已投出的 SUPPORT 票数（maxWinners 计数门用）。

@@ -70,8 +70,8 @@ public class ElectionCandidateRegistryImpl implements ElectionCandidateRegistry 
     }
 
     @Override
-    public int updateQualification(Long candidateId, int newStatusDbValue) {
-        return candidateMapper.updateQualification(candidateId, newStatusDbValue);
+    public int updateQualification(Long candidateId, int expectedFromDbValue, int newStatusDbValue) {
+        return candidateMapper.updateQualification(candidateId, expectedFromDbValue, newStatusDbValue);
     }
 
     @Override

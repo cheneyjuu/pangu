@@ -31,6 +31,6 @@ public class Candidate {
     /** 是否为中共党员 (PRD 提及原则上党员占比不低于 50%) */
     private boolean partyMember;
 
-    /** 资格审查状态（提名时 PENDING_REVIEW；审查后 APPROVED/REJECTED；仅 APPROVED 计入结算） */
+    /** 资格审查状态（提名时 PENDING_PARTY_REVIEW；过党组前置审查后 PENDING_COMMITTEE_REVIEW；居委会资格审查后 APPROVED/REJECTED；仅 APPROVED 计入结算） */
     private CandidateStatus qualificationStatus;
 }

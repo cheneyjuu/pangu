@@ -18,7 +18,7 @@
         candidate_id, subject_id, uid, name, is_party_member, qualification_status, create_time
     </sql>
 
-    <!-- 提名写入：status=PENDING_REVIEW(1)，create_time 由 DB DEFAULT 兜底。 -->
+    <!-- 提名写入：status=PENDING_PARTY_REVIEW(1)，create_time 由 DB DEFAULT 兜底。 -->
     <insert id="insertCandidate" useGeneratedKeys="true" keyProperty="candidateId" keyColumn="candidate_id">
         INSERT INTO t_election_candidate (
             subject_id, uid, name, is_party_member, qualification_status
@@ -27,12 +27,13 @@
         )
     </insert>
 
-    <!-- 资格审查：仅 PENDING_REVIEW(1) → newStatus；条件防并发重复审查。 -->
+    <!-- 资格审查：阶段化乐观锁，仅 qualification_status = expectedFrom 时 → newStatus；
+         防并发重复审查，且兜底跳过党组前置审查直接资格通过。 -->
     <update id="updateQualification">
         UPDATE t_election_candidate
         SET qualification_status = #{newStatus}
         WHERE candidate_id = #{candidateId}
-          AND qualification_status = 1
+          AND qualification_status = #{expectedFrom}
     </update>
 
     <select id="selectById" resultMap="ElectionCandidateRowMap">
