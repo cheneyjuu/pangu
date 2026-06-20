@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.SerializationFeature;
 import com.pangu.application.disclosure.command.ComposeCommand;
 import com.pangu.application.disclosure.command.CompareCommand;
 import com.pangu.application.disclosure.command.LockAndPublishCommand;
+import com.pangu.application.handover.HandoverCircuitBreaker;
 import com.pangu.application.lock.GovernanceLockApplicationException;
 import com.pangu.application.lock.GovernanceLockApplicationService;
 import com.pangu.application.lock.command.LockCommand;
@@ -72,6 +73,7 @@ public class FinanceDisclosureApplicationService {
     private final DistributedLockTemplate distributedLockTemplate;
     private final TransactionTemplate transactionTemplate;
     private final DisclosureDiffCalculator diffCalculator;
+    private final HandoverCircuitBreaker handoverCircuitBreaker;
 
     public FinanceDisclosureApplicationService(
             FinanceDisclosureRepository disclosureRepository,
@@ -80,7 +82,8 @@ public class FinanceDisclosureApplicationService {
             GovernanceLockApplicationService lockApplicationService,
             DistributedLockTemplate distributedLockTemplate,
             TransactionTemplate transactionTemplate,
-            DisclosureDiffCalculator diffCalculator) {
+            DisclosureDiffCalculator diffCalculator,
+            HandoverCircuitBreaker handoverCircuitBreaker) {
         this.disclosureRepository = disclosureRepository;
         this.compareRepository = compareRepository;
         this.ledgerQueryGateway = ledgerQueryGateway;
@@ -88,6 +91,7 @@ public class FinanceDisclosureApplicationService {
         this.distributedLockTemplate = distributedLockTemplate;
         this.transactionTemplate = transactionTemplate;
         this.diffCalculator = diffCalculator;
+        this.handoverCircuitBreaker = handoverCircuitBreaker;
     }
 
     // -----------------------------------------------------------------
@@ -177,6 +181,12 @@ public class FinanceDisclosureApplicationService {
                     FinanceDisclosureApplicationException.Reason.SNAPSHOT_NOT_FOUND,
                     "快照与当前租户不匹配 snapshotId=" + cmd.snapshotId());
         }
+        // 换届熔断（HANDOVER_LOCK）：业委会换届选举在途期间冻结财务公示发布，待选举结算/撤销后自动恢复。
+        handoverCircuitBreaker.activeElectionSubjectId(cmd.tenantId()).ifPresent(electionId -> {
+            throw new FinanceDisclosureApplicationException(
+                    FinanceDisclosureApplicationException.Reason.HANDOVER_IN_PROGRESS,
+                    "换届选举进行中，财务公示发布已熔断 electionSubjectId=" + electionId);
+        });
         // 内部委派治理锁：lock 内部已含 Redis 锁 + 行锁 + 唯一索引三层；
         // GovernanceLockApplicationException 由 GlobalExceptionHandler 统一处理（透传）。
         GovernanceLock lock = lockApplicationService.lock(new LockCommand(

@@ -65,5 +65,13 @@ public interface VotingSubjectMapper {
                                                   @Param("buildingIds") List<Long> buildingIds,
                                                   @Param("limit") int limit,
                                                   @Param("offset") int offset);
+
+    // ============= HANDOVER_LOCK 换届熔断 =============
+
+    /**
+     * 换届熔断检测：该租户任一在途换届选举（{@code subject_type = 1 AND status IN (2,3,4)}）的
+     * subject_id，无则 {@code null}。{@code ORDER BY subject_id LIMIT 1}。
+     */
+    Long selectActiveElectionSubjectId(@Param("tenantId") Long tenantId);
 }
 

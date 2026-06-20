@@ -86,6 +86,11 @@ public class VotingSubjectRepositoryImpl implements VotingSubjectRepository {
                 .stream().map(this::toAggregate).toList();
     }
 
+    @Override
+    public Optional<Long> findActiveElectionSubjectId(Long tenantId) {
+        return Optional.ofNullable(mapper.selectActiveElectionSubjectId(tenantId));
+    }
+
     private VotingSubjectRow toRow(VotingSubject s) {
         VotingSubjectRow row = new VotingSubjectRow();
         row.setSubjectId(s.getSubjectId());

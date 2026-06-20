@@ -23,6 +23,7 @@ public final class DisclosureExceptionTranslator {
             case COMPARE_INVALID_PAIR -> DisclosureErrorCode.COMPARE_INVALID_PAIR;
             case LEDGER_QUERY_EMPTY -> DisclosureErrorCode.LEDGER_QUERY_EMPTY;
             case SNAPSHOT_CONCURRENT_MODIFICATION -> DisclosureErrorCode.SNAPSHOT_CONCURRENT_MODIFICATION;
+            case HANDOVER_IN_PROGRESS -> DisclosureErrorCode.HANDOVER_IN_PROGRESS;
         };
     }
 }
