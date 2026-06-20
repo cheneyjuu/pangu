@@ -51,6 +51,20 @@ public enum ElectionErrorCode implements ErrorCode {
     SUBJECT_TYPE_NOT_SUPPORTED(40913, "议题类型尚不支持本项操作", 409, ErrorType.BIZ, false),
     SUBJECT_CONCURRENT_SETTLEMENT(40914, "议题在结算过程中被并发修改，请稍后重试", 409, ErrorType.SYSTEM, true),
 
+    // ============ M3-2 议题生命周期（BUSINESS / 409） ============
+    SUBJECT_NOT_DRAFT(40920, "议题不在草稿状态，无法公示", 409, ErrorType.BIZ, false),
+    SUBJECT_NOT_PUBLISHED(40921, "议题不在公示状态，无法强撤", 409, ErrorType.BIZ, false),
+    SUBJECT_NOT_VOTING_CASTABLE(40922, "议题不在投票中，暂无法投票", 409, ErrorType.BIZ, false),
+    PROPOSE_FORBIDDEN_FOR_TYPE(40923, "当前角色不允许发起该类型议题", 403, ErrorType.BIZ, false),
+    CANCEL_FORBIDDEN(40924, "当前角色或议题状态不允许撤回", 403, ErrorType.BIZ, false),
+    LIFECYCLE_CONCURRENT_MODIFICATION(40925, "议题状态在并发写入下被推翻，请刷新后重试", 409, ErrorType.SYSTEM, true),
+
+    // ============ M3-2 投票提交（AUTHZ / 403 + BUSINESS / 409） ============
+    AUTH_LEVEL_INSUFFICIENT(40330, "当前认证等级不足，请先完成人脸实名认证", 403, ErrorType.BIZ, false),
+    OPID_NOT_OWNED(40331, "该房产身份不属于当前用户", 403, ErrorType.BIZ, false),
+    OPID_OUT_OF_SCOPE(40332, "该房产不在本议题表决范围内", 403, ErrorType.BIZ, false),
+    VOTE_ALREADY_CAST(40930, "您已对该议题投过票，无法重复投票", 409, ErrorType.BIZ, false),
+
     // ============ 系统/外部依赖（SYSTEM / 500） ============
     DENOMINATOR_RESOLVE_FAILED(50010, "分母快照生成失败，请稍后重试", 500, ErrorType.SYSTEM, true),
     ATTESTATION_FAILED(50011, "司法链存证失败，请稍后重试", 500, ErrorType.SYSTEM, true),

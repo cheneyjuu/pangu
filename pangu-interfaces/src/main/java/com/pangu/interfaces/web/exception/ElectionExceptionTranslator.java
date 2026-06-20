@@ -65,6 +65,17 @@ public final class ElectionExceptionTranslator {
             case CONCURRENT_SETTLEMENT -> ElectionErrorCode.SUBJECT_CONCURRENT_SETTLEMENT;
             case DENOMINATOR_RESOLVE_FAILED -> ElectionErrorCode.DENOMINATOR_RESOLVE_FAILED;
             case ATTESTATION_FAILED -> ElectionErrorCode.ATTESTATION_FAILED;
+            // M3-2 lifecycle + voting cast
+            case SUBJECT_NOT_DRAFT -> ElectionErrorCode.SUBJECT_NOT_DRAFT;
+            case SUBJECT_NOT_PUBLISHED -> ElectionErrorCode.SUBJECT_NOT_PUBLISHED;
+            case SUBJECT_NOT_VOTING_CASTABLE -> ElectionErrorCode.SUBJECT_NOT_VOTING_CASTABLE;
+            case PROPOSE_FORBIDDEN_FOR_TYPE -> ElectionErrorCode.PROPOSE_FORBIDDEN_FOR_TYPE;
+            case CANCEL_FORBIDDEN -> ElectionErrorCode.CANCEL_FORBIDDEN;
+            case CONCURRENT_LIFECYCLE_MODIFICATION -> ElectionErrorCode.LIFECYCLE_CONCURRENT_MODIFICATION;
+            case AUTH_LEVEL_INSUFFICIENT -> ElectionErrorCode.AUTH_LEVEL_INSUFFICIENT;
+            case OPID_NOT_OWNED -> ElectionErrorCode.OPID_NOT_OWNED;
+            case OPID_OUT_OF_SCOPE -> ElectionErrorCode.OPID_OUT_OF_SCOPE;
+            case VOTE_ALREADY_CAST -> ElectionErrorCode.VOTE_ALREADY_CAST;
         };
     }
 }

@@ -53,4 +53,29 @@
         WHERE op.tenant_id = #{tenantId}
     </select>
 
+    <!-- ===================== M3-2 投票提交 / "我的议题" ===================== -->
+    <resultMap id="VotingViewResultMap"
+               type="com.pangu.infrastructure.persistence.entity.OwnerPropertyVotingViewRow">
+        <id property="opid" column="opid"/>
+        <result property="uid" column="uid"/>
+        <result property="tenantId" column="tenant_id"/>
+        <result property="buildingId" column="building_id"/>
+        <result property="buildArea" column="build_area"/>
+        <result property="votingDelegate" column="is_voting_delegate"/>
+        <result property="accountStatus" column="account_status"/>
+    </resultMap>
+
+    <select id="selectVotingViewByOpid" resultMap="VotingViewResultMap">
+        SELECT opid, uid, tenant_id, building_id, build_area,
+               is_voting_delegate, account_status
+        FROM c_owner_property
+        WHERE opid = #{opid}
+    </select>
+
+    <select id="selectBuildingIdsByUid" resultType="long">
+        SELECT DISTINCT building_id
+        FROM c_owner_property
+        WHERE uid = #{uid} AND tenant_id = #{tenantId}
+    </select>
+
 </mapper>

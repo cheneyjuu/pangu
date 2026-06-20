@@ -38,4 +38,10 @@ public class VotingSubjectRow {
 
     private long version;
     private Instant createTime;
+
+    // ============= M3-2 新增 =============
+    private Long proposedByUserId;
+    private Instant cancelledAt;
+    private Long cancelledByUserId;
+    private String cancelReason;
 }

@@ -20,12 +20,17 @@
         <result property="maxWinners" column="max_winners"/>
         <result property="version" column="version"/>
         <result property="createTime" column="create_time"/>
+        <result property="proposedByUserId" column="proposed_by_user_id"/>
+        <result property="cancelledAt" column="cancelled_at"/>
+        <result property="cancelledByUserId" column="cancelled_by_user_id"/>
+        <result property="cancelReason" column="cancel_reason"/>
     </resultMap>
 
     <sql id="all_columns">
         subject_id, tenant_id, title, subject_type, scope, scope_reference_id,
         status, publish_at, vote_start_at, vote_end_at, settled_at,
-        party_ratio_floor, max_winners, version, create_time
+        party_ratio_floor, max_winners, version, create_time,
+        proposed_by_user_id, cancelled_at, cancelled_by_user_id, cancel_reason
     </sql>
 
     <select id="selectById" resultMap="VotingSubjectRowMap">
@@ -67,6 +72,68 @@
           AND vote_end_at &lt; #{now}
         ORDER BY vote_end_at ASC
         LIMIT #{limit}
+    </select>
+
+    <!-- M3-2: 立项写入。version=0 由 DB DEFAULT 兜底；显式留空让 DB DEFAULT 生效。 -->
+    <insert id="insert" useGeneratedKeys="true" keyProperty="subjectId" keyColumn="subject_id">
+        INSERT INTO t_voting_subject (
+            tenant_id, title, subject_type, scope, scope_reference_id,
+            status, vote_start_at, vote_end_at,
+            party_ratio_floor, max_winners, proposed_by_user_id
+        ) VALUES (
+            #{tenantId}, #{title}, #{subjectType}, #{scope}, #{scopeReferenceId},
+            #{status}, #{voteStartAt}, #{voteEndAt},
+            <choose>
+                <when test="partyRatioFloor != null">#{partyRatioFloor}</when>
+                <otherwise>0.50</otherwise>
+            </choose>,
+            #{maxWinners}, #{proposedByUserId}
+        )
+    </insert>
+
+    <!-- M3-2: 撤回。乐观锁 + 版本递增 + 落 cancel_* 三件套。 -->
+    <update id="cancel">
+        UPDATE t_voting_subject
+        SET status               = 6,
+            cancelled_at         = #{cancelledAt},
+            cancelled_by_user_id = #{cancelledByUserId},
+            cancel_reason        = #{cancelReason},
+            version              = version + 1
+        WHERE subject_id = #{subjectId}
+          AND version = #{expectedVersion}
+    </update>
+
+    <!-- M3-2: scheduler 扫描 PUBLISHED 待开票议题。 -->
+    <select id="selectPublishedReadyForOpen" resultMap="VotingSubjectRowMap">
+        SELECT <include refid="all_columns"/>
+        FROM t_voting_subject
+        WHERE status = 2
+          AND vote_start_at IS NOT NULL
+          AND vote_start_at &lt;= #{now}
+        ORDER BY vote_start_at ASC
+        LIMIT #{limit}
+    </select>
+
+    <!-- M3-2: 业主"我的议题"列表。
+         规则：tenant 限定 + status ∈ (PUBLISHED, VOTING, CLOSED, SETTLED)
+              + (scope=COMMUNITY 或 scope=BUILDING 且 building_id 在业主名下楼栋集合内) -->
+    <select id="selectVisibleForOwner" resultMap="VotingSubjectRowMap">
+        SELECT <include refid="all_columns"/>
+        FROM t_voting_subject
+        WHERE tenant_id = #{tenantId}
+          AND status IN (2, 3, 4, 5)
+          AND (
+              scope = 1
+              <if test="buildingIds != null and !buildingIds.isEmpty()">
+                  OR (scope = 2 AND scope_reference_id IN
+                      <foreach collection="buildingIds" item="bid" open="(" separator="," close=")">
+                          #{bid}
+                      </foreach>
+                  )
+              </if>
+          )
+        ORDER BY vote_start_at DESC, subject_id DESC
+        LIMIT #{limit} OFFSET #{offset}
     </select>
 
 </mapper>

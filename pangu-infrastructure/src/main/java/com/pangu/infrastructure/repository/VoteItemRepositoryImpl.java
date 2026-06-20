@@ -6,15 +6,16 @@ import com.pangu.domain.repository.VoteItemRepository;
 import com.pangu.infrastructure.persistence.entity.VoteItemRow;
 import com.pangu.infrastructure.persistence.mapper.VoteItemMapper;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
 
 /**
- * {@link VoteItemRepository} 默认实现：仅做 row → 领域翻译。
+ * {@link VoteItemRepository} 默认实现。
  *
  * <p>双重去重交给 {@code AbstractVotingEngine.settle}，本层不在 SQL 内做去重以避免
- * 与领域去重规则脱钩。
+ * 与领域去重规则脱钩；M3-2 起补 {@link #insert} 用于业主投票提交。
  */
 @Repository
 @RequiredArgsConstructor
@@ -25,6 +26,26 @@ public class VoteItemRepositoryImpl implements VoteItemRepository {
     @Override
     public List<VoteItem> findValidVotes(Long subjectId) {
         return mapper.selectBySubjectId(subjectId).stream().map(this::toDomain).toList();
+    }
+
+    @Override
+    public long insert(Long subjectId, VoteItem item, String signatureHash) {
+        VoteItemRow row = new VoteItemRow();
+        row.setSubjectId(subjectId);
+        row.setOpid(item.getOpid());
+        row.setUid(item.getUid());
+        row.setTargetId(item.getTargetId());
+        row.setPropertyArea(item.getPropertyArea());
+        row.setChoice(item.getChoice() == null ? null : choiceToDb(item.getChoice()));
+        row.setSignatureHash(signatureHash);
+        try {
+            mapper.insert(row);
+        } catch (DuplicateKeyException e) {
+            throw new DuplicateVoteException(
+                    "重复投票 subjectId=" + subjectId + " opid=" + item.getOpid()
+                            + " targetId=" + item.getTargetId(), e);
+        }
+        return row.getVoteId();
     }
 
     private VoteItem toDomain(VoteItemRow r) {
@@ -45,4 +66,13 @@ public class VoteItemRepositoryImpl implements VoteItemRepository {
             default -> throw new IllegalArgumentException("Unknown VoteChoice dbValue: " + dbValue);
         };
     }
+
+    private int choiceToDb(VoteChoice c) {
+        return switch (c) {
+            case SUPPORT -> 1;
+            case AGAINST -> 2;
+            case ABSTAIN -> 3;
+        };
+    }
 }
+
