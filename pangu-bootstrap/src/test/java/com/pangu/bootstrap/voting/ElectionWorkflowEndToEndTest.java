@@ -71,7 +71,8 @@ public class ElectionWorkflowEndToEndTest {
     private static final long TEST_BUILDING = 990010L;
 
     private static final long ACC_GRID = 999804L, USR_GRID = 800004L;   // 陈网格员（提名）
-    private static final long ACC_COMM = 999803L, USR_COMM = 800003L;   // 刘主任（立项 / 审查 / 公示 / 列表）
+    private static final long ACC_COMM = 999803L, USR_COMM = 800003L;   // 刘主任（立项 / 资格审查 / 公示 / 列表）
+    private static final long ACC_PARTY = 999802L, USR_PARTY = 800002L; // 李书记（党组书记前置审查）
 
     private static final String TITLE_PREFIX = "M33E2E-";
 
@@ -174,6 +175,7 @@ public class ElectionWorkflowEndToEndTest {
     public void fullElectionPipeline_proposeNominateReviewVoteSettle() throws Exception {
         String comm = "Bearer " + sysToken(ACC_COMM, USR_COMM);
         String grid = "Bearer " + sysToken(ACC_GRID, USR_GRID);
+        String party = "Bearer " + sysToken(ACC_PARTY, USR_PARTY);
 
         // 1. 立项 ELECTION（刘主任，maxWinners=2，BUILDING scope）
         MvcResult proposeResult = mockMvc.perform(post("/api/v1/voting-subjects")
@@ -199,7 +201,17 @@ public class ElectionWorkflowEndToEndTest {
                 .content(nominateBody(8870003L, "非党员候选人丙", false)))
                 .andExpect(status().isCreated()).andReturn(), "candidateId");
 
-        // 3. 资格审查（刘主任）：c1/c2 通过、c3 拒绝
+        // 3. 党组书记前置审查（李书记）：c1/c2/c3 三人前置审查通过 → PENDING_COMMITTEE_REVIEW
+        for (long cid : new long[]{c1, c2, c3}) {
+            mockMvc.perform(post("/api/v1/candidates/" + cid + "/party-review")
+                            .header("Authorization", party).contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(Map.of("approve", true))))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.qualificationStatus",
+                            org.hamcrest.Matchers.is("PENDING_COMMITTEE_REVIEW")));
+        }
+
+        // 4. 居委会资格审查（刘主任）：c1/c2 通过、c3 拒绝
         mockMvc.perform(post("/api/v1/candidates/" + c1 + "/review")
                         .header("Authorization", comm).contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(Map.of("approve", true))))
@@ -215,19 +227,19 @@ public class ElectionWorkflowEndToEndTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.qualificationStatus", org.hamcrest.Matchers.is("REJECTED")));
 
-        // 4. 管理端列表（刘主任）：3 名候选人都在
+        // 5. 管理端列表（刘主任）：3 名候选人都在
         mockMvc.perform(get("/api/v1/voting-subjects/" + subjectId + "/candidates")
                         .header("Authorization", comm))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.length()", org.hamcrest.Matchers.is(3)));
 
-        // 5. 公示（刘主任有 voting:subject:publish）：DRAFT → PUBLISHED
+        // 6. 公示（刘主任有 voting:subject:publish）：DRAFT → PUBLISHED
         mockMvc.perform(post("/api/v1/voting-subjects/" + subjectId + "/publish")
                         .header("Authorization", comm))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status", org.hamcrest.Matchers.is("PUBLISHED")));
 
-        // 6. 业主 + 房产（3 户各 100 ㎡，同栋 990010）
+        // 7. 业主 + 房产（3 户各 100 ㎡，同栋 990010）
         Long uid1 = insertUser("77600000001");
         Long uid2 = insertUser("77600000002");
         Long uid3 = insertUser("77600000003");
@@ -235,16 +247,16 @@ public class ElectionWorkflowEndToEndTest {
         long opid2 = insertOwnership(uid2, 660002L, new BigDecimal("100.00"));
         long opid3 = insertOwnership(uid3, 660003L, new BigDecimal("100.00"));
 
-        // 7. 开票（scheduler 职责，手工触发）：PUBLISHED → VOTING
+        // 8. 开票（scheduler 职责，手工触发）：PUBLISHED → VOTING
         proposalLifecycleService.openVoting(subjectId, Instant.now());
 
-        // 8. 投票：3 户各对两名 APPROVED 候选人投 SUPPORT（100% 参与）
+        // 9. 投票：3 户各对两名 APPROVED 候选人投 SUPPORT（100% 参与）
         for (long[] owner : new long[][]{{opid1, uid1}, {opid2, uid2}, {opid3, uid3}}) {
             insertSupportVote(subjectId, owner[0], owner[1], c1, new BigDecimal("100.00"));
             insertSupportVote(subjectId, owner[0], owner[1], c2, new BigDecimal("100.00"));
         }
 
-        // 9. 结算（手工触发）：路由进 ElectionVotingEngine
+        // 10. 结算（手工触发）：路由进 ElectionVotingEngine
         VotingResultRepository.Snapshot snapshot = votingApplicationService.settle(
                 new SettleSubjectCommand(subjectId, "MANUAL"));
         assertTrue(snapshot.resultPayloadJson().contains("\"subjectType\":\"ELECTION\""),
@@ -253,7 +265,7 @@ public class ElectionWorkflowEndToEndTest {
         assertNotNull(snapshot.attestationTxHash());
         assertTrue(snapshot.attestationTxHash().startsWith("STUB-"));
 
-        // 10. 议题翻转 SETTLED + 候选人终态落库（2 APPROVED + 1 REJECTED）
+        // 11. 议题翻转 SETTLED + 候选人终态落库（2 APPROVED + 1 REJECTED）
         Integer finalStatus = jdbcTemplate.queryForObject(
                 "SELECT status FROM t_voting_subject WHERE subject_id = ?", Integer.class, subjectId);
         assertEquals(5, finalStatus, "议题应翻转为 SETTLED(5)");

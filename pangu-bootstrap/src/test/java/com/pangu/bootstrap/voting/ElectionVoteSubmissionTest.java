@@ -133,7 +133,7 @@ public class ElectionVoteSubmissionTest {
     public void candidateNotApproved_notVotable() {
         when(subjectRepository.findById(SUBJECT_ID)).thenReturn(Optional.of(electionVoting()));
         when(electionCandidateRegistry.findById(CANDIDATE_ID))
-                .thenReturn(Optional.of(candidate(SUBJECT_ID, CandidateStatus.PENDING_REVIEW)));
+                .thenReturn(Optional.of(candidate(SUBJECT_ID, CandidateStatus.PENDING_PARTY_REVIEW)));
         VotingApplicationException ex = assertThrows(VotingApplicationException.class,
                 () -> service.cast(cmd(CANDIDATE_ID, VoteChoice.SUPPORT)));
         assertEquals(VotingApplicationException.Reason.CANDIDATE_NOT_VOTABLE, ex.getReason());

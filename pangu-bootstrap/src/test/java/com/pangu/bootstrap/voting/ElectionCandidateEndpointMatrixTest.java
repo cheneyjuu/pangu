@@ -54,7 +54,8 @@ public class ElectionCandidateEndpointMatrixTest {
     private static final long TENANT_RUSHI = 10001L;
 
     private static final long ACC_GRID = 999804L, USR_GRID = 800004L;   // 陈网格员（nominate，无 approve/audit）
-    private static final long ACC_COMM = 999803L, USR_COMM = 800003L;   // 刘主任（approve + audit，无 nominate）
+    private static final long ACC_COMM = 999803L, USR_COMM = 800003L;   // 刘主任（approve + audit，无 nominate / party-review）
+    private static final long ACC_PARTY = 999802L, USR_PARTY = 800002L; // 李书记（party-review，无 approve——严格分权）
     private static final long ACC_LISI = 999913L, UID_LISI = 70002L;    // 李四 C_USER
 
     private static final String TITLE_PREFIX = "M33MTX-";
@@ -104,6 +105,14 @@ public class ElectionCandidateEndpointMatrixTest {
                 Long.class, subjectId, uid, name);
     }
 
+    /** 种一条已过党组前置审查、待居委会资格审查（PENDING_COMMITTEE_REVIEW=5）的候选人。 */
+    private Long insertCommitteeCandidate(Long subjectId, Long uid, String name) {
+        return jdbcTemplate.queryForObject(
+                "INSERT INTO t_election_candidate(subject_id, uid, name, is_party_member, qualification_status) "
+                        + "VALUES(?, ?, ?, 0, 5) RETURNING candidate_id",
+                Long.class, subjectId, uid, name);
+    }
+
     private String nominateBody(long uid, String name, boolean party) throws Exception {
         Map<String, Object> body = new HashMap<>();
         body.put("uid", uid);
@@ -149,12 +158,48 @@ public class ElectionCandidateEndpointMatrixTest {
                 .andExpect(jsonPath("$.code", is(403)));
     }
 
+    // ===== 党组书记前置审查 party-review：candidate:review:party（严格分权）=====
+
+    @Test
+    public void partySecretaryPartyReview_advancesToCommittee_200() throws Exception {
+        Long subjectId = insertElectionSubject("party-review-draft", 1);
+        Long candidateId = insertPendingCandidate(subjectId, 8860030L, "待前置审查候选人"); // 状态 1
+        mockMvc.perform(post("/api/v1/candidates/" + candidateId + "/party-review")
+                        .header("Authorization", "Bearer " + sysToken(ACC_PARTY, USR_PARTY))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(reviewBody(true)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code", is(200)))
+                .andExpect(jsonPath("$.data.qualificationStatus", is("PENDING_COMMITTEE_REVIEW")));
+    }
+
+    @Test
+    public void communityAdminCannotPartyReview_403() throws Exception {
+        // 刘主任（COMMUNITY_ADMIN）只做居委会资格审查，无 candidate:review:party。
+        mockMvc.perform(post("/api/v1/candidates/99999999/party-review")
+                        .header("Authorization", "Bearer " + sysToken(ACC_COMM, USR_COMM))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(reviewBody(true)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code", is(403)));
+    }
+
+    @Test
+    public void gridOperatorCannotPartyReview_403() throws Exception {
+        mockMvc.perform(post("/api/v1/candidates/99999999/party-review")
+                        .header("Authorization", "Bearer " + sysToken(ACC_GRID, USR_GRID))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(reviewBody(true)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code", is(403)));
+    }
+
     // ===== 资格审查 review：candidate:approve =====
 
     @Test
     public void communityAdminReview_approves_200() throws Exception {
         Long subjectId = insertElectionSubject("review-draft", 1);
-        Long candidateId = insertPendingCandidate(subjectId, 8860010L, "待审候选人");
+        Long candidateId = insertCommitteeCandidate(subjectId, 8860010L, "待资格审查候选人"); // 状态 5
         mockMvc.perform(post("/api/v1/candidates/" + candidateId + "/review")
                         .header("Authorization", "Bearer " + sysToken(ACC_COMM, USR_COMM))
                         .contentType(MediaType.APPLICATION_JSON)
@@ -162,6 +207,17 @@ public class ElectionCandidateEndpointMatrixTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code", is(200)))
                 .andExpect(jsonPath("$.data.qualificationStatus", is("APPROVED")));
+    }
+
+    @Test
+    public void partySecretaryCannotReview_403() throws Exception {
+        // 严格分权：李书记（PARTY_SECRETARY）已被收回 candidate:approve，不能做居委会资格审查。
+        mockMvc.perform(post("/api/v1/candidates/99999999/review")
+                        .header("Authorization", "Bearer " + sysToken(ACC_PARTY, USR_PARTY))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(reviewBody(true)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code", is(403)));
     }
 
     @Test
