@@ -101,6 +101,7 @@ public class AuthService {
         userInfo.put("active_identity_id", ctx.activeIdentityId());
         userInfo.put("tenant_id", ctx.tenantId());
         userInfo.put("auth_level", ctx.authLevel().getValue());
+        userInfo.put("role_key", ctx.roleKey());
         userInfo.put("permissions", ctx.permissions());
 
         Map<String, Object> result = new LinkedHashMap<>();

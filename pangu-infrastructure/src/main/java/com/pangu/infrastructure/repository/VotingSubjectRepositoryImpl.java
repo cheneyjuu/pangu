@@ -1,5 +1,6 @@
 package com.pangu.infrastructure.repository;
 
+import com.pangu.domain.common.Page;
 import com.pangu.domain.model.voting.ElectionSubject;
 import com.pangu.domain.model.voting.SubjectStatus;
 import com.pangu.domain.model.voting.SubjectType;
@@ -84,6 +85,20 @@ public class VotingSubjectRepositoryImpl implements VotingSubjectRepository {
         List<Long> safeBuildings = buildingIds == null ? Collections.emptyList() : buildingIds;
         return mapper.selectVisibleForOwner(tenantId, safeBuildings, limit, offset)
                 .stream().map(this::toAggregate).toList();
+    }
+
+    @Override
+    public Page<VotingSubject> pageForAdmin(Long tenantId, SubjectStatus status, SubjectType type, int page, int size) {
+        Integer statusDb = status == null ? null : status.getDbValue();
+        Integer typeDb = type == null ? null : type.getDbValue();
+        long total = mapper.countAdminPage(tenantId, statusDb, typeDb);
+        if (total == 0) {
+            return new Page<>(Collections.emptyList(), 0, page, size);
+        }
+        int offset = (page - 1) * size;
+        List<VotingSubject> items = mapper.selectAdminPage(tenantId, statusDb, typeDb, size, offset)
+                .stream().map(this::toAggregate).toList();
+        return new Page<>(items, total, page, size);
     }
 
     @Override

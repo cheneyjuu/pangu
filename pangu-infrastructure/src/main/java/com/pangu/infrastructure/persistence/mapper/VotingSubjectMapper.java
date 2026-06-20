@@ -66,6 +66,23 @@ public interface VotingSubjectMapper {
                                                   @Param("limit") int limit,
                                                   @Param("offset") int offset);
 
+    // ============= M4-1 管理端分页查询 =============
+
+    /**
+     * 管理端议题分页：tenant 恒在 + status/type 可选筛选，按 create_time 倒序。
+     * status/type 为 {@code null} 时该条件省略。
+     */
+    List<VotingSubjectRow> selectAdminPage(@Param("tenantId") Long tenantId,
+                                            @Param("status") Integer status,
+                                            @Param("type") Integer type,
+                                            @Param("limit") int limit,
+                                            @Param("offset") int offset);
+
+    /** 管理端议题分页计数：where 条件与 {@link #selectAdminPage} 一致。 */
+    long countAdminPage(@Param("tenantId") Long tenantId,
+                        @Param("status") Integer status,
+                        @Param("type") Integer type);
+
     // ============= HANDOVER_LOCK 换届熔断 =============
 
     /**

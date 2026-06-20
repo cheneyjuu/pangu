@@ -1,5 +1,8 @@
 package com.pangu.domain.repository;
 
+import com.pangu.domain.common.Page;
+import com.pangu.domain.model.voting.SubjectStatus;
+import com.pangu.domain.model.voting.SubjectType;
 import com.pangu.domain.model.voting.VotingSubject;
 
 import java.time.Instant;
@@ -78,6 +81,29 @@ public interface VotingSubjectRepository {
      * @param offset      偏移
      */
     List<VotingSubject> findVisibleForOwner(Long tenantId, List<Long> buildingIds, int limit, int offset);
+
+    /**
+     * B/G 管理端议题分页查询（M4-1）。
+     *
+     * <p>过滤规则：
+     * <ol>
+     *   <li>{@code tenant_id = #{tenantId}}（租户隔离，恒在）；</li>
+     *   <li>{@code status}：非空时按状态精确筛选，{@code null} 表示不限状态；</li>
+     *   <li>{@code type}：非空时按议题类型精确筛选，{@code null} 表示不限类型。</li>
+     * </ol>
+     *
+     * <p>与 {@link #findVisibleForOwner} 的区别：管理端列表覆盖全部状态（含 DRAFT/CANCELLED），
+     * 受众是社区级及以上角色，安全边界由租户 + endpoint 的 {@code @PreAuthorize} 共同保证，
+     * 不经业主 ABAC scope 过滤。
+     *
+     * @param tenantId 租户 ID（必填）
+     * @param status   状态筛选，{@code null} 不限
+     * @param type     类型筛选，{@code null} 不限
+     * @param page     页码（1-based）
+     * @param size     页大小
+     * @return 当前页议题 + 满足条件的总条数
+     */
+    Page<VotingSubject> pageForAdmin(Long tenantId, SubjectStatus status, SubjectType type, int page, int size);
 
     // ============= HANDOVER_LOCK 换届熔断 =============
 
