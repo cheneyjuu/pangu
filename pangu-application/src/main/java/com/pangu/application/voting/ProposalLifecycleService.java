@@ -1,5 +1,6 @@
 package com.pangu.application.voting;
 
+import com.pangu.application.handover.HandoverCircuitBreaker;
 import com.pangu.application.voting.command.CancelSubjectCommand;
 import com.pangu.application.voting.command.ProposeSubjectCommand;
 import com.pangu.application.voting.command.PublishSubjectCommand;
@@ -35,6 +36,7 @@ public class ProposalLifecycleService {
 
     private final VotingSubjectRepository subjectRepository;
     private final OwnerPropertyVotingRepository ownerPropertyVotingRepository;
+    private final HandoverCircuitBreaker handoverCircuitBreaker;
 
     /**
      * 立项（DRAFT 写入）。M3-3 起放开 ELECTION：要求携带 maxWinners >= 1。
@@ -67,6 +69,14 @@ public class ProposalLifecycleService {
         // maxWinners 仅 ELECTION 透传落库（GENERAL/MAJOR 为 null，trigger 13 不约束非 ELECTION）
         if (cmd.subjectType() == SubjectType.ELECTION) {
             draft.setMaxWinners(cmd.maxWinners());
+        }
+        // 换届熔断：换届选举在途期间冻结新 GENERAL/MAJOR 立项（放行 ELECTION，避免下一届换届自我死锁）
+        if (cmd.subjectType() != SubjectType.ELECTION) {
+            handoverCircuitBreaker.activeElectionSubjectId(cmd.tenantId()).ifPresent(electionId -> {
+                throw new VotingApplicationException(
+                        VotingApplicationException.Reason.PROPOSE_FROZEN_HANDOVER,
+                        "换届选举进行中，新议题立项已熔断 electionSubjectId=" + electionId);
+            });
         }
         VotingSubject persisted = subjectRepository.insert(draft);
         log.info("Subject proposed subjectId={} type={} scope={} maxWinners={} proposedByUserId={}",
