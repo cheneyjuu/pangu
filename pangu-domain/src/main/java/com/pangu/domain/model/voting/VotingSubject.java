@@ -78,6 +78,17 @@ public class VotingSubject {
     private String cancelReason;
 
     /**
+     * 应选名额（仅 ELECTION 必填，>=1；GENERAL/MAJOR 为 null）。
+     *
+     * <p>本字段是「持久化透传载体」：propose 时 application 从 command 写入，
+     * {@code toRow} 直接落 t_voting_subject.max_winners；{@code toAggregate} 对
+     * ELECTION 构造 {@link ElectionSubject} 时回填 {@code maxWinners}。基类持有
+     * 该字段，避免 {@code VotingSubjectActions.open} 只产基类、却要在 toRow 强转
+     * ElectionSubject 才能取值的分叉。
+     */
+    private Integer maxWinners;
+
+    /**
      * @return 安全获取 partyRatioFloor，未设置时返回默认 0.50
      */
     public BigDecimal getEffectivePartyRatioFloor() {

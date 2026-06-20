@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pangu.infrastructure.persistence.mapper.ElectionCandidateMapper">
+
+    <resultMap id="ElectionCandidateRowMap"
+               type="com.pangu.infrastructure.persistence.entity.ElectionCandidateRow">
+        <id property="candidateId" column="candidate_id"/>
+        <result property="subjectId" column="subject_id"/>
+        <result property="uid" column="uid"/>
+        <result property="name" column="name"/>
+        <result property="isPartyMember" column="is_party_member"/>
+        <result property="qualificationStatus" column="qualification_status"/>
+        <result property="createTime" column="create_time"/>
+    </resultMap>
+
+    <sql id="all_columns">
+        candidate_id, subject_id, uid, name, is_party_member, qualification_status, create_time
+    </sql>
+
+    <!-- 提名写入：status=PENDING_REVIEW(1)，create_time 由 DB DEFAULT 兜底。 -->
+    <insert id="insertCandidate" useGeneratedKeys="true" keyProperty="candidateId" keyColumn="candidate_id">
+        INSERT INTO t_election_candidate (
+            subject_id, uid, name, is_party_member, qualification_status
+        ) VALUES (
+            #{subjectId}, #{uid}, #{name}, #{isPartyMember}, 1
+        )
+    </insert>
+
+    <!-- 资格审查：仅 PENDING_REVIEW(1) → newStatus；条件防并发重复审查。 -->
+    <update id="updateQualification">
+        UPDATE t_election_candidate
+        SET qualification_status = #{newStatus}
+        WHERE candidate_id = #{candidateId}
+          AND qualification_status = 1
+    </update>
+
+    <select id="selectById" resultMap="ElectionCandidateRowMap">
+        SELECT <include refid="all_columns"/>
+        FROM t_election_candidate
+        WHERE candidate_id = #{candidateId}
+    </select>
+
+    <select id="selectBySubject" resultMap="ElectionCandidateRowMap">
+        SELECT <include refid="all_columns"/>
+        FROM t_election_candidate
+        WHERE subject_id = #{subjectId}
+        ORDER BY candidate_id ASC
+    </select>
+
+    <select id="selectApprovedBySubject" resultMap="ElectionCandidateRowMap">
+        SELECT <include refid="all_columns"/>
+        FROM t_election_candidate
+        WHERE subject_id = #{subjectId}
+          AND qualification_status = 2
+        ORDER BY candidate_id ASC
+    </select>
+
+    <select id="countSupportByOpid" resultType="long">
+        SELECT COUNT(1)
+        FROM t_vote_item
+        WHERE subject_id = #{subjectId}
+          AND opid = #{opid}
+          AND choice = 1
+    </select>
+
+</mapper>

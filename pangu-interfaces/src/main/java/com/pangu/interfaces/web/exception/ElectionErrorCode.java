@@ -65,6 +65,16 @@ public enum ElectionErrorCode implements ErrorCode {
     OPID_OUT_OF_SCOPE(40332, "该房产不在本议题表决范围内", 403, ErrorType.BIZ, false),
     VOTE_ALREADY_CAST(40930, "您已对该议题投过票，无法重复投票", 409, ErrorType.BIZ, false),
 
+    // ============ M3-3 ELECTION 选举全流程（VALIDATION/BUSINESS） ============
+    ELECTION_MAX_WINNERS_REQUIRED(40940, "选举立项必须指定应选名额（不少于 1）", 409, ErrorType.BIZ, false),
+    ELECTION_TARGET_REQUIRED(40941, "选举投票必须指定候选人", 409, ErrorType.BIZ, false),
+    CANDIDATE_NOT_FOUND(40942, "候选人不存在", 404, ErrorType.BIZ, false),
+    CANDIDATE_NOT_VOTABLE(40943, "候选人不可被投票（不属于本议题或资格未通过）", 409, ErrorType.BIZ, false),
+    CANDIDATE_ALREADY_NOMINATED(40944, "该业主已被提名为本议题候选人", 409, ErrorType.BIZ, false),
+    CANDIDATE_REVIEW_CONFLICT(40945, "候选人资格已被审查或状态不允许该操作", 409, ErrorType.BIZ, false),
+    VOTE_LIMIT_EXCEEDED(40946, "已投满本次选举的应选名额", 409, ErrorType.BIZ, false),
+    SUBJECT_NOT_NOMINATABLE(40947, "议题当前状态不允许增改候选人名单", 409, ErrorType.BIZ, false),
+
     // ============ 系统/外部依赖（SYSTEM / 500） ============
     DENOMINATOR_RESOLVE_FAILED(50010, "分母快照生成失败，请稍后重试", 500, ErrorType.SYSTEM, true),
     ATTESTATION_FAILED(50011, "司法链存证失败，请稍后重试", 500, ErrorType.SYSTEM, true),

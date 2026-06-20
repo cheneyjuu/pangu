@@ -5,7 +5,6 @@ import com.pangu.application.voting.VotingApplicationException;
 import com.pangu.application.voting.command.CancelSubjectCommand;
 import com.pangu.application.voting.command.ProposeSubjectCommand;
 import com.pangu.application.voting.command.PublishSubjectCommand;
-import com.pangu.domain.model.voting.SubjectType;
 import com.pangu.domain.model.voting.VotingSubject;
 import com.pangu.domain.repository.VotingSubjectRepository;
 import com.pangu.interfaces.security.SecurityUtils;
@@ -38,7 +37,8 @@ import org.springframework.web.bind.annotation.RestController;
  *   <li>{@code GET  /api/v1/voting-subjects/{id}}    —— {@code voting:subject:audit}（管理端工作台）</li>
  * </ul>
  *
- * <p>SubjectType=ELECTION 在 service 层兜底拒绝；endpoint 上的 @PreAuthorize 只做粗筛。
+ * <p>M3-3 起 SubjectType=ELECTION 放开（须携带 maxWinners）；endpoint 上的 @PreAuthorize 只做粗筛，
+ * 类型与角色的最终匹配由 service 层依据 {@code voting:subject:create} 角色绑定判定。
  */
 @RestController
 @RequestMapping("/api/v1")
@@ -53,12 +53,6 @@ public class SubjectAdminController extends BaseController {
     @PreAuthorize("hasAuthority('voting:subject:create')")
     public ResponseEntity<Result<AdminSubjectResponse>> propose(
             @Valid @RequestBody ProposeRequest request) {
-        if (request.subjectType() == SubjectType.ELECTION) {
-            // 一致性兜底：service 层也会再次拒绝
-            throw new VotingApplicationException(
-                    VotingApplicationException.Reason.SUBJECT_TYPE_NOT_SUPPORTED,
-                    "ELECTION 类型立项暂不支持，将在 M3-3 放开");
-        }
         ProposeSubjectCommand cmd = new ProposeSubjectCommand(
                 requireTenantId(),
                 request.subjectType(),
@@ -68,7 +62,8 @@ public class SubjectAdminController extends BaseController {
                 request.voteStartAt(),
                 request.voteEndAt(),
                 requireUserId(),
-                request.partyRatioFloor());
+                request.partyRatioFloor(),
+                request.maxWinners());
         VotingSubject draft = proposalLifecycleService.propose(cmd);
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(success("议题已草稿落库，待公示", AdminSubjectResponse.from(draft)));

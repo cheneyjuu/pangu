@@ -1,9 +1,11 @@
 package com.pangu.interfaces.web.controller;
 
+import com.pangu.application.voting.ElectionCandidateService;
 import com.pangu.application.voting.ProposalLifecycleService;
 import com.pangu.application.voting.VoteSubmissionService;
 import com.pangu.application.voting.VotingApplicationException;
 import com.pangu.application.voting.command.CastVoteCommand;
+import com.pangu.domain.model.voting.Candidate;
 import com.pangu.domain.model.voting.SubjectStatus;
 import com.pangu.domain.model.voting.VoteItem;
 import com.pangu.domain.model.voting.VotingScope;
@@ -12,6 +14,7 @@ import com.pangu.domain.repository.OwnerPropertyVotingRepository;
 import com.pangu.domain.repository.VoteItemRepository;
 import com.pangu.domain.repository.VotingSubjectRepository;
 import com.pangu.interfaces.security.SecurityUtils;
+import com.pangu.interfaces.web.controller.dto.voting.CandidateResponse;
 import com.pangu.interfaces.web.controller.dto.voting.CastVoteRequest;
 import com.pangu.interfaces.web.controller.dto.voting.OwnerSubjectResponse;
 import com.pangu.interfaces.web.controller.dto.voting.VoteAcknowledgement;
@@ -51,6 +54,7 @@ public class OwnerVotingController extends BaseController {
     private final VotingSubjectRepository votingSubjectRepository;
     private final VoteItemRepository voteItemRepository;
     private final OwnerPropertyVotingRepository ownerPropertyVotingRepository;
+    private final ElectionCandidateService electionCandidateService;
 
     /** "我的议题"列表：按 building 范围 + 状态过滤。 */
     @GetMapping("/voting-subjects")
@@ -76,37 +80,30 @@ public class OwnerVotingController extends BaseController {
             @PathVariable("subjectId") Long subjectId) {
         Long uid = requireUid();
         Long tenantId = requireTenantId();
-        VotingSubject subject = votingSubjectRepository.findById(subjectId)
-                .orElseThrow(() -> new VotingApplicationException(
-                        VotingApplicationException.Reason.SUBJECT_NOT_FOUND,
-                        "议题不存在 subjectId=" + subjectId));
-        if (!subject.getTenantId().equals(tenantId)) {
-            // 与"不存在"统一处理，避免暴露跨租户存在性
-            throw new VotingApplicationException(
-                    VotingApplicationException.Reason.SUBJECT_NOT_FOUND,
-                    "议题不在当前租户范围内 subjectId=" + subjectId);
-        }
-        SubjectStatus status = subject.getStatus();
-        if (status != SubjectStatus.PUBLISHED && status != SubjectStatus.VOTING
-                && status != SubjectStatus.CLOSED && status != SubjectStatus.SETTLED) {
-            throw new VotingApplicationException(
-                    VotingApplicationException.Reason.SUBJECT_NOT_FOUND,
-                    "议题尚未公示或已撤回 subjectId=" + subjectId);
-        }
-        if (subject.getScope() == VotingScope.BUILDING) {
-            List<Long> buildingIds = ownerPropertyVotingRepository.findBuildingIdsByUid(uid, tenantId);
-            if (!buildingIds.contains(subject.getScopeReferenceId())) {
-                throw new VotingApplicationException(
-                        VotingApplicationException.Reason.SUBJECT_NOT_FOUND,
-                        "议题不在业主所属楼栋范围内 subjectId=" + subjectId);
-            }
-        }
+        VotingSubject subject = assertSubjectVisibleForOwner(subjectId, uid, tenantId);
         boolean voted = voteItemRepository.findValidVotes(subjectId).stream()
                 .map(VoteItem::getUid)
                 .anyMatch(uid::equals);
         return success(Map.of(
                 "subject", OwnerSubjectResponse.from(subject),
                 "voted", voted));
+    }
+
+    /**
+     * "我的议题"可投候选人列表（仅 ELECTION，且仅返回 APPROVED 候选人）。
+     *
+     * <p>业主投票前查看可投候选人。可见性校验复用 {@link #findMyDetail} 的口径
+     * （tenant 匹配 + 状态可见 + scope 范围），不暴露未通过资格审查的候选人。
+     */
+    @GetMapping("/voting-subjects/{subjectId}/candidates")
+    @PreAuthorize("isAuthenticated()")
+    public Result<List<CandidateResponse>> listCandidatesForOwner(
+            @PathVariable("subjectId") Long subjectId) {
+        Long uid = requireUid();
+        Long tenantId = requireTenantId();
+        assertSubjectVisibleForOwner(subjectId, uid, tenantId);
+        List<Candidate> candidates = electionCandidateService.listApprovedCandidates(subjectId);
+        return success(candidates.stream().map(CandidateResponse::from).toList());
     }
 
     /** 业主投票提交。返回 voteId + voted=true，刻意不返回当前票数。 */
@@ -126,6 +123,38 @@ public class OwnerVotingController extends BaseController {
         long voteId = voteSubmissionService.cast(cmd);
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(success("投票成功", VoteAcknowledgement.of(voteId)));
+    }
+
+    /**
+     * 业主视角议题可见性校验：tenant 匹配 + 状态 ∈ {PUBLISHED, VOTING, CLOSED, SETTLED}
+     * + scope=COMMUNITY 或业主名下楼栋。所有失败统一归为 SUBJECT_NOT_FOUND，避免暴露跨租户存在性。
+     */
+    private VotingSubject assertSubjectVisibleForOwner(Long subjectId, Long uid, Long tenantId) {
+        VotingSubject subject = votingSubjectRepository.findById(subjectId)
+                .orElseThrow(() -> new VotingApplicationException(
+                        VotingApplicationException.Reason.SUBJECT_NOT_FOUND,
+                        "议题不存在 subjectId=" + subjectId));
+        if (!subject.getTenantId().equals(tenantId)) {
+            throw new VotingApplicationException(
+                    VotingApplicationException.Reason.SUBJECT_NOT_FOUND,
+                    "议题不在当前租户范围内 subjectId=" + subjectId);
+        }
+        SubjectStatus status = subject.getStatus();
+        if (status != SubjectStatus.PUBLISHED && status != SubjectStatus.VOTING
+                && status != SubjectStatus.CLOSED && status != SubjectStatus.SETTLED) {
+            throw new VotingApplicationException(
+                    VotingApplicationException.Reason.SUBJECT_NOT_FOUND,
+                    "议题尚未公示或已撤回 subjectId=" + subjectId);
+        }
+        if (subject.getScope() == VotingScope.BUILDING) {
+            List<Long> buildingIds = ownerPropertyVotingRepository.findBuildingIdsByUid(uid, tenantId);
+            if (!buildingIds.contains(subject.getScopeReferenceId())) {
+                throw new VotingApplicationException(
+                        VotingApplicationException.Reason.SUBJECT_NOT_FOUND,
+                        "议题不在业主所属楼栋范围内 subjectId=" + subjectId);
+            }
+        }
+        return subject;
     }
 
     private Long requireUid() {

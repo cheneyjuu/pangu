@@ -1,5 +1,6 @@
 package com.pangu.infrastructure.repository;
 
+import com.pangu.domain.model.voting.ElectionSubject;
 import com.pangu.domain.model.voting.SubjectStatus;
 import com.pangu.domain.model.voting.SubjectType;
 import com.pangu.domain.model.voting.VotingScope;
@@ -98,16 +99,41 @@ public class VotingSubjectRepositoryImpl implements VotingSubjectRepository {
         row.setVoteEndAt(s.getVoteEndAt());
         row.setPartyRatioFloor(s.getPartyRatioFloor());
         row.setProposedByUserId(s.getProposedByUserId());
-        // settled_at / publish_at / max_winners / cancelled_* 由 DB / 业务流程后续维护，不在 insert 中显式塞值
+        row.setMaxWinners(s.getMaxWinners());
+        // settled_at / publish_at / cancelled_* 由 DB / 业务流程后续维护，不在 insert 中显式塞值
         return row;
     }
 
     private VotingSubject toAggregate(VotingSubjectRow r) {
+        SubjectType type = r.getSubjectType() == null ? null : SubjectType.fromDbValue(r.getSubjectType());
+        if (type == SubjectType.ELECTION) {
+            // ELECTION 构造 ElectionSubject：携带 maxWinners，候选人 list 留空，
+            // 由 DefaultVotingEngineRouter 在 settle 前回填 APPROVED 候选人。
+            return ElectionSubject.builder()
+                    .subjectId(r.getSubjectId())
+                    .tenantId(r.getTenantId())
+                    .title(r.getTitle())
+                    .subjectType(type)
+                    .status(r.getStatus() == null ? null : SubjectStatus.fromDbValue(r.getStatus()))
+                    .scope(r.getScope() == null ? VotingScope.COMMUNITY : VotingScope.fromDbValue(r.getScope()))
+                    .scopeReferenceId(r.getScopeReferenceId())
+                    .partyRatioFloor(r.getPartyRatioFloor())
+                    .version(r.getVersion())
+                    .voteStartAt(r.getVoteStartAt())
+                    .voteEndAt(r.getVoteEndAt())
+                    .proposedByUserId(r.getProposedByUserId())
+                    .cancelledAt(r.getCancelledAt())
+                    .cancelledByUserId(r.getCancelledByUserId())
+                    .cancelReason(r.getCancelReason())
+                    .maxWinners(r.getMaxWinners())
+                    .candidates(Collections.emptyList())
+                    .build();
+        }
         return VotingSubject.builder()
                 .subjectId(r.getSubjectId())
                 .tenantId(r.getTenantId())
                 .title(r.getTitle())
-                .subjectType(r.getSubjectType() == null ? null : SubjectType.fromDbValue(r.getSubjectType()))
+                .subjectType(type)
                 .status(r.getStatus() == null ? null : SubjectStatus.fromDbValue(r.getStatus()))
                 .scope(r.getScope() == null ? VotingScope.COMMUNITY : VotingScope.fromDbValue(r.getScope()))
                 .scopeReferenceId(r.getScopeReferenceId())
@@ -119,6 +145,7 @@ public class VotingSubjectRepositoryImpl implements VotingSubjectRepository {
                 .cancelledAt(r.getCancelledAt())
                 .cancelledByUserId(r.getCancelledByUserId())
                 .cancelReason(r.getCancelReason())
+                .maxWinners(r.getMaxWinners())
                 .build();
     }
 }

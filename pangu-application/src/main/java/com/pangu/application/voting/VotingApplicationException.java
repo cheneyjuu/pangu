@@ -37,7 +37,25 @@ public class VotingApplicationException extends RuntimeException {
         /** 撤回行为被拒（DRAFT 阶段非本人 / PUBLISHED 阶段非政府 / VOTING+ 一律拒）。 */
         CANCEL_FORBIDDEN,
         /** 议题状态在写入并发下被推翻（cancel/publish 乐观锁失败）。 */
-        CONCURRENT_LIFECYCLE_MODIFICATION
+        CONCURRENT_LIFECYCLE_MODIFICATION,
+
+        // ========== M3-3 ELECTION 选举全流程新增 ==========
+        /** ELECTION 立项未携带 maxWinners（应选名额）或 < 1。 */
+        ELECTION_MAX_WINNERS_REQUIRED,
+        /** ELECTION 投票缺 candidateId（targetId）。 */
+        ELECTION_TARGET_REQUIRED,
+        /** 候选人不存在。 */
+        CANDIDATE_NOT_FOUND,
+        /** 候选人不可被投票（不属于本议题 / 非 APPROVED）。 */
+        CANDIDATE_NOT_VOTABLE,
+        /** 同一议题内重复提名同一 uid。 */
+        CANDIDATE_ALREADY_NOMINATED,
+        /** 资格审查并发冲突（候选人已非 PENDING_REVIEW）或非法状态迁移。 */
+        CANDIDATE_REVIEW_CONFLICT,
+        /** 该 opid 在本选举已投满 maxWinners 票。 */
+        VOTE_LIMIT_EXCEEDED,
+        /** 议题不在可提名状态（仅 DRAFT/PUBLISHED 允许增改候选人名单）。 */
+        SUBJECT_NOT_NOMINATABLE
     }
 
     private final Reason reason;

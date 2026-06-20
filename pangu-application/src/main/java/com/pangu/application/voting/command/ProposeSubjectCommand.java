@@ -18,6 +18,7 @@ import java.time.Instant;
  * @param voteEndAt        投票截止时间
  * @param proposedByUserId 发起人 sys_user.user_id（service 校验 = 当前登录 user）
  * @param partyRatioFloor  党员比例下限（可空；MAJOR 默认 0.50，由 application 写入）
+ * @param maxWinners       应选名额（仅 ELECTION 必填且 >=1；GENERAL/MAJOR 传 null）
  */
 public record ProposeSubjectCommand(
         Long tenantId,
@@ -28,6 +29,7 @@ public record ProposeSubjectCommand(
         Instant voteStartAt,
         Instant voteEndAt,
         Long proposedByUserId,
-        BigDecimal partyRatioFloor
+        BigDecimal partyRatioFloor,
+        Integer maxWinners
 ) {
 }
