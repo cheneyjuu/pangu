@@ -21,7 +21,7 @@ public class ElectionCandidateRow {
     /** 0-非党员, 1-党员。 */
     private Integer isPartyMember;
 
-    /** 1-PENDING_REVIEW, 2-APPROVED, 3-REJECTED, 4-WITHDRAWN。 */
+    /** 1-PENDING_PARTY_REVIEW, 2-APPROVED, 3-REJECTED, 4-WITHDRAWN, 5-PENDING_COMMITTEE_REVIEW。 */
     private Integer qualificationStatus;
 
     private Instant createTime;

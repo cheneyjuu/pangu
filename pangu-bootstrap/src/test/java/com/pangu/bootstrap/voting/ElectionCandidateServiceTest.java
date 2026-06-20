@@ -3,6 +3,7 @@ package com.pangu.bootstrap.voting;
 import com.pangu.application.voting.ElectionCandidateService;
 import com.pangu.application.voting.VotingApplicationException;
 import com.pangu.application.voting.command.NominateCandidateCommand;
+import com.pangu.application.voting.command.PartyReviewCandidateCommand;
 import com.pangu.application.voting.command.ReviewCandidateCommand;
 import com.pangu.domain.model.voting.Candidate;
 import com.pangu.domain.model.voting.CandidateStatus;
@@ -25,7 +26,6 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -36,12 +36,15 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * {@link ElectionCandidateService} 提名 / 资格审查 编排单元测试（Mockito）。
+ * {@link ElectionCandidateService} 提名 / 两段资格审查 编排单元测试（Mockito）。
  *
  * <p>覆盖：
  * <ul>
  *   <li>提名：议题不存在 / 非 ELECTION / 非 DRAFT&PUBLISHED / 跨租户 / 重复 → ALREADY_NOMINATED / 正向；</li>
- *   <li>审查：候选人不存在 / 终态再审冲突 / 乐观更新 0 行冲突 / 正向 approve。</li>
+ *   <li>党组前置审查 partyReview：PENDING_PARTY_REVIEW → PENDING_COMMITTEE_REVIEW / REJECTED；
+ *       对已过前置审查的候选人再前置审查 → 冲突；</li>
+ *   <li>居委会资格审查 review：候选人不存在 / 终态再审冲突 / 乐观更新 0 行冲突 /
+ *       正向 approve(5→2) / reject(5→3) / 跳过党组前置审查直接资格通过 → 冲突。</li>
  * </ul>
  */
 @ExtendWith(MockitoExtension.class)
@@ -61,6 +64,11 @@ public class ElectionCandidateServiceTest {
     private static final Long UID = 70001L;
     private static final Long OPERATOR = 800101L;
 
+    private static final int PARTY = CandidateStatus.PENDING_PARTY_REVIEW.getDbValue();      // 1
+    private static final int COMMITTEE = CandidateStatus.PENDING_COMMITTEE_REVIEW.getDbValue(); // 5
+    private static final int APPROVED = CandidateStatus.APPROVED.getDbValue();               // 2
+    private static final int REJECTED = CandidateStatus.REJECTED.getDbValue();               // 3
+
     private VotingSubject electionSubject(SubjectStatus status) {
         return VotingSubject.builder()
                 .subjectId(SUBJECT_ID)
@@ -78,6 +86,17 @@ public class ElectionCandidateServiceTest {
 
     private NominateCandidateCommand nominateCmd() {
         return new NominateCandidateCommand(SUBJECT_ID, UID, "张三", true, TENANT, OPERATOR);
+    }
+
+    private Candidate candidate(CandidateStatus status) {
+        return Candidate.builder()
+                .candidateId(555L)
+                .subjectId(SUBJECT_ID)
+                .uid(UID)
+                .name("张三")
+                .partyMember(true)
+                .qualificationStatus(status)
+                .build();
     }
 
     // ===== nominate =====
@@ -139,18 +158,46 @@ public class ElectionCandidateServiceTest {
         verify(electionCandidateRegistry).nominate(eq(SUBJECT_ID), eq(UID), eq("张三"), eq(true));
     }
 
-    // ===== review =====
+    // ===== partyReview（党组书记前置审查：1 → 5 / 3）=====
 
-    private Candidate pendingCandidate() {
-        return Candidate.builder()
-                .candidateId(555L)
-                .subjectId(SUBJECT_ID)
-                .uid(UID)
-                .name("张三")
-                .partyMember(true)
-                .qualificationStatus(CandidateStatus.PENDING_REVIEW)
-                .build();
+    @Test
+    public void partyReview_approve_pendingPartyToCommittee() {
+        when(electionCandidateRegistry.findById(555L))
+                .thenReturn(Optional.of(candidate(CandidateStatus.PENDING_PARTY_REVIEW)));
+        when(electionCandidateRegistry.updateQualification(eq(555L), eq(PARTY), eq(COMMITTEE))).thenReturn(1);
+        Candidate result = service.partyReview(new PartyReviewCandidateCommand(555L, true, OPERATOR));
+        assertEquals(CandidateStatus.PENDING_COMMITTEE_REVIEW, result.getQualificationStatus());
+        verify(electionCandidateRegistry).updateQualification(eq(555L), eq(PARTY), eq(COMMITTEE));
     }
+
+    @Test
+    public void partyReview_reject_pendingPartyToRejected() {
+        when(electionCandidateRegistry.findById(555L))
+                .thenReturn(Optional.of(candidate(CandidateStatus.PENDING_PARTY_REVIEW)));
+        when(electionCandidateRegistry.updateQualification(eq(555L), eq(PARTY), eq(REJECTED))).thenReturn(1);
+        Candidate result = service.partyReview(new PartyReviewCandidateCommand(555L, false, OPERATOR));
+        assertEquals(CandidateStatus.REJECTED, result.getQualificationStatus());
+    }
+
+    @Test
+    public void partyReview_alreadyAdvancedToCommittee_conflict() {
+        when(electionCandidateRegistry.findById(555L))
+                .thenReturn(Optional.of(candidate(CandidateStatus.PENDING_COMMITTEE_REVIEW)));
+        VotingApplicationException ex = assertThrows(VotingApplicationException.class,
+                () -> service.partyReview(new PartyReviewCandidateCommand(555L, true, OPERATOR)));
+        assertEquals(VotingApplicationException.Reason.CANDIDATE_REVIEW_CONFLICT, ex.getReason());
+        verify(electionCandidateRegistry, never()).updateQualification(anyLong(), anyInt(), anyInt());
+    }
+
+    @Test
+    public void partyReview_candidateNotFound() {
+        when(electionCandidateRegistry.findById(555L)).thenReturn(Optional.empty());
+        VotingApplicationException ex = assertThrows(VotingApplicationException.class,
+                () -> service.partyReview(new PartyReviewCandidateCommand(555L, true, OPERATOR)));
+        assertEquals(VotingApplicationException.Reason.CANDIDATE_NOT_FOUND, ex.getReason());
+    }
+
+    // ===== review（居委会资格审查：5 → 2 / 3）=====
 
     @Test
     public void review_candidateNotFound() {
@@ -162,20 +209,30 @@ public class ElectionCandidateServiceTest {
 
     @Test
     public void review_terminalStateConflict() {
-        Candidate c = pendingCandidate();
-        c.setQualificationStatus(CandidateStatus.APPROVED);
-        when(electionCandidateRegistry.findById(555L)).thenReturn(Optional.of(c));
+        when(electionCandidateRegistry.findById(555L))
+                .thenReturn(Optional.of(candidate(CandidateStatus.APPROVED)));
         VotingApplicationException ex = assertThrows(VotingApplicationException.class,
                 () -> service.review(new ReviewCandidateCommand(555L, true, OPERATOR)));
         assertEquals(VotingApplicationException.Reason.CANDIDATE_REVIEW_CONFLICT, ex.getReason());
-        verify(electionCandidateRegistry, never()).updateQualification(anyLong(), anyInt());
+        verify(electionCandidateRegistry, never()).updateQualification(anyLong(), anyInt(), anyInt());
+    }
+
+    @Test
+    public void review_skipPartyPreReview_conflict() {
+        // 候选人仍在党组前置审查阶段（未过前置审查），直接居委会资格通过应被状态机拒绝。
+        when(electionCandidateRegistry.findById(555L))
+                .thenReturn(Optional.of(candidate(CandidateStatus.PENDING_PARTY_REVIEW)));
+        VotingApplicationException ex = assertThrows(VotingApplicationException.class,
+                () -> service.review(new ReviewCandidateCommand(555L, true, OPERATOR)));
+        assertEquals(VotingApplicationException.Reason.CANDIDATE_REVIEW_CONFLICT, ex.getReason());
+        verify(electionCandidateRegistry, never()).updateQualification(anyLong(), anyInt(), anyInt());
     }
 
     @Test
     public void review_optimisticUpdateZeroRows_conflict() {
-        when(electionCandidateRegistry.findById(555L)).thenReturn(Optional.of(pendingCandidate()));
-        when(electionCandidateRegistry.updateQualification(eq(555L), eq(CandidateStatus.APPROVED.getDbValue())))
-                .thenReturn(0);
+        when(electionCandidateRegistry.findById(555L))
+                .thenReturn(Optional.of(candidate(CandidateStatus.PENDING_COMMITTEE_REVIEW)));
+        when(electionCandidateRegistry.updateQualification(eq(555L), eq(COMMITTEE), eq(APPROVED))).thenReturn(0);
         VotingApplicationException ex = assertThrows(VotingApplicationException.class,
                 () -> service.review(new ReviewCandidateCommand(555L, true, OPERATOR)));
         assertEquals(VotingApplicationException.Reason.CANDIDATE_REVIEW_CONFLICT, ex.getReason());
@@ -183,19 +240,19 @@ public class ElectionCandidateServiceTest {
 
     @Test
     public void review_approveHappyPath() {
-        when(electionCandidateRegistry.findById(555L)).thenReturn(Optional.of(pendingCandidate()));
-        when(electionCandidateRegistry.updateQualification(eq(555L), eq(CandidateStatus.APPROVED.getDbValue())))
-                .thenReturn(1);
+        when(electionCandidateRegistry.findById(555L))
+                .thenReturn(Optional.of(candidate(CandidateStatus.PENDING_COMMITTEE_REVIEW)));
+        when(electionCandidateRegistry.updateQualification(eq(555L), eq(COMMITTEE), eq(APPROVED))).thenReturn(1);
         Candidate result = service.review(new ReviewCandidateCommand(555L, true, OPERATOR));
         assertEquals(CandidateStatus.APPROVED, result.getQualificationStatus());
-        verify(electionCandidateRegistry).updateQualification(eq(555L), eq(CandidateStatus.APPROVED.getDbValue()));
+        verify(electionCandidateRegistry).updateQualification(eq(555L), eq(COMMITTEE), eq(APPROVED));
     }
 
     @Test
     public void review_rejectHappyPath() {
-        when(electionCandidateRegistry.findById(555L)).thenReturn(Optional.of(pendingCandidate()));
-        when(electionCandidateRegistry.updateQualification(eq(555L), eq(CandidateStatus.REJECTED.getDbValue())))
-                .thenReturn(1);
+        when(electionCandidateRegistry.findById(555L))
+                .thenReturn(Optional.of(candidate(CandidateStatus.PENDING_COMMITTEE_REVIEW)));
+        when(electionCandidateRegistry.updateQualification(eq(555L), eq(COMMITTEE), eq(REJECTED))).thenReturn(1);
         Candidate result = service.review(new ReviewCandidateCommand(555L, false, OPERATOR));
         assertEquals(CandidateStatus.REJECTED, result.getQualificationStatus());
     }

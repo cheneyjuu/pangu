@@ -50,7 +50,7 @@ public class VotingApplicationException extends RuntimeException {
         CANDIDATE_NOT_VOTABLE,
         /** 同一议题内重复提名同一 uid。 */
         CANDIDATE_ALREADY_NOMINATED,
-        /** 资格审查并发冲突（候选人已非 PENDING_REVIEW）或非法状态迁移。 */
+        /** 资格审查并发冲突（候选人已不在期望的审查阶段）或非法状态迁移。 */
         CANDIDATE_REVIEW_CONFLICT,
         /** 该 opid 在本选举已投满 maxWinners 票。 */
         VOTE_LIMIT_EXCEEDED,

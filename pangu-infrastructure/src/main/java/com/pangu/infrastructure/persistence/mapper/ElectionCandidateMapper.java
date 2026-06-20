@@ -14,14 +14,16 @@ import java.util.List;
 @Mapper
 public interface ElectionCandidateMapper {
 
-    /** 提名写入（status=PENDING_REVIEW）。回填自增 candidate_id 到 row。 */
+    /** 提名写入（status=PENDING_PARTY_REVIEW(1)）。回填自增 candidate_id 到 row。 */
     int insertCandidate(ElectionCandidateRow row);
 
     /**
-     * 资格审查：仅当前状态仍为 PENDING_REVIEW(1) 时生效，带条件防并发重复审查。
-     * @return affected rows（0 表示已被审查/状态非 PENDING_REVIEW）
+     * 资格审查：阶段化乐观锁，仅当前状态仍为 {@code expectedFrom} 时生效，
+     * 既防并发重复审查，又兜底「跳过党组前置审查直接资格通过」。
+     * @return affected rows（0 表示已被审查 / 当前状态非 expectedFrom）
      */
     int updateQualification(@Param("candidateId") Long candidateId,
+                            @Param("expectedFrom") int expectedFrom,
                             @Param("newStatus") int newStatus);
 
     ElectionCandidateRow selectById(@Param("candidateId") Long candidateId);

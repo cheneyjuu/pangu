@@ -3,6 +3,7 @@ package com.pangu.interfaces.web.controller;
 import com.pangu.application.voting.ElectionCandidateService;
 import com.pangu.application.voting.VotingApplicationException;
 import com.pangu.application.voting.command.NominateCandidateCommand;
+import com.pangu.application.voting.command.PartyReviewCandidateCommand;
 import com.pangu.application.voting.command.ReviewCandidateCommand;
 import com.pangu.domain.model.voting.Candidate;
 import com.pangu.interfaces.security.SecurityUtils;
@@ -27,12 +28,14 @@ import java.util.Map;
 /**
  * 业委会选举候选人管理端点（M3-3 引入）。
  *
- * <p>权限路由（沿用 V1.4 已种子化权限）：
+ * <p>权限路由（V1.4 既有 + 本期 V3.2 新增 candidate:review:party）：
  * <ul>
  *   <li>{@code POST /api/v1/voting-subjects/{id}/candidates} —— {@code candidate:nominate}
  *       （GB 端：网格员 / 业委会筹备组提名候选人）</li>
+ *   <li>{@code POST /api/v1/candidates/{candidateId}/party-review} —— {@code candidate:review:party}
+ *       （党组书记前置审查：政治/资格初筛，PENDING_PARTY_REVIEW → PENDING_COMMITTEE_REVIEW/REJECTED）</li>
  *   <li>{@code POST /api/v1/candidates/{candidateId}/review} —— {@code candidate:approve}
- *       （G 端：街道办 / 居委会资格审查）</li>
+ *       （居委会资格审查：PENDING_COMMITTEE_REVIEW → APPROVED/REJECTED）</li>
  *   <li>{@code GET  /api/v1/voting-subjects/{id}/candidates} —— {@code voting:subject:audit}
  *       （管理端候选人列表，含所有状态）</li>
  * </ul>
@@ -47,7 +50,7 @@ public class ElectionCandidateController extends BaseController {
 
     private final ElectionCandidateService electionCandidateService;
 
-    /** 提名候选人：写入 PENDING_REVIEW，仅 ELECTION 且议题处于 DRAFT/PUBLISHED。 */
+    /** 提名候选人：写入 PENDING_PARTY_REVIEW，仅 ELECTION 且议题处于 DRAFT/PUBLISHED。 */
     @PostMapping("/voting-subjects/{subjectId}/candidates")
     @PreAuthorize("hasAuthority('candidate:nominate')")
     public ResponseEntity<Result<Map<String, Object>>> nominate(
@@ -65,7 +68,19 @@ public class ElectionCandidateController extends BaseController {
                 .body(success("候选人已提名，待资格审查", Map.of("candidateId", candidateId)));
     }
 
-    /** 资格审查：PENDING_REVIEW → APPROVED / REJECTED。 */
+    /** 党组书记前置审查：PENDING_PARTY_REVIEW → PENDING_COMMITTEE_REVIEW（通过）/ REJECTED（驳回）。 */
+    @PostMapping("/candidates/{candidateId}/party-review")
+    @PreAuthorize("hasAuthority('candidate:review:party')")
+    public Result<CandidateResponse> partyReview(
+            @PathVariable("candidateId") Long candidateId,
+            @Valid @RequestBody ReviewCandidateRequest request) {
+        PartyReviewCandidateCommand cmd = new PartyReviewCandidateCommand(
+                candidateId, request.approve(), requireUserId());
+        Candidate candidate = electionCandidateService.partyReview(cmd);
+        return success("党组书记前置审查已更新", CandidateResponse.from(candidate));
+    }
+
+    /** 居委会资格审查：PENDING_COMMITTEE_REVIEW → APPROVED / REJECTED。 */
     @PostMapping("/candidates/{candidateId}/review")
     @PreAuthorize("hasAuthority('candidate:approve')")
     public Result<CandidateResponse> review(
