@@ -32,4 +32,64 @@
         )
     </insert>
 
+    <resultMap id="VoteDetailRowMap"
+               type="com.pangu.infrastructure.persistence.entity.VoteDetailRow">
+        <result property="opid" column="opid"/>
+        <result property="uid" column="uid"/>
+        <result property="buildingId" column="building_id"/>
+        <result property="roomId" column="room_id"/>
+        <result property="propertyArea" column="property_area"/>
+        <result property="authLevel" column="auth_level"/>
+        <result property="voteId" column="vote_id"/>
+        <result property="choice" column="choice"/>
+        <result property="votedAt" column="voted_at"/>
+    </resultMap>
+
+    <!--
+        M4-2 逐户投票明细分页：
+        - 左表为分母范围内应投房产（account_status=1），保证未投房产也出现（voted=false）；
+        - DISTINCT ON (opid) 兜底 ELECTION 一房多票，取最早投出的一票为代表，保证每户一行、
+          与 countVoteDetailPage 的 opid 计数口径一致；
+        - 外层按 building/room/opid 排序后分页（DISTINCT ON 要求内层先按 opid 排序）。
+        - 不解密 real_name（SM4 密文 + dev 明文种子冲突）。
+    -->
+    <select id="selectVoteDetailPage" resultMap="VoteDetailRowMap">
+        SELECT d.opid, d.uid, d.building_id, d.room_id, d.property_area,
+               d.auth_level, d.vote_id, d.choice, d.voted_at
+        FROM (
+            SELECT DISTINCT ON (op.opid)
+                   op.opid,
+                   op.uid,
+                   op.building_id,
+                   op.room_id,
+                   op.build_area AS property_area,
+                   cu.auth_level,
+                   vi.vote_id,
+                   vi.choice,
+                   vi.voted_at
+            FROM c_owner_property op
+            JOIN c_user cu ON cu.uid = op.uid
+            LEFT JOIN t_vote_item vi
+                   ON vi.subject_id = #{subjectId} AND vi.opid = op.opid
+            WHERE op.tenant_id = #{tenantId}
+              AND op.account_status = 1
+            <if test="scope == 2">
+                AND op.building_id = #{scopeReferenceId}
+            </if>
+            ORDER BY op.opid, vi.voted_at ASC
+        ) d
+        ORDER BY d.building_id, d.room_id, d.opid
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <select id="countVoteDetailPage" resultType="long">
+        SELECT COUNT(*)
+        FROM c_owner_property op
+        WHERE op.tenant_id = #{tenantId}
+          AND op.account_status = 1
+        <if test="scope == 2">
+            AND op.building_id = #{scopeReferenceId}
+        </if>
+    </select>
+
 </mapper>

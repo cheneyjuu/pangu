@@ -2,19 +2,24 @@ package com.pangu.interfaces.web.controller;
 
 import com.pangu.application.voting.ProposalLifecycleService;
 import com.pangu.application.voting.VotingApplicationException;
+import com.pangu.application.voting.VotingProgressQueryService;
 import com.pangu.application.voting.command.CancelSubjectCommand;
 import com.pangu.application.voting.command.ProposeSubjectCommand;
 import com.pangu.application.voting.command.PublishSubjectCommand;
 import com.pangu.domain.common.Page;
 import com.pangu.domain.model.voting.SubjectStatus;
 import com.pangu.domain.model.voting.SubjectType;
+import com.pangu.domain.model.voting.VotingProgress;
 import com.pangu.domain.model.voting.VotingSubject;
+import com.pangu.domain.repository.VoteDetailQueryRepository;
 import com.pangu.domain.repository.VotingSubjectRepository;
 import com.pangu.interfaces.security.SecurityUtils;
 import com.pangu.interfaces.web.controller.dto.PageResponse;
 import com.pangu.interfaces.web.controller.dto.voting.AdminSubjectResponse;
 import com.pangu.interfaces.web.controller.dto.voting.CancelRequest;
 import com.pangu.interfaces.web.controller.dto.voting.ProposeRequest;
+import com.pangu.interfaces.web.controller.dto.voting.SubjectProgressResponse;
+import com.pangu.interfaces.web.controller.dto.voting.VoteDetailResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -52,6 +57,7 @@ public class SubjectAdminController extends BaseController {
 
     private final ProposalLifecycleService proposalLifecycleService;
     private final VotingSubjectRepository votingSubjectRepository;
+    private final VotingProgressQueryService votingProgressQueryService;
 
     /** 立项：DRAFT 写入。 */
     @PostMapping("/voting-subjects")
@@ -139,6 +145,36 @@ public class SubjectAdminController extends BaseController {
                         VotingApplicationException.Reason.SUBJECT_NOT_FOUND,
                         "议题不存在 subjectId=" + subjectId));
         return success(AdminSubjectResponse.from(subject));
+    }
+
+    /**
+     * 议题双过半进度（M4-2）。
+     *
+     * <p>VOTING/CLOSED 等未结算态返回实时进度（与结算口径一致但非法定值）；
+     * SETTLED 态返回法定结算快照。{@code support*} 在 SETTLED 态为 null。
+     */
+    @GetMapping("/voting-subjects/{subjectId}/progress")
+    @PreAuthorize("hasAuthority('voting:subject:audit')")
+    public Result<SubjectProgressResponse> progress(@PathVariable("subjectId") Long subjectId) {
+        VotingProgress progress = votingProgressQueryService.queryProgress(subjectId, requireTenantId());
+        return success(SubjectProgressResponse.from(progress));
+    }
+
+    /**
+     * 逐户投票明细分页（M4-2）。
+     *
+     * <p>以分母范围内应投房产全量铺开，未投房产以 {@code voted=false} 出现，
+     * 返回统一分页契约 {@code { items, total, page, size }}。
+     */
+    @GetMapping("/voting-subjects/{subjectId}/vote-details")
+    @PreAuthorize("hasAuthority('voting:subject:audit')")
+    public Result<PageResponse<VoteDetailResponse>> voteDetails(
+            @PathVariable("subjectId") Long subjectId,
+            @RequestParam(name = "page", defaultValue = "1") int page,
+            @RequestParam(name = "size", defaultValue = "20") int size) {
+        Page<VoteDetailQueryRepository.VoteDetailRow> result =
+                votingProgressQueryService.pageVoteDetails(subjectId, requireTenantId(), page, size);
+        return success(PageResponse.from(result, VoteDetailResponse::from));
     }
 
     private Long requireUserId() {
