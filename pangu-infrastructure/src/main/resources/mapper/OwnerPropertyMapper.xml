@@ -78,4 +78,28 @@
         WHERE uid = #{uid} AND tenant_id = #{tenantId}
     </select>
 
+    <!-- ===================== 提名候选人:按手机号检索业主 ===================== -->
+    <!-- phone 作普通明文列映射(走 idx_account_phone 前缀匹配),不选 real_name(SM4 加密列) -->
+    <resultMap id="OwnerLookupResultMap"
+               type="com.pangu.infrastructure.persistence.entity.OwnerLookupRow">
+        <id property="uid" column="uid"/>
+        <result property="phone" column="phone"/>
+        <result property="buildingId" column="building_id"/>
+        <result property="roomId" column="room_id"/>
+    </resultMap>
+
+    <select id="searchOwnersByPhonePrefix" resultMap="OwnerLookupResultMap">
+        SELECT cu.uid AS uid,
+               a.phone AS phone,
+               MIN(op.building_id) AS building_id,
+               MIN(op.room_id) AS room_id
+        FROM t_account a
+        JOIN c_user cu ON cu.account_id = a.account_id
+        JOIN c_owner_property op ON op.uid = cu.uid AND op.tenant_id = #{tenantId}
+        WHERE a.phone LIKE CONCAT(#{phonePrefix}, '%')
+        GROUP BY cu.uid, a.phone
+        ORDER BY a.phone
+        LIMIT 20
+    </select>
+
 </mapper>
