@@ -5,6 +5,7 @@ import com.pangu.domain.policy.impl.DefaultAbacPolicyEngine;
 import com.pangu.domain.model.voting.ElectionVotingEngine;
 import com.pangu.domain.model.voting.GeneralDecisionEngine;
 import com.pangu.domain.model.voting.MajorDecisionEngine;
+import com.pangu.domain.model.voting.VotingProgressCalculator;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -33,5 +34,10 @@ public class DomainConfig {
     @Bean
     public ElectionVotingEngine electionVotingEngine() {
         return new ElectionVotingEngine();
+    }
+
+    @Bean
+    public VotingProgressCalculator votingProgressCalculator() {
+        return new VotingProgressCalculator();
     }
 }
