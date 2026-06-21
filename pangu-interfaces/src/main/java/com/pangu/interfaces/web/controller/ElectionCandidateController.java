@@ -5,10 +5,12 @@ import com.pangu.application.voting.VotingApplicationException;
 import com.pangu.application.voting.command.NominateCandidateCommand;
 import com.pangu.application.voting.command.PartyReviewCandidateCommand;
 import com.pangu.application.voting.command.ReviewCandidateCommand;
+import com.pangu.domain.model.asset.OwnerSummary;
 import com.pangu.domain.model.voting.Candidate;
 import com.pangu.interfaces.security.SecurityUtils;
 import com.pangu.interfaces.web.controller.dto.voting.CandidateResponse;
 import com.pangu.interfaces.web.controller.dto.voting.NominateCandidateRequest;
+import com.pangu.interfaces.web.controller.dto.voting.OwnerSearchResponse;
 import com.pangu.interfaces.web.controller.dto.voting.ReviewCandidateRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -20,6 +22,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -99,6 +102,17 @@ public class ElectionCandidateController extends BaseController {
             @PathVariable("subjectId") Long subjectId) {
         List<Candidate> candidates = electionCandidateService.listCandidates(subjectId);
         return success(candidates.stream().map(CandidateResponse::from).toList());
+    }
+
+    /**
+     * 提名候选人时按手机号前缀检索本租户业主，用于自动关联 uid（uid 内部 id 不便记忆）。
+     * 复用 {@code candidate:nominate} 权限；租户取自 {@link #requireTenantId()}，手机号脱敏回显。
+     */
+    @GetMapping("/owners/search")
+    @PreAuthorize("hasAuthority('candidate:nominate')")
+    public Result<List<OwnerSearchResponse>> searchOwners(@RequestParam("phone") String phone) {
+        List<OwnerSummary> owners = electionCandidateService.searchNominatableOwners(phone, requireTenantId());
+        return success(owners.stream().map(OwnerSearchResponse::from).toList());
     }
 
     private Long requireUserId() {

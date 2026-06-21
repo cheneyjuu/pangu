@@ -3,6 +3,8 @@ package com.pangu.application.voting;
 import com.pangu.application.voting.command.NominateCandidateCommand;
 import com.pangu.application.voting.command.PartyReviewCandidateCommand;
 import com.pangu.application.voting.command.ReviewCandidateCommand;
+import com.pangu.domain.gateway.PropertyGateway;
+import com.pangu.domain.model.asset.OwnerSummary;
 import com.pangu.domain.model.voting.Candidate;
 import com.pangu.domain.model.voting.CandidateStatus;
 import com.pangu.domain.model.voting.ElectionCandidateActions;
@@ -40,6 +42,10 @@ public class ElectionCandidateService {
 
     private final VotingSubjectRepository subjectRepository;
     private final ElectionCandidateRegistry electionCandidateRegistry;
+    private final PropertyGateway propertyGateway;
+
+    /** 手机号前缀检索最小位数：低于此长度不查，避免无意义的全表前缀扫描。 */
+    private static final int MIN_PHONE_PREFIX_LENGTH = 3;
 
     /**
      * 提名候选人。要求议题存在、为 ELECTION、status ∈ {DRAFT, PUBLISHED}。
@@ -162,5 +168,22 @@ public class ElectionCandidateService {
      */
     public List<Candidate> listApprovedCandidates(Long subjectId) {
         return electionCandidateRegistry.findApprovedCandidates(subjectId);
+    }
+
+    /**
+     * 提名候选人时按手机号前缀检索本租户业主，用于自动关联 uid（uid 内部 id 不便记忆）。
+     *
+     * <p>守卫：手机号前缀去空白后不足 {@value #MIN_PHONE_PREFIX_LENGTH} 位直接返回空列表，
+     * 避免无意义的全表前缀扫描。命中由 SQL 限本租户业主 + 上限 20 条。
+     */
+    public List<OwnerSummary> searchNominatableOwners(String phonePrefix, Long tenantId) {
+        if (phonePrefix == null) {
+            return List.of();
+        }
+        String prefix = phonePrefix.trim();
+        if (prefix.length() < MIN_PHONE_PREFIX_LENGTH) {
+            return List.of();
+        }
+        return propertyGateway.searchOwnersByPhone(prefix, tenantId);
     }
 }

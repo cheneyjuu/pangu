@@ -2,6 +2,7 @@ package com.pangu.infrastructure.persistence.mapper;
 
 import com.pangu.domain.model.asset.PropertyOwnership;
 import com.pangu.infrastructure.persistence.annotation.DataScope;
+import com.pangu.infrastructure.persistence.entity.OwnerLookupRow;
 import com.pangu.infrastructure.persistence.entity.OwnerPropertyVotingViewRow;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -45,4 +46,11 @@ public interface OwnerPropertyMapper {
      * M3-2 "我的议题"：列出某业主在某租户下涉及的全部楼栋 ID。
      */
     List<Long> selectBuildingIdsByUid(@Param("uid") Long uid, @Param("tenantId") Long tenantId);
+
+    /**
+     * 按手机号前缀检索本租户业主（换届选举提名候选人定位业主）。
+     * phone 走 idx_account_phone 索引前缀匹配，一行一业主，上限 20 条。
+     */
+    List<OwnerLookupRow> searchOwnersByPhonePrefix(@Param("tenantId") Long tenantId,
+                                                   @Param("phonePrefix") String phonePrefix);
 }

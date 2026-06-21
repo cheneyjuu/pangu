@@ -1,7 +1,9 @@
 package com.pangu.infrastructure.gateway;
 
 import com.pangu.domain.gateway.PropertyGateway;
+import com.pangu.domain.model.asset.OwnerSummary;
 import com.pangu.domain.model.asset.PropertyOwnership;
+import com.pangu.infrastructure.persistence.entity.OwnerLookupRow;
 import com.pangu.infrastructure.persistence.mapper.OwnerPropertyMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Repository;
@@ -26,5 +28,21 @@ public class PropertyGatewayImpl implements PropertyGateway {
     @Override
     public List<PropertyOwnership> getOwnerships(Long uid, Long tenantId) {
         return ownerPropertyMapper.selectOwnershipsByUid(uid, tenantId);
+    }
+
+    @Override
+    public List<OwnerSummary> searchOwnersByPhone(String phonePrefix, Long tenantId) {
+        return ownerPropertyMapper.searchOwnersByPhonePrefix(tenantId, phonePrefix).stream()
+                .map(this::toSummary)
+                .toList();
+    }
+
+    private OwnerSummary toSummary(OwnerLookupRow row) {
+        return OwnerSummary.builder()
+                .uid(row.getUid())
+                .phone(row.getPhone())
+                .buildingId(row.getBuildingId())
+                .roomId(row.getRoomId())
+                .build();
     }
 }
