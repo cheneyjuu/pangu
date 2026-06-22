@@ -16,6 +16,8 @@ public class RoleAdminApplicationException extends RuntimeException {
         ROLE_KEY_DUPLICATE,
         /** trigger 7 拒绝删除 is_system=1 的预置角色。 */
         ROLE_PROTECTED,
+        /** fixed_data_scope 非空，数据范围被法理红线锁死，不可在线变更。 */
+        ROLE_SCOPE_LOCKED,
         /** 同一 (role_id, permission_key) 已经存在授予记录。 */
         PERMISSION_ALREADY_ASSIGNED,
         /** 撤销时 (role_id, permission_key) 授予记录不存在。 */
