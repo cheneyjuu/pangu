@@ -1,8 +1,11 @@
 package com.pangu.infrastructure.persistence.mapper;
 
+import com.pangu.domain.gateway.dto.OwnerQuery;
 import com.pangu.domain.model.asset.PropertyOwnership;
 import com.pangu.infrastructure.persistence.annotation.DataScope;
 import com.pangu.infrastructure.persistence.entity.OwnerLookupRow;
+import com.pangu.infrastructure.persistence.entity.OwnerProfileRow;
+import com.pangu.infrastructure.persistence.entity.OwnerPropertyDetailRow;
 import com.pangu.infrastructure.persistence.entity.OwnerPropertyVotingViewRow;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -53,4 +56,33 @@ public interface OwnerPropertyMapper {
      */
     List<OwnerLookupRow> searchOwnersByPhonePrefix(@Param("tenantId") Long tenantId,
                                                    @Param("phonePrefix") String phonePrefix);
+
+    /**
+     * 业主名册分页查询（M4 读侧）。
+     *
+     * <p>聚合 {@code t_account / c_user / c_owner_property} 三表，按 uid 分组统计
+     * {@code propertyCount} 与 {@code totalBuildArea}；行级数据范围由 {@code @DataScope} 注入
+     * （{@code op.building_id IN (...)}）。
+     */
+    @DataScope(buildingAlias = "op")
+    List<OwnerProfileRow> pageOwners(@Param("q") OwnerQuery q);
+
+    /**
+     * 业主名册分页总数（与 {@link #pageOwners(OwnerQuery)} 同款过滤）。
+     */
+    @DataScope(buildingAlias = "op")
+    long countOwners(@Param("q") OwnerQuery q);
+
+    /**
+     * 业主名册详情（按 uid + tenant 聚合）。
+     */
+    @DataScope(buildingAlias = "op")
+    OwnerProfileRow selectOwnerProfile(@Param("uid") Long uid, @Param("tenantId") Long tenantId);
+
+    /**
+     * 业主在指定租户下的房产明细（详情页用）。
+     */
+    @DataScope(buildingAlias = "op")
+    List<OwnerPropertyDetailRow> selectPropertiesByUid(@Param("uid") Long uid,
+                                                      @Param("tenantId") Long tenantId);
 }

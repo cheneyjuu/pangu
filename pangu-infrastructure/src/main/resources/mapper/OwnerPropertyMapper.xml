@@ -102,4 +102,100 @@
         LIMIT 20
     </select>
 
+    <!-- ===================== M4 业主名册（读侧） ===================== -->
+    <!-- realName 走密文原值（不挂 SM4 TypeHandler），由 application 层 NameDecryptor 容错解密 -->
+    <resultMap id="OwnerProfileResultMap"
+               type="com.pangu.infrastructure.persistence.entity.OwnerProfileRow">
+        <id property="uid" column="uid"/>
+        <result property="accountId" column="account_id"/>
+        <result property="phone" column="phone"/>
+        <result property="realNameCipher" column="real_name_cipher"/>
+        <result property="realNameVerified" column="real_name_verified"/>
+        <result property="authLevel" column="auth_level"/>
+        <result property="accountStatus" column="account_status"/>
+        <result property="propertyCount" column="property_count"/>
+        <result property="totalBuildArea" column="total_build_area"/>
+        <result property="createTime" column="create_time"/>
+    </resultMap>
+
+    <sql id="OwnerListFilter">
+        <if test="q.phonePrefix != null">AND a.phone LIKE CONCAT(#{q.phonePrefix}, '%')</if>
+        <if test="q.buildingId != null">AND op.building_id = #{q.buildingId}</if>
+        <if test="q.roomId != null">AND op.room_id = #{q.roomId}</if>
+    </sql>
+
+    <select id="pageOwners" resultMap="OwnerProfileResultMap">
+        SELECT cu.uid AS uid,
+               cu.account_id AS account_id,
+               a.phone AS phone,
+               a.real_name AS real_name_cipher,
+               a.real_name_verified AS real_name_verified,
+               cu.auth_level AS auth_level,
+               a.status AS account_status,
+               COUNT(op.opid) AS property_count,
+               COALESCE(SUM(op.build_area), 0) AS total_build_area,
+               cu.create_time AS create_time
+        FROM t_account a
+        JOIN c_user cu ON cu.account_id = a.account_id
+        JOIN c_owner_property op ON op.uid = cu.uid AND op.tenant_id = #{q.tenantId}
+        <where>
+            <include refid="OwnerListFilter"/>
+        </where>
+        GROUP BY cu.uid, cu.account_id, a.phone, a.real_name, a.real_name_verified,
+                 cu.auth_level, a.status, cu.create_time
+        ORDER BY cu.uid DESC
+        LIMIT #{q.size} OFFSET (#{q.page} - 1) * #{q.size}
+    </select>
+
+    <select id="countOwners" resultType="long">
+        SELECT COUNT(DISTINCT cu.uid)
+        FROM t_account a
+        JOIN c_user cu ON cu.account_id = a.account_id
+        JOIN c_owner_property op ON op.uid = cu.uid AND op.tenant_id = #{q.tenantId}
+        <where>
+            <include refid="OwnerListFilter"/>
+        </where>
+    </select>
+
+    <select id="selectOwnerProfile" resultMap="OwnerProfileResultMap">
+        SELECT cu.uid AS uid,
+               cu.account_id AS account_id,
+               a.phone AS phone,
+               a.real_name AS real_name_cipher,
+               a.real_name_verified AS real_name_verified,
+               cu.auth_level AS auth_level,
+               a.status AS account_status,
+               COUNT(op.opid) AS property_count,
+               COALESCE(SUM(op.build_area), 0) AS total_build_area,
+               cu.create_time AS create_time
+        FROM t_account a
+        JOIN c_user cu ON cu.account_id = a.account_id
+        JOIN c_owner_property op ON op.uid = cu.uid AND op.tenant_id = #{tenantId}
+        WHERE cu.uid = #{uid}
+        GROUP BY cu.uid, cu.account_id, a.phone, a.real_name, a.real_name_verified,
+                 cu.auth_level, a.status, cu.create_time
+    </select>
+
+    <resultMap id="OwnerPropertyDetailResultMap"
+               type="com.pangu.infrastructure.persistence.entity.OwnerPropertyDetailRow">
+        <id property="opid" column="opid"/>
+        <result property="buildingId" column="building_id"/>
+        <result property="roomId" column="room_id"/>
+        <result property="buildArea" column="build_area"/>
+        <result property="votingDelegate" column="is_voting_delegate"/>
+        <result property="accountStatus" column="account_status"/>
+    </resultMap>
+
+    <select id="selectPropertiesByUid" resultMap="OwnerPropertyDetailResultMap">
+        SELECT op.opid AS opid,
+               op.building_id AS building_id,
+               op.room_id AS room_id,
+               op.build_area AS build_area,
+               op.is_voting_delegate AS is_voting_delegate,
+               op.account_status AS account_status
+        FROM c_owner_property op
+        WHERE op.uid = #{uid} AND op.tenant_id = #{tenantId}
+        ORDER BY op.building_id, op.room_id
+    </select>
+
 </mapper>
