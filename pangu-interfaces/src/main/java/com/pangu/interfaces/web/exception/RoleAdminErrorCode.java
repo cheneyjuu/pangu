@@ -24,7 +24,9 @@ public enum RoleAdminErrorCode implements ErrorCode {
     PERMISSION_ASSIGNMENT_INCONSISTENT(42204,
             "permission 授予一致性失败（端归属 / 红线 / 外键）", 409, ErrorType.BIZ, false),
 
-    ROLE_PROTECTED(42301, "is_system=1 的预置角色禁止删除", 403, ErrorType.BIZ, false);
+    ROLE_PROTECTED(42301, "is_system=1 的预置角色禁止删除", 403, ErrorType.BIZ, false),
+
+    ROLE_SCOPE_LOCKED(42302, "数据范围被法理红线锁死，不可在线变更", 403, ErrorType.BIZ, false);
 
     private final int code;
     private final String message;

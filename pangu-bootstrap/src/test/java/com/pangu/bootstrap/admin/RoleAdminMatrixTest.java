@@ -15,6 +15,7 @@ import java.util.Map;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -26,6 +27,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *   <li>{@code POST   /api/v1/admin/roles}                                     —— createRole</li>
  *   <li>{@code POST   /api/v1/admin/roles/{roleId}/permissions}                —— assignPermission</li>
  *   <li>{@code DELETE /api/v1/admin/roles/{roleId}/permissions/{permissionKey}} —— revokePermission</li>
+ *   <li>{@code PATCH  /api/v1/admin/roles/{roleId}/data-scope}                 —— updateDataScope</li>
  *   <li>{@code DELETE /api/v1/admin/roles/{roleId}}                            —— deleteRole</li>
  * </ul>
  *
@@ -252,6 +254,65 @@ public class RoleAdminMatrixTest {
                 .andExpect(jsonPath("$.code", is(42205)));
 
         // 清理临时角色
+        mockMvc.perform(delete("/api/v1/admin/roles/" + newRoleId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
+    }
+
+    // ===== 7. 写侧 data-scope：写回 / 红线锁死 / 角色不存在 =====
+
+    @Test
+    public void govSuperAdmin_updateDataScopeOnNonExistentRole_404_42201() throws Exception {
+        String token = jwtTokenProvider.generateToken(ACC_WANG, "SYS_USER", USR_WANG, TENANT_RUSHI);
+        mockMvc.perform(patch("/api/v1/admin/roles/999999/data-scope")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"defaultDataScope\":\"OWNER_GROUP\"}"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code", is(42201)));
+    }
+
+    @Test
+    public void govSuperAdmin_updateDataScopeOnFixedLockedRole_403_42302() throws Exception {
+        // role_id=2 COMMUNITY_ADMIN 的 fixed_data_scope=ALL_COMMUNITY（非空）—— 红线锁死，拒变更
+        String token = jwtTokenProvider.generateToken(ACC_WANG, "SYS_USER", USR_WANG, TENANT_RUSHI);
+        mockMvc.perform(patch("/api/v1/admin/roles/2/data-scope")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"defaultDataScope\":\"OWNER_GROUP\"}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code", is(42302)));
+    }
+
+    @Test
+    public void govSuperAdmin_updateDataScopeHappyPath_200_thenVerify() throws Exception {
+        String token = jwtTokenProvider.generateToken(ACC_WANG, "SYS_USER", USR_WANG, TENANT_RUSHI);
+        String roleKey = "RA_TEST_SCOPE_" + System.nanoTime();
+
+        // 新建角色（fixed=null, default=ALL_COMMUNITY）—— 可在线改 default
+        Long newRoleId = parseRoleId(mockMvc.perform(post("/api/v1/admin/roles")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(validCreateRoleJson(roleKey)))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString());
+
+        // 写回 default_data_scope = OWNER_GROUP — 200
+        mockMvc.perform(patch("/api/v1/admin/roles/" + newRoleId + "/data-scope")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"defaultDataScope\":\"OWNER_GROUP\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code", is(200)));
+
+        // 非法取值 → 40001 PARAM_ERROR（@Pattern 先于 application 层）
+        mockMvc.perform(patch("/api/v1/admin/roles/" + newRoleId + "/data-scope")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"defaultDataScope\":\"SELF\"}"))
+                .andExpect(status().isBadRequest());
+
+        // 清理
         mockMvc.perform(delete("/api/v1/admin/roles/" + newRoleId)
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk());

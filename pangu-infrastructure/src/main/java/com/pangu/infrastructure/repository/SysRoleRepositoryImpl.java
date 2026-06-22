@@ -74,6 +74,12 @@ public class SysRoleRepositoryImpl implements SysRoleRepository {
     }
 
     @Override
+    public int updateDefaultDataScope(Long roleId, String defaultDataScope) {
+        // fixed 非空的红线拦截在应用层完成；此处裸 UPDATE，CHECK 约束兜底。
+        return mapper.updateDefaultDataScope(roleId, defaultDataScope);
+    }
+
+    @Override
     public Page<RoleListItem> pageRoles(RoleQuery query) {
         long total = mapper.countRoles(query);
         List<RoleListItem> items = total == 0

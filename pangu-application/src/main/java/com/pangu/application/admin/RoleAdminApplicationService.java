@@ -22,9 +22,10 @@ import java.util.Set;
  *   <li>{@link #deleteRole} 删除非系统角色（trigger 7 兜底拒绝预置角色）。</li>
  * </ol>
  *
- * <p>红线策略：本服务不暴露 {@code update} —— 角色的端归属 / fixed_data_scope 一旦
- * 落库就不允许在线变更（涉及历史数据 effective_data_scope 一致性）。需要变更者由
- * 运维通过 Flyway 迁移完成。
+ * <p>红线策略：本服务不暴露 {@code fixed_data_scope} / {@code is_system} /
+ * {@code allowed_dept_category} 等结构性字段的在线变更（涉及历史数据
+ * effective_data_scope 一致性）。仅 {@code default_data_scope} 允许在 fixed 为空时
+ * 通过 {@link #updateDefaultDataScope} 在线写回；fixed 非空的角色数据范围被法理锁死。
  *
  * <p>本服务对外只抛 {@link RoleAdminApplicationException}；DB 触发器（trigger 6/7）
  * 与唯一约束在 repository 层翻译为端口异常，本服务再二次转译为业务原因码。
@@ -128,6 +129,50 @@ public class RoleAdminApplicationService {
                     RoleAdminApplicationException.Reason.PERMISSION_NOT_ASSIGNED,
                     "permission 未授予该角色，无需撤销：role_id=" + roleId
                             + ", permission_key=" + permissionKey);
+        }
+    }
+
+    /**
+     * 在线变更角色的 {@code default_data_scope}（M4-1 数据范围写回）。
+     *
+     * <p>校验顺序：
+     * <ol>
+     *   <li>入参非空 + {@code defaultDataScope} 取值 ∈ 白名单；</li>
+     *   <li>角色存在（ROLE_NOT_FOUND）；</li>
+     *   <li>{@code fixed_data_scope} 非空 → ROLE_SCOPE_LOCKED（法理红线锁死，不可在线变更）。
+     *       fixed 非空时 default 必须等于 fixed（{@code chk_role_scope_consistency} CHECK），
+     *       故 fixed 锁死的角色无在线变更空间；</li>
+     *   <li>repository.updateDefaultDataScope 返回 0（并发删除）→ ROLE_NOT_FOUND。</li>
+     * </ol>
+     *
+     * <p>本方法仅改 {@code default_data_scope}，不触碰 {@code fixed_data_scope} /
+     * {@code is_system} / {@code allowed_dept_category} 等结构性字段。
+     */
+    @Transactional
+    public void updateDefaultDataScope(Long roleId, String defaultDataScope) {
+        if (roleId == null || defaultDataScope == null || defaultDataScope.isBlank()) {
+            throw new RoleAdminApplicationException(
+                    RoleAdminApplicationException.Reason.ROLE_PARAM_INVALID,
+                    "roleId 与 defaultDataScope 必填");
+        }
+        if (!ALLOWED_DATA_SCOPES.contains(defaultDataScope)) {
+            throw new RoleAdminApplicationException(
+                    RoleAdminApplicationException.Reason.ROLE_PARAM_INVALID,
+                    "defaultDataScope 取值必须为 ALL_COMMUNITY/OWNER_GROUP/ORG_ONLY，实际：" + defaultDataScope);
+        }
+        SysRole role = roleRepository.findById(roleId).orElseThrow(() -> new RoleAdminApplicationException(
+                RoleAdminApplicationException.Reason.ROLE_NOT_FOUND,
+                "角色不存在：role_id=" + roleId));
+        if (role.fixedDataScope() != null) {
+            throw new RoleAdminApplicationException(
+                    RoleAdminApplicationException.Reason.ROLE_SCOPE_LOCKED,
+                    "fixed_data_scope 非空，数据范围被法理红线锁死，不可在线变更：role_id=" + roleId);
+        }
+        int affected = roleRepository.updateDefaultDataScope(roleId, defaultDataScope);
+        if (affected == 0) {
+            throw new RoleAdminApplicationException(
+                    RoleAdminApplicationException.Reason.ROLE_NOT_FOUND,
+                    "角色不存在：role_id=" + roleId);
         }
     }
 

@@ -16,9 +16,10 @@ import java.util.Optional;
  *
  * <p>设计原则：
  * <ul>
- *   <li>写侧只暴露 SaaS 管理员后台需要的 4 条接口（{@code findById} / {@code findByRoleKey} /
- *       {@code insert} / {@code delete}）—— 不暴露 UPDATE，避免把 is_system / fixed_data_scope
- *       等结构性字段暴露给后台动态修改；这些字段一旦预置就不能在线变更。</li>
+ *   <li>写侧暴露 SaaS 管理员后台需要的接口（{@code findById} / {@code findByRoleKey} /
+ *       {@code insert} / {@code delete} / {@code updateDefaultDataScope}）——
+ *       {@code is_system} / {@code fixed_data_scope} 等结构性字段仍不可在线变更；
+ *       仅 {@code default_data_scope} 允许在 fixed 为空时由 {@code updateDefaultDataScope} 修改。</li>
  *   <li>读侧（M4-1 补）{@code pageRoles} / {@code listPermissionsByRole} 为纯查询，不挂
  *       {@code @DataScope}——{@code sys_role} 平台级表无 tenant/dept/building 维度，
  *       收口由 endpoint {@code @PreAuthorize(admin:role:read)} 保证。</li>
@@ -70,6 +71,20 @@ public interface SysRoleRepository {
      * @return 实际删除的行数（0 或 1）
      */
     int delete(Long roleId);
+
+    /**
+     * 在线变更角色的 {@code default_data_scope}（M4-1 数据范围写回）。
+     *
+     * <p><b>红线</b>：{@code fixed_data_scope} 非空的角色其数据范围被法理锁死，
+     * 应用层应先拦截并抛 {@code ROLE_SCOPE_LOCKED}，不得调用本方法——
+     * 否则 {@code chk_role_scope_consistency} CHECK 会兜底拒绝（fixed 非空时
+     * default 必须等于 fixed）。
+     *
+     * <p>本端口只做裸 UPDATE，不判断 fixed；{@code role_id} 不存在返回 0。
+     *
+     * @return 实际更新行数（0 或 1）
+     */
+    int updateDefaultDataScope(Long roleId, String defaultDataScope);
 
     /** sys_role.role_key UNIQUE 约束冲突信号。 */
     class DuplicateRoleKeyException extends RuntimeException {

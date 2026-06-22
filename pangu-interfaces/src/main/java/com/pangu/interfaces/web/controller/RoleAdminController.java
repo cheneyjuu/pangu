@@ -17,6 +17,7 @@ import com.pangu.interfaces.web.controller.dto.admin.CreateRoleRequest;
 import com.pangu.interfaces.web.controller.dto.admin.RoleListItemResponse;
 import com.pangu.interfaces.web.controller.dto.admin.RolePermissionResponse;
 import com.pangu.interfaces.web.controller.dto.admin.RoleResponse;
+import com.pangu.interfaces.web.controller.dto.admin.UpdateDataScopeRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -24,6 +25,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -41,6 +43,7 @@ import java.util.List;
  *   <li>{@code POST   /api/v1/admin/roles}                              —— 新建非系统角色（写，{@code admin:role:manage}）；</li>
  *   <li>{@code POST   /api/v1/admin/roles/{roleId}/permissions}         —— 授予 permission（写，{@code admin:role:manage}）；</li>
  *   <li>{@code DELETE /api/v1/admin/roles/{roleId}/permissions/{permissionKey}} —— 撤销 permission（写，{@code admin:role:manage}）；</li>
+ *   <li>{@code PATCH  /api/v1/admin/roles/{roleId}/data-scope}                 —— 写回数据范围（写，{@code admin:role:manage}，fixed 非空拒绝）；</li>
  *   <li>{@code DELETE /api/v1/admin/roles/{roleId}}                     —— 删除非系统角色（写，{@code admin:role:manage}，trigger 7 拒绝预置）；</li>
  *   <li>{@code GET    /api/v1/admin/roles}                              —— 角色分页列表（读，{@code admin:role:read}，M4-1）；</li>
  *   <li>{@code GET    /api/v1/admin/roles/{roleId}/permissions}         —— 某角色已授权限明细（读，{@code admin:role:read}，M4-1）。</li>
@@ -97,6 +100,20 @@ public class RoleAdminController extends BaseController {
                                          @PathVariable("permissionKey") String permissionKey) {
         roleAdminApplicationService.revokePermission(roleId, permissionKey);
         return success("permission 已撤销", null);
+    }
+
+    /**
+     * 在线写回角色数据范围（写侧，{@code admin:role:manage}，M4-1）。
+     *
+     * <p>仅 {@code default_data_scope} 可改；{@code fixed_data_scope} 非空的角色被法理红线
+     * 锁死，返回 {@code 403 ROLE_SCOPE_LOCKED}。角色不存在 → {@code 404 ROLE_NOT_FOUND}。
+     */
+    @PatchMapping("/{roleId}/data-scope")
+    @PreAuthorize("hasAuthority('admin:role:manage')")
+    public Result<Void> updateDataScope(@PathVariable("roleId") Long roleId,
+                                        @Valid @RequestBody UpdateDataScopeRequest request) {
+        roleAdminApplicationService.updateDefaultDataScope(roleId, request.defaultDataScope());
+        return success("数据范围已更新", null);
     }
 
     @DeleteMapping("/{roleId}")
