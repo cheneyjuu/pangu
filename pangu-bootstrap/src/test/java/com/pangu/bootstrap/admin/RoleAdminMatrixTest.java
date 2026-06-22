@@ -23,9 +23,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * M2-4 SaaS 角色管理三个 endpoint 的矩阵测试：
  *
  * <ul>
- *   <li>{@code POST   /api/v1/admin/roles}                       —— createRole</li>
- *   <li>{@code POST   /api/v1/admin/roles/{roleId}/permissions}  —— assignPermission</li>
- *   <li>{@code DELETE /api/v1/admin/roles/{roleId}}              —— deleteRole</li>
+ *   <li>{@code POST   /api/v1/admin/roles}                                     —— createRole</li>
+ *   <li>{@code POST   /api/v1/admin/roles/{roleId}/permissions}                —— assignPermission</li>
+ *   <li>{@code DELETE /api/v1/admin/roles/{roleId}/permissions/{permissionKey}} —— revokePermission</li>
+ *   <li>{@code DELETE /api/v1/admin/roles/{roleId}}                            —— deleteRole</li>
  * </ul>
  *
  * <p>覆盖：
@@ -126,7 +127,13 @@ public class RoleAdminMatrixTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code", is(200)));
 
-        // (3) 删除该角色（is_system=0 → trigger 7 不拦） — 200
+        // (3) 撤销刚授予的 identity:switch — 200（写侧 revoke happy path）
+        mockMvc.perform(delete("/api/v1/admin/roles/" + newRoleId + "/permissions/identity:switch")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code", is(200)));
+
+        // (4) 删除该角色（is_system=0 → trigger 7 不拦） — 200
         mockMvc.perform(delete("/api/v1/admin/roles/" + newRoleId)
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
@@ -213,6 +220,41 @@ public class RoleAdminMatrixTest {
                         .content("{\"permissionKey\":\"admin:role:manage\"}"))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code", is(42203)));
+    }
+
+    // ===== 6. 写侧 revoke：撤销不存在角色 / 撤销未授予的权限 =====
+
+    @Test
+    public void govSuperAdmin_revokeOnNonExistentRole_404_42201() throws Exception {
+        String token = jwtTokenProvider.generateToken(ACC_WANG, "SYS_USER", USR_WANG, TENANT_RUSHI);
+        mockMvc.perform(delete("/api/v1/admin/roles/999999/permissions/identity:switch")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code", is(42201)));
+    }
+
+    @Test
+    public void govSuperAdmin_revokeNotAssignedPermission_404_42205() throws Exception {
+        String token = jwtTokenProvider.generateToken(ACC_WANG, "SYS_USER", USR_WANG, TENANT_RUSHI);
+        String roleKey = "RA_TEST_REVOKE_" + System.nanoTime();
+
+        // 新建角色（不授予任何权限）—— 直接 revoke identity:switch 应返回 42205
+        Long newRoleId = parseRoleId(mockMvc.perform(post("/api/v1/admin/roles")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(validCreateRoleJson(roleKey)))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString());
+
+        mockMvc.perform(delete("/api/v1/admin/roles/" + newRoleId + "/permissions/identity:switch")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code", is(42205)));
+
+        // 清理临时角色
+        mockMvc.perform(delete("/api/v1/admin/roles/" + newRoleId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
     }
 
     // ===== 帮助器 =====

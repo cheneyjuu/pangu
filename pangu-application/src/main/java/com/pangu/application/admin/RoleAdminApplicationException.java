@@ -18,6 +18,8 @@ public class RoleAdminApplicationException extends RuntimeException {
         ROLE_PROTECTED,
         /** 同一 (role_id, permission_key) 已经存在授予记录。 */
         PERMISSION_ALREADY_ASSIGNED,
+        /** 撤销时 (role_id, permission_key) 授予记录不存在。 */
+        PERMISSION_NOT_ASSIGNED,
         /** trigger 6 一致性失败：端归属不匹配 / redline 缺 fixed_data_scope / permission 不存在。 */
         PERMISSION_ASSIGNMENT_INCONSISTENT,
         /** 必填字段缺失或非法（角色键为空、dept_category 取值非 G/B/S 等应用层校验）。 */

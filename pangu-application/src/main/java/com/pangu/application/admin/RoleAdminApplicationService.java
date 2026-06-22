@@ -104,6 +104,34 @@ public class RoleAdminApplicationService {
     }
 
     /**
+     * 撤销指定角色的一项 permission（写侧 revoke，对称于 {@link #assignPermission}）。
+     *
+     * <p>校验顺序与 assignPermission 一致：先确认角色存在（ROLE_NOT_FOUND），
+     * 再调 repository.revoke；revoke 返回 0（授予记录本不存在）翻译为
+     * {@link RoleAdminApplicationException.Reason#PERMISSION_NOT_ASSIGNED}。
+     */
+    @Transactional
+    public void revokePermission(Long roleId, String permissionKey) {
+        if (roleId == null || permissionKey == null || permissionKey.isBlank()) {
+            throw new RoleAdminApplicationException(
+                    RoleAdminApplicationException.Reason.ROLE_PARAM_INVALID,
+                    "roleId 与 permissionKey 必填");
+        }
+        if (roleRepository.findById(roleId).isEmpty()) {
+            throw new RoleAdminApplicationException(
+                    RoleAdminApplicationException.Reason.ROLE_NOT_FOUND,
+                    "角色不存在：role_id=" + roleId);
+        }
+        int affected = rolePermissionRepository.revoke(roleId, permissionKey);
+        if (affected == 0) {
+            throw new RoleAdminApplicationException(
+                    RoleAdminApplicationException.Reason.PERMISSION_NOT_ASSIGNED,
+                    "permission 未授予该角色，无需撤销：role_id=" + roleId
+                            + ", permission_key=" + permissionKey);
+        }
+    }
+
+    /**
      * 删除非系统角色。trigger 7 拒绝 is_system=1 的角色，应用层翻译为
      * {@link RoleAdminApplicationException.Reason#ROLE_PROTECTED}。
      *

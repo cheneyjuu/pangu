@@ -16,6 +16,7 @@ public final class RoleAdminExceptionTranslator {
             case ROLE_KEY_DUPLICATE -> RoleAdminErrorCode.ROLE_KEY_DUPLICATE;
             case ROLE_PROTECTED -> RoleAdminErrorCode.ROLE_PROTECTED;
             case PERMISSION_ALREADY_ASSIGNED -> RoleAdminErrorCode.PERMISSION_ALREADY_ASSIGNED;
+            case PERMISSION_NOT_ASSIGNED -> RoleAdminErrorCode.PERMISSION_NOT_ASSIGNED;
             case PERMISSION_ASSIGNMENT_INCONSISTENT -> RoleAdminErrorCode.PERMISSION_ASSIGNMENT_INCONSISTENT;
             case ROLE_PARAM_INVALID -> RoleAdminErrorCode.ROLE_PARAM_INVALID;
         };

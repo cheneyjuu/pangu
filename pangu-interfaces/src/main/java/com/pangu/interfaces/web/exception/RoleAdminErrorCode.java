@@ -20,6 +20,7 @@ public enum RoleAdminErrorCode implements ErrorCode {
     ROLE_NOT_FOUND(42201, "角色不存在", 404, ErrorType.BIZ, false),
     ROLE_KEY_DUPLICATE(42202, "role_key 已存在", 409, ErrorType.BIZ, false),
     PERMISSION_ALREADY_ASSIGNED(42203, "permission 已经授予该角色", 409, ErrorType.BIZ, false),
+    PERMISSION_NOT_ASSIGNED(42205, "permission 未授予该角色，无需撤销", 404, ErrorType.BIZ, false),
     PERMISSION_ASSIGNMENT_INCONSISTENT(42204,
             "permission 授予一致性失败（端归属 / 红线 / 外键）", 409, ErrorType.BIZ, false),
 
