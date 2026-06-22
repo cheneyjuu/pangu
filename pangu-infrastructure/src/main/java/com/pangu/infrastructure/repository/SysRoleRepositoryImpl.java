@@ -1,7 +1,13 @@
 package com.pangu.infrastructure.repository;
 
+import com.pangu.domain.common.Page;
+import com.pangu.domain.gateway.dto.RoleQuery;
+import com.pangu.domain.model.role.RoleListItem;
+import com.pangu.domain.model.role.RolePermissionDetail;
 import com.pangu.domain.model.role.SysRole;
 import com.pangu.domain.repository.SysRoleRepository;
+import com.pangu.infrastructure.persistence.entity.RoleListItemRow;
+import com.pangu.infrastructure.persistence.entity.RolePermissionDetailRow;
 import com.pangu.infrastructure.persistence.entity.SysRoleRow;
 import com.pangu.infrastructure.persistence.mapper.SysRoleMapper;
 import lombok.RequiredArgsConstructor;
@@ -9,6 +15,7 @@ import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Repository;
 
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -64,6 +71,46 @@ public class SysRoleRepositoryImpl implements SysRoleRepository {
             }
             throw e;
         }
+    }
+
+    @Override
+    public Page<RoleListItem> pageRoles(RoleQuery query) {
+        long total = mapper.countRoles(query);
+        List<RoleListItem> items = total == 0
+                ? List.of()
+                : mapper.pageRolesList(query).stream().map(this::toListItem).toList();
+        return new Page<>(items, total, query.page(), query.size());
+    }
+
+    @Override
+    public List<RolePermissionDetail> listPermissionsByRole(Long roleId) {
+        return mapper.selectPermissionsByRole(roleId).stream()
+                .map(this::toPermissionDetail).toList();
+    }
+
+    private RoleListItem toListItem(RoleListItemRow row) {
+        return new RoleListItem(
+                row.getRoleId(),
+                row.getRoleKey(),
+                row.getRoleName(),
+                row.getAllowedDeptCategory(),
+                row.getFixedDataScope(),
+                row.getDefaultDataScope(),
+                row.getIsSystem() == null ? 0 : row.getIsSystem(),
+                row.getStatus(),
+                row.getPermissionCount() == null ? 0L : row.getPermissionCount(),
+                row.getCreateTime());
+    }
+
+    private RolePermissionDetail toPermissionDetail(RolePermissionDetailRow row) {
+        return new RolePermissionDetail(
+                row.getPermissionKey(),
+                row.getDescription(),
+                row.getPermissionGroup(),
+                row.getAllowedDeptCategories(),
+                row.getIsLegalRedline(),
+                row.getGrantedBy(),
+                row.getGrantedAt());
     }
 
     private static boolean causeMessageContains(Throwable t, String token) {

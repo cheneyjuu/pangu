@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pangu.infrastructure.persistence.mapper.SysPermissionMapper">
+
+    <resultMap id="PermissionCatalogRowMap"
+               type="com.pangu.infrastructure.persistence.entity.PermissionCatalogRow">
+        <result property="permissionKey" column="permission_key"/>
+        <result property="description" column="description"/>
+        <result property="permissionGroup" column="permission_group"/>
+        <result property="allowedDeptCategories" column="allowed_dept_categories"/>
+        <result property="isLegalRedline" column="is_legal_redline"/>
+    </resultMap>
+
+    <!-- 平台级表，不挂 @DataScope；收口由 endpoint @PreAuthorize(admin:role:read) 保证 -->
+    <select id="selectAll" resultMap="PermissionCatalogRowMap">
+        SELECT permission_key, description, permission_group,
+               allowed_dept_categories, is_legal_redline
+        FROM sys_permission
+        ORDER BY permission_group, permission_key
+    </select>
+
+</mapper>
