@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pangu.infrastructure.persistence.mapper.BuildingAssignmentMapper">
+
+    <resultMap id="BuildingAssignmentRowMap"
+               type="com.pangu.infrastructure.persistence.entity.BuildingAssignmentRow">
+        <id property="assignmentId" column="assignment_id"/>
+        <result property="userId" column="user_id"/>
+        <result property="buildingId" column="building_id"/>
+        <result property="tenantId" column="tenant_id"/>
+        <result property="assignedBy" column="assigned_by"/>
+        <result property="assignedAt" column="assigned_at"/>
+        <result property="status" column="status"/>
+        <result property="revokeReason" column="revoke_reason"/>
+    </resultMap>
+
+    <resultMap id="AssignableUserRowMap"
+               type="com.pangu.infrastructure.persistence.entity.AssignableUserRow">
+        <result property="userId" column="user_id"/>
+        <result property="nickName" column="nick_name"/>
+        <result property="roleKey" column="role_key"/>
+        <result property="buildingCount" column="building_count"/>
+    </resultMap>
+
+    <!-- 同租户内某角色用户 + 已生效楼栋数；tenantId=null 时跨租户（街道超管俯瞰） -->
+    <select id="selectUsersByRole" resultMap="AssignableUserRowMap">
+        SELECT u.user_id, u.nick_name, r.role_key,
+               (SELECT COUNT(*) FROM sys_user_building ub
+                WHERE ub.user_id = u.user_id AND ub.status = 1) AS building_count
+        FROM sys_user_role ur
+        JOIN sys_user u ON u.user_id = ur.user_id
+        JOIN sys_role r ON r.role_id = ur.role_id
+        JOIN sys_dept d ON d.dept_id = u.dept_id
+        WHERE r.role_key = #{roleKey}
+          AND u.status = '0'
+        <if test="tenantId != null">
+            AND d.tenant_id = #{tenantId}
+        </if>
+        ORDER BY u.user_id ASC
+    </select>
+
+    <!-- distinct building_id；@DataScope(buildingAlias="op") 对 OWNER_GROUP 用户行级兜底 -->
+    <select id="selectDistinctBuildings" resultType="long">
+        SELECT DISTINCT op.building_id
+        FROM c_owner_property op
+        WHERE op.tenant_id = #{tenantId}
+        ORDER BY op.building_id ASC
+    </select>
+
+    <select id="selectAssignmentsByUser" resultMap="BuildingAssignmentRowMap">
+        SELECT assignment_id, user_id, building_id, tenant_id,
+               assigned_by, assigned_at, status, revoke_reason
+        FROM sys_user_building
+        WHERE user_id = #{userId} AND status = 1
+        ORDER BY building_id ASC
+    </select>
+
+    <select id="selectExisting" resultMap="BuildingAssignmentRowMap">
+        SELECT assignment_id, user_id, building_id, tenant_id,
+               assigned_by, assigned_at, status, revoke_reason
+        FROM sys_user_building
+        WHERE user_id = #{userId} AND building_id = #{buildingId}
+        LIMIT 1
+    </select>
+
+    <insert id="insertAssignment">
+        INSERT INTO sys_user_building (user_id, building_id, tenant_id, assigned_by, status)
+        VALUES (#{userId}, #{buildingId}, #{tenantId}, #{assignedBy}, 1)
+    </insert>
+
+    <update id="reactivateAssignment">
+        UPDATE sys_user_building
+        SET status = 1, assigned_by = #{assignedBy}, assigned_at = now(), revoke_reason = NULL
+        WHERE assignment_id = #{assignmentId}
+    </update>
+
+    <update id="revokeAssignment">
+        UPDATE sys_user_building
+        SET status = 2, revoke_reason = #{revokeReason}
+        WHERE user_id = #{userId} AND building_id = #{buildingId} AND status = 1
+    </update>
+
+    <select id="existsBuildingInTenant" resultType="boolean">
+        SELECT EXISTS(SELECT 1 FROM c_owner_property
+        WHERE building_id = #{buildingId} AND tenant_id = #{tenantId})
+    </select>
+
+    <select id="userHasRoleInTenant" resultType="boolean">
+        SELECT EXISTS(
+            SELECT 1 FROM sys_user_role ur
+            JOIN sys_role r ON r.role_id = ur.role_id
+            JOIN sys_user u ON u.user_id = ur.user_id
+            JOIN sys_dept d ON d.dept_id = u.dept_id
+            WHERE ur.user_id = #{userId} AND r.role_key = #{roleKey}
+            <if test="tenantId != null">
+                AND d.tenant_id = #{tenantId}
+            </if>
+        )
+    </select>
+
+</mapper>
