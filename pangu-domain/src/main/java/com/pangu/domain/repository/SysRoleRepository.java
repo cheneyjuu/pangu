@@ -1,19 +1,27 @@
 package com.pangu.domain.repository;
 
+import com.pangu.domain.common.Page;
+import com.pangu.domain.gateway.dto.RoleQuery;
+import com.pangu.domain.model.role.RoleListItem;
+import com.pangu.domain.model.role.RolePermissionDetail;
 import com.pangu.domain.model.role.SysRole;
 
+import java.util.List;
 import java.util.Optional;
 
 /**
- * 角色仓储端口（Hexagonal Port）— 服务 SaaS 管理员的角色 CRUD。
+ * 角色仓储端口（Hexagonal Port）— 服务 SaaS 管理员的角色 CRUD + 读侧查询。
  *
  * <p>实现位置：{@code pangu-infrastructure/.../repository/SysRoleRepositoryImpl}。
  *
  * <p>设计原则：
  * <ul>
- *   <li>只暴露 SaaS 管理员后台需要的 4 条接口（{@code findById} / {@code findByRoleKey} /
+ *   <li>写侧只暴露 SaaS 管理员后台需要的 4 条接口（{@code findById} / {@code findByRoleKey} /
  *       {@code insert} / {@code delete}）—— 不暴露 UPDATE，避免把 is_system / fixed_data_scope
  *       等结构性字段暴露给后台动态修改；这些字段一旦预置就不能在线变更。</li>
+ *   <li>读侧（M4-1 补）{@code pageRoles} / {@code listPermissionsByRole} 为纯查询，不挂
+ *       {@code @DataScope}——{@code sys_role} 平台级表无 tenant/dept/building 维度，
+ *       收口由 endpoint {@code @PreAuthorize(admin:role:read)} 保证。</li>
  *   <li>{@code delete} 的 trigger 7（is_system=1 拒绝）由 DB 层兜底，本端口仅返回行影响数
  *       供应用层判定 not-found / silent-prevented。</li>
  * </ul>
@@ -23,6 +31,25 @@ public interface SysRoleRepository {
     Optional<SysRole> findById(Long roleId);
 
     Optional<SysRole> findByRoleKey(String roleKey);
+
+    /**
+     * 角色分页列表（带每行已授 permission 数）。
+     *
+     * @param query 过滤 + 分页参数（roleKey/roleName 模糊、isSystem/status 过滤）
+     * @return 当前页角色列表行 + 总数
+     */
+    Page<RoleListItem> pageRoles(RoleQuery query);
+
+    /**
+     * 某角色已授的权限明细（JOIN sys_permission）。
+     *
+     * <p>调用方应先 {@link #findById(Long)} 校验角色存在；不存在由应用层抛
+     * {@code ROLE_NOT_FOUND}。本方法对不存在的 roleId 返回空列表（不报错）。
+     *
+     * @param roleId 角色 id
+     * @return 权限明细列表，按 permission_group, permission_key 排序
+     */
+    List<RolePermissionDetail> listPermissionsByRole(Long roleId);
 
     /**
      * 新建角色（is_system=0）。返回带数据库主键的角色。
