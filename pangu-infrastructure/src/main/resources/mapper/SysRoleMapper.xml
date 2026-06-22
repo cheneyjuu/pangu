@@ -54,4 +54,79 @@
         DELETE FROM sys_role WHERE role_id = #{roleId}
     </delete>
 
+    <!-- ============ M4-1 读侧：角色分页列表 / 权限明细 ============ -->
+    <!-- sys_role 平台级表，不挂 @DataScope；收口由 endpoint @PreAuthorize(admin:role:read) 保证 -->
+
+    <resultMap id="RoleListItemRowMap"
+               type="com.pangu.infrastructure.persistence.entity.RoleListItemRow">
+        <id property="roleId" column="role_id"/>
+        <result property="roleKey" column="role_key"/>
+        <result property="roleName" column="role_name"/>
+        <result property="allowedDeptCategory" column="allowed_dept_category"/>
+        <result property="fixedDataScope" column="fixed_data_scope"/>
+        <result property="defaultDataScope" column="default_data_scope"/>
+        <result property="isSystem" column="is_system"/>
+        <result property="status" column="status"/>
+        <result property="permissionCount" column="permission_count"/>
+        <result property="createTime" column="create_time"/>
+    </resultMap>
+
+    <resultMap id="RolePermissionDetailRowMap"
+               type="com.pangu.infrastructure.persistence.entity.RolePermissionDetailRow">
+        <result property="permissionKey" column="permission_key"/>
+        <result property="description" column="description"/>
+        <result property="permissionGroup" column="permission_group"/>
+        <result property="allowedDeptCategories" column="allowed_dept_categories"/>
+        <result property="isLegalRedline" column="is_legal_redline"/>
+        <result property="grantedBy" column="granted_by"/>
+        <result property="grantedAt" column="granted_at"/>
+    </resultMap>
+
+    <!-- 角色列表过滤片段（list 与 count 共用） -->
+    <sql id="roleListFilter">
+        <where>
+            <if test="q.roleKey != null and q.roleKey != ''">
+                AND r.role_key LIKE CONCAT('%', #{q.roleKey}, '%')
+            </if>
+            <if test="q.roleName != null and q.roleName != ''">
+                AND r.role_name LIKE CONCAT('%', #{q.roleName}, '%')
+            </if>
+            <if test="q.isSystem != null">
+                AND r.is_system = #{q.isSystem}
+            </if>
+            <if test="q.status != null and q.status != ''">
+                AND r.status = #{q.status}
+            </if>
+        </where>
+    </sql>
+
+    <!-- 带 permission_count 子查询，避免 N+1；预置角色(is_system=1) 排序在前 -->
+    <select id="pageRolesList" resultMap="RoleListItemRowMap">
+        SELECT r.role_id, r.role_key, r.role_name, r.allowed_dept_category,
+               r.fixed_data_scope, r.default_data_scope, r.is_system, r.status,
+               r.create_time,
+               (SELECT COUNT(*) FROM sys_role_permission rp
+                WHERE rp.role_id = r.role_id) AS permission_count
+        FROM sys_role r
+        <include refid="roleListFilter"/>
+        ORDER BY r.is_system DESC, r.role_id ASC
+        LIMIT #{q.size} OFFSET (#{q.page} - 1) * #{q.size}
+    </select>
+
+    <select id="countRoles" resultType="long">
+        SELECT COUNT(*) FROM sys_role r
+        <include refid="roleListFilter"/>
+    </select>
+
+    <!-- 某角色已授权限明细：JOIN sys_permission 取元信息 -->
+    <select id="selectPermissionsByRole" resultMap="RolePermissionDetailRowMap">
+        SELECT p.permission_key, p.description, p.permission_group,
+               p.allowed_dept_categories, p.is_legal_redline,
+               rp.granted_by, rp.granted_at
+        FROM sys_role_permission rp
+        JOIN sys_permission p ON p.permission_key = rp.permission_key
+        WHERE rp.role_id = #{roleId}
+        ORDER BY p.permission_group, p.permission_key
+    </select>
+
 </mapper>
