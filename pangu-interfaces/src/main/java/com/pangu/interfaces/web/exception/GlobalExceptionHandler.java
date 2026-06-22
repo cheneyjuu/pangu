@@ -1,6 +1,7 @@
 package com.pangu.interfaces.web.exception;
 
 import com.pangu.application.admin.RoleAdminApplicationException;
+import com.pangu.application.admin.BuildingAssignmentApplicationException;
 import com.pangu.application.disclosure.FinanceDisclosureApplicationException;
 import com.pangu.application.dispute.DisputeApplicationException;
 import com.pangu.application.lock.GovernanceLockApplicationException;
@@ -149,6 +150,24 @@ public class GlobalExceptionHandler {
         RoleAdminErrorCode errorCode = RoleAdminExceptionTranslator.translate(ex);
         response.setStatus(errorCode.getHttpStatus());
         log.info("RoleAdmin business exception reason={} code={} msg={}",
+                ex.getReason(), errorCode.getCode(), ex.getMessage());
+        return Result.fail(
+                errorCode.getCode(),
+                ex.getMessage() != null ? ex.getMessage() : errorCode.getMessage(),
+                null,
+                errorCode.getErrorType(),
+                errorCode.isNeedRetry());
+    }
+
+    /**
+     * 楼栋责任田分配应用层业务异常 → BuildingAssignmentErrorCode（M4）。
+     */
+    @ExceptionHandler(BuildingAssignmentApplicationException.class)
+    public Result<Object> handleBuildingAssignmentApplicationException(
+            BuildingAssignmentApplicationException ex, HttpServletResponse response) {
+        BuildingAssignmentErrorCode errorCode = BuildingAssignmentExceptionTranslator.translate(ex);
+        response.setStatus(errorCode.getHttpStatus());
+        log.info("BuildingAssignment business exception reason={} code={} msg={}",
                 ex.getReason(), errorCode.getCode(), ex.getMessage());
         return Result.fail(
                 errorCode.getCode(),
