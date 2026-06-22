@@ -54,6 +54,13 @@
         DELETE FROM sys_role WHERE role_id = #{roleId}
     </delete>
 
+    <!-- M4-1 数据范围写回：仅 default_data_scope 可改；fixed 非空时应用层拦截 + chk_role_scope_consistency 兜底 -->
+    <update id="updateDefaultDataScope">
+        UPDATE sys_role
+        SET default_data_scope = #{defaultDataScope}, update_time = now()
+        WHERE role_id = #{roleId}
+    </update>
+
     <!-- ============ M4-1 读侧：角色分页列表 / 权限明细 ============ -->
     <!-- sys_role 平台级表，不挂 @DataScope；收口由 endpoint @PreAuthorize(admin:role:read) 保证 -->
 

@@ -20,6 +20,10 @@ public interface SysRoleMapper {
 
     int deleteById(@Param("roleId") Long roleId);
 
+    /** 在线变更 default_data_scope（fixed 非空时由应用层拦截，CHECK 兜底）。 */
+    int updateDefaultDataScope(@Param("roleId") Long roleId,
+                               @Param("defaultDataScope") String defaultDataScope);
+
     /**
      * 角色分页列表（带 permission_count 子查询）。不挂 @DataScope——sys_role 平台级表。
      */
