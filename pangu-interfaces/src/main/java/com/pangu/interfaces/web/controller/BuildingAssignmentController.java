@@ -4,9 +4,11 @@ import com.pangu.application.admin.BuildingAssignmentApplicationService;
 import com.pangu.application.admin.BuildingAssignmentQueryService;
 import com.pangu.domain.model.user.AssignableUser;
 import com.pangu.domain.model.user.BuildingAssignment;
+import com.pangu.domain.model.user.BuildingOccupancy;
 import com.pangu.interfaces.web.controller.dto.admin.AssignBuildingRequest;
 import com.pangu.interfaces.web.controller.dto.admin.AssignableUserResponse;
 import com.pangu.interfaces.web.controller.dto.admin.BuildingAssignmentResponse;
+import com.pangu.interfaces.web.controller.dto.admin.BuildingOccupancyResponse;
 import com.pangu.interfaces.web.controller.dto.admin.BuildingResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -27,10 +29,12 @@ import java.util.List;
  *
  * <p>API 路径：
  * <ul>
- *   <li>{@code GET    /api/v1/admin/building-assignments/users?roleKey=...}  —— 可分配用户列表；</li>
- *   <li>{@code GET    /api/v1/admin/building-assignments/buildings}          —— 可分配楼栋列表；</li>
- *   <li>{@code GET    /api/v1/admin/building-assignments/users/{userId}/buildings} —— 某用户已分配楼栋；</li>
- *   <li>{@code POST   /api/v1/admin/building-assignments/users/{userId}/buildings} —— 分配楼栋（幂等）；</li>
+ *   <li>{@code GET    /api/v1/admin/building-assignments/users?roleKey=...}        —— 可分配用户列表（按角色）；</li>
+ *   <li>{@code GET    /api/v1/admin/building-assignments/search?keyword=...}      —— 模糊搜索（姓名/手机号/手机尾号 OR）；</li>
+ *   <li>{@code GET    /api/v1/admin/building-assignments/buildings}               —— 可分配楼栋列表；</li>
+ *   <li>{@code GET    /api/v1/admin/building-assignments/buildings/{id}/occupants}—— 楼栋当前占用快照；</li>
+ *   <li>{@code GET    /api/v1/admin/building-assignments/users/{userId}/buildings}—— 某用户已分配楼栋；</li>
+ *   <li>{@code POST   /api/v1/admin/building-assignments/users/{userId}/buildings}—— 分配楼栋（body 含 force=true 时转移）；</li>
  *   <li>{@code DELETE /api/v1/admin/building-assignments/users/{userId}/buildings/{buildingId}} —— 撤销分配。</li>
  * </ul>
  *
@@ -54,11 +58,25 @@ public class BuildingAssignmentController extends BaseController {
         return success(users.stream().map(AssignableUserResponse::from).toList());
     }
 
+    @GetMapping("/search")
+    @PreAuthorize("isAuthenticated()")
+    public Result<List<AssignableUserResponse>> search(@RequestParam("keyword") String keyword) {
+        List<AssignableUser> users = queryService.searchAssignableUsers(keyword);
+        return success(users.stream().map(AssignableUserResponse::from).toList());
+    }
+
     @GetMapping("/buildings")
     @PreAuthorize("isAuthenticated()")
     public Result<List<BuildingResponse>> listBuildings() {
         List<Long> ids = queryService.listBuildings();
         return success(ids.stream().map(BuildingResponse::of).toList());
+    }
+
+    @GetMapping("/buildings/{buildingId}/occupants")
+    @PreAuthorize("isAuthenticated()")
+    public Result<BuildingOccupancyResponse> listBuildingOccupants(@PathVariable("buildingId") Long buildingId) {
+        BuildingOccupancy occupancy = queryService.listBuildingOccupants(buildingId);
+        return success(BuildingOccupancyResponse.from(occupancy));
     }
 
     @GetMapping("/users/{userId}/buildings")
@@ -72,8 +90,8 @@ public class BuildingAssignmentController extends BaseController {
     @PreAuthorize("isAuthenticated()")
     public Result<Void> assign(@PathVariable("userId") Long userId,
                                 @Valid @RequestBody AssignBuildingRequest request) {
-        applicationService.assign(userId, request.buildingId(), request.targetRoleKey());
-        return success("楼栋已分配", null);
+        applicationService.assign(userId, request.buildingId(), request.targetRoleKey(), request.isForce());
+        return success(request.isForce() ? "楼栋已转移分配" : "楼栋已分配", null);
     }
 
     @DeleteMapping("/users/{userId}/buildings/{buildingId}")
