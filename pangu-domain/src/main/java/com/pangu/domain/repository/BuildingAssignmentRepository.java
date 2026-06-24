@@ -2,6 +2,7 @@ package com.pangu.domain.repository;
 
 import com.pangu.domain.model.user.AssignableUser;
 import com.pangu.domain.model.user.BuildingAssignment;
+import com.pangu.domain.model.user.BuildingOccupant;
 
 import java.util.List;
 
@@ -30,6 +31,29 @@ public interface BuildingAssignmentRepository {
      * @param tenantId 租户；街道超管为 {@code null} 时跨租户
      */
     List<AssignableUser> listUsersByRole(String roleKey, Long tenantId);
+
+    /**
+     * 模糊搜索可分配角色（GRID_OPERATOR / VOLUNTEER / OWNER_REPRESENTATIVE）下的用户。
+     *
+     * <p>三字段 OR 匹配：{@code nick_name ILIKE %keyword%} / {@code phone = keyword}
+     * (完整手机号) / {@code phone LIKE %keyword} (手机尾号)。结果按用户 id 排序，
+     * service 层附 {@link AssignableUser#complianceIssues()} 合规快照。
+     *
+     * @param keyword  非空关键词；service 层做长度兜底
+     * @param tenantId 租户；{@code null} 时跨租户
+     * @param limit    返回上限（service 层硬编码，防 N+1）
+     */
+    List<AssignableUser> searchAssignableUsers(String keyword, Long tenantId, int limit);
+
+    /**
+     * 某楼栋当前所有 status=1 的占用者（含不同角色）。
+     *
+     * <p>不同角色可共享一栋楼，前端按 roleKey 分组判定「同角色冲突」。
+     *
+     * @param buildingId 楼栋 id
+     * @param tenantId   租户（{@code null} 时跨租户）
+     */
+    List<BuildingOccupant> listOccupants(Long buildingId, Long tenantId);
 
     /**
      * 可分配楼栋列表（distinct building_id）。
