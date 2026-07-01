@@ -12,11 +12,12 @@ import com.pangu.application.handover.HandoverCircuitBreaker;
 import com.pangu.application.lock.GovernanceLockApplicationException;
 import com.pangu.application.lock.GovernanceLockApplicationService;
 import com.pangu.application.lock.command.LockCommand;
+import com.pangu.application.support.ApplicationRoleGuard;
+import com.pangu.application.support.LockedTransactionTemplate;
 import com.pangu.application.support.PayloadHasher;
-import com.pangu.domain.context.UserContext;
+import com.pangu.application.support.StateMutationTemplate;
 import com.pangu.domain.context.UserContextHolder;
 import com.pangu.domain.lock.DistributedLockTemplate;
-import com.pangu.domain.lock.DistributedLockTemplate.DistributedLockAcquisitionException;
 import com.pangu.domain.model.disclosure.DisclosureDiff;
 import com.pangu.domain.model.disclosure.DisclosureType;
 import com.pangu.domain.model.disclosure.FinanceDisclosureSnapshot;
@@ -122,14 +123,12 @@ public class FinanceDisclosureApplicationService {
         }
         String key = String.format("lock:disclosure:tenant:%d:type:%s:period:%s",
                 cmd.tenantId(), cmd.disclosureType().name(), cmd.period());
-        try {
-            return distributedLockTemplate.executeWithLock(key, COMPOSE_LOCK_TTL, () ->
-                    transactionTemplate.execute(status -> doComposeWithinTx(cmd)));
-        } catch (DistributedLockAcquisitionException e) {
-            throw new FinanceDisclosureApplicationException(
-                    FinanceDisclosureApplicationException.Reason.SNAPSHOT_DUPLICATE,
-                    "目标期间正在被另一线程聚合，请稍后再试", e);
-        }
+        return LockedTransactionTemplate.execute(
+                distributedLockTemplate, transactionTemplate, key, COMPOSE_LOCK_TTL,
+                () -> doComposeWithinTx(cmd),
+                e -> new FinanceDisclosureApplicationException(
+                        FinanceDisclosureApplicationException.Reason.SNAPSHOT_DUPLICATE,
+                        "目标期间正在被另一线程聚合，请稍后再试", e));
     }
 
     private FinanceDisclosureSnapshot doComposeWithinTx(ComposeCommand cmd) {
@@ -204,21 +203,14 @@ public class FinanceDisclosureApplicationService {
                 cmd.tenantId(), LockEntityType.FINANCE_DISCLOSURE, snapshot.getSnapshotId(),
                 cmd.userId(), snapshot.getPayloadHash()));
 
-        // markLocked 同步落 status + governanceLockId + lockedAt，repo.update 一次 UPDATE 全部下推（trigger 9 通过）
-        try {
-            snapshot.markLocked(lock.getLockId());
-        } catch (IllegalStateException e) {
-            throw mapStateException(e);
-        }
-        updateSnapshot(snapshot);
-
-        // LOCKED → PUBLISHED：第二次 update 推进 status + publishedAt
-        try {
-            snapshot.markPublished();
-        } catch (IllegalStateException e) {
-            throw mapStateException(e);
-        }
-        updateSnapshot(snapshot);
+        StateMutationTemplate.advance(snapshot,
+                current -> current.markLocked(lock.getLockId()),
+                this::updateSnapshot,
+                this::mapStateException);
+        StateMutationTemplate.advance(snapshot,
+                FinanceDisclosureSnapshot::markPublished,
+                this::updateSnapshot,
+                this::mapStateException);
 
         return snapshot;
     }
@@ -321,12 +313,9 @@ public class FinanceDisclosureApplicationService {
     }
 
     private void requireAnyRole(Set<String> expectedRoles, String message) {
-        UserContext ctx = userContextHolder.current();
-        if (ctx == null || !expectedRoles.contains(ctx.roleKey())) {
-            throw new FinanceDisclosureApplicationException(
-                    FinanceDisclosureApplicationException.Reason.DISCLOSURE_ROLE_FORBIDDEN,
-                    message + "，当前角色=" + (ctx == null ? "ANONYMOUS" : ctx.roleKey()));
-        }
+        ApplicationRoleGuard.requireAnyRole(userContextHolder, expectedRoles, message,
+                msg -> new FinanceDisclosureApplicationException(
+                        FinanceDisclosureApplicationException.Reason.DISCLOSURE_ROLE_FORBIDDEN, msg));
     }
 
     private FinanceDisclosureSnapshot loadById(Long snapshotId) {

@@ -2,7 +2,7 @@ package com.pangu.application.voting;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.pangu.domain.context.UserContext;
+import com.pangu.application.support.ApplicationRoleGuard;
 import com.pangu.domain.context.UserContextHolder;
 import com.pangu.domain.model.voting.CandidatePoolSnapshot;
 import com.pangu.domain.model.voting.SubjectStatus;
@@ -102,12 +102,9 @@ public class ProposalReviewService {
     }
 
     private void assertRole(String expectedRole, String message) {
-        UserContext ctx = userContextHolder.current();
-        if (ctx == null || !expectedRole.equals(ctx.roleKey())) {
-            throw new VotingApplicationException(
-                    VotingApplicationException.Reason.PROPOSE_FORBIDDEN_FOR_TYPE,
-                    message + "，当前角色=" + (ctx == null ? "ANONYMOUS" : ctx.roleKey()));
-        }
+        ApplicationRoleGuard.requireRole(userContextHolder, expectedRole, message,
+                msg -> new VotingApplicationException(
+                        VotingApplicationException.Reason.PROPOSE_FORBIDDEN_FOR_TYPE, msg));
     }
 
     private void assertExpectedStatus(ReviewAction action, VotingSubject subject, Long subjectId) {

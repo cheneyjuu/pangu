@@ -1,10 +1,11 @@
 package com.pangu.application.voting;
 
-import com.pangu.domain.context.UserContext;
-import com.pangu.domain.context.UserContextHolder;
+import com.pangu.application.support.ApplicationRoleGuard;
 import com.pangu.application.voting.command.NominateCandidateCommand;
 import com.pangu.application.voting.command.PartyReviewCandidateCommand;
 import com.pangu.application.voting.command.ReviewCandidateCommand;
+import com.pangu.domain.context.UserContext;
+import com.pangu.domain.context.UserContextHolder;
 import com.pangu.domain.gateway.PropertyGateway;
 import com.pangu.domain.model.asset.OwnerSummary;
 import com.pangu.domain.model.voting.Candidate;
@@ -84,7 +85,7 @@ public class ElectionCandidateService {
             throw new VotingApplicationException(
                     VotingApplicationException.Reason.PROPOSE_FORBIDDEN_FOR_TYPE,
                     "ELECTION 候选人提名仅限 G 端基层经办员（dept_type IN (2,5)），当前角色="
-                            + (ctx == null ? "ANONYMOUS" : ctx.roleKey())
+                            + ApplicationRoleGuard.currentRole(ctx)
                             + " deptType=" + (ctx == null ? null : ctx.deptType()));
         }
         if (subject.getStatus() != SubjectStatus.DRAFT && subject.getStatus() != SubjectStatus.PUBLISHED) {
@@ -159,12 +160,9 @@ public class ElectionCandidateService {
     }
 
     private void requireRole(String expectedRole, String message) {
-        UserContext ctx = userContextHolder.current();
-        if (ctx == null || !expectedRole.equals(ctx.roleKey())) {
-            throw new VotingApplicationException(
-                    VotingApplicationException.Reason.CANDIDATE_REVIEW_FORBIDDEN,
-                    message + "，当前角色=" + (ctx == null ? "ANONYMOUS" : ctx.roleKey()));
-        }
+        ApplicationRoleGuard.requireRole(userContextHolder, expectedRole, message,
+                msg -> new VotingApplicationException(
+                        VotingApplicationException.Reason.CANDIDATE_REVIEW_FORBIDDEN, msg));
     }
 
     private Candidate executeCandidateReview(CandidateReviewAction action,

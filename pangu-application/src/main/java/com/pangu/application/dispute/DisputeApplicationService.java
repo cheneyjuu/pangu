@@ -8,6 +8,7 @@ import com.pangu.application.dispute.command.GotoLitigationCommand;
 import com.pangu.application.dispute.command.OpenCommand;
 import com.pangu.application.dispute.command.StartReviewCommand;
 import com.pangu.application.dispute.command.WithdrawCommand;
+import com.pangu.application.support.StateMutationTemplate;
 import com.pangu.domain.model.dispute.Decision;
 import com.pangu.domain.model.dispute.Dispute;
 import com.pangu.domain.model.dispute.DisputeEvidence;
@@ -60,14 +61,7 @@ public class DisputeApplicationService {
     /** 行政机关受理：RAISED → UNDER_REVIEW_LEVEL_<currentLevel>。 */
     @Transactional
     public Dispute startReview(StartReviewCommand cmd) {
-        Dispute d = loadForUpdate(cmd.disputeId());
-        try {
-            d.startReview();
-        } catch (IllegalStateException e) {
-            throw mapStateException(e);
-        }
-        updateWithOptimisticLock(d);
-        return d;
+        return executeDisputeAction(cmd.disputeId(), Dispute::startReview);
     }
 
     /**
@@ -101,57 +95,25 @@ public class DisputeApplicationService {
     /** 业主升级到下一级。校验 owner 一致性 + Level 4 REJECTED 必须走 gotoLitigation。 */
     @Transactional
     public Dispute escalate(EscalateCommand cmd) {
-        Dispute d = loadForUpdate(cmd.disputeId());
-        ensureOwner(d, cmd.requestByOwnerId());
-        try {
-            d.escalate();
-        } catch (IllegalStateException e) {
-            throw mapStateException(e);
-        }
-        updateWithOptimisticLock(d);
-        return d;
+        return executeOwnerAction(cmd.disputeId(), cmd.requestByOwnerId(), Dispute::escalate);
     }
 
     /** 业主走 Level 5 行政诉讼。 */
     @Transactional
     public Dispute gotoLitigation(GotoLitigationCommand cmd) {
-        Dispute d = loadForUpdate(cmd.disputeId());
-        ensureOwner(d, cmd.requestByOwnerId());
-        try {
-            d.gotoLitigation();
-        } catch (IllegalStateException e) {
-            throw mapStateException(e);
-        }
-        updateWithOptimisticLock(d);
-        return d;
+        return executeOwnerAction(cmd.disputeId(), cmd.requestByOwnerId(), Dispute::gotoLitigation);
     }
 
     /** 业主撤回。 */
     @Transactional
     public Dispute withdraw(WithdrawCommand cmd) {
-        Dispute d = loadForUpdate(cmd.disputeId());
-        ensureOwner(d, cmd.requestByOwnerId());
-        try {
-            d.withdraw();
-        } catch (IllegalStateException e) {
-            throw mapStateException(e);
-        }
-        updateWithOptimisticLock(d);
-        return d;
+        return executeOwnerAction(cmd.disputeId(), cmd.requestByOwnerId(), Dispute::withdraw);
     }
 
     /** 业主接受最终决议。 */
     @Transactional
     public Dispute concludeFinal(ConcludeCommand cmd) {
-        Dispute d = loadForUpdate(cmd.disputeId());
-        ensureOwner(d, cmd.requestByOwnerId());
-        try {
-            d.concludeFinal();
-        } catch (IllegalStateException e) {
-            throw mapStateException(e);
-        }
-        updateWithOptimisticLock(d);
-        return d;
+        return executeOwnerAction(cmd.disputeId(), cmd.requestByOwnerId(), Dispute::concludeFinal);
     }
 
     /** 业主补充证据；终态拒绝。 */
@@ -204,6 +166,29 @@ public class DisputeApplicationService {
                 .orElseThrow(() -> new DisputeApplicationException(
                         DisputeApplicationException.Reason.DISPUTE_NOT_FOUND,
                         "异议不存在 disputeId=" + disputeId));
+    }
+
+    private Dispute executeDisputeAction(Long disputeId,
+                                         StateMutationTemplate.StateMutation<Dispute> mutation) {
+        return StateMutationTemplate.execute(
+                () -> loadForUpdate(disputeId),
+                mutation,
+                this::updateWithOptimisticLock,
+                this::mapStateException);
+    }
+
+    private Dispute executeOwnerAction(Long disputeId,
+                                       Long requestByOwnerId,
+                                       StateMutationTemplate.StateMutation<Dispute> mutation) {
+        return StateMutationTemplate.execute(
+                () -> {
+                    Dispute d = loadForUpdate(disputeId);
+                    ensureOwner(d, requestByOwnerId);
+                    return d;
+                },
+                mutation,
+                this::updateWithOptimisticLock,
+                this::mapStateException);
     }
 
     private void ensureOwner(Dispute d, Long requestByOwnerId) {

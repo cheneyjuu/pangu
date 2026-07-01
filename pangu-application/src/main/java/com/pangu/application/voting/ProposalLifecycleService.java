@@ -1,6 +1,7 @@
 package com.pangu.application.voting;
 
 import com.pangu.application.handover.HandoverCircuitBreaker;
+import com.pangu.application.support.ApplicationRoleGuard;
 import com.pangu.application.voting.command.CancelSubjectCommand;
 import com.pangu.application.voting.command.ProposeSubjectCommand;
 import com.pangu.application.voting.command.PublishSubjectCommand;
@@ -77,7 +78,7 @@ public class ProposalLifecycleService {
                 throw new VotingApplicationException(
                         VotingApplicationException.Reason.PROPOSE_FORBIDDEN_FOR_TYPE,
                         "ELECTION 议题立项仅限 G 端基层经办员（dept_type IN (2,5)），当前角色="
-                                + (ctx == null ? "ANONYMOUS" : ctx.roleKey())
+                                + ApplicationRoleGuard.currentRole(ctx)
                                 + " deptType=" + (ctx == null ? null : ctx.deptType()));
             }
         }
