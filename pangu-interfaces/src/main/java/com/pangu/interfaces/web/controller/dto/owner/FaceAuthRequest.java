@@ -12,6 +12,6 @@ import jakarta.validation.constraints.Size;
 public record FaceAuthRequest(
         @NotBlank @Size(max = 32) String provider,
         @NotBlank @Size(max = 128) String providerRequestId,
-        @Size(max = 512) String providerResult
+        @NotBlank @Size(max = 512) String providerResult
 ) {
 }

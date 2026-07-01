@@ -49,6 +49,9 @@ import java.util.Optional;
  *
  * <p>本服务对外只抛 {@link WaiverApplicationException}；状态机与 dept_type 校验由聚合根
  * {@link PartyRatioWaiver} 完成，本服务捕获 {@link IllegalStateException} 转译。
+ *
+ * <p>初审 / 终审借鉴 {@code CampaignApplyService} 的动作路由，但审批不自动连续推进：
+ * waiver 审批每一步都需要真实角色签署，public 方法只触发一个明确动作。
  */
 @Slf4j
 @Service
@@ -161,15 +164,48 @@ public class WaiverApplicationService {
     /** 居委会初审。 */
     @Transactional
     public PartyRatioWaiver reviewByCommittee(CommitteeReviewCommand cmd) {
-        assertRole(WAIVER_COMMITTEE_REVIEW_ROLE, "Waiver 居委会初审仅限居委会管理员");
-        RejectEvidencePolicy.requireForReject(cmd.approve(), cmd.rejectReasonCode(), cmd.rejectEvidenceJson());
-        PartyRatioWaiver waiver = loadForUpdate(cmd.waiverId());
+        return executeReview(WaiverReviewAction.COMMITTEE_REVIEW,
+                cmd.waiverId(),
+                cmd.approverUserId(),
+                cmd.approve(),
+                cmd.opinion(),
+                cmd.rejectReasonCode(),
+                cmd.rejectEvidenceJson());
+    }
+
+    /**
+     * 街道办终审。通过 → APPROVED 后立刻锁定 {@code local_payload_hash}（可重放摘要），
+     * 后续异步上链由 outbox 流程驱动。
+     */
+    @Transactional
+    public PartyRatioWaiver reviewByStreet(StreetReviewCommand cmd) {
+        return executeReview(WaiverReviewAction.STREET_REVIEW,
+                cmd.waiverId(),
+                cmd.approverUserId(),
+                cmd.approve(),
+                cmd.opinion(),
+                cmd.rejectReasonCode(),
+                cmd.rejectEvidenceJson());
+    }
+
+    private PartyRatioWaiver executeReview(WaiverReviewAction action,
+                                           Long waiverId,
+                                           Long approverUserId,
+                                           boolean approve,
+                                           String opinion,
+                                           String rejectReasonCode,
+                                           String rejectEvidenceJson) {
+        assertRole(action.requiredRole, action.forbiddenMessage);
+        RejectEvidencePolicy.requireForReject(approve, rejectReasonCode, rejectEvidenceJson);
+        PartyRatioWaiver waiver = loadForUpdate(waiverId);
         try {
-            if (cmd.approve()) {
-                waiver.approveByCommittee(cmd.approverUserId(), cmd.opinion());
+            if (approve) {
+                action.approveTransition.apply(waiver, approverUserId, opinion);
+                if (action.lockPayloadHashAfterApprove) {
+                    lockLocalPayloadHash(waiver);
+                }
             } else {
-                waiver.reject(cmd.approverUserId(), cmd.opinion(),
-                        cmd.rejectReasonCode(), cmd.rejectEvidenceJson());
+                waiver.reject(approverUserId, opinion, rejectReasonCode, rejectEvidenceJson);
             }
         } catch (IllegalStateException e) {
             throw mapStateException(e);
@@ -184,35 +220,9 @@ public class WaiverApplicationService {
         return waiver;
     }
 
-    /**
-     * 街道办终审。通过 → APPROVED 后立刻锁定 {@code local_payload_hash}（可重放摘要），
-     * 后续异步上链由 outbox 流程驱动。
-     */
-    @Transactional
-    public PartyRatioWaiver reviewByStreet(StreetReviewCommand cmd) {
-        assertRole(WAIVER_STREET_REVIEW_ROLE, "Waiver 街道终审仅限街道办");
-        RejectEvidencePolicy.requireForReject(cmd.approve(), cmd.rejectReasonCode(), cmd.rejectEvidenceJson());
-        PartyRatioWaiver waiver = loadForUpdate(cmd.waiverId());
-        try {
-            if (cmd.approve()) {
-                waiver.approveByStreet(cmd.approverUserId(), cmd.opinion());
-                String hash = payloadHasher.hashWaiverApproval(waiver);
-                waiver.lockLocalPayloadHash(hash);
-            } else {
-                waiver.reject(cmd.approverUserId(), cmd.opinion(),
-                        cmd.rejectReasonCode(), cmd.rejectEvidenceJson());
-            }
-        } catch (IllegalStateException e) {
-            throw mapStateException(e);
-        }
-        try {
-            waiverRepository.update(waiver);
-        } catch (OptimisticLockException e) {
-            throw new WaiverApplicationException(
-                    WaiverApplicationException.Reason.CONCURRENT_MODIFICATION,
-                    "Waiver 已被其他操作并发修改，请刷新后重试", e);
-        }
-        return waiver;
+    private void lockLocalPayloadHash(PartyRatioWaiver waiver) {
+        String hash = payloadHasher.hashWaiverApproval(waiver);
+        waiver.lockLocalPayloadHash(hash);
     }
 
     private void assertRole(String expectedRole, String message) {
@@ -269,5 +279,38 @@ public class WaiverApplicationService {
     /** 仅供测试与监控 hooks，提供默认 ratio 常量。 */
     public static BigDecimal defaultRatioFloor() {
         return new BigDecimal("0.50");
+    }
+
+    private enum WaiverReviewAction {
+        COMMITTEE_REVIEW(
+                WAIVER_COMMITTEE_REVIEW_ROLE,
+                "Waiver 居委会初审仅限居委会管理员",
+                false,
+                PartyRatioWaiver::approveByCommittee),
+        STREET_REVIEW(
+                WAIVER_STREET_REVIEW_ROLE,
+                "Waiver 街道终审仅限街道办",
+                true,
+                PartyRatioWaiver::approveByStreet);
+
+        private final String requiredRole;
+        private final String forbiddenMessage;
+        private final boolean lockPayloadHashAfterApprove;
+        private final WaiverApproveTransition approveTransition;
+
+        WaiverReviewAction(String requiredRole,
+                           String forbiddenMessage,
+                           boolean lockPayloadHashAfterApprove,
+                           WaiverApproveTransition approveTransition) {
+            this.requiredRole = requiredRole;
+            this.forbiddenMessage = forbiddenMessage;
+            this.lockPayloadHashAfterApprove = lockPayloadHashAfterApprove;
+            this.approveTransition = approveTransition;
+        }
+    }
+
+    @FunctionalInterface
+    private interface WaiverApproveTransition {
+        void apply(PartyRatioWaiver waiver, Long approverUserId, String opinion);
     }
 }

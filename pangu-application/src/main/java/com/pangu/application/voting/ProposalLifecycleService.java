@@ -32,6 +32,9 @@ import java.util.Set;
  * <p>角色授权决策由 service 层完成：endpoint 上的 {@code @PreAuthorize} 仅做粗筛
  * （{@code voting:subject:create / publish / cancel}），是否真正可以发起 / 撤回还要根据
  * {@link SubjectType} 与议题状态进一步判定。这个分层与 M2-3 disclosure 的做法一致。
+ *
+ * <p>公示 / 开票使用显式动作定义加统一执行模板；scheduler 开票仍只触发单步动作，
+ * 不把后续结算自动串进本服务。
  */
 @Slf4j
 @Service
@@ -131,33 +134,8 @@ public class ProposalLifecycleService {
      */
     @Transactional
     public VotingSubject publish(PublishSubjectCommand cmd) {
-        VotingSubject subject = subjectRepository.findByIdForUpdate(cmd.subjectId())
-                .orElseThrow(() -> new VotingApplicationException(
-                        VotingApplicationException.Reason.SUBJECT_NOT_FOUND,
-                        "议题不存在 subjectId=" + cmd.subjectId()));
-        if (subject.getSubjectType() == SubjectType.ELECTION) {
-            throw new VotingApplicationException(
-                    VotingApplicationException.Reason.PROPOSE_FORBIDDEN_FOR_TYPE,
-                    "ELECTION 议题必须通过街道办终审发布，请使用 street-review subjectId=" + cmd.subjectId());
-        }
-        if (subject.getStatus() != SubjectStatus.DRAFT) {
-            throw new VotingApplicationException(
-                    VotingApplicationException.Reason.SUBJECT_NOT_DRAFT,
-                    "议题不在草稿状态 subjectId=" + cmd.subjectId() + " status=" + subject.getStatus());
-        }
-        try {
-            VotingSubjectActions.publish(subject);
-        } catch (VotingSubjectActions.IllegalSubjectTransitionException e) {
-            throw new VotingApplicationException(
-                    VotingApplicationException.Reason.SUBJECT_NOT_DRAFT, e.getMessage(), e);
-        }
-        int updated = subjectRepository.updateStatus(
-                subject.getSubjectId(), SubjectStatus.PUBLISHED.getDbValue(), subject.getVersion());
-        if (updated != 1) {
-            throw new VotingApplicationException(
-                    VotingApplicationException.Reason.CONCURRENT_LIFECYCLE_MODIFICATION,
-                    "议题在公示过程中被并发修改 subjectId=" + cmd.subjectId());
-        }
+        VotingSubject subject = executeLifecycleTransition(
+                LifecycleTransition.PUBLISH, cmd.subjectId(), null);
         log.info("Subject published subjectId={} byUserId={}", cmd.subjectId(), cmd.currentUserId());
         return subject;
     }
@@ -214,30 +192,33 @@ public class ProposalLifecycleService {
      */
     @Transactional
     public VotingSubject openVoting(Long subjectId, Instant now) {
+        VotingSubject subject = executeLifecycleTransition(LifecycleTransition.OPEN_VOTING, subjectId, now);
+        votingMobilizationService.activateForVotingOpened(subject, now);
+        log.info("Subject voting opened subjectId={} now={}", subjectId, now);
+        return subject;
+    }
+
+    private VotingSubject executeLifecycleTransition(LifecycleTransition action,
+                                                    Long subjectId,
+                                                    Instant now) {
         VotingSubject subject = subjectRepository.findByIdForUpdate(subjectId)
                 .orElseThrow(() -> new VotingApplicationException(
                         VotingApplicationException.Reason.SUBJECT_NOT_FOUND,
                         "议题不存在 subjectId=" + subjectId));
-        if (subject.getStatus() != SubjectStatus.PUBLISHED) {
-            throw new VotingApplicationException(
-                    VotingApplicationException.Reason.SUBJECT_NOT_PUBLISHED,
-                    "议题不在公示状态 subjectId=" + subjectId + " status=" + subject.getStatus());
-        }
+        action.validateSubject(subject, subjectId);
         try {
-            VotingSubjectActions.openVoting(subject, now);
+            action.transition.apply(subject, now);
         } catch (VotingSubjectActions.IllegalSubjectTransitionException e) {
             throw new VotingApplicationException(
-                    VotingApplicationException.Reason.SUBJECT_NOT_PUBLISHED, e.getMessage(), e);
+                    action.invalidTransitionReason, e.getMessage(), e);
         }
         int updated = subjectRepository.updateStatus(
-                subjectId, SubjectStatus.VOTING.getDbValue(), subject.getVersion());
+                subjectId, action.targetStatus.getDbValue(), subject.getVersion());
         if (updated != 1) {
             throw new VotingApplicationException(
                     VotingApplicationException.Reason.CONCURRENT_LIFECYCLE_MODIFICATION,
-                    "议题在开票过程中被并发修改 subjectId=" + subjectId);
+                    action.concurrentErrorMessage(subjectId));
         }
-        votingMobilizationService.activateForVotingOpened(subject, now);
-        log.info("Subject voting opened subjectId={} now={}", subjectId, now);
         return subject;
     }
 
@@ -265,5 +246,73 @@ public class ProposalLifecycleService {
         return ctx != null
                 && ELECTION_PROPOSE_ROLE.equals(ctx.roleKey())
                 && ELECTION_PROPOSE_DEPT_TYPES.contains(ctx.deptType());
+    }
+
+    private enum LifecycleTransition {
+        PUBLISH(
+                SubjectStatus.DRAFT,
+                SubjectStatus.PUBLISHED,
+                VotingApplicationException.Reason.SUBJECT_NOT_DRAFT,
+                "公示",
+                (subject, now) -> VotingSubjectActions.publish(subject)) {
+            @Override
+            void validateSubject(VotingSubject subject, Long subjectId) {
+                if (subject.getSubjectType() == SubjectType.ELECTION) {
+                    throw new VotingApplicationException(
+                            VotingApplicationException.Reason.PROPOSE_FORBIDDEN_FOR_TYPE,
+                            "ELECTION 议题必须通过街道办终审发布，请使用 street-review subjectId=" + subjectId);
+                }
+                super.validateSubject(subject, subjectId);
+            }
+        },
+        OPEN_VOTING(
+                SubjectStatus.PUBLISHED,
+                SubjectStatus.VOTING,
+                VotingApplicationException.Reason.SUBJECT_NOT_PUBLISHED,
+                "开票",
+                VotingSubjectActions::openVoting);
+
+        private final SubjectStatus expectedStatus;
+        private final SubjectStatus targetStatus;
+        private final VotingApplicationException.Reason invalidTransitionReason;
+        private final String actionName;
+        private final LifecycleTransitionApplier transition;
+
+        LifecycleTransition(SubjectStatus expectedStatus,
+                            SubjectStatus targetStatus,
+                            VotingApplicationException.Reason invalidTransitionReason,
+                            String actionName,
+                            LifecycleTransitionApplier transition) {
+            this.expectedStatus = expectedStatus;
+            this.targetStatus = targetStatus;
+            this.invalidTransitionReason = invalidTransitionReason;
+            this.actionName = actionName;
+            this.transition = transition;
+        }
+
+        void validateSubject(VotingSubject subject, Long subjectId) {
+            if (subject.getStatus() == expectedStatus) {
+                return;
+            }
+            throw new VotingApplicationException(
+                    invalidTransitionReason,
+                    statusErrorMessage(subjectId, subject.getStatus()));
+        }
+
+        private String statusErrorMessage(Long subjectId, SubjectStatus actualStatus) {
+            return switch (this) {
+                case PUBLISH -> "议题不在草稿状态 subjectId=" + subjectId + " status=" + actualStatus;
+                case OPEN_VOTING -> "议题不在公示状态 subjectId=" + subjectId + " status=" + actualStatus;
+            };
+        }
+
+        private String concurrentErrorMessage(Long subjectId) {
+            return "议题在" + actionName + "过程中被并发修改 subjectId=" + subjectId;
+        }
+    }
+
+    @FunctionalInterface
+    private interface LifecycleTransitionApplier {
+        void apply(VotingSubject subject, Instant now);
     }
 }

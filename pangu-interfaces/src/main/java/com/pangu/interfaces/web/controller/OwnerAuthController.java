@@ -1,5 +1,6 @@
 package com.pangu.interfaces.web.controller;
 
+import com.pangu.interfaces.web.controller.dto.owner.FaceAuthContextResponse;
 import com.pangu.interfaces.web.controller.dto.owner.FaceAuthRequest;
 import com.pangu.interfaces.web.controller.dto.owner.FaceAuthResponse;
 import com.pangu.interfaces.web.service.OwnerFaceAuthService;
@@ -17,6 +18,12 @@ import org.springframework.web.bind.annotation.RestController;
 public class OwnerAuthController extends BaseController {
 
     private final OwnerFaceAuthService ownerFaceAuthService;
+
+    @PostMapping("/face/context")
+    @PreAuthorize("isAuthenticated()")
+    public Result<FaceAuthContextResponse> prepareFaceAuthContext() {
+        return success(ownerFaceAuthService.prepareContext());
+    }
 
     @PostMapping("/face")
     @PreAuthorize("isAuthenticated()")

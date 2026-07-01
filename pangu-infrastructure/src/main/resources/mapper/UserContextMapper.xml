@@ -46,6 +46,53 @@
         LIMIT 1
     </select>
 
+    <select id="loadFaceAuthIdentity"
+            resultType="com.pangu.infrastructure.persistence.mapper.UserContextMapper$FaceAuthIdentityRow">
+        SELECT
+            real_name         AS realNameCipher,
+            id_card_encrypted AS idCardCipher
+        FROM t_account
+        WHERE account_id = #{accountId}
+          AND status = 1
+        LIMIT 1
+    </select>
+
+    <update id="upgradeCUserAuthLevel">
+        UPDATE c_user
+        SET auth_level = GREATEST(auth_level, #{authLevel}),
+            update_time = CURRENT_TIMESTAMP
+        WHERE uid = #{uid}
+          AND account_id = #{accountId}
+    </update>
+
+    <update id="markAccountRealNameVerified">
+        UPDATE t_account
+        SET real_name_verified = 1,
+            update_time = CURRENT_TIMESTAMP
+        WHERE account_id = #{accountId}
+    </update>
+
+    <insert id="insertFaceAuthAttestation">
+        INSERT INTO t_owner_face_auth_attestation (
+            uid,
+            account_id,
+            provider,
+            provider_request_id,
+            provider_result,
+            verified,
+            auth_level_after
+        )
+        VALUES (
+            #{uid},
+            #{accountId},
+            #{provider},
+            #{providerRequestId},
+            #{providerResult},
+            #{verified},
+            #{authLevelAfter}
+        )
+    </insert>
+
     <!-- 给定角色反查能力点（permission_key）集合。 -->
     <select id="selectPermissionsByRoleId" resultType="java.lang.String">
         SELECT permission_key

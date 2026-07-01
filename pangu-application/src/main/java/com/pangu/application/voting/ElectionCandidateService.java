@@ -125,45 +125,13 @@ public class ElectionCandidateService {
      */
     @Transactional
     public Candidate partyReview(PartyReviewCandidateCommand cmd) {
-        requireRole(PARTY_REVIEW_ROLE, "候选人党组前置审查仅限党组织书记");
-        RejectEvidencePolicy.requireForReject(cmd.approve(), cmd.rejectReasonCode(), cmd.rejectEvidenceJson());
-        Candidate candidate = electionCandidateRegistry.findById(cmd.candidateId())
-                .orElseThrow(() -> new VotingApplicationException(
-                        VotingApplicationException.Reason.CANDIDATE_NOT_FOUND,
-                        "候选人不存在 candidateId=" + cmd.candidateId()));
-        CandidateStatus from = candidate.getQualificationStatus();
-        try {
-            if (cmd.approve()) {
-                ElectionCandidateActions.partyApprove(candidate);
-            } else {
-                ElectionCandidateActions.partyReject(candidate);
-            }
-        } catch (ElectionCandidateActions.IllegalCandidateTransitionException e) {
-            throw new VotingApplicationException(
-                    VotingApplicationException.Reason.CANDIDATE_REVIEW_CONFLICT, e.getMessage(), e);
-        }
-        int updated = electionCandidateRegistry.updateQualification(
-                candidate.getCandidateId(),
-                from.getDbValue(),
-                candidate.getQualificationStatus().getDbValue(),
-                cmd.approve() ? null : cmd.rejectReasonCode(),
-                cmd.approve() ? null : cmd.rejectEvidenceJson(),
-                cmd.approve() ? null : cmd.operatorUserId(),
-                cmd.approve() ? null : "PARTY_REVIEW");
-        if (updated != 1) {
-            throw new VotingApplicationException(
-                    VotingApplicationException.Reason.CANDIDATE_REVIEW_CONFLICT,
-                    "候选人已被并发审查 candidateId=" + cmd.candidateId());
-        }
-        if (!cmd.approve()) {
-            candidate.setRejectReasonCode(cmd.rejectReasonCode());
-            candidate.setRejectEvidenceJson(cmd.rejectEvidenceJson());
-            candidate.setRejectReviewerUserId(cmd.operatorUserId());
-            candidate.setRejectReviewStage("PARTY_REVIEW");
-        }
-        log.info("Candidate party-reviewed candidateId={} approve={} newStatus={} operatorUserId={}",
-                cmd.candidateId(), cmd.approve(), candidate.getQualificationStatus(), cmd.operatorUserId());
-        return candidate;
+        return executeCandidateReview(
+                CandidateReviewAction.PARTY_REVIEW,
+                cmd.candidateId(),
+                cmd.approve(),
+                cmd.operatorUserId(),
+                cmd.rejectReasonCode(),
+                cmd.rejectEvidenceJson());
     }
 
     /**
@@ -174,45 +142,13 @@ public class ElectionCandidateService {
      */
     @Transactional
     public Candidate review(ReviewCandidateCommand cmd) {
-        requireRole(COMMITTEE_REVIEW_ROLE, "候选人居委会资格审查仅限居委会");
-        RejectEvidencePolicy.requireForReject(cmd.approve(), cmd.rejectReasonCode(), cmd.rejectEvidenceJson());
-        Candidate candidate = electionCandidateRegistry.findById(cmd.candidateId())
-                .orElseThrow(() -> new VotingApplicationException(
-                        VotingApplicationException.Reason.CANDIDATE_NOT_FOUND,
-                        "候选人不存在 candidateId=" + cmd.candidateId()));
-        CandidateStatus from = candidate.getQualificationStatus();
-        try {
-            if (cmd.approve()) {
-                ElectionCandidateActions.approve(candidate);
-            } else {
-                ElectionCandidateActions.reject(candidate);
-            }
-        } catch (ElectionCandidateActions.IllegalCandidateTransitionException e) {
-            throw new VotingApplicationException(
-                    VotingApplicationException.Reason.CANDIDATE_REVIEW_CONFLICT, e.getMessage(), e);
-        }
-        int updated = electionCandidateRegistry.updateQualification(
-                candidate.getCandidateId(),
-                from.getDbValue(),
-                candidate.getQualificationStatus().getDbValue(),
-                cmd.approve() ? null : cmd.rejectReasonCode(),
-                cmd.approve() ? null : cmd.rejectEvidenceJson(),
-                cmd.approve() ? null : cmd.operatorUserId(),
-                cmd.approve() ? null : "COMMITTEE_REVIEW");
-        if (updated != 1) {
-            throw new VotingApplicationException(
-                    VotingApplicationException.Reason.CANDIDATE_REVIEW_CONFLICT,
-                    "候选人已被并发审查 candidateId=" + cmd.candidateId());
-        }
-        if (!cmd.approve()) {
-            candidate.setRejectReasonCode(cmd.rejectReasonCode());
-            candidate.setRejectEvidenceJson(cmd.rejectEvidenceJson());
-            candidate.setRejectReviewerUserId(cmd.operatorUserId());
-            candidate.setRejectReviewStage("COMMITTEE_REVIEW");
-        }
-        log.info("Candidate reviewed candidateId={} approve={} newStatus={} operatorUserId={}",
-                cmd.candidateId(), cmd.approve(), candidate.getQualificationStatus(), cmd.operatorUserId());
-        return candidate;
+        return executeCandidateReview(
+                CandidateReviewAction.COMMITTEE_REVIEW,
+                cmd.candidateId(),
+                cmd.approve(),
+                cmd.operatorUserId(),
+                cmd.rejectReasonCode(),
+                cmd.rejectEvidenceJson());
     }
 
     /**
@@ -228,6 +164,60 @@ public class ElectionCandidateService {
             throw new VotingApplicationException(
                     VotingApplicationException.Reason.CANDIDATE_REVIEW_FORBIDDEN,
                     message + "，当前角色=" + (ctx == null ? "ANONYMOUS" : ctx.roleKey()));
+        }
+    }
+
+    private Candidate executeCandidateReview(CandidateReviewAction action,
+                                             Long candidateId,
+                                             boolean approve,
+                                             Long operatorUserId,
+                                             String rejectReasonCode,
+                                             String rejectEvidenceJson) {
+        requireRole(action.requiredRole, action.forbiddenMessage);
+        RejectEvidencePolicy.requireForReject(approve, rejectReasonCode, rejectEvidenceJson);
+        Candidate candidate = electionCandidateRegistry.findById(candidateId)
+                .orElseThrow(() -> new VotingApplicationException(
+                        VotingApplicationException.Reason.CANDIDATE_NOT_FOUND,
+                        "候选人不存在 candidateId=" + candidateId));
+
+        CandidateStatus from = candidate.getQualificationStatus();
+        applyCandidateTransition(action, candidate, approve);
+        int updated = electionCandidateRegistry.updateQualification(
+                candidate.getCandidateId(),
+                from.getDbValue(),
+                candidate.getQualificationStatus().getDbValue(),
+                approve ? null : rejectReasonCode,
+                approve ? null : rejectEvidenceJson,
+                approve ? null : operatorUserId,
+                approve ? null : action.reviewStage);
+        if (updated != 1) {
+            throw new VotingApplicationException(
+                    VotingApplicationException.Reason.CANDIDATE_REVIEW_CONFLICT,
+                    "候选人已被并发审查 candidateId=" + candidateId);
+        }
+        if (!approve) {
+            candidate.setRejectReasonCode(rejectReasonCode);
+            candidate.setRejectEvidenceJson(rejectEvidenceJson);
+            candidate.setRejectReviewerUserId(operatorUserId);
+            candidate.setRejectReviewStage(action.reviewStage);
+        }
+        log.info("Candidate review action={} candidateId={} approve={} newStatus={} operatorUserId={}",
+                action.reviewStage, candidateId, approve, candidate.getQualificationStatus(), operatorUserId);
+        return candidate;
+    }
+
+    private void applyCandidateTransition(CandidateReviewAction action,
+                                          Candidate candidate,
+                                          boolean approve) {
+        try {
+            if (approve) {
+                action.approveTransition.apply(candidate);
+            } else {
+                action.rejectTransition.apply(candidate);
+            }
+        } catch (ElectionCandidateActions.IllegalCandidateTransitionException e) {
+            throw new VotingApplicationException(
+                    VotingApplicationException.Reason.CANDIDATE_REVIEW_CONFLICT, e.getMessage(), e);
         }
     }
 
@@ -300,5 +290,43 @@ public class ElectionCandidateService {
             if (!Character.isDigit(s.charAt(i))) return false;
         }
         return true;
+    }
+
+    private enum CandidateReviewAction {
+        PARTY_REVIEW(
+                PARTY_REVIEW_ROLE,
+                "候选人党组前置审查仅限党组织书记",
+                "PARTY_REVIEW",
+                ElectionCandidateActions::partyApprove,
+                ElectionCandidateActions::partyReject),
+        COMMITTEE_REVIEW(
+                COMMITTEE_REVIEW_ROLE,
+                "候选人居委会资格审查仅限居委会",
+                "COMMITTEE_REVIEW",
+                ElectionCandidateActions::approve,
+                ElectionCandidateActions::reject);
+
+        private final String requiredRole;
+        private final String forbiddenMessage;
+        private final String reviewStage;
+        private final CandidateTransition approveTransition;
+        private final CandidateTransition rejectTransition;
+
+        CandidateReviewAction(String requiredRole,
+                              String forbiddenMessage,
+                              String reviewStage,
+                              CandidateTransition approveTransition,
+                              CandidateTransition rejectTransition) {
+            this.requiredRole = requiredRole;
+            this.forbiddenMessage = forbiddenMessage;
+            this.reviewStage = reviewStage;
+            this.approveTransition = approveTransition;
+            this.rejectTransition = rejectTransition;
+        }
+    }
+
+    @FunctionalInterface
+    private interface CandidateTransition {
+        void apply(Candidate candidate);
     }
 }
