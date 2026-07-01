@@ -5,10 +5,12 @@ import com.pangu.application.voting.VotingApplicationException;
 import com.pangu.application.voting.command.CastVoteCommand;
 import com.pangu.domain.context.UserContext;
 import com.pangu.domain.context.UserContextHolder;
+import com.pangu.domain.gateway.VoteCastMonitorGateway;
 import com.pangu.domain.model.asset.OwnerPropertyVotingView;
 import com.pangu.domain.model.user.AuthenticationLevel;
 import com.pangu.domain.model.voting.SubjectStatus;
 import com.pangu.domain.model.voting.SubjectType;
+import com.pangu.domain.model.voting.VoteChannel;
 import com.pangu.domain.model.voting.VoteChoice;
 import com.pangu.domain.model.voting.VotingScope;
 import com.pangu.domain.model.voting.VotingSubject;
@@ -35,6 +37,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentCaptor.forClass;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -68,6 +71,8 @@ public class VoteSubmissionServiceTest {
     private UserContextHolder userContextHolder;
     @Mock
     private ElectionCandidateRegistry electionCandidateRegistry;
+    @Mock
+    private VoteCastMonitorGateway voteCastMonitorGateway;
 
     @InjectMocks
     private VoteSubmissionService service;
@@ -80,6 +85,10 @@ public class VoteSubmissionServiceTest {
 
     private CastVoteCommand cmd() {
         return new CastVoteCommand(SUBJECT_ID, UID, TENANT, OPID, null, VoteChoice.SUPPORT, null);
+    }
+
+    private CastVoteCommand cmd(VoteChannel voteChannel) {
+        return new CastVoteCommand(SUBJECT_ID, UID, TENANT, OPID, null, VoteChoice.SUPPORT, null, voteChannel);
     }
 
     private VotingSubject votingSubject(SubjectType type, VotingScope scope, Long scopeRef) {
@@ -105,7 +114,7 @@ public class VoteSubmissionServiceTest {
 
     private UserContext ctx(AuthenticationLevel level) {
         return new UserContext(999913L, UserContext.IdentityType.C_USER, UID, TENANT,
-                null, null, null, level, null, null, null);
+                null, null, null, null, level, null, null, null);
     }
 
     // ===== 议题级闸门 =====
@@ -224,6 +233,7 @@ public class VoteSubmissionServiceTest {
         VotingApplicationException ex = assertThrows(VotingApplicationException.class,
                 () -> service.cast(cmd()));
         assertEquals(VotingApplicationException.Reason.VOTE_ALREADY_CAST, ex.getReason());
+        verify(voteCastMonitorGateway, never()).recordCast(any());
     }
 
     // ===== 正向 =====
@@ -240,5 +250,64 @@ public class VoteSubmissionServiceTest {
         assertEquals(555L, voteId);
         // GENERAL 议题不触发 L3 face-auth
         verify(abacPolicyEngine, never()).evaluateVoting(anyLong(), anyLong(), any());
+        verify(voteCastMonitorGateway).recordCast(any());
+    }
+
+    @Test
+    public void missingVoteChannel_defaultsToOnlineNotUnsignedLikePaper() {
+        when(subjectRepository.findById(SUBJECT_ID))
+                .thenReturn(Optional.of(votingSubject(SubjectType.GENERAL, VotingScope.COMMUNITY, null)));
+        when(ownerPropertyVotingRepository.findByOpid(OPID))
+                .thenReturn(Optional.of(view(UID, TENANT, BUILDING, true, 1)));
+        when(voteItemRepository.insert(eq(SUBJECT_ID), any(), any())).thenReturn(556L);
+
+        service.cast(cmd());
+
+        org.mockito.ArgumentCaptor<com.pangu.domain.model.voting.VoteItem> itemCaptor =
+                forClass(com.pangu.domain.model.voting.VoteItem.class);
+        verify(voteItemRepository).insert(eq(SUBJECT_ID), itemCaptor.capture(), any());
+        assertEquals(VoteChannel.ONLINE, itemCaptor.getValue().getVoteChannel());
+
+        org.mockito.ArgumentCaptor<VoteCastMonitorGateway.VoteCastEvent> eventCaptor =
+                forClass(VoteCastMonitorGateway.VoteCastEvent.class);
+        verify(voteCastMonitorGateway).recordCast(eventCaptor.capture());
+        assertEquals(VoteChannel.ONLINE, eventCaptor.getValue().voteChannel());
+        assertEquals(false, eventCaptor.getValue().unsignedLikePaper());
+    }
+
+    @Test
+    public void paperVoteChannel_recordsPaperLikeMonitorEvent() {
+        when(subjectRepository.findById(SUBJECT_ID))
+                .thenReturn(Optional.of(votingSubject(SubjectType.GENERAL, VotingScope.COMMUNITY, null)));
+        when(ownerPropertyVotingRepository.findByOpid(OPID))
+                .thenReturn(Optional.of(view(UID, TENANT, BUILDING, true, 1)));
+        when(voteItemRepository.insert(eq(SUBJECT_ID), any(), any())).thenReturn(557L);
+
+        service.cast(cmd(VoteChannel.PAPER));
+
+        org.mockito.ArgumentCaptor<VoteCastMonitorGateway.VoteCastEvent> eventCaptor =
+                forClass(VoteCastMonitorGateway.VoteCastEvent.class);
+        verify(voteCastMonitorGateway).recordCast(eventCaptor.capture());
+        assertEquals(VoteChannel.PAPER, eventCaptor.getValue().voteChannel());
+        assertEquals(true, eventCaptor.getValue().unsignedLikePaper());
+    }
+
+    @Test
+    public void majorOfflineProxyVote_skipsOnlineL3GateAndRecordsPaperLike() {
+        when(subjectRepository.findById(SUBJECT_ID))
+                .thenReturn(Optional.of(votingSubject(SubjectType.MAJOR, VotingScope.COMMUNITY, null)));
+        when(ownerPropertyVotingRepository.findByOpid(OPID))
+                .thenReturn(Optional.of(view(UID, TENANT, BUILDING, true, 1)));
+        when(voteItemRepository.insert(eq(SUBJECT_ID), any(), any())).thenReturn(558L);
+
+        long voteId = service.cast(cmd(VoteChannel.OFFLINE_PROXY));
+
+        assertEquals(558L, voteId);
+        verify(abacPolicyEngine, never()).evaluateVoting(anyLong(), anyLong(), any());
+        org.mockito.ArgumentCaptor<VoteCastMonitorGateway.VoteCastEvent> eventCaptor =
+                forClass(VoteCastMonitorGateway.VoteCastEvent.class);
+        verify(voteCastMonitorGateway).recordCast(eventCaptor.capture());
+        assertEquals(VoteChannel.OFFLINE_PROXY, eventCaptor.getValue().voteChannel());
+        assertEquals(true, eventCaptor.getValue().unsignedLikePaper());
     }
 }

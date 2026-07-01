@@ -103,6 +103,7 @@ public class DataScopeTest {
                 10001L,                                   // tenantId
                 101L,                                     // deptId（求是居委会）
                 UserContext.DeptCategory.G,
+                2,
                 scope,
                 AuthenticationLevel.L1,
                 "TEST_ROLE",

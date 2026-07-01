@@ -70,9 +70,10 @@ public class ElectionWorkflowEndToEndTest {
     private static final long TENANT_RUSHI = 10001L;
     private static final long TEST_BUILDING = 990010L;
 
-    private static final long ACC_GRID = 999804L, USR_GRID = 800004L;   // 陈网格员（提名）
-    private static final long ACC_COMM = 999803L, USR_COMM = 800003L;   // 刘主任（立项 / 资格审查 / 公示 / 列表）
+    private static final long ACC_OPERATOR = 999805L, USR_OPERATOR = 800005L; // 吴经办员（ELECTION 立项 / 提名 / 提交初审）
+    private static final long ACC_COMM = 999803L, USR_COMM = 800003L;   // 刘主任（资格审查 / 初审 / 列表）
     private static final long ACC_PARTY = 999802L, USR_PARTY = 800002L; // 李书记（党组书记前置审查）
+    private static final long ACC_STREET = 999801L, USR_STREET = 800001L; // 王街道（ELECTION 公示独占）
 
     private static final String TITLE_PREFIX = "M33E2E-";
 
@@ -110,6 +111,15 @@ public class ElectionWorkflowEndToEndTest {
                 TENANT_RUSHI, TITLE_PREFIX + "%");
         jdbcTemplate.update(
                 "DELETE FROM t_election_candidate WHERE subject_id IN "
+                        + "(SELECT subject_id FROM t_voting_subject WHERE tenant_id = ? AND title LIKE ?)",
+                TENANT_RUSHI, TITLE_PREFIX + "%");
+        jdbcTemplate.update(
+                "DELETE FROM t_tenant_term_state WHERE term_locked_by_subject_id IN "
+                        + "(SELECT subject_id FROM t_voting_subject WHERE tenant_id = ? AND title LIKE ?)",
+                TENANT_RUSHI, TITLE_PREFIX + "%");
+        jdbcTemplate.update(
+                "UPDATE t_voting_subject SET clock_suspended_at = NULL, clock_suspended_by_subject_id = NULL "
+                        + "WHERE clock_suspended_by_subject_id IN "
                         + "(SELECT subject_id FROM t_voting_subject WHERE tenant_id = ? AND title LIKE ?)",
                 TENANT_RUSHI, TITLE_PREFIX + "%");
         jdbcTemplate.update("DELETE FROM t_voting_subject WHERE tenant_id = ? AND title LIKE ?",
@@ -173,35 +183,50 @@ public class ElectionWorkflowEndToEndTest {
 
     @Test
     public void fullElectionPipeline_proposeNominateReviewVoteSettle() throws Exception {
+        String operator = "Bearer " + sysToken(ACC_OPERATOR, USR_OPERATOR);
         String comm = "Bearer " + sysToken(ACC_COMM, USR_COMM);
-        String grid = "Bearer " + sysToken(ACC_GRID, USR_GRID);
         String party = "Bearer " + sysToken(ACC_PARTY, USR_PARTY);
+        String street = "Bearer " + sysToken(ACC_STREET, USR_STREET);
 
-        // 1. 立项 ELECTION（刘主任，maxWinners=2，BUILDING scope）
+        // 1. 立项前业主 + 房产已清洗入库（3 户各 100 ㎡，同栋 990010），立项即冻结分母。
+        Long uid1 = insertUser("77600000001");
+        Long uid2 = insertUser("77600000002");
+        Long uid3 = insertUser("77600000003");
+        long opid1 = insertOwnership(uid1, 660001L, new BigDecimal("100.00"));
+        long opid2 = insertOwnership(uid2, 660002L, new BigDecimal("100.00"));
+        long opid3 = insertOwnership(uid3, 660003L, new BigDecimal("100.00"));
+
+        // 2. 立项 ELECTION（G 端基层经办员，maxWinners=2，BUILDING scope）
         MvcResult proposeResult = mockMvc.perform(post("/api/v1/voting-subjects")
-                        .header("Authorization", comm)
+                        .header("Authorization", operator)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(proposeBody()))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.data.subjectType", org.hamcrest.Matchers.is("ELECTION")))
                 .andReturn();
         long subjectId = dataLong(proposeResult, "subjectId");
+        Map<String, Object> denominatorSnapshot = jdbcTemplate.queryForMap(
+                "SELECT total_area, total_owner_count, aggregate_hash FROM t_voting_denominator_snapshot WHERE subject_id = ?",
+                subjectId);
+        assertEquals(0, new BigDecimal("300.00").compareTo((BigDecimal) denominatorSnapshot.get("total_area")));
+        assertEquals(3L, ((Number) denominatorSnapshot.get("total_owner_count")).longValue());
+        assertEquals(64, ((String) denominatorSnapshot.get("aggregate_hash")).length());
 
-        // 2. 提名 3 名候选人（网格员）：2 党员 + 1 非党员
+        // 3. 提名 3 名候选人（基层经办员）：2 党员 + 1 非党员
         long c1 = dataLong(mockMvc.perform(post("/api/v1/voting-subjects/" + subjectId + "/candidates")
-                .header("Authorization", grid).contentType(MediaType.APPLICATION_JSON)
+                .header("Authorization", operator).contentType(MediaType.APPLICATION_JSON)
                 .content(nominateBody(8870001L, "党员候选人甲", true)))
                 .andExpect(status().isCreated()).andReturn(), "candidateId");
         long c2 = dataLong(mockMvc.perform(post("/api/v1/voting-subjects/" + subjectId + "/candidates")
-                .header("Authorization", grid).contentType(MediaType.APPLICATION_JSON)
+                .header("Authorization", operator).contentType(MediaType.APPLICATION_JSON)
                 .content(nominateBody(8870002L, "党员候选人乙", true)))
                 .andExpect(status().isCreated()).andReturn(), "candidateId");
         long c3 = dataLong(mockMvc.perform(post("/api/v1/voting-subjects/" + subjectId + "/candidates")
-                .header("Authorization", grid).contentType(MediaType.APPLICATION_JSON)
+                .header("Authorization", operator).contentType(MediaType.APPLICATION_JSON)
                 .content(nominateBody(8870003L, "非党员候选人丙", false)))
                 .andExpect(status().isCreated()).andReturn(), "candidateId");
 
-        // 3. 党组书记前置审查（李书记）：c1/c2/c3 三人前置审查通过 → PENDING_COMMITTEE_REVIEW
+        // 4. 党组书记前置审查（李书记）：c1/c2/c3 三人前置审查通过 → PENDING_COMMITTEE_REVIEW
         for (long cid : new long[]{c1, c2, c3}) {
             mockMvc.perform(post("/api/v1/candidates/" + cid + "/party-review")
                             .header("Authorization", party).contentType(MediaType.APPLICATION_JSON)
@@ -211,7 +236,7 @@ public class ElectionWorkflowEndToEndTest {
                             org.hamcrest.Matchers.is("PENDING_COMMITTEE_REVIEW")));
         }
 
-        // 4. 居委会资格审查（刘主任）：c1/c2 通过、c3 拒绝
+        // 5. 居委会资格审查（刘主任）：c1/c2 通过、c3 拒绝
         mockMvc.perform(post("/api/v1/candidates/" + c1 + "/review")
                         .header("Authorization", comm).contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(Map.of("approve", true))))
@@ -223,29 +248,48 @@ public class ElectionWorkflowEndToEndTest {
                 .andExpect(status().isOk());
         mockMvc.perform(post("/api/v1/candidates/" + c3 + "/review")
                         .header("Authorization", comm).contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(Map.of("approve", false))))
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "approve", false,
+                                "rejectReasonCode", "C2",
+                                "rejectEvidence", Map.of(
+                                        "files", java.util.List.of("oss://election/candidate-c3.pdf"),
+                                        "note", "材料不完整")))))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.qualificationStatus", org.hamcrest.Matchers.is("REJECTED")));
+                .andExpect(jsonPath("$.data.qualificationStatus", org.hamcrest.Matchers.is("REJECTED")))
+                .andExpect(jsonPath("$.data.rejectReasonCode", org.hamcrest.Matchers.is("C2")));
 
-        // 5. 管理端列表（刘主任）：3 名候选人都在
+        // 6. 管理端列表（刘主任）：3 名候选人都在
         mockMvc.perform(get("/api/v1/voting-subjects/" + subjectId + "/candidates")
                         .header("Authorization", comm))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.length()", org.hamcrest.Matchers.is(3)));
 
-        // 6. 公示（刘主任有 voting:subject:publish）：DRAFT → PUBLISHED
-        mockMvc.perform(post("/api/v1/voting-subjects/" + subjectId + "/publish")
-                        .header("Authorization", comm))
+        // 7. 议题双签：DRAFT → PENDING_COMMITTEE → PENDING_STREET → PUBLISHED
+        mockMvc.perform(post("/api/v1/voting-subjects/" + subjectId + "/submit-for-review")
+                        .header("Authorization", operator))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status", org.hamcrest.Matchers.is("PENDING_COMMITTEE")));
+        mockMvc.perform(post("/api/v1/voting-subjects/" + subjectId + "/committee-review")
+                        .header("Authorization", comm).contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("decision", "APPROVE"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status", org.hamcrest.Matchers.is("PENDING_STREET")));
+        mockMvc.perform(post("/api/v1/voting-subjects/" + subjectId + "/street-review")
+                        .header("Authorization", street).contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("decision", "APPROVE"))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status", org.hamcrest.Matchers.is("PUBLISHED")));
-
-        // 7. 业主 + 房产（3 户各 100 ㎡，同栋 990010）
-        Long uid1 = insertUser("77600000001");
-        Long uid2 = insertUser("77600000002");
-        Long uid3 = insertUser("77600000003");
-        long opid1 = insertOwnership(uid1, 660001L, new BigDecimal("100.00"));
-        long opid2 = insertOwnership(uid2, 660002L, new BigDecimal("100.00"));
-        long opid3 = insertOwnership(uid3, 660003L, new BigDecimal("100.00"));
+        String reviewHistory = jdbcTemplate.queryForObject(
+                "SELECT review_history::text FROM t_voting_subject WHERE subject_id = ?",
+                String.class, subjectId);
+        JsonNode reviews = objectMapper.readTree(reviewHistory);
+        assertEquals(3, reviews.size(), "三步双签动作都应追加 review_history");
+        assertEquals("submitForCommitteeReview", reviews.get(0).path("action").asText());
+        assertEquals("committeeApprove", reviews.get(1).path("action").asText());
+        assertEquals("streetApprove", reviews.get(2).path("action").asText());
+        assertEquals(USR_OPERATOR, reviews.get(0).path("reviewerUserId").asLong());
+        assertEquals(USR_COMM, reviews.get(1).path("reviewerUserId").asLong());
+        assertEquals(USR_STREET, reviews.get(2).path("reviewerUserId").asLong());
 
         // 8. 开票（scheduler 职责，手工触发）：PUBLISHED → VOTING
         proposalLifecycleService.openVoting(subjectId, Instant.now());

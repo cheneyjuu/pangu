@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pangu.infrastructure.persistence.mapper.MaintenanceFundAccountMapper">
+
+    <resultMap id="MaintenanceFundAccountRowMap"
+               type="com.pangu.infrastructure.persistence.entity.MaintenanceFundAccountRow">
+        <id property="accountId" column="account_id"/>
+        <result property="tenantId" column="tenant_id"/>
+        <result property="totalBalance" column="total_balance"/>
+        <result property="frozenBalance" column="frozen_balance"/>
+        <result property="version" column="version"/>
+    </resultMap>
+
+    <select id="selectByIdForUpdate" resultMap="MaintenanceFundAccountRowMap">
+        SELECT account_id, tenant_id, total_balance, frozen_balance, version
+        FROM t_maintenance_fund_account
+        WHERE account_id = #{accountId}
+        FOR UPDATE
+    </select>
+
+    <update id="debit">
+        UPDATE t_maintenance_fund_account
+        SET total_balance = total_balance - #{amount},
+            version = version + 1,
+            update_time = CURRENT_TIMESTAMP
+        WHERE account_id = #{accountId}
+          AND version = #{expectedVersion}
+          AND total_balance - frozen_balance &gt;= #{amount}
+    </update>
+
+    <update id="credit">
+        UPDATE t_maintenance_fund_account
+        SET total_balance = total_balance + #{amount},
+            version = version + 1,
+            update_time = CURRENT_TIMESTAMP
+        WHERE account_id = #{accountId}
+          AND version = #{expectedVersion}
+    </update>
+
+    <insert id="insertLedgerEntry">
+        INSERT INTO t_fund_ledger_entry(
+            account_id, business_type, business_ref_id, direction, amount,
+            balance_after, occurred_at, operator_id, audit_hash
+        )
+        VALUES(
+            #{accountId}, #{businessType}, #{businessRefId}, #{direction}, #{amount},
+            #{balanceAfter}, #{occurredAt}, #{operatorId}, #{auditHash}
+        )
+    </insert>
+
+    <select id="countConfirmedLedgerEntry" resultType="int">
+        SELECT COUNT(*)
+        FROM t_fund_ledger_entry
+        WHERE account_id = #{accountId}
+          AND business_type = #{businessType}
+          AND business_ref_id = #{businessRefId}
+          AND chain_attest_status = 3
+          AND blockchain_tx_hash IS NOT NULL
+    </select>
+</mapper>

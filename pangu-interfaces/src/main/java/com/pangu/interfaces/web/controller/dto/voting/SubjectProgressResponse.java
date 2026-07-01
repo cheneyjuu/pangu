@@ -14,6 +14,9 @@ import java.math.BigDecimal;
  *
  * <p>{@code settled=true} 时数据来自法定结算快照，{@code supportArea/supportOwnerCount} 及其比例为空
  * （快照表无 support 列），前端需容忍 null。
+ *
+ * <p>{@code denominatorSnapshotId/denominatorMerkleRoot} 指向立项时冻结的分母快照与行级 Merkle root；
+ * 存量或非选举议题未冻结时可为空。
  */
 public record SubjectProgressResponse(
         Long subjectId,
@@ -34,7 +37,9 @@ public record SubjectProgressResponse(
         int thresholdDenominator,
         boolean quorumSatisfied,
         boolean settled,
-        boolean passed
+        boolean passed,
+        Long denominatorSnapshotId,
+        String denominatorMerkleRoot
 ) {
     public static SubjectProgressResponse from(VotingProgress p) {
         boolean hasSupport = p.supportOwnerCount() != null;
@@ -57,6 +62,8 @@ public record SubjectProgressResponse(
                 3,
                 p.quorumSatisfied(),
                 p.settled(),
-                p.passed());
+                p.passed(),
+                p.denominatorSnapshotId(),
+                p.denominatorMerkleRoot());
     }
 }

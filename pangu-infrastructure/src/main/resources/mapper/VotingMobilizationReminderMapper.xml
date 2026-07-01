@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pangu.infrastructure.persistence.mapper.VotingMobilizationReminderMapper">
+
+    <resultMap id="VotingMobilizationReminderRowMap"
+               type="com.pangu.infrastructure.persistence.entity.VotingMobilizationReminderRow">
+        <id property="reminderId" column="reminder_id"/>
+        <result property="subjectId" column="subject_id"/>
+        <result property="tenantId" column="tenant_id"/>
+        <result property="buildingId" column="building_id"/>
+        <result property="sentByUserId" column="sent_by_user_id"/>
+        <result property="permissionId" column="permission_id"/>
+        <result property="targetScope" column="target_scope"/>
+        <result property="targetCount" column="target_count"/>
+        <result property="messageTemplate" column="message_template"/>
+        <result property="message" column="message"/>
+        <result property="outboxEventId" column="outbox_event_id"/>
+        <result property="sentAt" column="sent_at"/>
+    </resultMap>
+
+    <select id="countUnvotedOwners" resultType="int">
+        SELECT COUNT(DISTINCT op.opid)
+        FROM c_owner_property op
+        LEFT JOIN t_vote_item vi
+               ON vi.subject_id = #{subjectId}
+              AND vi.opid = op.opid
+        WHERE op.tenant_id = #{tenantId}
+          AND op.building_id = #{buildingId}
+          AND op.account_status = 1
+          AND vi.vote_id IS NULL
+    </select>
+
+    <insert id="insert"
+            parameterType="com.pangu.infrastructure.persistence.entity.VotingMobilizationReminderRow"
+            useGeneratedKeys="true"
+            keyProperty="reminderId"
+            keyColumn="reminder_id">
+        INSERT INTO t_voting_mobilization_reminder (
+            subject_id, tenant_id, building_id, sent_by_user_id, permission_id,
+            target_scope, target_count, message_template, message, outbox_event_id, sent_at
+        ) VALUES (
+            #{subjectId}, #{tenantId}, #{buildingId}, #{sentByUserId}, #{permissionId},
+            #{targetScope}, #{targetCount}, #{messageTemplate}, #{message}, #{outboxEventId}, #{sentAt}
+        )
+    </insert>
+</mapper>

@@ -5,8 +5,10 @@ import com.pangu.domain.context.UserContextLoader;
 import com.pangu.domain.gateway.PropertyGateway;
 import com.pangu.domain.model.asset.PropertyOwnership;
 import com.pangu.infrastructure.persistence.mapper.AccountMapper;
+import com.pangu.infrastructure.persistence.mapper.IdentityShadowMapper;
 import com.pangu.interfaces.security.JwtTokenProvider;
 import com.pangu.interfaces.web.controller.dto.LoginRequest;
+import com.pangu.interfaces.web.controller.dto.SwitchShadowRequest;
 import com.pangu.interfaces.web.controller.dto.SwitchTenantRequest;
 import com.pangu.interfaces.web.exception.AppException;
 import com.pangu.interfaces.web.exception.CommonErrorCode;
@@ -41,6 +43,9 @@ public class AuthService {
 
     @Autowired
     private AccountMapper accountMapper;
+
+    @Autowired
+    private IdentityShadowMapper identityShadowMapper;
 
     @Autowired
     private UserContextLoader userContextLoader;
@@ -95,19 +100,68 @@ public class AuthService {
         String token = jwtTokenProvider.generateToken(
                 ctx.accountId(), ctx.identityType().name(), ctx.activeIdentityId(), ctx.tenantId());
 
-        Map<String, Object> userInfo = new LinkedHashMap<>();
-        userInfo.put("account_id", ctx.accountId());
-        userInfo.put("identity_type", ctx.identityType().name());
-        userInfo.put("active_identity_id", ctx.activeIdentityId());
-        userInfo.put("tenant_id", ctx.tenantId());
-        userInfo.put("auth_level", ctx.authLevel().getValue());
-        userInfo.put("role_key", ctx.roleKey());
-        userInfo.put("permissions", ctx.permissions());
-
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("access_token", token);
         result.put("expires_in", 7200);
-        result.put("user_info", userInfo);
+        result.put("user_info", buildUserInfo(ctx));
+        return result;
+    }
+
+    /**
+     * 查询当前自然人名下的管理端工作分身列表。
+     */
+    public Map<String, Object> listSysUserShadows(String authHeader) {
+        String token = extractValidToken(authHeader);
+        Long accountId = jwtTokenProvider.getAccountIdFromToken(token);
+        String identityType = jwtTokenProvider.getIdentityTypeFromToken(token);
+        Long activeIdentityId = jwtTokenProvider.getActiveIdentityIdFromToken(token);
+
+        List<Map<String, Object>> shadows = identityShadowMapper.listSysUserShadows(accountId).stream()
+                .map(row -> buildShadowInfo(row, UserContext.IdentityType.SYS_USER.name().equals(identityType)
+                        && row.getUserId().equals(activeIdentityId)))
+                .toList();
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("shadows", shadows);
+        return result;
+    }
+
+    /**
+     * 管理端工作分身切换：同一 {@code account_id} 名下的 {@code sys_user} 之间切换，并重发 JWT。
+     */
+    public Map<String, Object> switchShadow(String authHeader, SwitchShadowRequest request) {
+        String token = extractValidToken(authHeader);
+        Long accountId = jwtTokenProvider.getAccountIdFromToken(token);
+        Long targetUserId = request == null ? null : request.getTargetUserId();
+        if (targetUserId == null) {
+            throw new AppException(CommonErrorCode.PARAM_ERROR, "targetUserId 不能为空");
+        }
+
+        AccountMapper.AccountRow account = accountMapper.selectById(accountId);
+        if (account == null || account.getStatus() == null || account.getStatus() != 1) {
+            throw new AppException(CommonErrorCode.UNAUTHORIZED, "账号已被禁用或注销，请联系管理员");
+        }
+
+        IdentityShadowMapper.SysUserShadowRow shadow =
+                identityShadowMapper.selectSysUserShadow(accountId, targetUserId);
+        if (shadow == null) {
+            throw new AppException(CommonErrorCode.FORBIDDEN, "目标工作分身不存在或不属于当前账号");
+        }
+
+        UserContext ctx = userContextLoader.load(accountId, UserContext.IdentityType.SYS_USER, targetUserId, null);
+        if (ctx == null) {
+            throw new AppException(CommonErrorCode.FORBIDDEN, "目标工作分身不可用");
+        }
+        accountMapper.updateLastActiveIdentity(accountId, ctx.activeIdentityId(), ctx.identityType().name());
+
+        String newToken = jwtTokenProvider.generateToken(
+                ctx.accountId(), ctx.identityType().name(), ctx.activeIdentityId(), ctx.tenantId());
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("new_access_token", newToken);
+        result.put("expires_in", 7200);
+        result.put("user_info", buildUserInfo(ctx));
+        result.put("active_shadow", buildShadowInfo(shadow, true));
         return result;
     }
 
@@ -116,13 +170,7 @@ public class AuthService {
      * 校验目标 tenant 下确有房产绑定，重新签发 token。
      */
     public Map<String, Object> switchTenant(String authHeader, SwitchTenantRequest request) {
-        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
-            throw new AppException(CommonErrorCode.TOKEN_MISSING);
-        }
-        String token = authHeader.substring(7);
-        if (!jwtTokenProvider.validateToken(token)) {
-            throw new AppException(CommonErrorCode.UNAUTHORIZED, "认证失效，请重新登录");
-        }
+        String token = extractValidToken(authHeader);
 
         String identityType = jwtTokenProvider.getIdentityTypeFromToken(token);
         if (!UserContext.IdentityType.C_USER.name().equals(identityType)) {
@@ -165,5 +213,47 @@ public class AuthService {
             return UserContext.IdentityType.C_USER;
         }
         return UserContext.IdentityType.SYS_USER;
+    }
+
+    private String extractValidToken(String authHeader) {
+        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+            throw new AppException(CommonErrorCode.TOKEN_MISSING);
+        }
+        String token = authHeader.substring(7);
+        if (!jwtTokenProvider.validateToken(token)) {
+            throw new AppException(CommonErrorCode.UNAUTHORIZED, "认证失效，请重新登录");
+        }
+        return token;
+    }
+
+    private Map<String, Object> buildUserInfo(UserContext ctx) {
+        Map<String, Object> userInfo = new LinkedHashMap<>();
+        userInfo.put("account_id", ctx.accountId());
+        userInfo.put("identity_type", ctx.identityType().name());
+        userInfo.put("active_identity_id", ctx.activeIdentityId());
+        userInfo.put("tenant_id", ctx.tenantId());
+        userInfo.put("dept_type", ctx.deptType());
+        userInfo.put("auth_level", ctx.authLevel().getValue());
+        userInfo.put("role_key", ctx.roleKey());
+        userInfo.put("permissions", ctx.permissions());
+        return userInfo;
+    }
+
+    private Map<String, Object> buildShadowInfo(IdentityShadowMapper.SysUserShadowRow row, boolean active) {
+        Map<String, Object> info = new LinkedHashMap<>();
+        info.put("user_id", row.getUserId());
+        info.put("dept_id", row.getDeptId());
+        info.put("tenant_id", row.getTenantId());
+        info.put("user_name", row.getUserName());
+        info.put("nick_name", row.getNickName());
+        info.put("dept_type", row.getDeptType());
+        info.put("dept_category", row.getDeptCategory());
+        info.put("dept_name", row.getDeptName());
+        info.put("role_id", row.getRoleId());
+        info.put("role_key", row.getRoleKey());
+        info.put("role_name", row.getRoleName());
+        info.put("effective_data_scope", row.getEffectiveDataScope());
+        info.put("active", active);
+        return info;
     }
 }

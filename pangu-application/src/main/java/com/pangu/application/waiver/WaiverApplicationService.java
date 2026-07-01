@@ -5,6 +5,9 @@ import com.pangu.application.waiver.command.CommitteeReviewCommand;
 import com.pangu.application.waiver.command.RevokeWaiverCommand;
 import com.pangu.application.waiver.command.StreetReviewCommand;
 import com.pangu.application.waiver.command.SubmitDraftCommand;
+import com.pangu.application.voting.RejectEvidencePolicy;
+import com.pangu.domain.context.UserContext;
+import com.pangu.domain.context.UserContextHolder;
 import com.pangu.domain.lock.DistributedLockTemplate;
 import com.pangu.domain.lock.DistributedLockTemplate.DistributedLockAcquisitionException;
 import com.pangu.domain.model.voting.CandidatePoolSnapshot;
@@ -54,6 +57,8 @@ public class WaiverApplicationService {
 
     /** Redis 锁 TTL（远大于单次事务执行时间，但短于业务上限以防死锁）。 */
     private static final Duration WAIVER_LOCK_TTL = Duration.ofSeconds(30);
+    private static final String WAIVER_COMMITTEE_REVIEW_ROLE = "COMMUNITY_ADMIN";
+    private static final String WAIVER_STREET_REVIEW_ROLE = "GOV_SUPER_ADMIN";
 
     private final PartyRatioWaiverRepository waiverRepository;
     private final VotingSubjectRepository subjectRepository;
@@ -62,6 +67,7 @@ public class WaiverApplicationService {
     private final DistributedLockTemplate lockTemplate;
     private final PayloadHasher payloadHasher;
     private final TransactionTemplate transactionTemplate;
+    private final UserContextHolder userContextHolder;
 
     /**
      * 居委会发起申请并直接进入初审待审。
@@ -155,12 +161,15 @@ public class WaiverApplicationService {
     /** 居委会初审。 */
     @Transactional
     public PartyRatioWaiver reviewByCommittee(CommitteeReviewCommand cmd) {
+        assertRole(WAIVER_COMMITTEE_REVIEW_ROLE, "Waiver 居委会初审仅限居委会管理员");
+        RejectEvidencePolicy.requireForReject(cmd.approve(), cmd.rejectReasonCode(), cmd.rejectEvidenceJson());
         PartyRatioWaiver waiver = loadForUpdate(cmd.waiverId());
         try {
             if (cmd.approve()) {
                 waiver.approveByCommittee(cmd.approverUserId(), cmd.opinion());
             } else {
-                waiver.reject(cmd.approverUserId(), cmd.opinion());
+                waiver.reject(cmd.approverUserId(), cmd.opinion(),
+                        cmd.rejectReasonCode(), cmd.rejectEvidenceJson());
             }
         } catch (IllegalStateException e) {
             throw mapStateException(e);
@@ -181,6 +190,8 @@ public class WaiverApplicationService {
      */
     @Transactional
     public PartyRatioWaiver reviewByStreet(StreetReviewCommand cmd) {
+        assertRole(WAIVER_STREET_REVIEW_ROLE, "Waiver 街道终审仅限街道办");
+        RejectEvidencePolicy.requireForReject(cmd.approve(), cmd.rejectReasonCode(), cmd.rejectEvidenceJson());
         PartyRatioWaiver waiver = loadForUpdate(cmd.waiverId());
         try {
             if (cmd.approve()) {
@@ -188,7 +199,8 @@ public class WaiverApplicationService {
                 String hash = payloadHasher.hashWaiverApproval(waiver);
                 waiver.lockLocalPayloadHash(hash);
             } else {
-                waiver.reject(cmd.approverUserId(), cmd.opinion());
+                waiver.reject(cmd.approverUserId(), cmd.opinion(),
+                        cmd.rejectReasonCode(), cmd.rejectEvidenceJson());
             }
         } catch (IllegalStateException e) {
             throw mapStateException(e);
@@ -201,6 +213,15 @@ public class WaiverApplicationService {
                     "Waiver 已被其他操作并发修改，请刷新后重试", e);
         }
         return waiver;
+    }
+
+    private void assertRole(String expectedRole, String message) {
+        UserContext ctx = userContextHolder.current();
+        if (ctx == null || !expectedRole.equals(ctx.roleKey())) {
+            throw new WaiverApplicationException(
+                    WaiverApplicationException.Reason.APPROVER_DEPT_INVALID,
+                    message + "，当前角色=" + (ctx == null ? "ANONYMOUS" : ctx.roleKey()));
+        }
     }
 
     /** 人工撤销。 */

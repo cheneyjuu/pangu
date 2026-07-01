@@ -32,4 +32,12 @@ public class VoteItem {
 
     /** 投票人选择 */
     private VoteChoice choice;
+
+    /** 投票写入通道，默认 C 端线上票。 */
+    @Builder.Default
+    private VoteChannel voteChannel = VoteChannel.ONLINE;
+
+    public VoteItem(Long opid, Long uid, Long targetId, BigDecimal propertyArea, VoteChoice choice) {
+        this(opid, uid, targetId, propertyArea, choice, VoteChannel.ONLINE);
+    }
 }

@@ -24,5 +24,11 @@ public class ElectionCandidateRow {
     /** 1-PENDING_PARTY_REVIEW, 2-APPROVED, 3-REJECTED, 4-WITHDRAWN, 5-PENDING_COMMITTEE_REVIEW。 */
     private Integer qualificationStatus;
 
+    private String rejectReasonCode;
+    private String rejectEvidenceJson;
+    private Long rejectReviewerUserId;
+    private String rejectReviewStage;
+    private Instant rejectedAt;
+
     private Instant createTime;
 }

@@ -24,7 +24,11 @@ public interface ElectionCandidateMapper {
      */
     int updateQualification(@Param("candidateId") Long candidateId,
                             @Param("expectedFrom") int expectedFrom,
-                            @Param("newStatus") int newStatus);
+                            @Param("newStatus") int newStatus,
+                            @Param("rejectReasonCode") String rejectReasonCode,
+                            @Param("rejectEvidenceJson") String rejectEvidenceJson,
+                            @Param("rejectReviewerUserId") Long rejectReviewerUserId,
+                            @Param("rejectReviewStage") String rejectReviewStage);
 
     ElectionCandidateRow selectById(@Param("candidateId") Long candidateId);
 

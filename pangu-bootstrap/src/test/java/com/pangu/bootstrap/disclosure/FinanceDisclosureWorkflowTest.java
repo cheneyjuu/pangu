@@ -5,10 +5,14 @@ import com.pangu.application.disclosure.FinanceDisclosureApplicationService;
 import com.pangu.application.disclosure.command.CompareCommand;
 import com.pangu.application.disclosure.command.ComposeCommand;
 import com.pangu.application.disclosure.command.LockAndPublishCommand;
+import com.pangu.domain.context.UserContext;
+import com.pangu.domain.context.UserContextHolder;
 import com.pangu.domain.model.disclosure.DisclosureDiff;
 import com.pangu.domain.model.disclosure.DisclosureStatus;
 import com.pangu.domain.model.disclosure.DisclosureType;
 import com.pangu.domain.model.disclosure.FinanceDisclosureSnapshot;
+import com.pangu.domain.model.user.AuthenticationLevel;
+import com.pangu.domain.model.user.DataScopeType;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -18,6 +22,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.math.BigDecimal;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -49,6 +54,9 @@ public class FinanceDisclosureWorkflowTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    @Autowired
+    private UserContextHolder userContextHolder;
+
     @BeforeEach
     public void setUp() {
         cleanUp();
@@ -56,6 +64,7 @@ public class FinanceDisclosureWorkflowTest {
 
     @AfterEach
     public void tearDown() {
+        userContextHolder.clear();
         cleanUp();
     }
 
@@ -92,13 +101,32 @@ public class FinanceDisclosureWorkflowTest {
                 "h".repeat(64));
     }
 
+    private void setRole(String roleKey, long userId) {
+        userContextHolder.set(new UserContext(
+                userId + 100000L,
+                UserContext.IdentityType.SYS_USER,
+                userId,
+                TEST_TENANT_ID,
+                9001L,
+                "GOV_SUPER_ADMIN".equals(roleKey) || "COMMUNITY_ADMIN".equals(roleKey)
+                        ? UserContext.DeptCategory.G : UserContext.DeptCategory.B,
+                "GOV_SUPER_ADMIN".equals(roleKey) || "COMMUNITY_ADMIN".equals(roleKey) ? 2 : 10,
+                DataScopeType.ALL_COMMUNITY,
+                AuthenticationLevel.L1,
+                roleKey,
+                Set.of(),
+                Set.of()));
+    }
+
     @Test
     public void fullWorkflow_composeLockPublishGetCompare() {
         // 第一期：2026-03
         Long accountId = seedAccount(new BigDecimal("1000.00"));
         seedEntry(accountId, 2, 1, new BigDecimal("100.00"), "2026-03-10 10:00:00");
+        setRole("COMMITTEE_DIRECTOR", COMPOSE_USER);
         FinanceDisclosureSnapshot prev = service.compose(new ComposeCommand(
                 TEST_TENANT_ID, "2026-03", DisclosureType.MAINTENANCE_FUND, COMPOSE_USER));
+        setRole("COMMITTEE_DIRECTOR", PUBLISH_USER);
         prev = service.lockAndPublish(new LockAndPublishCommand(
                 TEST_TENANT_ID, prev.getSnapshotId(), PUBLISH_USER));
         assertEquals(DisclosureStatus.PUBLISHED, prev.getStatus());
@@ -122,10 +150,12 @@ public class FinanceDisclosureWorkflowTest {
         jdbcTemplate.update("UPDATE t_maintenance_fund_account SET total_balance = ? "
                 + "WHERE account_id = ?", new BigDecimal("1100.00"), accountId);
         seedEntry(accountId, 2, 1, new BigDecimal("100.00"), "2026-04-12 10:00:00");
+        setRole("COMMITTEE_DIRECTOR", COMPOSE_USER);
         FinanceDisclosureSnapshot curr = service.compose(new ComposeCommand(
                 TEST_TENANT_ID, "2026-04", DisclosureType.MAINTENANCE_FUND, COMPOSE_USER));
 
         // compare：DRAFT 与 PUBLISHED 也允许 audit（service 不限制 status，只校验 tenant/type/时序）
+        setRole("GOV_SUPER_ADMIN", AUDIT_USER);
         DisclosureDiff diff = service.compare(new CompareCommand(
                 TEST_TENANT_ID, prev.getSnapshotId(), curr.getSnapshotId(), AUDIT_USER));
         // 至少有一处 W（账户余额变了）
@@ -139,6 +169,7 @@ public class FinanceDisclosureWorkflowTest {
         assertEquals(1, auditRows);
 
         // 幂等：同 (prev, curr) 再 compare 不应写第二条
+        setRole("GOV_SUPER_ADMIN", AUDIT_USER);
         service.compare(new CompareCommand(
                 TEST_TENANT_ID, prev.getSnapshotId(), curr.getSnapshotId(), AUDIT_USER));
         Integer auditRowsAfter = jdbcTemplate.queryForObject(
@@ -152,6 +183,7 @@ public class FinanceDisclosureWorkflowTest {
     public void getReadablePublishedSnapshot_draftRejected() {
         Long accountId = seedAccount(new BigDecimal("500.00"));
         seedEntry(accountId, 2, 1, new BigDecimal("50.00"), "2026-09-01 10:00:00");
+        setRole("COMMITTEE_DIRECTOR", COMPOSE_USER);
         FinanceDisclosureSnapshot draft = service.compose(new ComposeCommand(
                 TEST_TENANT_ID, "2026-09", DisclosureType.MAINTENANCE_FUND, COMPOSE_USER));
         assertEquals(DisclosureStatus.DRAFT, draft.getStatus());
@@ -167,6 +199,7 @@ public class FinanceDisclosureWorkflowTest {
     public void getReadablePublishedSnapshot_wrongTenantRejected() {
         Long accountId = seedAccount(new BigDecimal("500.00"));
         seedEntry(accountId, 2, 1, new BigDecimal("50.00"), "2026-10-01 10:00:00");
+        setRole("COMMITTEE_DIRECTOR", COMPOSE_USER);
         FinanceDisclosureSnapshot snap = service.compose(new ComposeCommand(
                 TEST_TENANT_ID, "2026-10", DisclosureType.MAINTENANCE_FUND, COMPOSE_USER));
 
@@ -181,15 +214,51 @@ public class FinanceDisclosureWorkflowTest {
     public void compare_samePairRejected() {
         Long accountId = seedAccount(new BigDecimal("500.00"));
         seedEntry(accountId, 2, 1, new BigDecimal("50.00"), "2026-11-01 10:00:00");
+        setRole("COMMITTEE_DIRECTOR", COMPOSE_USER);
         FinanceDisclosureSnapshot snap = service.compose(new ComposeCommand(
                 TEST_TENANT_ID, "2026-11", DisclosureType.MAINTENANCE_FUND, COMPOSE_USER));
 
+        setRole("GOV_SUPER_ADMIN", AUDIT_USER);
         FinanceDisclosureApplicationException ex = assertThrows(
                 FinanceDisclosureApplicationException.class,
                 () -> service.compare(new CompareCommand(
                         TEST_TENANT_ID, snap.getSnapshotId(),
                         snap.getSnapshotId(), AUDIT_USER)));
         assertEquals(FinanceDisclosureApplicationException.Reason.COMPARE_INVALID_PAIR,
+                ex.getReason());
+    }
+
+    @Test
+    public void communityAdminCannotPublishEvenIfPermissionMisconfigured() {
+        Long accountId = seedAccount(new BigDecimal("500.00"));
+        seedEntry(accountId, 2, 1, new BigDecimal("50.00"), "2026-12-01 10:00:00");
+        setRole("COMMITTEE_DIRECTOR", COMPOSE_USER);
+        FinanceDisclosureSnapshot draft = service.compose(new ComposeCommand(
+                TEST_TENANT_ID, "2026-12", DisclosureType.MAINTENANCE_FUND, COMPOSE_USER));
+
+        setRole("COMMUNITY_ADMIN", PUBLISH_USER);
+        FinanceDisclosureApplicationException ex = assertThrows(
+                FinanceDisclosureApplicationException.class,
+                () -> service.lockAndPublish(new LockAndPublishCommand(
+                        TEST_TENANT_ID, draft.getSnapshotId(), PUBLISH_USER)));
+        assertEquals(FinanceDisclosureApplicationException.Reason.DISCLOSURE_ROLE_FORBIDDEN,
+                ex.getReason());
+    }
+
+    @Test
+    public void committeeDirectorCannotAuditEvenIfPermissionMisconfigured() {
+        Long accountId = seedAccount(new BigDecimal("500.00"));
+        seedEntry(accountId, 2, 1, new BigDecimal("50.00"), "2027-01-01 10:00:00");
+        setRole("COMMITTEE_DIRECTOR", COMPOSE_USER);
+        FinanceDisclosureSnapshot snap = service.compose(new ComposeCommand(
+                TEST_TENANT_ID, "2027-01", DisclosureType.MAINTENANCE_FUND, COMPOSE_USER));
+
+        setRole("COMMITTEE_DIRECTOR", AUDIT_USER);
+        FinanceDisclosureApplicationException ex = assertThrows(
+                FinanceDisclosureApplicationException.class,
+                () -> service.compare(new CompareCommand(
+                        TEST_TENANT_ID, snap.getSnapshotId(), snap.getSnapshotId(), AUDIT_USER)));
+        assertEquals(FinanceDisclosureApplicationException.Reason.DISCLOSURE_ROLE_FORBIDDEN,
                 ex.getReason());
     }
 

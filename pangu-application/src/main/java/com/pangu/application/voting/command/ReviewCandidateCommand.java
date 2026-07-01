@@ -10,6 +10,11 @@ package com.pangu.application.voting.command;
 public record ReviewCandidateCommand(
         Long candidateId,
         boolean approve,
-        Long operatorUserId
+        Long operatorUserId,
+        String rejectReasonCode,
+        String rejectEvidenceJson
 ) {
+    public ReviewCandidateCommand(Long candidateId, boolean approve, Long operatorUserId) {
+        this(candidateId, approve, operatorUserId, null, null);
+    }
 }

@@ -86,7 +86,7 @@ public class VotingLifecycleTriggerTest {
                 "信息应提及 非 CANCELLED 不应携带 cancel_* 字段：" + rootMessage(ex));
     }
 
-    // ===== chk_subject_status：status 越界（7） =====
+    // ===== chk_subject_status：status 越界（9） =====
 
     @Test
     public void chkSubjectStatus_outOfRangeRejected() {
@@ -94,7 +94,7 @@ public class VotingLifecycleTriggerTest {
                 jdbcTemplate.update(
                         "INSERT INTO t_voting_subject(tenant_id, title, subject_type, status, "
                                 + "vote_start_at, vote_end_at) "
-                                + "VALUES(?, '非法状态 7', 3, 7, "
+                                + "VALUES(?, '非法状态 9', 3, 9, "
                                 + "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + INTERVAL '1 day')",
                         TEST_TENANT_ID));
         String msg = rootMessage(ex).toLowerCase();

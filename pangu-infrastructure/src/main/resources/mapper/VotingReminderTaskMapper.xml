@@ -1,0 +1,161 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pangu.infrastructure.persistence.mapper.VotingReminderTaskMapper">
+
+    <resultMap id="ReminderTaskRowMap"
+               type="com.pangu.infrastructure.persistence.entity.ReminderTaskRow">
+        <result property="subjectId" column="subject_id"/>
+        <result property="subjectTitle" column="subject_title"/>
+        <result property="subjectType" column="subject_type"/>
+        <result property="voteEndAt" column="vote_end_at"/>
+        <result property="totalCount" column="total_count"/>
+        <result property="pendingCount" column="pending_count"/>
+    </resultMap>
+
+    <resultMap id="ReminderPendingOwnerRowMap"
+               type="com.pangu.infrastructure.persistence.entity.ReminderPendingOwnerRow">
+        <result property="uid" column="uid"/>
+        <result property="nickName" column="nick_name"/>
+        <result property="phoneMasked" column="phone_masked"/>
+        <result property="buildingId" column="building_id"/>
+        <result property="roomId" column="room_id"/>
+        <result property="notifiedChannels" column="notified_channels"/>
+        <result property="notifiedAt" column="notified_at"/>
+        <result property="note" column="note"/>
+    </resultMap>
+
+    <sql id="ActivePermissionScope">
+        SELECT DISTINCT subject_id, tenant_id, building_id
+        FROM t_voting_mobilization_permission
+        WHERE tenant_id = #{tenantId}
+          AND user_id = #{userId}
+          AND status = 1
+          AND can_remind = TRUE
+          AND deactivated_at IS NULL
+          AND (expires_at IS NULL OR expires_at &gt; CURRENT_TIMESTAMP)
+    </sql>
+
+    <select id="listTasks" resultMap="ReminderTaskRowMap">
+        WITH scope AS (
+            <include refid="ActivePermissionScope"/>
+        ),
+        owner_scope AS (
+            SELECT s.subject_id, op.opid
+            FROM scope s
+            JOIN c_owner_property op
+              ON op.tenant_id = s.tenant_id
+             AND op.building_id = s.building_id
+             AND op.account_status = 1
+        ),
+        vote_state AS (
+            SELECT os.subject_id,
+                   COUNT(DISTINCT os.opid) AS total_count,
+                   COUNT(DISTINCT os.opid) FILTER (WHERE vi.vote_id IS NULL) AS pending_count
+            FROM owner_scope os
+            LEFT JOIN t_vote_item vi
+                   ON vi.subject_id = os.subject_id
+                  AND vi.opid = os.opid
+            GROUP BY os.subject_id
+        )
+        SELECT vs.subject_id,
+               subj.title AS subject_title,
+               subj.subject_type AS subject_type,
+               subj.vote_end_at AS vote_end_at,
+               vs.total_count,
+               vs.pending_count
+        FROM vote_state vs
+        JOIN t_voting_subject subj ON subj.subject_id = vs.subject_id
+        WHERE subj.tenant_id = #{tenantId}
+          AND subj.status = 3
+        ORDER BY subj.vote_end_at ASC, subj.subject_id ASC
+    </select>
+
+    <select id="listPendingOwners" resultMap="ReminderPendingOwnerRowMap">
+        WITH scope AS (
+            <include refid="ActivePermissionScope"/>
+        ),
+        pending AS (
+            SELECT DISTINCT ON (op.opid)
+                   op.uid,
+                   op.building_id,
+                   op.room_id,
+                   a.real_name AS real_name,
+                   a.phone AS phone
+            FROM scope s
+            JOIN t_voting_subject subj
+              ON subj.subject_id = s.subject_id
+             AND subj.tenant_id = s.tenant_id
+             AND subj.status = 3
+            JOIN c_owner_property op
+              ON op.tenant_id = s.tenant_id
+             AND op.building_id = s.building_id
+             AND op.account_status = 1
+            JOIN c_user cu ON cu.uid = op.uid
+            JOIN t_account a ON a.account_id = cu.account_id
+            LEFT JOIN t_vote_item vi
+                   ON vi.subject_id = s.subject_id
+                  AND vi.opid = op.opid
+            WHERE s.subject_id = #{subjectId}
+              AND vi.vote_id IS NULL
+            ORDER BY op.opid
+        )
+        SELECT p.uid,
+               COALESCE(NULLIF(p.real_name, ''), CONCAT('业主#', p.uid)) AS nick_name,
+               CASE
+                   WHEN p.phone IS NULL OR length(p.phone) &lt; 7 THEN p.phone
+                   ELSE CONCAT(substr(p.phone, 1, 3), '****', substr(p.phone, length(p.phone) - 3, 4))
+               END AS phone_masked,
+               p.building_id,
+               p.room_id,
+               STRING_AGG(DISTINCT n.channel, ',' ORDER BY n.channel) AS notified_channels,
+               MAX(n.notified_at) AS notified_at,
+               (ARRAY_AGG(n.note ORDER BY n.notified_at DESC NULLS LAST))[1] AS note
+        FROM pending p
+        LEFT JOIN t_voting_mobilization_owner_notice n
+               ON n.subject_id = #{subjectId}
+              AND n.tenant_id = #{tenantId}
+              AND n.uid = p.uid
+        GROUP BY p.uid, p.real_name, p.phone, p.building_id, p.room_id
+        ORDER BY p.building_id, p.room_id, p.uid
+    </select>
+
+    <insert id="markNotified">
+        INSERT INTO t_voting_mobilization_owner_notice (
+            subject_id, tenant_id, uid, building_id, room_id,
+            notified_by_user_id, channel, note, notified_at
+        )
+        SELECT #{subjectId}, #{tenantId}, op.uid, op.building_id, op.room_id,
+               #{userId}, #{channel}, #{note}, CURRENT_TIMESTAMP
+        FROM t_voting_mobilization_permission p
+        JOIN t_voting_subject subj
+          ON subj.subject_id = p.subject_id
+         AND subj.tenant_id = p.tenant_id
+         AND subj.status = 3
+        JOIN c_owner_property op
+          ON op.tenant_id = p.tenant_id
+         AND op.building_id = p.building_id
+         AND op.uid = #{uid}
+         AND op.account_status = 1
+        LEFT JOIN t_vote_item vi
+               ON vi.subject_id = p.subject_id
+              AND vi.opid = op.opid
+        WHERE p.subject_id = #{subjectId}
+          AND p.tenant_id = #{tenantId}
+          AND p.user_id = #{userId}
+          AND p.status = 1
+          AND p.can_remind = TRUE
+          AND p.deactivated_at IS NULL
+          AND (p.expires_at IS NULL OR p.expires_at &gt; CURRENT_TIMESTAMP)
+          AND vi.vote_id IS NULL
+        ORDER BY op.building_id, op.room_id
+        LIMIT 1
+        ON CONFLICT (subject_id, uid, channel)
+        DO UPDATE SET
+            building_id = EXCLUDED.building_id,
+            room_id = EXCLUDED.room_id,
+            notified_by_user_id = EXCLUDED.notified_by_user_id,
+            note = EXCLUDED.note,
+            notified_at = EXCLUDED.notified_at
+    </insert>
+</mapper>

@@ -52,6 +52,15 @@ public class VotingSubjectRepositoryImpl implements VotingSubjectRepository {
     }
 
     @Override
+    public int updateStatusWithReviewHistory(Long subjectId,
+                                             int newStatusDbValue,
+                                             long expectedVersion,
+                                             String reviewEntryJson) {
+        return mapper.updateStatusWithReviewHistory(
+                subjectId, newStatusDbValue, expectedVersion, reviewEntryJson);
+    }
+
+    @Override
     public List<VotingSubject> findExpiredVoting(Instant now, int limit) {
         return mapper.selectExpiredVoting(now, limit).stream().map(this::toAggregate).toList();
     }
@@ -78,6 +87,16 @@ public class VotingSubjectRepositoryImpl implements VotingSubjectRepository {
     @Override
     public List<VotingSubject> findPublishedReadyForOpen(Instant now, int limit) {
         return mapper.selectPublishedReadyForOpen(now, limit).stream().map(this::toAggregate).toList();
+    }
+
+    @Override
+    public int suspendVotingClocksForHandover(Long tenantId, Long electionSubjectId) {
+        return mapper.suspendVotingClocksForHandover(tenantId, electionSubjectId);
+    }
+
+    @Override
+    public int resumeVotingClocksAfterHandover(Long tenantId) {
+        return mapper.resumeVotingClocksAfterHandover(tenantId);
     }
 
     @Override
@@ -141,6 +160,8 @@ public class VotingSubjectRepositoryImpl implements VotingSubjectRepository {
                     .version(r.getVersion())
                     .voteStartAt(r.getVoteStartAt())
                     .voteEndAt(r.getVoteEndAt())
+                    .clockSuspendedAt(r.getClockSuspendedAt())
+                    .clockSuspendedBySubjectId(r.getClockSuspendedBySubjectId())
                     .proposedByUserId(r.getProposedByUserId())
                     .cancelledAt(r.getCancelledAt())
                     .cancelledByUserId(r.getCancelledByUserId())
@@ -161,6 +182,8 @@ public class VotingSubjectRepositoryImpl implements VotingSubjectRepository {
                 .version(r.getVersion())
                 .voteStartAt(r.getVoteStartAt())
                 .voteEndAt(r.getVoteEndAt())
+                .clockSuspendedAt(r.getClockSuspendedAt())
+                .clockSuspendedBySubjectId(r.getClockSuspendedBySubjectId())
                 .proposedByUserId(r.getProposedByUserId())
                 .cancelledAt(r.getCancelledAt())
                 .cancelledByUserId(r.getCancelledByUserId())
@@ -169,4 +192,3 @@ public class VotingSubjectRepositoryImpl implements VotingSubjectRepository {
                 .build();
     }
 }
-

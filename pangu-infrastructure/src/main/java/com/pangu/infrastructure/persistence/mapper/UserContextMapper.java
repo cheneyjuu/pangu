@@ -21,12 +21,20 @@ public interface UserContextMapper {
      *
      * @return 不存在或已禁用返回 null
      */
-    SysUserContextRow loadSysUserContext(@Param("userId") Long userId);
+    SysUserContextRow loadSysUserContext(@Param("accountId") Long accountId,
+                                         @Param("userId") Long userId);
 
     /**
      * 根据 c_user.uid 装配业主端身份上下文。
      */
-    CUserContextRow loadCUserContext(@Param("uid") Long uid);
+    CUserContextRow loadCUserContext(@Param("accountId") Long accountId,
+                                     @Param("uid") Long uid);
+
+    /**
+     * 反查业主名下任一房产的 tenant_id——C_USER 登录时 JWT 未带 tenantId
+     * 时用此作默认值。返回 null 表示该业主未关联任何房产（应拒绝登录）。
+     */
+    Long selectDefaultTenantByUid(@Param("uid") Long uid);
 
     /**
      * 给定 role_id 反查其所有 permission_key。
@@ -48,6 +56,8 @@ public interface UserContextMapper {
         private Long deptTenantId;
         /** sys_dept.dept_category：'G' / 'B' / 'S'。 */
         private String deptCategory;
+        /** sys_dept.dept_type：1-11，见 V1 schema 注释。 */
+        private Integer deptType;
         private Long roleId;
         private String roleKey;
         /** sys_user_role.effective_data_scope 或 sys_role.fixed_data_scope。 */
@@ -63,6 +73,8 @@ public interface UserContextMapper {
         public void setDeptTenantId(Long deptTenantId) { this.deptTenantId = deptTenantId; }
         public String getDeptCategory() { return deptCategory; }
         public void setDeptCategory(String deptCategory) { this.deptCategory = deptCategory; }
+        public Integer getDeptType() { return deptType; }
+        public void setDeptType(Integer deptType) { this.deptType = deptType; }
         public Long getRoleId() { return roleId; }
         public void setRoleId(Long roleId) { this.roleId = roleId; }
         public String getRoleKey() { return roleKey; }

@@ -49,6 +49,7 @@ public class PreAuthorizeMatrixTest {
     private static final long TENANT_RUSHI = 10001L;
 
     // V1.1 求是小区 seed 关键身份
+    private static final long ACC_STREET = 999801L, USR_STREET = 800001L;   // 王街道 GOV_SUPER_ADMIN
     private static final long ACC_GRID = 999804L, USR_GRID = 800004L;       // 陈网格员 GRID_OPERATOR
     private static final long ACC_COMM = 999803L, USR_COMM = 800003L;       // 刘主任 COMMUNITY_ADMIN
     private static final long ACC_REP  = 999812L, USR_REP  = 800102L;       // 张三 OWNER_REPRESENTATIVE
@@ -104,6 +105,18 @@ public class PreAuthorizeMatrixTest {
         // PROPERTY_MANAGER 是 S 端，仅有 waiver:read
         String token = jwtTokenProvider.generateToken(ACC_PROP, "SYS_USER", USR_PROP, TENANT_RUSHI);
         Map<String, Object> body = Map.of("approve", true, "opinion", "no");
+        mockMvc.perform(post("/api/v1/waivers/99999/committee-review")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(body)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code", is(403)));
+    }
+
+    @Test
+    public void streetAdminCannotApproveByCommittee_403() throws Exception {
+        String token = jwtTokenProvider.generateToken(ACC_STREET, "SYS_USER", USR_STREET, TENANT_RUSHI);
+        Map<String, Object> body = Map.of("approve", true, "opinion", "street cannot committee-review");
         mockMvc.perform(post("/api/v1/waivers/99999/committee-review")
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)

@@ -13,6 +13,8 @@ import com.pangu.application.lock.GovernanceLockApplicationException;
 import com.pangu.application.lock.GovernanceLockApplicationService;
 import com.pangu.application.lock.command.LockCommand;
 import com.pangu.application.support.PayloadHasher;
+import com.pangu.domain.context.UserContext;
+import com.pangu.domain.context.UserContextHolder;
 import com.pangu.domain.lock.DistributedLockTemplate;
 import com.pangu.domain.lock.DistributedLockTemplate.DistributedLockAcquisitionException;
 import com.pangu.domain.model.disclosure.DisclosureDiff;
@@ -35,6 +37,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Set;
 
 /**
  * 财务公示编排服务（M2-3）。
@@ -60,6 +63,9 @@ import java.time.Instant;
 public class FinanceDisclosureApplicationService {
 
     private static final Duration COMPOSE_LOCK_TTL = Duration.ofSeconds(30);
+    private static final Set<String> COMPOSE_ROLES = Set.of("COMMITTEE_DIRECTOR", "COMMUNITY_ADMIN");
+    private static final Set<String> AUDIT_ROLES = Set.of("GOV_SUPER_ADMIN", "COMMUNITY_ADMIN");
+    private static final String PUBLISH_ROLE = "COMMITTEE_DIRECTOR";
 
     /** 内部 canonical mapper：保证 hash / 持久化 JSON 在不同 JVM 上一致。 */
     private static final ObjectMapper CANONICAL_MAPPER = new ObjectMapper()
@@ -74,6 +80,7 @@ public class FinanceDisclosureApplicationService {
     private final TransactionTemplate transactionTemplate;
     private final DisclosureDiffCalculator diffCalculator;
     private final HandoverCircuitBreaker handoverCircuitBreaker;
+    private final UserContextHolder userContextHolder;
 
     public FinanceDisclosureApplicationService(
             FinanceDisclosureRepository disclosureRepository,
@@ -83,7 +90,8 @@ public class FinanceDisclosureApplicationService {
             DistributedLockTemplate distributedLockTemplate,
             TransactionTemplate transactionTemplate,
             DisclosureDiffCalculator diffCalculator,
-            HandoverCircuitBreaker handoverCircuitBreaker) {
+            HandoverCircuitBreaker handoverCircuitBreaker,
+            UserContextHolder userContextHolder) {
         this.disclosureRepository = disclosureRepository;
         this.compareRepository = compareRepository;
         this.ledgerQueryGateway = ledgerQueryGateway;
@@ -92,6 +100,7 @@ public class FinanceDisclosureApplicationService {
         this.transactionTemplate = transactionTemplate;
         this.diffCalculator = diffCalculator;
         this.handoverCircuitBreaker = handoverCircuitBreaker;
+        this.userContextHolder = userContextHolder;
     }
 
     // -----------------------------------------------------------------
@@ -105,6 +114,7 @@ public class FinanceDisclosureApplicationService {
      * 事务内重读最大 statisticsVersion 决定下一版本号；DB 唯一索引兜底。
      */
     public FinanceDisclosureSnapshot compose(ComposeCommand cmd) {
+        requireAnyRole(COMPOSE_ROLES, "仅业委会主任或居委会可聚合财务公示快照");
         requireMaintenanceFund(cmd.disclosureType());
         if (cmd.tenantId() == null || cmd.composedByUserId() == null
                 || cmd.period() == null || cmd.period().isBlank()) {
@@ -172,6 +182,7 @@ public class FinanceDisclosureApplicationService {
      */
     @Transactional
     public FinanceDisclosureSnapshot lockAndPublish(LockAndPublishCommand cmd) {
+        requireRole(PUBLISH_ROLE, "仅业委会主任可锁定并发布财务公示");
         if (cmd.tenantId() == null || cmd.snapshotId() == null || cmd.userId() == null) {
             throw new IllegalArgumentException("LockAndPublishCommand 字段不完整");
         }
@@ -221,6 +232,7 @@ public class FinanceDisclosureApplicationService {
      */
     @Transactional
     public DisclosureDiff compare(CompareCommand cmd) {
+        requireAnyRole(AUDIT_ROLES, "仅街道办或居委会可执行财务公示差分审计");
         if (cmd.tenantId() == null || cmd.prevSnapshotId() == null
                 || cmd.currSnapshotId() == null || cmd.auditedByUserId() == null) {
             throw new IllegalArgumentException("CompareCommand 字段不完整");
@@ -301,6 +313,19 @@ public class FinanceDisclosureApplicationService {
             throw new FinanceDisclosureApplicationException(
                     FinanceDisclosureApplicationException.Reason.DISCLOSURE_TYPE_NOT_SUPPORTED,
                     "本期仅支持 MAINTENANCE_FUND，未启用 type=" + type);
+        }
+    }
+
+    private void requireRole(String expectedRole, String message) {
+        requireAnyRole(Set.of(expectedRole), message);
+    }
+
+    private void requireAnyRole(Set<String> expectedRoles, String message) {
+        UserContext ctx = userContextHolder.current();
+        if (ctx == null || !expectedRoles.contains(ctx.roleKey())) {
+            throw new FinanceDisclosureApplicationException(
+                    FinanceDisclosureApplicationException.Reason.DISCLOSURE_ROLE_FORBIDDEN,
+                    message + "，当前角色=" + (ctx == null ? "ANONYMOUS" : ctx.roleKey()));
         }
     }
 

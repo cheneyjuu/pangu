@@ -41,6 +41,14 @@ public interface VotingSubjectRepository {
     int updateStatus(Long subjectId, int newStatusDbValue, long expectedVersion);
 
     /**
+     * 状态翻转 + 追加审批审计轨迹。{@code reviewEntryJson} 必须是单个 JSON object 字符串。
+     */
+    int updateStatusWithReviewHistory(Long subjectId,
+                                      int newStatusDbValue,
+                                      long expectedVersion,
+                                      String reviewEntryJson);
+
+    /**
      * 找到所有 {@code status = VOTING AND vote_end_at < now} 的议题，按 vote_end_at 升序，
      * 仅返回首批 {@code limit} 条。供 {@code VotingDeadlineScheduler} 分批结算。
      */
@@ -64,6 +72,23 @@ public interface VotingSubjectRepository {
      * 按 vote_start_at 升序返回前 {@code limit} 条。
      */
     List<VotingSubject> findPublishedReadyForOpen(Instant now, int limit);
+
+    /**
+     * HANDOVER_LOCK 生效时暂停租户内非选举议题的投票倒计时。
+     *
+     * <p>覆盖 status ∈ {PUBLISHED, VOTING} 且尚未暂停的 GENERAL/MAJOR 议题。
+     *
+     * @return 本次新暂停的议题数量
+     */
+    int suspendVotingClocksForHandover(Long tenantId, Long electionSubjectId);
+
+    /**
+     * HANDOVER_LOCK 解除时恢复投票倒计时：按 {@code now - clock_suspended_at}
+     * 顺延 vote_start_at / vote_end_at，并清空暂停标记。
+     *
+     * @return 本次恢复的议题数量
+     */
+    int resumeVotingClocksAfterHandover(Long tenantId);
 
     /**
      * "我的议题"列表：按租户 + ABAC scope 过滤业主可见的议题。
@@ -116,4 +141,3 @@ public interface VotingSubjectRepository {
      */
     Optional<Long> findActiveElectionSubjectId(Long tenantId);
 }
-

@@ -10,6 +10,7 @@ import com.pangu.domain.repository.VoteDetailQueryRepository;
 import com.pangu.domain.repository.VoteItemRepository;
 import com.pangu.domain.repository.VotingDenominatorReader;
 import com.pangu.domain.repository.VotingDenominatorReader.DenominatorTotals;
+import com.pangu.domain.repository.VotingDenominatorReader.FrozenDenominatorSnapshot;
 import com.pangu.domain.repository.VotingResultRepository;
 import com.pangu.domain.repository.VotingSubjectRepository;
 import lombok.RequiredArgsConstructor;
@@ -17,6 +18,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Optional;
 
 /**
  * 议题进度 / 逐户明细只读查询服务（M4-2）。
@@ -55,6 +57,7 @@ public class VotingProgressQueryService {
                     .orElseThrow(() -> new VotingApplicationException(
                             VotingApplicationException.Reason.SUBJECT_ALREADY_SETTLED,
                             "议题状态为 SETTLED 但结果快照缺失，数据损坏 subjectId=" + subjectId));
+            Optional<FrozenDenominatorSnapshot> frozen = denominatorReader.findFrozenSnapshot(subjectId);
             return new VotingProgress(
                     subject.getSubjectId(),
                     subject.getStatus(),
@@ -68,11 +71,16 @@ public class VotingProgressQueryService {
                     null,
                     snapshot.quorumSatisfied(),
                     true,
-                    snapshot.passed());
+                    snapshot.passed(),
+                    snapshot.denominatorSnapshotId(),
+                    frozen.map(FrozenDenominatorSnapshot::merkleRoot).orElse(null));
         }
 
-        DenominatorTotals totals = denominatorReader.previewTotals(
-                tenantId, subject.getScope(), subject.getScopeReferenceId());
+        DenominatorTotals totals = denominatorReader.findFrozenSnapshot(subjectId)
+                .map(frozen -> new DenominatorTotals(
+                        frozen.totalArea(), frozen.totalOwnerCount(), frozen.snapshotId(), frozen.merkleRoot()))
+                .orElseGet(() -> denominatorReader.previewTotals(
+                        tenantId, subject.getScope(), subject.getScopeReferenceId()));
         List<VoteItem> votes = voteItemRepository.findValidVotes(subjectId);
         return progressCalculator.compute(subject, totals, votes);
     }

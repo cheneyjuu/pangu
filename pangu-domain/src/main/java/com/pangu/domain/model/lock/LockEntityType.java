@@ -8,6 +8,7 @@ package com.pangu.domain.model.lock;
  *   <li>{@link #FINANCE_DISCLOSURE} —— 财务公示快照（M2-3 落地后启用）</li>
  *   <li>{@link #ELECTION_DISCLOSURE} —— 选举公示快照</li>
  *   <li>{@link #FUND_LEDGER_PUBLISH} —— 维修资金台账期末发布</li>
+ *   <li>{@link #TRUST_FUND_PAYMENT} —— 信托制动账付款指令</li>
  * </ul>
  *
  * <p>枚举名直接作为 DB {@code entity_type} 字段（VARCHAR(32)）存储，与 V2.5 的
@@ -17,7 +18,8 @@ public enum LockEntityType {
 
     FINANCE_DISCLOSURE,
     ELECTION_DISCLOSURE,
-    FUND_LEDGER_PUBLISH;
+    FUND_LEDGER_PUBLISH,
+    TRUST_FUND_PAYMENT;
 
     public static LockEntityType fromDbValue(String dbValue) {
         if (dbValue == null) {

@@ -21,6 +21,7 @@ public final class GovernanceLockExceptionTranslator {
             case LOCK_INVALID_TRANSITION -> LockErrorCode.LOCK_INVALID_TRANSITION;
             case LOCK_SIGNER_CONFLICT -> LockErrorCode.LOCK_SIGNER_CONFLICT;
             case LOCK_NOT_HELD -> LockErrorCode.LOCK_NOT_HELD;
+            case LOCK_ROLE_FORBIDDEN -> LockErrorCode.LOCK_ROLE_FORBIDDEN;
         };
     }
 }

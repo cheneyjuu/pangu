@@ -1,14 +1,23 @@
 package com.pangu.bootstrap.web;
 
+import com.pangu.application.handover.TenantTermLockService;
 import com.pangu.application.voting.VotingApplicationService;
 import com.pangu.application.voting.command.SettleSubjectCommand;
 import com.pangu.application.waiver.WaiverApplicationService;
 import com.pangu.application.waiver.command.CommitteeReviewCommand;
 import com.pangu.application.waiver.command.StreetReviewCommand;
 import com.pangu.application.waiver.command.SubmitDraftCommand;
+import com.pangu.domain.context.UserContext;
+import com.pangu.domain.context.UserContextHolder;
+import com.pangu.domain.model.user.AuthenticationLevel;
+import com.pangu.domain.model.user.DataScopeType;
+import com.pangu.domain.model.voting.SubjectStatus;
+import com.pangu.domain.model.voting.SubjectType;
+import com.pangu.domain.model.voting.VotingSubject;
 import com.pangu.domain.model.waiver.PartyRatioWaiver;
 import com.pangu.domain.model.waiver.WaiverStatus;
 import com.pangu.domain.repository.VotingResultRepository;
+import com.pangu.domain.repository.VotingSubjectRepository;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -17,9 +26,12 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.math.BigDecimal;
+import java.sql.Timestamp;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -58,10 +70,19 @@ public class ElectionWorkflowIntegrationTest {
     private VotingApplicationService votingApplicationService;
 
     @Autowired
+    private TenantTermLockService tenantTermLockService;
+
+    @Autowired
     private VotingResultRepository votingResultRepository;
 
     @Autowired
+    private VotingSubjectRepository votingSubjectRepository;
+
+    @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private UserContextHolder userContextHolder;
 
     @BeforeEach
     public void setUp() {
@@ -70,7 +91,24 @@ public class ElectionWorkflowIntegrationTest {
 
     @AfterEach
     public void tearDown() {
+        userContextHolder.clear();
         cleanUp();
+    }
+
+    private void setRole(String roleKey, long userId) {
+        userContextHolder.set(new UserContext(
+                999000L + userId,
+                UserContext.IdentityType.SYS_USER,
+                userId,
+                TEST_TENANT_ID,
+                101L,
+                UserContext.DeptCategory.G,
+                "GOV_SUPER_ADMIN".equals(roleKey) ? 1 : 2,
+                DataScopeType.ALL_COMMUNITY,
+                AuthenticationLevel.L1,
+                roleKey,
+                Set.of(),
+                Set.of()));
     }
 
     private void cleanUp() {
@@ -101,6 +139,12 @@ public class ElectionWorkflowIntegrationTest {
                 "DELETE FROM t_election_candidate "
                         + "WHERE subject_id IN (SELECT subject_id FROM t_voting_subject WHERE tenant_id = ?)",
                 TEST_TENANT_ID);
+        jdbcTemplate.update("DELETE FROM t_tenant_term_state WHERE tenant_id = ?", TEST_TENANT_ID);
+        jdbcTemplate.update(
+                "UPDATE t_voting_subject SET clock_suspended_at = NULL, clock_suspended_by_subject_id = NULL "
+                        + "WHERE tenant_id = ? OR clock_suspended_by_subject_id IN "
+                        + "(SELECT subject_id FROM t_voting_subject WHERE tenant_id = ?)",
+                TEST_TENANT_ID, TEST_TENANT_ID);
         jdbcTemplate.update("DELETE FROM t_voting_subject WHERE tenant_id = ?", TEST_TENANT_ID);
         jdbcTemplate.update("DELETE FROM c_owner_property WHERE tenant_id = ?", TEST_TENANT_ID);
         // 测试用户 phone 以 770/770 开头共 11 位；和生产数据隔离开
@@ -136,6 +180,21 @@ public class ElectionWorkflowIntegrationTest {
                         + "VALUES(?, ?, 3, 1, 3, 0.50) RETURNING subject_id",  // status=3 VOTING
                 Long.class,
                 TEST_TENANT_ID, "一般议题-e2e");
+    }
+
+    private Long insertTimedSubject(String title, int subjectType, int status, Instant start, Instant end) {
+        return jdbcTemplate.queryForObject(
+                "INSERT INTO t_voting_subject(tenant_id, title, subject_type, scope, status, "
+                        + "vote_start_at, vote_end_at, party_ratio_floor, max_winners) "
+                        + "VALUES(?, ?, ?, 1, ?, ?, ?, 0.50, ?) RETURNING subject_id",
+                Long.class,
+                TEST_TENANT_ID,
+                title,
+                subjectType,
+                status,
+                Timestamp.from(start),
+                Timestamp.from(end),
+                subjectType == 1 ? 3 : null);
     }
 
     private void insertCandidate(Long subjectId, Long uid, String name, int isParty) {
@@ -181,6 +240,7 @@ public class ElectionWorkflowIntegrationTest {
         assertEquals(6L, submitted.getTotalEligibleSize());
 
         // 3. 居委会初审通过（不同审批人，dept_type=2）→ PENDING_STREET
+        setRole("COMMUNITY_ADMIN", COMMITTEE_APPROVER);
         PartyRatioWaiver afterCommittee = waiverApplicationService.reviewByCommittee(
                 new CommitteeReviewCommand(submitted.getWaiverId(), COMMITTEE_APPROVER, true, "情况属实"));
         assertEquals(WaiverStatus.PENDING_STREET, afterCommittee.getStatus());
@@ -188,6 +248,7 @@ public class ElectionWorkflowIntegrationTest {
         assertNotNull(afterCommittee.getCommitteeApprovalAt());
 
         // 4. 街道办终审通过（dept_type=1）→ APPROVED + payloadHash 锁定
+        setRole("GOV_SUPER_ADMIN", STREET_APPROVER);
         PartyRatioWaiver afterStreet = waiverApplicationService.reviewByStreet(
                 new StreetReviewCommand(submitted.getWaiverId(), STREET_APPROVER, true, "终审通过"));
         assertEquals(WaiverStatus.APPROVED, afterStreet.getStatus());
@@ -208,6 +269,42 @@ public class ElectionWorkflowIntegrationTest {
         assertEquals(afterStreet.getLocalPayloadHash(), waiverRow.get("local_payload_hash"));
         assertEquals(COMMITTEE_APPROVER, ((Number) waiverRow.get("committee_approver")).longValue());
         assertEquals(STREET_APPROVER, ((Number) waiverRow.get("street_approver")).longValue());
+    }
+
+    @Test
+    public void waiverCommitteeReject_requiresAndPersistsReasonCodeEvidence() {
+        Long subjectId = insertElectionSubject();
+        for (int i = 0; i < 6; i++) {
+            insertCandidate(subjectId, 810000L + i, "候选人" + i, i < 2 ? 1 : 0);
+        }
+
+        SubmitDraftCommand draftCmd = new SubmitDraftCommand(
+                subjectId, TEST_TENANT_ID, INITIATOR, new BigDecimal("0.30"),
+                "本小区共有产权房比例较高党员人数严重不足经多次组织居民代表协商发动报名仍无法凑足候选人池所需的党员数量特申请将党员比例下限放宽至30%恳请居委会及街道办予以审议批准",
+                null
+        );
+        PartyRatioWaiver submitted = waiverApplicationService.submitDraft(draftCmd);
+
+        setRole("COMMUNITY_ADMIN", COMMITTEE_APPROVER);
+        PartyRatioWaiver rejected = waiverApplicationService.reviewByCommittee(
+                new CommitteeReviewCommand(
+                        submitted.getWaiverId(),
+                        COMMITTEE_APPROVER,
+                        false,
+                        "证据材料不足",
+                        "C1",
+                        "{\"files\":[\"oss://waiver/reject-c1.pdf\"],\"note\":\"缺少联名证明\"}"));
+        assertEquals(WaiverStatus.REJECTED, rejected.getStatus());
+        assertEquals("C1", rejected.getCommitteeRejectReasonCode());
+        assertTrue(rejected.getCommitteeRejectEvidenceJson().contains("reject-c1.pdf"));
+
+        Map<String, Object> waiverRow = jdbcTemplate.queryForMap(
+                "SELECT status, committee_reject_reason_code, committee_reject_evidence_json::text AS evidence "
+                        + "FROM t_party_ratio_waiver WHERE waiver_id = ?",
+                submitted.getWaiverId());
+        assertEquals(WaiverStatus.REJECTED.getDbValue(), ((Number) waiverRow.get("status")).intValue());
+        assertEquals("C1", waiverRow.get("committee_reject_reason_code"));
+        assertTrue(((String) waiverRow.get("evidence")).contains("reject-c1.pdf"));
     }
 
     @Test
@@ -266,6 +363,64 @@ public class ElectionWorkflowIntegrationTest {
     }
 
     @Test
+    public void clockSuspend_handoverLockPausesAndResumesPublishedVotingSubjects() {
+        Instant publishedStart = Instant.parse("2026-07-01T00:00:00Z");
+        Instant publishedEnd = Instant.parse("2026-07-15T00:00:00Z");
+        Instant votingStart = Instant.parse("2026-06-01T00:00:00Z");
+        Instant votingEnd = Instant.parse("2026-07-10T00:00:00Z");
+
+        Long electionSubjectId = insertTimedSubject(
+                "已结算换届选举", 1, SubjectStatus.SETTLED.getDbValue(),
+                Instant.parse("2026-06-01T00:00:00Z"),
+                Instant.parse("2026-06-20T00:00:00Z"));
+        Long publishedSubjectId = insertTimedSubject(
+                "待开票一般议题", 3, SubjectStatus.PUBLISHED.getDbValue(), publishedStart, publishedEnd);
+        Long votingSubjectId = insertTimedSubject(
+                "投票中一般议题", 3, SubjectStatus.VOTING.getDbValue(), votingStart, votingEnd);
+        Long draftSubjectId = insertTimedSubject(
+                "草稿一般议题", 3, SubjectStatus.DRAFT.getDbValue(),
+                Instant.parse("2026-07-01T00:00:00Z"),
+                Instant.parse("2026-07-15T00:00:00Z"));
+
+        tenantTermLockService.engageAfterElectionSettled(VotingSubject.builder()
+                .subjectId(electionSubjectId)
+                .tenantId(TEST_TENANT_ID)
+                .subjectType(SubjectType.ELECTION)
+                .status(SubjectStatus.SETTLED)
+                .build());
+
+        assertEquals(electionSubjectId, suspendedBy(publishedSubjectId));
+        assertEquals(electionSubjectId, suspendedBy(votingSubjectId));
+        assertNull(suspendedAt(draftSubjectId), "草稿不应进入 Clock Suspend");
+        assertTrue(votingSubjectRepository.findPublishedReadyForOpen(
+                        Instant.parse("2026-08-01T00:00:00Z"), 20)
+                .stream().noneMatch(s -> s.getSubjectId().equals(publishedSubjectId)),
+                "暂停中的 PUBLISHED 议题不应被开票调度器扫到");
+        assertTrue(votingSubjectRepository.findExpiredVoting(
+                        Instant.parse("2026-08-01T00:00:00Z"), 20)
+                .stream().noneMatch(s -> s.getSubjectId().equals(votingSubjectId)),
+                "暂停中的 VOTING 议题不应被截止调度器扫到");
+
+        jdbcTemplate.update(
+                "UPDATE t_voting_subject SET clock_suspended_at = CURRENT_TIMESTAMP - INTERVAL '2 hours' "
+                        + "WHERE subject_id IN (?, ?)",
+                publishedSubjectId, votingSubjectId);
+
+        tenantTermLockService.confirmHandover(TEST_TENANT_ID, STREET_APPROVER);
+
+        assertNull(suspendedAt(publishedSubjectId));
+        assertNull(suspendedAt(votingSubjectId));
+        assertTrue(voteStartAt(publishedSubjectId).isAfter(publishedStart.plusSeconds(60 * 60)),
+                "PUBLISHED 议题恢复后应顺延 vote_start_at");
+        assertTrue(voteEndAt(publishedSubjectId).isAfter(publishedEnd.plusSeconds(60 * 60)),
+                "PUBLISHED 议题恢复后应顺延 vote_end_at");
+        assertEquals(votingStart, voteStartAt(votingSubjectId),
+                "VOTING 议题已开票，恢复时不应改写 vote_start_at");
+        assertTrue(voteEndAt(votingSubjectId).isAfter(votingEnd.plusSeconds(60 * 60)),
+                "VOTING 议题恢复后应顺延 vote_end_at");
+    }
+
+    @Test
     public void votingSettle_quorumFailed_passedFalse_butStillEmitsAttestation() {
         // 极端：3 业主中只 1 人参会（33%）→ 双 2/3 不达 → 不成立 → passed=false
         Long uid1 = insertUser("77020000001");
@@ -286,5 +441,34 @@ public class ElectionWorkflowIntegrationTest {
         // 即使未通过，tx_hash 仍应生成（审计需要存证）
         assertNotNull(snap.attestationTxHash());
         assertTrue(snap.attestationTxHash().startsWith("STUB-"));
+    }
+
+    private Instant suspendedAt(Long subjectId) {
+        Timestamp ts = jdbcTemplate.queryForObject(
+                "SELECT clock_suspended_at FROM t_voting_subject WHERE subject_id = ?",
+                Timestamp.class,
+                subjectId);
+        return ts == null ? null : ts.toInstant();
+    }
+
+    private Long suspendedBy(Long subjectId) {
+        return jdbcTemplate.queryForObject(
+                "SELECT clock_suspended_by_subject_id FROM t_voting_subject WHERE subject_id = ?",
+                Long.class,
+                subjectId);
+    }
+
+    private Instant voteStartAt(Long subjectId) {
+        return jdbcTemplate.queryForObject(
+                "SELECT vote_start_at FROM t_voting_subject WHERE subject_id = ?",
+                Timestamp.class,
+                subjectId).toInstant();
+    }
+
+    private Instant voteEndAt(Long subjectId) {
+        return jdbcTemplate.queryForObject(
+                "SELECT vote_end_at FROM t_voting_subject WHERE subject_id = ?",
+                Timestamp.class,
+                subjectId).toInstant();
     }
 }

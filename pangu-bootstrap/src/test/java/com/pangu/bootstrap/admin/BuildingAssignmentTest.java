@@ -67,6 +67,7 @@ public class BuildingAssignmentTest {
     private static final long ACC_MEMBER = 999813L, USR_MEMBER = 800103L;                   // 业委会委员（非白名单）
     // 目标用户
     private static final long USR_GRID = 800004L;       // 网格员
+    private static final long USR_LIU_GRID_SHADOW = 800006L; // 刘主任的网格员分身
     private static final long USR_VOLUNTEER = 800104L;  // 志愿者
     private static final long USR_PROPERTY_MGR = 800201L; // 物业经理（非可分配角色）
 
@@ -264,11 +265,11 @@ public class BuildingAssignmentTest {
 
     @Test
     public void search_excludesNonAssignableRoles() throws Exception {
-        // 居委会主任不是可分配角色（CommunityAdmin），搜「主任」不能搜到自己（USR_COMMUNITY_ADMIN）
-        // 但可能搜到业委会主任「周主任」—— 业委会主任也不在可分配 3 角色，故应 0 命中
+        // 业委会主任不在可分配 3 角色，搜「周主任」应 0 命中。
+        // 刘主任已在 D-mini 具备 GRID_OPERATOR 分身，因此不能再作为此负例。
         String token = jwtTokenProvider.generateToken(ACC_COMMUNITY_ADMIN, "SYS_USER", USR_COMMUNITY_ADMIN, TENANT_RUSHI);
         mockMvc.perform(get("/api/v1/admin/building-assignments/search")
-                        .param("keyword", "刘主任")
+                        .param("keyword", "周主任")
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data").isArray())
@@ -290,21 +291,15 @@ public class BuildingAssignmentTest {
 
     @Test
     public void assign_buildingOccupiedBySameRole_409_42407() throws Exception {
-        // 30001 已被 800004 GRID_OPERATOR 占；试图给「另一个网格员」分 30001 → 应拒
-        // V1.1 seed 只有 1 个网格员，故造一个未实名的临时网格员行不通。
-        // 替代：转移到不同 user 但同角色——直接拿 800004 自己（同 user 是幂等不冲突，跳过此用例的造测）。
-        // 我们用 OWNER_REPRESENTATIVE 角色场景：800102 当前占 30001
-        // 试图给另一个 OWNER_REPRESENTATIVE 分 30001。V1.1 同样只有 1 个 OWNER_REPRESENTATIVE。
-        // 故这里仅断言：业务路径——给「同 user 同 building 同角色」应是幂等 200，不冲突。
-        // 冲突路径需要 2 个同角色用户，留待后续 seed 补全后跑。
-        // 本用例改为：assign 给 USR_GRID 30001（同 user 同 building，已生效 → 幂等）。
+        // D-mini seed 增加了第二个 GRID_OPERATOR 分身 800006。
+        // 30001 已被 800004 GRID_OPERATOR 占；试图给 800006 分 30001 → 同角色互斥，应拒。
         String token = jwtTokenProvider.generateToken(ACC_COMMUNITY_ADMIN, "SYS_USER", USR_COMMUNITY_ADMIN, TENANT_RUSHI);
-        mockMvc.perform(post("/api/v1/admin/building-assignments/users/" + USR_GRID + "/buildings")
+        mockMvc.perform(post("/api/v1/admin/building-assignments/users/" + USR_LIU_GRID_SHADOW + "/buildings")
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(assignBody(30001L, "GRID_OPERATOR")))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code", is(200)));
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code", is(42407)));
     }
 
     @Test

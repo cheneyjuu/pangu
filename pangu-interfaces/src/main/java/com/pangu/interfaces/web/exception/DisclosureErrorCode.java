@@ -13,6 +13,7 @@ package com.pangu.interfaces.web.exception;
  *   <li>{@code LEDGER_QUERY_EMPTY}：compose 期间 V2.2 流水/账户为空；</li>
  *   <li>{@code SNAPSHOT_CONCURRENT_MODIFICATION}：乐观锁冲突，{@code needRetry=true}。</li>
  *   <li>{@code HANDOVER_IN_PROGRESS}：换届选举在途，财务公示发布被熔断（HANDOVER_LOCK）。</li>
+ *   <li>{@code DISCLOSURE_ROLE_FORBIDDEN}：当前角色不允许执行该财务公示动作。</li>
  * </ul>
  */
 public enum DisclosureErrorCode implements ErrorCode {
@@ -25,7 +26,8 @@ public enum DisclosureErrorCode implements ErrorCode {
     COMPARE_INVALID_PAIR(41106, "差分快照对不合法", 400, ErrorType.BIZ, false),
     LEDGER_QUERY_EMPTY(41107, "目标期间内无任何账户与流水可聚合", 409, ErrorType.BIZ, false),
     SNAPSHOT_CONCURRENT_MODIFICATION(41108, "财务公示快照已被并发修改，请刷新后重试", 409, ErrorType.SYSTEM, true),
-    HANDOVER_IN_PROGRESS(41109, "换届选举进行中，财务公示发布已熔断", 409, ErrorType.BIZ, false);
+    HANDOVER_IN_PROGRESS(41109, "换届选举进行中，财务公示发布已熔断", 409, ErrorType.BIZ, false),
+    DISCLOSURE_ROLE_FORBIDDEN(41110, "当前角色无权执行该财务公示动作", 403, ErrorType.BIZ, false);
 
     private final int code;
     private final String message;

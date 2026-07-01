@@ -36,8 +36,8 @@ import org.springframework.web.bind.annotation.RestController;
  *   <li>{@code POST /locks}（创建）—— 本期由系统管理员触发回归测试，挂
  *       {@code @PreAuthorize("hasAuthority('admin:role:manage')")}；
  *       M2-3 落地时由 disclosure publish 内部委派，再下沉到具体业务权限。</li>
- *   <li>{@code committee-sign} —— {@code lock:unlock:committee}（V2.5 注册到 COMMITTEE_DIRECTOR）；</li>
- *   <li>{@code street-sign}    —— {@code lock:unlock:street}（V2.5 注册到 GOV_SUPER_ADMIN / COMMUNITY_ADMIN）。</li>
+ *   <li>{@code committee-sign} —— {@code lock:unlock:committee}（COMMITTEE_DIRECTOR）；</li>
+ *   <li>{@code street-sign}    —— {@code lock:unlock:street}（V3.24 收敛为 GOV_SUPER_ADMIN）。</li>
  * </ul>
  */
 @RestController

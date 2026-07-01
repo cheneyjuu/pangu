@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pangu.infrastructure.persistence.mapper.IdentityShadowMapper">
+
+    <sql id="SysUserShadowColumns">
+        u.user_id AS userId,
+        u.account_id AS accountId,
+        u.dept_id AS deptId,
+        d.tenant_id AS tenantId,
+        u.user_name AS userName,
+        u.nick_name AS nickName,
+        d.dept_type AS deptType,
+        d.dept_category AS deptCategory,
+        d.dept_name AS deptName,
+        r.role_id AS roleId,
+        r.role_key AS roleKey,
+        r.role_name AS roleName,
+        COALESCE(ur.effective_data_scope, r.fixed_data_scope, r.default_data_scope) AS effectiveDataScope
+    </sql>
+
+    <select id="listSysUserShadows"
+            resultType="com.pangu.infrastructure.persistence.mapper.IdentityShadowMapper$SysUserShadowRow">
+        SELECT
+            <include refid="SysUserShadowColumns"/>
+        FROM sys_user u
+        INNER JOIN sys_dept d ON d.dept_id = u.dept_id
+        LEFT JOIN sys_user_role ur ON ur.user_id = u.user_id
+        LEFT JOIN sys_role r ON r.role_id = ur.role_id AND r.status = '0'
+        WHERE u.account_id = #{accountId}
+          AND u.status = '0'
+        ORDER BY u.user_id ASC
+    </select>
+
+    <select id="selectSysUserShadow"
+            resultType="com.pangu.infrastructure.persistence.mapper.IdentityShadowMapper$SysUserShadowRow">
+        SELECT
+            <include refid="SysUserShadowColumns"/>
+        FROM sys_user u
+        INNER JOIN sys_dept d ON d.dept_id = u.dept_id
+        LEFT JOIN sys_user_role ur ON ur.user_id = u.user_id
+        LEFT JOIN sys_role r ON r.role_id = ur.role_id AND r.status = '0'
+        WHERE u.account_id = #{accountId}
+          AND u.user_id = #{userId}
+          AND u.status = '0'
+        LIMIT 1
+    </select>
+</mapper>

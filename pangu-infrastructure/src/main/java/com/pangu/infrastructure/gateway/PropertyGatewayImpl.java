@@ -38,8 +38,15 @@ public class PropertyGatewayImpl implements PropertyGateway {
     }
 
     @Override
-    public List<OwnerSummary> searchOwnersByPhone(String phonePrefix, Long tenantId) {
-        return ownerPropertyMapper.searchOwnersByPhonePrefix(tenantId, phonePrefix).stream()
+    public List<OwnerSummary> searchOwnersByPhone(String phoneFragment, Long tenantId) {
+        return ownerPropertyMapper.searchOwnersByPhoneFragment(tenantId, phoneFragment).stream()
+                .map(this::toSummary)
+                .toList();
+    }
+
+    @Override
+    public List<OwnerSummary> listAllNominatableOwners(Long tenantId, int limit) {
+        return ownerPropertyMapper.listNominatableOwnersWithName(tenantId, limit).stream()
                 .map(this::toSummary)
                 .toList();
     }
@@ -67,11 +74,13 @@ public class PropertyGatewayImpl implements PropertyGateway {
     }
 
     private OwnerSummary toSummary(OwnerLookupRow row) {
+        // row.realName 在手机号 fast-path 为 null；在姓名/拼音预扫描路径为 SM4 密文，由 application 解密。
         return OwnerSummary.builder()
                 .uid(row.getUid())
                 .phone(row.getPhone())
                 .buildingId(row.getBuildingId())
                 .roomId(row.getRoomId())
+                .realName(row.getRealName())
                 .build();
     }
 

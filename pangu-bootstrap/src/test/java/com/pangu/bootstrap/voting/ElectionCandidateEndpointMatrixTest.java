@@ -27,7 +27,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *
  * <p>V1.1 求是小区 seed + V1.4 角色授权：
  * <ul>
- *   <li>陈网格员（GRID_OPERATOR，role 4）—— 有 {@code candidate:nominate}，无 approve / audit；</li>
+ *   <li>吴经办员（GOV_OPERATOR，role 14）—— 有 {@code candidate:nominate}，且 service 层允许提名；</li>
+ *   <li>陈网格员（GRID_OPERATOR，role 4）—— V3.20 后已回收 {@code candidate:nominate}；</li>
  *   <li>刘主任（COMMUNITY_ADMIN，role 2）—— 有 {@code candidate:approve} + {@code voting:subject:audit}，无 nominate；</li>
  *   <li>李四（C_USER）—— G 端候选人 endpoint 全 403，仅 C 端只读列表 isAuthenticated 通过。</li>
  * </ul>
@@ -54,6 +55,8 @@ public class ElectionCandidateEndpointMatrixTest {
     private static final long TENANT_RUSHI = 10001L;
 
     private static final long ACC_GRID = 999804L, USR_GRID = 800004L;   // 陈网格员（nominate，无 approve/audit）
+    private static final long ACC_STREET = 999801L, USR_STREET = 800001L; // 王街道（V3.26 起无候选人审查权）
+    private static final long ACC_OPERATOR = 999805L, USR_OPERATOR = 800005L; // 吴经办员（nominate 且允许）
     private static final long ACC_COMM = 999803L, USR_COMM = 800003L;   // 刘主任（approve + audit，无 nominate / party-review）
     private static final long ACC_PARTY = 999802L, USR_PARTY = 800002L; // 李书记（party-review，无 approve——严格分权）
     private static final long ACC_LISI = 999913L, UID_LISI = 70002L;    // 李四 C_USER
@@ -125,17 +128,40 @@ public class ElectionCandidateEndpointMatrixTest {
         return objectMapper.writeValueAsString(Map.of("approve", approve));
     }
 
+    private String rejectBody(String reasonCode) throws Exception {
+        Map<String, Object> body = new HashMap<>();
+        body.put("approve", false);
+        if (reasonCode != null) {
+            body.put("rejectReasonCode", reasonCode);
+        }
+        body.put("rejectEvidence", Map.of(
+                "files", java.util.List.of("oss://candidate/reject.pdf"),
+                "note", "材料不完整"));
+        return objectMapper.writeValueAsString(body);
+    }
+
     // ===== 提名 nominate：candidate:nominate =====
 
     @Test
-    public void gridOperatorNominate_passesPreAuth_created() throws Exception {
+    public void govOperatorNominate_created() throws Exception {
         Long subjectId = insertElectionSubject("nominate-draft", 1); // DRAFT
         mockMvc.perform(post("/api/v1/voting-subjects/" + subjectId + "/candidates")
-                        .header("Authorization", "Bearer " + sysToken(ACC_GRID, USR_GRID))
+                        .header("Authorization", "Bearer " + sysToken(ACC_OPERATOR, USR_OPERATOR))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(nominateBody(8860001L, "提名候选人", true)))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.data.candidateId").exists());
+    }
+
+    @Test
+    public void gridOperatorNominate_rejectedByPermissionMatrix_403() throws Exception {
+        Long subjectId = insertElectionSubject("nominate-grid-rejected", 1); // DRAFT
+        mockMvc.perform(post("/api/v1/voting-subjects/" + subjectId + "/candidates")
+                        .header("Authorization", "Bearer " + sysToken(ACC_GRID, USR_GRID))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(nominateBody(8860004L, "网格员不能提名", true)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code", is(403)));
     }
 
     @Test
@@ -185,6 +211,16 @@ public class ElectionCandidateEndpointMatrixTest {
     }
 
     @Test
+    public void streetAdminCannotPartyReview_403() throws Exception {
+        mockMvc.perform(post("/api/v1/candidates/99999999/party-review")
+                        .header("Authorization", "Bearer " + sysToken(ACC_STREET, USR_STREET))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(reviewBody(true)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code", is(403)));
+    }
+
+    @Test
     public void gridOperatorCannotPartyReview_403() throws Exception {
         mockMvc.perform(post("/api/v1/candidates/99999999/party-review")
                         .header("Authorization", "Bearer " + sysToken(ACC_GRID, USR_GRID))
@@ -210,10 +246,46 @@ public class ElectionCandidateEndpointMatrixTest {
     }
 
     @Test
+    public void communityAdminReject_withoutReasonCode_400() throws Exception {
+        Long subjectId = insertElectionSubject("review-reject-missing-code", 1);
+        Long candidateId = insertCommitteeCandidate(subjectId, 8860011L, "待驳回候选人"); // 状态 5
+        mockMvc.perform(post("/api/v1/candidates/" + candidateId + "/review")
+                        .header("Authorization", "Bearer " + sysToken(ACC_COMM, USR_COMM))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(rejectBody(null)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code", is(40952)));
+    }
+
+    @Test
+    public void communityAdminReject_withReasonEvidence_200() throws Exception {
+        Long subjectId = insertElectionSubject("review-reject-with-evidence", 1);
+        Long candidateId = insertCommitteeCandidate(subjectId, 8860012L, "待驳回候选人"); // 状态 5
+        mockMvc.perform(post("/api/v1/candidates/" + candidateId + "/review")
+                        .header("Authorization", "Bearer " + sysToken(ACC_COMM, USR_COMM))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(rejectBody("C3")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.qualificationStatus", is("REJECTED")))
+                .andExpect(jsonPath("$.data.rejectReasonCode", is("C3")))
+                .andExpect(jsonPath("$.data.rejectReviewStage", is("COMMITTEE_REVIEW")));
+    }
+
+    @Test
     public void partySecretaryCannotReview_403() throws Exception {
         // 严格分权：李书记（PARTY_SECRETARY）已被收回 candidate:approve，不能做居委会资格审查。
         mockMvc.perform(post("/api/v1/candidates/99999999/review")
                         .header("Authorization", "Bearer " + sysToken(ACC_PARTY, USR_PARTY))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(reviewBody(true)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code", is(403)));
+    }
+
+    @Test
+    public void streetAdminCannotCommitteeReview_403() throws Exception {
+        mockMvc.perform(post("/api/v1/candidates/99999999/review")
+                        .header("Authorization", "Bearer " + sysToken(ACC_STREET, USR_STREET))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(reviewBody(true)))
                 .andExpect(status().isForbidden())
@@ -254,11 +326,12 @@ public class ElectionCandidateEndpointMatrixTest {
     }
 
     @Test
-    public void gridOperatorCannotListForAdmin_403() throws Exception {
+    public void gridOperatorListForAdmin_passesPreAuth_thenNotFound_404() throws Exception {
+        // V3.4 起网格员补了 voting:subject:audit，可访问管理端候选人读端点。
         mockMvc.perform(get("/api/v1/voting-subjects/99999/candidates")
                         .header("Authorization", "Bearer " + sysToken(ACC_GRID, USR_GRID)))
-                .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.code", is(403)));
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()", is(0)));
     }
 
     // ===== C 端只读候选人列表：isAuthenticated =====

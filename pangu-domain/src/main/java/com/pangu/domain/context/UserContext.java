@@ -20,6 +20,7 @@ import java.util.Set;
  * @param tenantId             当前租户 ID；街道办用户跨租户俯瞰时为 null
  * @param deptId               所属部门 ID（C 端为 null）
  * @param deptCategory         所属部门端归属：{@link DeptCategory#G}/{@link DeptCategory#B}/{@link DeptCategory#S}（C 端为 null）
+ * @param deptType             所属部门类型（C 端为 null）；对齐 {@code sys_dept.dept_type}
  * @param dataScopeType        行级数据权限范围（{@link DataScopeType#ALL_COMMUNITY}/{@link DataScopeType#OWNER_GROUP}/{@link DataScopeType#ORG_ONLY}）
  * @param authLevel            认证等级（C 端 L1/L3 实名状态；管理端通常 L1）
  * @param roleKey              角色 key；C 端为 null
@@ -33,6 +34,7 @@ public record UserContext(
         Long tenantId,
         Long deptId,
         DeptCategory deptCategory,
+        Integer deptType,
         DataScopeType dataScopeType,
         AuthenticationLevel authLevel,
         String roleKey,

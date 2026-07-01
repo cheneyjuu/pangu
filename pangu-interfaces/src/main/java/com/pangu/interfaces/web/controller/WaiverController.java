@@ -81,7 +81,9 @@ public class WaiverController extends BaseController {
                 waiverId,
                 requireUserId(),
                 Boolean.TRUE.equals(request.approve()),
-                request.opinion());
+                request.opinion(),
+                request.rejectReasonCode(),
+                request.rejectEvidenceJson());
         PartyRatioWaiver waiver = waiverApplicationService.reviewByCommittee(cmd);
         return success(Boolean.TRUE.equals(request.approve()) ? "初审通过，已转街道办终审" : "初审已驳回",
                 WaiverResponse.from(waiver));
@@ -97,7 +99,9 @@ public class WaiverController extends BaseController {
                 waiverId,
                 requireUserId(),
                 Boolean.TRUE.equals(request.approve()),
-                request.opinion());
+                request.opinion(),
+                request.rejectReasonCode(),
+                request.rejectEvidenceJson());
         PartyRatioWaiver waiver = waiverApplicationService.reviewByStreet(cmd);
         return success(Boolean.TRUE.equals(request.approve()) ? "终审通过，已锁定证据并提交存证" : "终审已驳回",
                 WaiverResponse.from(waiver));

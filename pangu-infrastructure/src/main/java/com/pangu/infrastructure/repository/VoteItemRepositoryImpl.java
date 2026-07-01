@@ -1,6 +1,7 @@
 package com.pangu.infrastructure.repository;
 
 import com.pangu.domain.model.voting.VoteChoice;
+import com.pangu.domain.model.voting.VoteChannel;
 import com.pangu.domain.model.voting.VoteItem;
 import com.pangu.domain.repository.VoteItemRepository;
 import com.pangu.infrastructure.persistence.entity.VoteItemRow;
@@ -38,6 +39,7 @@ public class VoteItemRepositoryImpl implements VoteItemRepository {
         row.setPropertyArea(item.getPropertyArea());
         row.setChoice(item.getChoice() == null ? null : choiceToDb(item.getChoice()));
         row.setSignatureHash(signatureHash);
+        row.setVoteChannel(VoteChannel.defaultIfNull(item.getVoteChannel()).getDbValue());
         try {
             mapper.insert(row);
         } catch (DuplicateKeyException e) {
@@ -55,6 +57,7 @@ public class VoteItemRepositoryImpl implements VoteItemRepository {
                 .targetId(r.getTargetId())
                 .propertyArea(r.getPropertyArea())
                 .choice(r.getChoice() == null ? null : choiceFromDb(r.getChoice()))
+                .voteChannel(VoteChannel.fromDbValue(r.getVoteChannel()))
                 .build();
     }
 
@@ -75,4 +78,3 @@ public class VoteItemRepositoryImpl implements VoteItemRepository {
         };
     }
 }
-

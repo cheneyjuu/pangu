@@ -15,6 +15,8 @@
         <result property="publishAt" column="publish_at"/>
         <result property="voteStartAt" column="vote_start_at"/>
         <result property="voteEndAt" column="vote_end_at"/>
+        <result property="clockSuspendedAt" column="clock_suspended_at"/>
+        <result property="clockSuspendedBySubjectId" column="clock_suspended_by_subject_id"/>
         <result property="settledAt" column="settled_at"/>
         <result property="partyRatioFloor" column="party_ratio_floor"/>
         <result property="maxWinners" column="max_winners"/>
@@ -28,7 +30,8 @@
 
     <sql id="all_columns">
         subject_id, tenant_id, title, subject_type, scope, scope_reference_id,
-        status, publish_at, vote_start_at, vote_end_at, settled_at,
+        status, publish_at, vote_start_at, vote_end_at,
+        clock_suspended_at, clock_suspended_by_subject_id, settled_at,
         party_ratio_floor, max_winners, version, create_time,
         proposed_by_user_id, cancelled_at, cancelled_by_user_id, cancel_reason
     </sql>
@@ -64,12 +67,25 @@
           AND version = #{expectedVersion}
     </update>
 
+    <!-- B 阶段双签：状态翻转与 review_history 追加在同一条 UPDATE 内完成。 -->
+    <update id="updateStatusWithReviewHistory">
+        UPDATE t_voting_subject
+        SET status         = #{newStatus},
+            settled_at     = CASE WHEN #{newStatus} = 5 THEN CURRENT_TIMESTAMP ELSE settled_at END,
+            review_history = COALESCE(review_history, '[]'::jsonb)
+                             || jsonb_build_array(CAST(#{reviewEntryJson} AS JSONB)),
+            version        = version + 1
+        WHERE subject_id = #{subjectId}
+          AND version = #{expectedVersion}
+    </update>
+
     <select id="selectExpiredVoting" resultMap="VotingSubjectRowMap">
         SELECT <include refid="all_columns"/>
         FROM t_voting_subject
         WHERE status = 3
           AND vote_end_at IS NOT NULL
           AND vote_end_at &lt; #{now}
+          AND clock_suspended_at IS NULL
         ORDER BY vote_end_at ASC
         LIMIT #{limit}
     </select>
@@ -110,9 +126,42 @@
         WHERE status = 2
           AND vote_start_at IS NOT NULL
           AND vote_start_at &lt;= #{now}
+          AND clock_suspended_at IS NULL
         ORDER BY vote_start_at ASC
         LIMIT #{limit}
     </select>
+
+    <!-- E4 Clock Suspend: HANDOVER_LOCK 期间暂停非选举议题倒计时。 -->
+    <update id="suspendVotingClocksForHandover">
+        UPDATE t_voting_subject
+        SET clock_suspended_at = CURRENT_TIMESTAMP,
+            clock_suspended_by_subject_id = #{electionSubjectId},
+            version = version + 1
+        WHERE tenant_id = #{tenantId}
+          AND subject_type != 1
+          AND status IN (2, 3)
+          AND clock_suspended_at IS NULL
+    </update>
+
+    <!-- E4 Clock Suspend: NORMAL 恢复时按暂停时长顺延时间并清空暂停标记。 -->
+    <update id="resumeVotingClocksAfterHandover">
+        UPDATE t_voting_subject
+        SET vote_start_at = CASE
+                WHEN status = 2 AND vote_start_at IS NOT NULL
+                    THEN vote_start_at + (CURRENT_TIMESTAMP - clock_suspended_at)
+                ELSE vote_start_at
+            END,
+            vote_end_at = CASE
+                WHEN vote_end_at IS NOT NULL
+                    THEN vote_end_at + (CURRENT_TIMESTAMP - clock_suspended_at)
+                ELSE vote_end_at
+            END,
+            clock_suspended_at = NULL,
+            clock_suspended_by_subject_id = NULL,
+            version = version + 1
+        WHERE tenant_id = #{tenantId}
+          AND clock_suspended_at IS NOT NULL
+    </update>
 
     <!-- M3-2: 业主"我的议题"列表。
          规则：tenant 限定 + status ∈ (PUBLISHED, VOTING, CLOSED, SETTLED)

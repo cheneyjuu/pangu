@@ -3,6 +3,8 @@ package com.pangu.application.lock;
 import com.pangu.application.lock.command.CommitteeUnlockCommand;
 import com.pangu.application.lock.command.LockCommand;
 import com.pangu.application.lock.command.StreetUnlockCommand;
+import com.pangu.domain.context.UserContext;
+import com.pangu.domain.context.UserContextHolder;
 import com.pangu.domain.lock.DistributedLockTemplate;
 import com.pangu.domain.lock.DistributedLockTemplate.DistributedLockAcquisitionException;
 import com.pangu.domain.model.lock.GovernanceLock;
@@ -46,10 +48,13 @@ public class GovernanceLockApplicationService {
 
     /** Redis 锁 TTL（远大于单次事务执行时间，但短于业务上限以防死锁）。 */
     private static final Duration LOCK_TTL = Duration.ofSeconds(30);
+    private static final String COMMITTEE_UNLOCK_ROLE = "COMMITTEE_DIRECTOR";
+    private static final String STREET_UNLOCK_ROLE = "GOV_SUPER_ADMIN";
 
     private final GovernanceLockRepository lockRepository;
     private final DistributedLockTemplate lockTemplate;
     private final TransactionTemplate transactionTemplate;
+    private final UserContextHolder userContextHolder;
 
     /**
      * 锁定指定业务实体。先 Redis 锁串行化，再事务内行锁查询，最后落库由唯一索引兜底。
@@ -92,6 +97,7 @@ public class GovernanceLockApplicationService {
     /** 业委会主任解锁初签。 */
     @Transactional
     public GovernanceLock committeeSign(CommitteeUnlockCommand cmd) {
+        requireRole(COMMITTEE_UNLOCK_ROLE, "仅业委会主任可执行治理锁初签");
         GovernanceLock lock = loadForUpdate(cmd.lockId());
         try {
             lock.signByCommittee(cmd.approverUserId(), cmd.signature());
@@ -111,6 +117,7 @@ public class GovernanceLockApplicationService {
     /** 街道办解锁终签。 */
     @Transactional
     public GovernanceLock streetSign(StreetUnlockCommand cmd) {
+        requireRole(STREET_UNLOCK_ROLE, "仅街道办超管可执行治理锁终签");
         GovernanceLock lock = loadForUpdate(cmd.lockId());
         try {
             lock.signByStreet(cmd.approverUserId(), cmd.signature());
@@ -150,6 +157,15 @@ public class GovernanceLockApplicationService {
                 .orElseThrow(() -> new GovernanceLockApplicationException(
                         GovernanceLockApplicationException.Reason.LOCK_NOT_FOUND,
                         "治理锁不存在 lockId=" + lockId));
+    }
+
+    private void requireRole(String expectedRole, String message) {
+        UserContext ctx = userContextHolder.current();
+        if (ctx == null || !expectedRole.equals(ctx.roleKey())) {
+            throw new GovernanceLockApplicationException(
+                    GovernanceLockApplicationException.Reason.LOCK_ROLE_FORBIDDEN,
+                    message + "，当前角色=" + (ctx == null ? "ANONYMOUS" : ctx.roleKey()));
+        }
     }
 
     private GovernanceLockApplicationException mapStateException(IllegalStateException e) {

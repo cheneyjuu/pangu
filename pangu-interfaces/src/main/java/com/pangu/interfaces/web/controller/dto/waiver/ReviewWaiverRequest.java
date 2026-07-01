@@ -1,5 +1,6 @@
 package com.pangu.interfaces.web.controller.dto.waiver;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
@@ -16,6 +17,14 @@ public record ReviewWaiverRequest(
         Boolean approve,
 
         @Size(max = 500, message = "opinion length must be <= 500")
-        String opinion
+        String opinion,
+
+        @Size(max = 2, message = "rejectReasonCode must be C1-C5")
+        String rejectReasonCode,
+
+        JsonNode rejectEvidence
 ) {
+    public String rejectEvidenceJson() {
+        return rejectEvidence == null ? null : rejectEvidence.toString();
+    }
 }

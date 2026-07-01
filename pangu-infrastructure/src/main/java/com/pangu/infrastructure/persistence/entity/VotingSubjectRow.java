@@ -31,6 +31,8 @@ public class VotingSubjectRow {
     private Instant publishAt;
     private Instant voteStartAt;
     private Instant voteEndAt;
+    private Instant clockSuspendedAt;
+    private Long clockSuspendedBySubjectId;
     private Instant settledAt;
 
     private BigDecimal partyRatioFloor;

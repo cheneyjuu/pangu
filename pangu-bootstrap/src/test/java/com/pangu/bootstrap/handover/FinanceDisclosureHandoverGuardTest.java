@@ -7,10 +7,14 @@ import com.pangu.application.disclosure.command.LockAndPublishCommand;
 import com.pangu.application.handover.HandoverCircuitBreaker;
 import com.pangu.application.lock.GovernanceLockApplicationService;
 import com.pangu.application.lock.command.LockCommand;
+import com.pangu.domain.context.UserContext;
+import com.pangu.domain.context.UserContextHolder;
 import com.pangu.domain.lock.DistributedLockTemplate;
 import com.pangu.domain.model.disclosure.DisclosureStatus;
 import com.pangu.domain.model.disclosure.DisclosureType;
 import com.pangu.domain.model.disclosure.FinanceDisclosureSnapshot;
+import com.pangu.domain.model.user.AuthenticationLevel;
+import com.pangu.domain.model.user.DataScopeType;
 import com.pangu.domain.model.lock.GovernanceLock;
 import com.pangu.domain.repository.DisclosureCompareRepository;
 import com.pangu.domain.repository.FinanceDisclosureRepository;
@@ -19,6 +23,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.Optional;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -52,10 +57,12 @@ public class FinanceDisclosureHandoverGuardTest {
     private final TransactionTemplate transactionTemplate = mock(TransactionTemplate.class);
     private final DisclosureDiffCalculator diffCalculator = mock(DisclosureDiffCalculator.class);
     private final HandoverCircuitBreaker handoverCircuitBreaker = mock(HandoverCircuitBreaker.class);
+    private final UserContextHolder userContextHolder = mock(UserContextHolder.class);
 
     private final FinanceDisclosureApplicationService service = new FinanceDisclosureApplicationService(
             disclosureRepository, compareRepository, ledgerQueryGateway, lockApplicationService,
-            distributedLockTemplate, transactionTemplate, diffCalculator, handoverCircuitBreaker);
+            distributedLockTemplate, transactionTemplate, diffCalculator, handoverCircuitBreaker,
+            userContextHolder);
 
     /** 构造一条 DRAFT 态、归属 TENANT 的快照（compose 工厂产物即 DRAFT）。 */
     private FinanceDisclosureSnapshot draftSnapshot() {
@@ -64,8 +71,25 @@ public class FinanceDisclosureHandoverGuardTest {
                 "{}", "a".repeat(64), 7001L, 1);
     }
 
+    private UserContext committeeDirector() {
+        return new UserContext(
+                999811L,
+                UserContext.IdentityType.SYS_USER,
+                PUBLISH_USER,
+                TENANT,
+                9001L,
+                UserContext.DeptCategory.B,
+                10,
+                DataScopeType.ALL_COMMUNITY,
+                AuthenticationLevel.L1,
+                "COMMITTEE_DIRECTOR",
+                Set.of(),
+                Set.of());
+    }
+
     @Test
     public void handoverInProgress_blocksPublishAndSkipsGovernanceLock() {
+        when(userContextHolder.current()).thenReturn(committeeDirector());
         when(disclosureRepository.findByIdForUpdate(SNAPSHOT_ID)).thenReturn(Optional.of(draftSnapshot()));
         when(handoverCircuitBreaker.activeElectionSubjectId(TENANT)).thenReturn(Optional.of(888L));
 
@@ -79,6 +103,7 @@ public class FinanceDisclosureHandoverGuardTest {
 
     @Test
     public void noHandover_proceedsToLockAndPublish() {
+        when(userContextHolder.current()).thenReturn(committeeDirector());
         FinanceDisclosureSnapshot snapshot = draftSnapshot();
         when(disclosureRepository.findByIdForUpdate(SNAPSHOT_ID)).thenReturn(Optional.of(snapshot));
         when(handoverCircuitBreaker.activeElectionSubjectId(TENANT)).thenReturn(Optional.empty());

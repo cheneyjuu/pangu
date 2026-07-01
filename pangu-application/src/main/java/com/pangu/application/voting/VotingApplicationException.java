@@ -52,12 +52,28 @@ public class VotingApplicationException extends RuntimeException {
         CANDIDATE_ALREADY_NOMINATED,
         /** 资格审查并发冲突（候选人已不在期望的审查阶段）或非法状态迁移。 */
         CANDIDATE_REVIEW_CONFLICT,
+        /** 当前角色不允许执行候选人审查动作。 */
+        CANDIDATE_REVIEW_FORBIDDEN,
         /** 该 opid 在本选举已投满 maxWinners 票。 */
         VOTE_LIMIT_EXCEEDED,
         /** 议题不在可提名状态（仅 DRAFT/PUBLISHED 允许增改候选人名单）。 */
         SUBJECT_NOT_NOMINATABLE,
+        /** ELECTION 议题公示前必须至少有 1 名 APPROVED 候选人。 */
+        ELECTION_NO_APPROVED_CANDIDATE,
         /** 换届选举在途，新 GENERAL/MAJOR 立项被熔断（放行 ELECTION）。 */
-        PROPOSE_FROZEN_HANDOVER
+        PROPOSE_FROZEN_HANDOVER,
+
+        // ========== M5-B ELECTION 议题双签 ==========
+        /** 议题不在居委会初审中。 */
+        SUBJECT_NOT_PENDING_COMMITTEE,
+        /** 议题不在街道办终审中。 */
+        SUBJECT_NOT_PENDING_STREET,
+        /** 审批驳回必须填写原因。 */
+        REVIEW_REJECT_REASON_REQUIRED,
+        /** E3：驳回必须携带 C1-C5 客观理由码。 */
+        REJECT_REASON_CODE_REQUIRED,
+        /** E3：驳回必须携带 JSONB 证据链。 */
+        REJECT_EVIDENCE_REQUIRED
     }
 
     private final Reason reason;

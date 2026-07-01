@@ -12,7 +12,11 @@ public record CandidateResponse(
         Long uid,
         String name,
         boolean partyMember,
-        CandidateStatus qualificationStatus
+        CandidateStatus qualificationStatus,
+        String rejectReasonCode,
+        String rejectEvidenceJson,
+        Long rejectReviewerUserId,
+        String rejectReviewStage
 ) {
     public static CandidateResponse from(Candidate c) {
         return new CandidateResponse(
@@ -21,6 +25,10 @@ public record CandidateResponse(
                 c.getUid(),
                 c.getName(),
                 c.isPartyMember(),
-                c.getQualificationStatus());
+                c.getQualificationStatus(),
+                c.getRejectReasonCode(),
+                c.getRejectEvidenceJson(),
+                c.getRejectReviewerUserId(),
+                c.getRejectReviewStage());
     }
 }

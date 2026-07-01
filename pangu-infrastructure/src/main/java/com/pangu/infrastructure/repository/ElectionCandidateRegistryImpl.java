@@ -70,8 +70,15 @@ public class ElectionCandidateRegistryImpl implements ElectionCandidateRegistry 
     }
 
     @Override
-    public int updateQualification(Long candidateId, int expectedFromDbValue, int newStatusDbValue) {
-        return candidateMapper.updateQualification(candidateId, expectedFromDbValue, newStatusDbValue);
+    public int updateQualification(Long candidateId,
+                                   int expectedFromDbValue,
+                                   int newStatusDbValue,
+                                   String rejectReasonCode,
+                                   String rejectEvidenceJson,
+                                   Long rejectReviewerUserId,
+                                   String rejectReviewStage) {
+        return candidateMapper.updateQualification(candidateId, expectedFromDbValue, newStatusDbValue,
+                rejectReasonCode, rejectEvidenceJson, rejectReviewerUserId, rejectReviewStage);
     }
 
     @Override
@@ -88,6 +95,10 @@ public class ElectionCandidateRegistryImpl implements ElectionCandidateRegistry 
                 .partyMember(r.getIsPartyMember() != null && r.getIsPartyMember() == 1)
                 .qualificationStatus(r.getQualificationStatus() == null
                         ? null : CandidateStatus.fromDbValue(r.getQualificationStatus()))
+                .rejectReasonCode(r.getRejectReasonCode())
+                .rejectEvidenceJson(r.getRejectEvidenceJson())
+                .rejectReviewerUserId(r.getRejectReviewerUserId())
+                .rejectReviewStage(r.getRejectReviewStage())
                 .build();
     }
 }

@@ -26,7 +26,9 @@ public class FinanceDisclosureApplicationException extends RuntimeException {
         /** 乐观锁失败（并发写）。 */
         SNAPSHOT_CONCURRENT_MODIFICATION,
         /** 换届选举在途，财务公示发布被熔断（HANDOVER_LOCK）。 */
-        HANDOVER_IN_PROGRESS
+        HANDOVER_IN_PROGRESS,
+        /** 当前角色不允许执行该财务公示动作。 */
+        DISCLOSURE_ROLE_FORBIDDEN
     }
 
     private final Reason reason;

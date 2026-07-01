@@ -78,7 +78,11 @@ public class ElectionCandidateController extends BaseController {
             @PathVariable("candidateId") Long candidateId,
             @Valid @RequestBody ReviewCandidateRequest request) {
         PartyReviewCandidateCommand cmd = new PartyReviewCandidateCommand(
-                candidateId, request.approve(), requireUserId());
+                candidateId,
+                request.approve(),
+                requireUserId(),
+                request.rejectReasonCode(),
+                request.rejectEvidenceJson());
         Candidate candidate = electionCandidateService.partyReview(cmd);
         return success("党组书记前置审查已更新", CandidateResponse.from(candidate));
     }
@@ -90,7 +94,11 @@ public class ElectionCandidateController extends BaseController {
             @PathVariable("candidateId") Long candidateId,
             @Valid @RequestBody ReviewCandidateRequest request) {
         ReviewCandidateCommand cmd = new ReviewCandidateCommand(
-                candidateId, request.approve(), requireUserId());
+                candidateId,
+                request.approve(),
+                requireUserId(),
+                request.rejectReasonCode(),
+                request.rejectEvidenceJson());
         Candidate candidate = electionCandidateService.review(cmd);
         return success("候选人资格已更新", CandidateResponse.from(candidate));
     }
@@ -105,13 +113,23 @@ public class ElectionCandidateController extends BaseController {
     }
 
     /**
-     * 提名候选人时按手机号前缀检索本租户业主，用于自动关联 uid（uid 内部 id 不便记忆）。
-     * 复用 {@code candidate:nominate} 权限；租户取自 {@link #requireTenantId()}，手机号脱敏回显。
+     * 提名候选人时按关键词检索本租户业主，用于自动关联 uid（uid 内部 id 不便记忆）。
+     *
+     * <p>关键词形态决定匹配维度（由 application 层分流）：
+     * 全数字 → 手机号模糊（前缀/中段/尾号 SQL LIKE '%xxx%'）；
+     * 含中文 → 姓名 contains（解密 real_name）；
+     * 含字母 → 全拼 / 首字母 contains。
+     * 兼容旧前端的 {@code phone} 参数名（仍可作为 fallback）；优先读 {@code q}。
+     *
+     * <p>复用 {@code candidate:nominate} 权限；租户取自 {@link #requireTenantId()}，手机号脱敏回显。
      */
     @GetMapping("/owners/search")
     @PreAuthorize("hasAuthority('candidate:nominate')")
-    public Result<List<OwnerSearchResponse>> searchOwners(@RequestParam("phone") String phone) {
-        List<OwnerSummary> owners = electionCandidateService.searchNominatableOwners(phone, requireTenantId());
+    public Result<List<OwnerSearchResponse>> searchOwners(
+            @RequestParam(value = "q", required = false) String q,
+            @RequestParam(value = "phone", required = false) String phone) {
+        String keyword = q != null && !q.isEmpty() ? q : phone;
+        List<OwnerSummary> owners = electionCandidateService.searchNominatableOwners(keyword, requireTenantId());
         return success(owners.stream().map(OwnerSearchResponse::from).toList());
     }
 

@@ -22,7 +22,9 @@ public record OwnerSubjectResponse(
         VotingScope scope,
         Long scopeReferenceId,
         Instant voteStartAt,
-        Instant voteEndAt
+        Instant voteEndAt,
+        Instant clockSuspendedAt,
+        Long clockSuspendedBySubjectId
 ) {
     public static OwnerSubjectResponse from(VotingSubject s) {
         return new OwnerSubjectResponse(
@@ -33,6 +35,8 @@ public record OwnerSubjectResponse(
                 s.getScope(),
                 s.getScopeReferenceId(),
                 s.getVoteStartAt(),
-                s.getVoteEndAt());
+                s.getVoteEndAt(),
+                s.getClockSuspendedAt(),
+                s.getClockSuspendedBySubjectId());
     }
 }

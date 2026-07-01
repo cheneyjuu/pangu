@@ -94,9 +94,13 @@ public class PartyRatioWaiverRepositoryImpl implements PartyRatioWaiverRepositor
         r.setCommitteeApprover(w.getCommitteeApprover());
         r.setCommitteeApprovalAt(w.getCommitteeApprovalAt());
         r.setCommitteeOpinion(w.getCommitteeOpinion());
+        r.setCommitteeRejectReasonCode(w.getCommitteeRejectReasonCode());
+        r.setCommitteeRejectEvidenceJson(w.getCommitteeRejectEvidenceJson());
         r.setStreetApprover(w.getStreetApprover());
         r.setStreetApprovalAt(w.getStreetApprovalAt());
         r.setStreetOpinion(w.getStreetOpinion());
+        r.setStreetRejectReasonCode(w.getStreetRejectReasonCode());
+        r.setStreetRejectEvidenceJson(w.getStreetRejectEvidenceJson());
         r.setAppliedAt(w.getAppliedAt());
         r.setLocalPayloadHash(w.getLocalPayloadHash());
         r.setLocalPayloadLockedAt(w.getLocalPayloadLockedAt());
@@ -117,7 +121,9 @@ public class PartyRatioWaiverRepositoryImpl implements PartyRatioWaiverRepositor
                 r.getReasonText(), r.getReasonEvidenceKeys(),
                 WaiverStatus.fromDbValue(r.getStatus()),
                 r.getCommitteeApprover(), r.getCommitteeApprovalAt(), r.getCommitteeOpinion(),
+                r.getCommitteeRejectReasonCode(), r.getCommitteeRejectEvidenceJson(),
                 r.getStreetApprover(), r.getStreetApprovalAt(), r.getStreetOpinion(),
+                r.getStreetRejectReasonCode(), r.getStreetRejectEvidenceJson(),
                 r.getAppliedAt(),
                 r.getLocalPayloadHash(), r.getLocalPayloadLockedAt(),
                 r.getBlockchainTxHash(), r.getBlockchainChainProvider(),

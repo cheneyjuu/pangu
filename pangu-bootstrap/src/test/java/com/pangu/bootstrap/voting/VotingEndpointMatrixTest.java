@@ -24,8 +24,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *
  * <p>V1.1 求是小区 seed + V1.4/V3.0 角色授权：
  * <ul>
- *   <li>陈网格员（GRID_OPERATOR，role 4）—— 仅 {@code voting:subject:publish}，无 create/cancel/audit；</li>
- *   <li>刘主任（COMMUNITY_ADMIN，role 2）—— create + publish + audit，无 cancel；</li>
+ *   <li>吴经办员（GOV_OPERATOR，role 14）—— create:election + audit，可提交初审；</li>
+ *   <li>陈网格员（GRID_OPERATOR，role 4）—— 有 publish/audit，无 create/cancel/双签审批；</li>
+ *   <li>刘主任（COMMUNITY_ADMIN，role 2）—— create + publish + audit + committee-review，无 cancel/street-review；</li>
+ *   <li>王街道（GOV_SUPER_ADMIN，role 1）—— street-review + cancel；</li>
  *   <li>李四（C_USER，无 sys_role）—— G 端全 403，C 端 isAuthenticated 通过到 service 层。</li>
  * </ul>
  *
@@ -48,7 +50,9 @@ public class VotingEndpointMatrixTest {
 
     private static final long TENANT_RUSHI = 10001L;
 
-    private static final long ACC_GRID = 999804L, USR_GRID = 800004L;   // 陈网格员 GRID_OPERATOR（仅 publish）
+    private static final long ACC_STREET = 999801L, USR_STREET = 800001L; // 王街道 GOV_SUPER_ADMIN
+    private static final long ACC_OPERATOR = 999805L, USR_OPERATOR = 800005L; // 吴经办员 GOV_OPERATOR
+    private static final long ACC_GRID = 999804L, USR_GRID = 800004L;   // 陈网格员 GRID_OPERATOR（publish/audit）
     private static final long ACC_COMM = 999803L, USR_COMM = 800003L;   // 刘主任 COMMUNITY_ADMIN（create/publish/audit）
     private static final long ACC_LISI = 999913L, UID_LISI = 70002L;    // 李四 C_USER（无 sys_role）
 
@@ -68,6 +72,10 @@ public class VotingEndpointMatrixTest {
         body.put("voteStartAt", "2026-07-01T00:00:00Z");
         body.put("voteEndAt", "2026-07-15T00:00:00Z");
         return objectMapper.writeValueAsString(body);
+    }
+
+    private String reviewBody(String decision) throws Exception {
+        return objectMapper.writeValueAsString(Map.of("decision", decision));
     }
 
     // ===== 立项 create：无 create 权限 → 403 =====
@@ -93,10 +101,20 @@ public class VotingEndpointMatrixTest {
     }
 
     @Test
-    public void communityAdminProposeElectionWithoutMaxWinners_passesPreAuth_thenMaxWinnersRequired_409() throws Exception {
-        // 刘主任有 create，通过 PreAuthorize；M3-3 起 ELECTION 已放开，但缺 maxWinners → 40940
+    public void communityAdminProposeElection_rejectedByPermissionMatrix_403() throws Exception {
+        // 刘主任只有通用 create；ELECTION 立项必须有 voting:subject:create:election。
         mockMvc.perform(post("/api/v1/voting-subjects")
                         .header("Authorization", "Bearer " + sysToken(ACC_COMM, USR_COMM))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(proposeBody("ELECTION")))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code", is(403)));
+    }
+
+    @Test
+    public void govOperatorProposeElectionWithoutMaxWinners_passesPreAuth_thenMaxWinnersRequired_409() throws Exception {
+        mockMvc.perform(post("/api/v1/voting-subjects")
+                        .header("Authorization", "Bearer " + sysToken(ACC_OPERATOR, USR_OPERATOR))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(proposeBody("ELECTION")))
                 .andExpect(status().isConflict())
@@ -106,11 +124,12 @@ public class VotingEndpointMatrixTest {
     // ===== 审计查看 audit =====
 
     @Test
-    public void gridOperatorCannotAudit_403() throws Exception {
+    public void gridOperatorAudit_passesPreAuth_thenNotFound_404() throws Exception {
+        // V3.4 起网格员补了 voting:subject:audit（参与议题相关写动作的角色需要读议题）。
         mockMvc.perform(get("/api/v1/voting-subjects/99999")
                         .header("Authorization", "Bearer " + sysToken(ACC_GRID, USR_GRID)))
-                .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.code", is(403)));
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code", is(40910)));
     }
 
     @Test
@@ -121,6 +140,115 @@ public class VotingEndpointMatrixTest {
                 .andExpect(jsonPath("$.code", is(40910)));
     }
 
+    @Test
+    public void gridOperatorMonitor_passesPreAuth_thenNotFound_404() throws Exception {
+        mockMvc.perform(get("/api/v1/voting-subjects/99999/monitor")
+                        .header("Authorization", "Bearer " + sysToken(ACC_GRID, USR_GRID)))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code", is(40910)));
+    }
+
+    @Test
+    public void cUserMonitor_forbidden_403() throws Exception {
+        mockMvc.perform(get("/api/v1/voting-subjects/99999/monitor")
+                        .header("Authorization", "Bearer " + cToken(ACC_LISI, UID_LISI)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code", is(403)));
+    }
+
+    @Test
+    public void gridOperatorMobilizationPermissions_passesPreAuth_thenNotFound_404() throws Exception {
+        mockMvc.perform(get("/api/v1/voting-subjects/99999/mobilization-permissions/me")
+                        .header("Authorization", "Bearer " + sysToken(ACC_GRID, USR_GRID)))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code", is(40910)));
+    }
+
+    @Test
+    public void cUserMobilizationPermissions_forbidden_403() throws Exception {
+        mockMvc.perform(get("/api/v1/voting-subjects/99999/mobilization-permissions/me")
+                        .header("Authorization", "Bearer " + cToken(ACC_LISI, UID_LISI)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code", is(403)));
+    }
+
+    @Test
+    public void gridOperatorSendMobilizationReminder_passesPreAuth_thenNotFound_404() throws Exception {
+        mockMvc.perform(post("/api/v1/voting-subjects/99999/mobilization-reminders")
+                        .header("Authorization", "Bearer " + sysToken(ACC_GRID, USR_GRID))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("buildingId", 30001L))))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code", is(40910)));
+    }
+
+    @Test
+    public void cUserSendMobilizationReminder_forbidden_403() throws Exception {
+        mockMvc.perform(post("/api/v1/voting-subjects/99999/mobilization-reminders")
+                        .header("Authorization", "Bearer " + cToken(ACC_LISI, UID_LISI))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("buildingId", 30001L))))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code", is(403)));
+    }
+
+    @Test
+    public void gridOperatorReminderDeliveries_passesPreAuth_thenNotFound_404() throws Exception {
+        mockMvc.perform(get("/api/v1/voting-subjects/99999/reminder-deliveries")
+                        .header("Authorization", "Bearer " + sysToken(ACC_GRID, USR_GRID)))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code", is(40910)));
+    }
+
+    @Test
+    public void cUserReminderDeliveries_forbidden_403() throws Exception {
+        mockMvc.perform(get("/api/v1/voting-subjects/99999/reminder-deliveries")
+                        .header("Authorization", "Bearer " + cToken(ACC_LISI, UID_LISI)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code", is(403)));
+    }
+
+    @Test
+    public void gridOperatorOfflineProxyVote_passesPreAuth_thenNotFound_404() throws Exception {
+        mockMvc.perform(post("/api/v1/voting-subjects/99999/offline-proxy-votes")
+                        .header("Authorization", "Bearer " + sysToken(ACC_GRID, USR_GRID))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "opid", 30001101L,
+                                "choice", "SUPPORT",
+                                "offlineEvidenceHash", "hash-001"))))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code", is(40910)));
+    }
+
+    @Test
+    public void cUserOfflineProxyVote_forbidden_403() throws Exception {
+        mockMvc.perform(post("/api/v1/voting-subjects/99999/offline-proxy-votes")
+                        .header("Authorization", "Bearer " + cToken(ACC_LISI, UID_LISI))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "opid", 30001101L,
+                                "choice", "SUPPORT"))))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code", is(403)));
+    }
+
+    @Test
+    public void gridOperatorReminderTasks_passesPreAuth_200() throws Exception {
+        mockMvc.perform(get("/api/v1/reminder/tasks")
+                        .header("Authorization", "Bearer " + sysToken(ACC_GRID, USR_GRID)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code", is(200)));
+    }
+
+    @Test
+    public void cUserReminderTasks_forbidden_403() throws Exception {
+        mockMvc.perform(get("/api/v1/reminder/tasks")
+                        .header("Authorization", "Bearer " + cToken(ACC_LISI, UID_LISI)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code", is(403)));
+    }
+
     // ===== 公示 publish：陈网格员有 publish，通过 PreAuth → 业务 NOT_FOUND =====
 
     @Test
@@ -129,6 +257,15 @@ public class VotingEndpointMatrixTest {
                         .header("Authorization", "Bearer " + sysToken(ACC_GRID, USR_GRID)))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code", is(40910)));
+    }
+
+    @Test
+    public void streetAdminPublish_forbidden_403() throws Exception {
+        // ELECTION 发布必须走 street-review；V3.27 起街道办不再持有通用直接公示权限。
+        mockMvc.perform(post("/api/v1/voting-subjects/99999/publish")
+                        .header("Authorization", "Bearer " + sysToken(ACC_STREET, USR_STREET)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code", is(403)));
     }
 
     // ===== 撤回 cancel：isAuthenticated 通过，service/controller 二次授权 =====
@@ -153,6 +290,118 @@ public class VotingEndpointMatrixTest {
                         .content(objectMapper.writeValueAsString(Map.of("reason", "业委会发起人撤回草稿"))))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code", is(40910)));
+    }
+
+    // ===== ELECTION 双签审批 endpoint =====
+
+    @Test
+    public void operatorSubmitForReview_passesPreAuth_thenNotFound_404() throws Exception {
+        mockMvc.perform(post("/api/v1/voting-subjects/99999/submit-for-review")
+                        .header("Authorization", "Bearer " + sysToken(ACC_OPERATOR, USR_OPERATOR)))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code", is(40910)));
+    }
+
+    @Test
+    public void gridOperatorSubmitForReview_noCreate_forbidden_403() throws Exception {
+        mockMvc.perform(post("/api/v1/voting-subjects/99999/submit-for-review")
+                        .header("Authorization", "Bearer " + sysToken(ACC_GRID, USR_GRID)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code", is(403)));
+    }
+
+    @Test
+    public void communityAdminSubmitForReview_genericCreateForbidden_403() throws Exception {
+        mockMvc.perform(post("/api/v1/voting-subjects/99999/submit-for-review")
+                        .header("Authorization", "Bearer " + sysToken(ACC_COMM, USR_COMM)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code", is(403)));
+    }
+
+    @Test
+    public void communityAdminCommitteeReview_passesPreAuth_thenNotFound_404() throws Exception {
+        mockMvc.perform(post("/api/v1/voting-subjects/99999/committee-review")
+                        .header("Authorization", "Bearer " + sysToken(ACC_COMM, USR_COMM))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(reviewBody("APPROVE")))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code", is(40910)));
+    }
+
+    @Test
+    public void gridOperatorCommitteeReview_forbidden_403() throws Exception {
+        mockMvc.perform(post("/api/v1/voting-subjects/99999/committee-review")
+                        .header("Authorization", "Bearer " + sysToken(ACC_GRID, USR_GRID))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(reviewBody("APPROVE")))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code", is(403)));
+    }
+
+    @Test
+    public void streetAdminCommitteeReview_forbidden_403() throws Exception {
+        mockMvc.perform(post("/api/v1/voting-subjects/99999/committee-review")
+                        .header("Authorization", "Bearer " + sysToken(ACC_STREET, USR_STREET))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(reviewBody("APPROVE")))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code", is(403)));
+    }
+
+    @Test
+    public void communityAdminCommitteeReview_missingDecision_400() throws Exception {
+        mockMvc.perform(post("/api/v1/voting-subjects/99999/committee-review")
+                        .header("Authorization", "Bearer " + sysToken(ACC_COMM, USR_COMM))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of())))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code", is(40951)));
+    }
+
+    @Test
+    public void streetAdminStreetReview_passesPreAuth_thenNotFound_404() throws Exception {
+        mockMvc.perform(post("/api/v1/voting-subjects/99999/street-review")
+                        .header("Authorization", "Bearer " + sysToken(ACC_STREET, USR_STREET))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(reviewBody("APPROVE")))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code", is(40910)));
+    }
+
+    @Test
+    public void communityAdminStreetReview_forbidden_403() throws Exception {
+        mockMvc.perform(post("/api/v1/voting-subjects/99999/street-review")
+                        .header("Authorization", "Bearer " + sysToken(ACC_COMM, USR_COMM))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(reviewBody("APPROVE")))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code", is(403)));
+    }
+
+    @Test
+    public void streetAdminStreetReview_missingDecision_400() throws Exception {
+        mockMvc.perform(post("/api/v1/voting-subjects/99999/street-review")
+                        .header("Authorization", "Bearer " + sysToken(ACC_STREET, USR_STREET))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of())))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code", is(40951)));
+    }
+
+    @Test
+    public void streetAdminConfirmHandover_allowed_200() throws Exception {
+        mockMvc.perform(post("/api/v1/handover/confirm")
+                        .header("Authorization", "Bearer " + sysToken(ACC_STREET, USR_STREET)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data", is("NORMAL")));
+    }
+
+    @Test
+    public void communityAdminConfirmHandover_forbidden_403() throws Exception {
+        mockMvc.perform(post("/api/v1/handover/confirm")
+                        .header("Authorization", "Bearer " + sysToken(ACC_COMM, USR_COMM)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code", is(403)));
     }
 
     // ===== C 端业主 endpoint（isAuthenticated）=====

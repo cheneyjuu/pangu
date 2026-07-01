@@ -3,6 +3,7 @@ package com.pangu.application.voting;
 import com.pangu.application.voting.command.CastVoteCommand;
 import com.pangu.domain.context.UserContext;
 import com.pangu.domain.context.UserContextHolder;
+import com.pangu.domain.gateway.VoteCastMonitorGateway;
 import com.pangu.domain.model.asset.OwnerPropertyVotingView;
 import com.pangu.domain.model.user.AuthenticationLevel;
 import com.pangu.domain.model.voting.Candidate;
@@ -10,6 +11,7 @@ import com.pangu.domain.model.voting.CandidateStatus;
 import com.pangu.domain.model.voting.SubjectStatus;
 import com.pangu.domain.model.voting.SubjectType;
 import com.pangu.domain.model.voting.VoteChoice;
+import com.pangu.domain.model.voting.VoteChannel;
 import com.pangu.domain.model.voting.VoteItem;
 import com.pangu.domain.model.voting.VotingScope;
 import com.pangu.domain.model.voting.VotingSubject;
@@ -23,6 +25,10 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+
+import java.time.Instant;
 
 /**
  * 业主投票提交服务（M3-2 引入）。
@@ -49,6 +55,7 @@ public class VoteSubmissionService {
     private final AbacPolicyEngine abacPolicyEngine;
     private final UserContextHolder userContextHolder;
     private final ElectionCandidateRegistry electionCandidateRegistry;
+    private final VoteCastMonitorGateway voteCastMonitorGateway;
 
     @Transactional
     public long cast(CastVoteCommand cmd) {
@@ -101,8 +108,10 @@ public class VoteSubmissionService {
             }
         }
 
-        // 2. MAJOR 议题强制 L3 face-auth；GENERAL 议题不要求（沿用现有 evaluateVoting 设计）
-        if (subject.getSubjectType() == SubjectType.MAJOR) {
+        VoteChannel voteChannel = VoteChannel.defaultIfNull(cmd.voteChannel());
+
+        // 2. MAJOR 线上票强制 L3 face-auth；纸票/线下代录走线下凭证，不复用 C 端人脸认证闸门。
+        if (subject.getSubjectType() == SubjectType.MAJOR && voteChannel == VoteChannel.ONLINE) {
             UserContext ctx = userContextHolder.current();
             AuthenticationLevel currentLevel = ctx == null ? null : ctx.authLevel();
             EvaluationResult eval = abacPolicyEngine.evaluateVoting(cmd.uid(), cmd.tenantId(), currentLevel);
@@ -159,6 +168,7 @@ public class VoteSubmissionService {
                 .targetId(cmd.targetId())
                 .propertyArea(view.buildArea())
                 .choice(cmd.choice())
+                .voteChannel(voteChannel)
                 .build();
         long voteId;
         try {
@@ -169,8 +179,32 @@ public class VoteSubmissionService {
                     "您已对该议题投过票 subjectId=" + cmd.subjectId() + " opid=" + cmd.opid(), e);
         }
 
-        log.info("Vote cast subjectId={} uid={} opid={} choice={} voteId={}",
-                cmd.subjectId(), cmd.uid(), cmd.opid(), cmd.choice(), voteId);
+        log.info("Vote cast subjectId={} uid={} opid={} choice={} channel={} voteId={}",
+                cmd.subjectId(), cmd.uid(), cmd.opid(), cmd.choice(), voteChannel, voteId);
+        recordMonitorAfterCommit(new VoteCastMonitorGateway.VoteCastEvent(
+                cmd.subjectId(),
+                cmd.tenantId(),
+                cmd.uid(),
+                cmd.opid(),
+                cmd.targetId(),
+                subject.getSubjectType(),
+                cmd.choice(),
+                cmd.signatureHash(),
+                voteChannel,
+                Instant.now()));
         return voteId;
+    }
+
+    private void recordMonitorAfterCommit(VoteCastMonitorGateway.VoteCastEvent event) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    voteCastMonitorGateway.recordCast(event);
+                }
+            });
+            return;
+        }
+        voteCastMonitorGateway.recordCast(event);
     }
 }

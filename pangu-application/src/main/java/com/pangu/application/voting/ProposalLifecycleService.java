@@ -4,8 +4,11 @@ import com.pangu.application.handover.HandoverCircuitBreaker;
 import com.pangu.application.voting.command.CancelSubjectCommand;
 import com.pangu.application.voting.command.ProposeSubjectCommand;
 import com.pangu.application.voting.command.PublishSubjectCommand;
+import com.pangu.domain.context.UserContext;
+import com.pangu.domain.context.UserContextHolder;
 import com.pangu.domain.model.voting.SubjectStatus;
 import com.pangu.domain.model.voting.SubjectType;
+import com.pangu.domain.model.voting.VotingDenominatorResolver;
 import com.pangu.domain.model.voting.VotingSubject;
 import com.pangu.domain.model.voting.VotingSubjectActions;
 import com.pangu.domain.repository.OwnerPropertyVotingRepository;
@@ -18,6 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 
 /**
  * 议题生命周期编排服务（M3-2 引入）。
@@ -37,9 +41,24 @@ public class ProposalLifecycleService {
     private final VotingSubjectRepository subjectRepository;
     private final OwnerPropertyVotingRepository ownerPropertyVotingRepository;
     private final HandoverCircuitBreaker handoverCircuitBreaker;
+    private final VotingDenominatorResolver denominatorResolver;
+    private final UserContextHolder userContextHolder;
+    private final VotingMobilizationService votingMobilizationService;
+
+    /**
+     * 选举议题（ELECTION）立项执行人：G 端基层经办员。
+     *
+     * <p>设计稿《选举闭环.md》§二·阶段一明确：换届选举新建必须由
+     * {@code role_key = GOV_OPERATOR} 且隶属居委会 / 网格组织的 G 端经办人操作。
+     */
+    private static final String ELECTION_PROPOSE_ROLE = "GOV_OPERATOR";
+    private static final Set<Integer> ELECTION_PROPOSE_DEPT_TYPES = Set.of(2, 5);
 
     /**
      * 立项（DRAFT 写入）。M3-3 起放开 ELECTION：要求携带 maxWinners >= 1。
+     *
+     * <p>M5 起 ELECTION 额外加角色护栏：仅 G 端 GOV_OPERATOR 可立项选举
+     * （业委会全员封死、党组书记 / 居委会管理员 / 街道办不立项）。
      */
     @Transactional
     public VotingSubject propose(ProposeSubjectCommand cmd) {
@@ -48,6 +67,16 @@ public class ProposalLifecycleService {
             throw new VotingApplicationException(
                     VotingApplicationException.Reason.ELECTION_MAX_WINNERS_REQUIRED,
                     "ELECTION 立项必须携带 maxWinners >= 1，当前 maxWinners=" + cmd.maxWinners());
+        }
+        if (cmd.subjectType() == SubjectType.ELECTION) {
+            UserContext ctx = userContextHolder.current();
+            if (!canProposeElection(ctx)) {
+                throw new VotingApplicationException(
+                        VotingApplicationException.Reason.PROPOSE_FORBIDDEN_FOR_TYPE,
+                        "ELECTION 议题立项仅限 G 端基层经办员（dept_type IN (2,5)），当前角色="
+                                + (ctx == null ? "ANONYMOUS" : ctx.roleKey())
+                                + " deptType=" + (ctx == null ? null : ctx.deptType()));
+            }
         }
         VotingSubject draft;
         try {
@@ -79,6 +108,15 @@ public class ProposalLifecycleService {
             });
         }
         VotingSubject persisted = subjectRepository.insert(draft);
+        if (persisted.getSubjectType() == SubjectType.ELECTION) {
+            try {
+                denominatorResolver.resolve(persisted);
+            } catch (RuntimeException ex) {
+                throw new VotingApplicationException(
+                        VotingApplicationException.Reason.DENOMINATOR_RESOLVE_FAILED,
+                        "ELECTION 立项分母快照落定失败 subjectId=" + persisted.getSubjectId(), ex);
+            }
+        }
         log.info("Subject proposed subjectId={} type={} scope={} maxWinners={} proposedByUserId={}",
                 persisted.getSubjectId(), persisted.getSubjectType(),
                 persisted.getScope(), persisted.getMaxWinners(), persisted.getProposedByUserId());
@@ -86,7 +124,10 @@ public class ProposalLifecycleService {
     }
 
     /**
-     * 公示：DRAFT → PUBLISHED。
+     * 公示：DRAFT → PUBLISHED（仅 GENERAL/MAJOR 等非 ELECTION 议题）。
+     *
+     * <p>ELECTION 议题必须走 {@link ProposalReviewService#streetApprove(Long, Long)}，
+     * 由 {@code voting:subject:review:street} 完成街道终审、状态发布和 review_history 留痕。
      */
     @Transactional
     public VotingSubject publish(PublishSubjectCommand cmd) {
@@ -94,6 +135,11 @@ public class ProposalLifecycleService {
                 .orElseThrow(() -> new VotingApplicationException(
                         VotingApplicationException.Reason.SUBJECT_NOT_FOUND,
                         "议题不存在 subjectId=" + cmd.subjectId()));
+        if (subject.getSubjectType() == SubjectType.ELECTION) {
+            throw new VotingApplicationException(
+                    VotingApplicationException.Reason.PROPOSE_FORBIDDEN_FOR_TYPE,
+                    "ELECTION 议题必须通过街道办终审发布，请使用 street-review subjectId=" + cmd.subjectId());
+        }
         if (subject.getStatus() != SubjectStatus.DRAFT) {
             throw new VotingApplicationException(
                     VotingApplicationException.Reason.SUBJECT_NOT_DRAFT,
@@ -156,6 +202,7 @@ public class ProposalLifecycleService {
                     VotingApplicationException.Reason.CONCURRENT_LIFECYCLE_MODIFICATION,
                     "议题在撤回过程中被并发修改 subjectId=" + cmd.subjectId());
         }
+        votingMobilizationService.deactivateForSubject(subject.getSubjectId(), now);
         log.info("Subject cancelled subjectId={} byUserId={} byGovernment={} reasonLen={}",
                 cmd.subjectId(), cmd.currentUserId(), cmd.byGovernment(),
                 cmd.reason() == null ? 0 : cmd.reason().length());
@@ -189,6 +236,7 @@ public class ProposalLifecycleService {
                     VotingApplicationException.Reason.CONCURRENT_LIFECYCLE_MODIFICATION,
                     "议题在开票过程中被并发修改 subjectId=" + subjectId);
         }
+        votingMobilizationService.activateForVotingOpened(subject, now);
         log.info("Subject voting opened subjectId={} now={}", subjectId, now);
         return subject;
     }
@@ -211,5 +259,11 @@ public class ProposalLifecycleService {
         if (size <= 0 || size > 200) size = 20;
         List<Long> buildingIds = ownerPropertyVotingRepository.findBuildingIdsByUid(uid, tenantId);
         return subjectRepository.findVisibleForOwner(tenantId, buildingIds, size, page * size);
+    }
+
+    private boolean canProposeElection(UserContext ctx) {
+        return ctx != null
+                && ELECTION_PROPOSE_ROLE.equals(ctx.roleKey())
+                && ELECTION_PROPOSE_DEPT_TYPES.contains(ctx.deptType());
     }
 }

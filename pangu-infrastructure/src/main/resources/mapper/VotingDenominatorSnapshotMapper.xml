@@ -13,6 +13,19 @@
         <result property="eligibilityFlag" column="eligibility_flag"/>
     </resultMap>
 
+    <resultMap id="DenominatorSnapshotRowMap"
+               type="com.pangu.infrastructure.persistence.entity.DenominatorSnapshotRow">
+        <id property="snapshotId" column="snapshot_id"/>
+        <result property="subjectId" column="subject_id"/>
+        <result property="scope" column="scope"/>
+        <result property="scopeReferenceId" column="scope_reference_id"/>
+        <result property="totalArea" column="total_area"/>
+        <result property="totalOwnerCount" column="total_owner_count"/>
+        <result property="itemCount" column="item_count"/>
+        <result property="aggregateHash" column="aggregate_hash"/>
+        <result property="snapshotAt" column="snapshot_at"/>
+    </resultMap>
+
     <!--
         双重去重查询：
         - 第一层 scoped：按 tenantId + scope 过滤 c_owner_property
@@ -76,7 +89,15 @@
         ORDER BY rr.building_id, rr.room_id
     </select>
 
-    <select id="upsertSnapshot" resultType="java.lang.Long">
+    <select id="selectSnapshotBySubjectId" resultMap="DenominatorSnapshotRowMap">
+        SELECT snapshot_id, subject_id, scope, scope_reference_id,
+               total_area, total_owner_count, item_count,
+               aggregate_hash, snapshot_at
+        FROM t_voting_denominator_snapshot
+        WHERE subject_id = #{subjectId}
+    </select>
+
+    <select id="insertSnapshotIfAbsent" resultType="java.lang.Long">
         INSERT INTO t_voting_denominator_snapshot (
             subject_id, scope, scope_reference_id,
             total_area, total_owner_count, item_count,
@@ -86,14 +107,7 @@
             #{totalArea}, #{totalOwnerCount}, #{itemCount},
             #{aggregateHash}, CURRENT_TIMESTAMP
         )
-        ON CONFLICT (subject_id) DO UPDATE SET
-            scope              = EXCLUDED.scope,
-            scope_reference_id = EXCLUDED.scope_reference_id,
-            total_area         = EXCLUDED.total_area,
-            total_owner_count  = EXCLUDED.total_owner_count,
-            item_count         = EXCLUDED.item_count,
-            aggregate_hash     = EXCLUDED.aggregate_hash,
-            snapshot_at        = EXCLUDED.snapshot_at
+        ON CONFLICT (subject_id) DO NOTHING
         RETURNING snapshot_id
     </select>
 

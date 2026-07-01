@@ -65,9 +65,11 @@ public class ControllerIntegrationTest {
 
         // permissions 出现在 response.user_info（来自 UserContextLoader 实时反查）
         Map<String, Object> userInfo = (Map<String, Object>) data.get("user_info");
+        assert userInfo.get("dept_type").equals(5);
         List<String> permissions = (List<String>) userInfo.get("permissions");
         assert permissions != null && permissions.contains("voting:subject:publish");
-        assert permissions.contains("candidate:nominate");
+        // V3.20 起 ELECTION 候选人提名只授 GOV_OPERATOR；网格员仅保留催票/责任田相关能力。
+        assert !permissions.contains("candidate:nominate");
         assert permissions.contains("waiver:read");
     }
 
