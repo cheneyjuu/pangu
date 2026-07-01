@@ -38,10 +38,6 @@ Pull requests should include the problem, solution summary, affected modules, te
 
 `application.yml` contains development defaults only. Do not commit production JWT secrets, SM4 keys, OSS credentials, or database passwords. Prefer environment-specific overrides for deploys.
 
-## Agent-Specific Instructions
-
-Before agent-driven changes, run `~/.codex/superpowers/.codex/superpowers-codex bootstrap` if that command exists, and follow the returned workflow. If the command is missing on this machine, state that it is unavailable and continue under these repository instructions.
-
 ## Agent Operating Rules
 
 - Confirm business facts before implementation: inspect existing data models, permissions, state machines, external API constraints, and project docs before deriving a solution from a local API or isolated code path.
