@@ -20,24 +20,76 @@
         <result property="userId" column="user_id"/>
         <result property="nickName" column="nick_name"/>
         <result property="roleKey" column="role_key"/>
+        <result property="phone" column="phone"/>
+        <result property="realNameVerified" column="real_name_verified"/>
         <result property="buildingCount" column="building_count"/>
+    </resultMap>
+
+    <resultMap id="BuildingOccupantRowMap"
+               type="com.pangu.infrastructure.persistence.entity.BuildingOccupantRow">
+        <result property="userId" column="user_id"/>
+        <result property="nickName" column="nick_name"/>
+        <result property="roleKey" column="role_key"/>
     </resultMap>
 
     <!-- 同租户内某角色用户 + 已生效楼栋数；tenantId=null 时跨租户（街道超管俯瞰） -->
     <select id="selectUsersByRole" resultMap="AssignableUserRowMap">
         SELECT u.user_id, u.nick_name, r.role_key,
+               a.phone, a.real_name_verified,
                (SELECT COUNT(*) FROM sys_user_building ub
                 WHERE ub.user_id = u.user_id AND ub.status = 1) AS building_count
         FROM sys_user_role ur
         JOIN sys_user u ON u.user_id = ur.user_id
         JOIN sys_role r ON r.role_id = ur.role_id
         JOIN sys_dept d ON d.dept_id = u.dept_id
+        LEFT JOIN t_account a ON a.account_id = u.account_id
         WHERE r.role_key = #{roleKey}
           AND u.status = '0'
         <if test="tenantId != null">
             AND d.tenant_id = #{tenantId}
         </if>
         ORDER BY u.user_id ASC
+    </select>
+
+    <!-- 模糊搜索：三字段 OR（nick_name ILIKE / phone 全等 / phone 尾号 LIKE）-->
+    <!-- 受可分配角色固定过滤，避免搜出超管/书记/物业等 -->
+    <select id="searchUsers" resultMap="AssignableUserRowMap">
+        SELECT u.user_id, u.nick_name, r.role_key,
+               a.phone, a.real_name_verified,
+               (SELECT COUNT(*) FROM sys_user_building ub
+                WHERE ub.user_id = u.user_id AND ub.status = 1) AS building_count
+        FROM sys_user_role ur
+        JOIN sys_user u ON u.user_id = ur.user_id
+        JOIN sys_role r ON r.role_id = ur.role_id
+        JOIN sys_dept d ON d.dept_id = u.dept_id
+        LEFT JOIN t_account a ON a.account_id = u.account_id
+        WHERE r.role_key IN ('GRID_OPERATOR','VOLUNTEER','OWNER_REPRESENTATIVE')
+          AND u.status = '0'
+          AND (
+              u.nick_name ILIKE CONCAT('%', #{keyword}, '%')
+              OR a.phone = #{keyword}
+              OR a.phone LIKE CONCAT('%', #{keyword})
+          )
+        <if test="tenantId != null">
+            AND d.tenant_id = #{tenantId}
+        </if>
+        ORDER BY u.user_id ASC
+        LIMIT #{limit}
+    </select>
+
+    <!-- 某楼栋当前所有 status=1 占用者（含不同角色） -->
+    <select id="selectOccupantsByBuilding" resultMap="BuildingOccupantRowMap">
+        SELECT ub.user_id, u.nick_name, r.role_key
+        FROM sys_user_building ub
+        JOIN sys_user u ON u.user_id = ub.user_id
+        LEFT JOIN sys_user_role ur ON ur.user_id = ub.user_id
+        LEFT JOIN sys_role r ON r.role_id = ur.role_id
+        WHERE ub.building_id = #{buildingId}
+          AND ub.status = 1
+        <if test="tenantId != null">
+            AND ub.tenant_id = #{tenantId}
+        </if>
+        ORDER BY ub.user_id ASC
     </select>
 
     <!-- distinct building_id；@DataScope(buildingAlias="op") 对 OWNER_GROUP 用户行级兜底 -->

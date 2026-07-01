@@ -18,9 +18,13 @@
         <result property="committeeApprover" column="committee_approver"/>
         <result property="committeeApprovalAt" column="committee_approval_at"/>
         <result property="committeeOpinion" column="committee_opinion"/>
+        <result property="committeeRejectReasonCode" column="committee_reject_reason_code"/>
+        <result property="committeeRejectEvidenceJson" column="committee_reject_evidence_json"/>
         <result property="streetApprover" column="street_approver"/>
         <result property="streetApprovalAt" column="street_approval_at"/>
         <result property="streetOpinion" column="street_opinion"/>
+        <result property="streetRejectReasonCode" column="street_reject_reason_code"/>
+        <result property="streetRejectEvidenceJson" column="street_reject_evidence_json"/>
         <result property="appliedAt" column="applied_at"/>
         <result property="localPayloadHash" column="local_payload_hash"/>
         <result property="localPayloadLockedAt" column="local_payload_locked_at"/>
@@ -40,7 +44,9 @@
         requested_ratio, party_pool_size, total_eligible_size,
         reason_text, reason_evidence_keys, status,
         committee_approver, committee_approval_at, committee_opinion,
+        committee_reject_reason_code, committee_reject_evidence_json::text AS committee_reject_evidence_json,
         street_approver, street_approval_at, street_opinion,
+        street_reject_reason_code, street_reject_evidence_json::text AS street_reject_evidence_json,
         applied_at,
         local_payload_hash, local_payload_locked_at,
         blockchain_tx_hash, blockchain_chain_provider,
@@ -82,7 +88,9 @@
             requested_ratio, party_pool_size, total_eligible_size,
             reason_text, reason_evidence_keys, status,
             committee_approver, committee_approval_at, committee_opinion,
+            committee_reject_reason_code, committee_reject_evidence_json,
             street_approver, street_approval_at, street_opinion,
+            street_reject_reason_code, street_reject_evidence_json,
             applied_at,
             local_payload_hash, local_payload_locked_at,
             blockchain_tx_hash, blockchain_chain_provider,
@@ -93,7 +101,17 @@
             #{requestedRatio}, #{partyPoolSize}, #{totalEligibleSize},
             #{reasonText}, #{reasonEvidenceKeys}, #{status},
             #{committeeApprover}, #{committeeApprovalAt}, #{committeeOpinion},
+            #{committeeRejectReasonCode},
+            <choose>
+                <when test="committeeRejectEvidenceJson != null">CAST(#{committeeRejectEvidenceJson} AS jsonb)</when>
+                <otherwise>NULL</otherwise>
+            </choose>,
             #{streetApprover}, #{streetApprovalAt}, #{streetOpinion},
+            #{streetRejectReasonCode},
+            <choose>
+                <when test="streetRejectEvidenceJson != null">CAST(#{streetRejectEvidenceJson} AS jsonb)</when>
+                <otherwise>NULL</otherwise>
+            </choose>,
             #{appliedAt},
             #{localPayloadHash}, #{localPayloadLockedAt},
             #{blockchainTxHash}, #{blockchainChainProvider},
@@ -116,9 +134,21 @@
             committee_approver = #{committeeApprover},
             committee_approval_at = #{committeeApprovalAt},
             committee_opinion = #{committeeOpinion},
+            committee_reject_reason_code = #{committeeRejectReasonCode},
+            committee_reject_evidence_json =
+                <choose>
+                    <when test="committeeRejectEvidenceJson != null">CAST(#{committeeRejectEvidenceJson} AS jsonb)</when>
+                    <otherwise>NULL</otherwise>
+                </choose>,
             street_approver = #{streetApprover},
             street_approval_at = #{streetApprovalAt},
             street_opinion = #{streetOpinion},
+            street_reject_reason_code = #{streetRejectReasonCode},
+            street_reject_evidence_json =
+                <choose>
+                    <when test="streetRejectEvidenceJson != null">CAST(#{streetRejectEvidenceJson} AS jsonb)</when>
+                    <otherwise>NULL</otherwise>
+                </choose>,
             applied_at = #{appliedAt},
             local_payload_hash = #{localPayloadHash},
             local_payload_locked_at = #{localPayloadLockedAt},

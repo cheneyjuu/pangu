@@ -19,7 +19,11 @@ public class BuildingAssignmentApplicationException extends RuntimeException {
         /** 楼栋不在分配者租户范围内。 */
         BUILDING_NOT_IN_SCOPE,
         /** 撤销时无生效授予记录。 */
-        ASSIGNMENT_NOT_FOUND
+        ASSIGNMENT_NOT_FOUND,
+        /** 目标用户不满足合规要求（账号状态/实名/楼栋上限）。 */
+        USER_NOT_COMPLIANT,
+        /** 该楼栋已被同角色其他用户占用；前端需走 force=true 二次确认转移。 */
+        BUILDING_OCCUPIED_BY_SAME_ROLE
     }
 
     private final Reason reason;

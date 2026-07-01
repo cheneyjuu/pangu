@@ -20,7 +20,9 @@ public class GovernanceLockApplicationException extends RuntimeException {
         /** 终签与初签审批人为同一人。 */
         LOCK_SIGNER_CONFLICT,
         /** verifyLocked 时锁不存在或已被双签解锁。 */
-        LOCK_NOT_HELD
+        LOCK_NOT_HELD,
+        /** 当前角色不允许执行治理锁签署动作。 */
+        LOCK_ROLE_FORBIDDEN
     }
 
     private final Reason reason;

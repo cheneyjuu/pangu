@@ -3,6 +3,20 @@
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.pangu.infrastructure.persistence.mapper.OutboxEventMapper">
 
+    <resultMap id="OutboxEventRowMap"
+               type="com.pangu.infrastructure.persistence.entity.OutboxEventRow">
+        <id property="eventId" column="event_id"/>
+        <result property="eventType" column="event_type"/>
+        <result property="businessRefId" column="business_ref_id"/>
+        <result property="tenantId" column="tenant_id"/>
+        <result property="payloadJson" column="payload_json"/>
+        <result property="status" column="status"/>
+        <result property="attempts" column="attempts"/>
+        <result property="lastError" column="last_error"/>
+        <result property="lastAttemptAt" column="last_attempt_at"/>
+        <result property="confirmedAt" column="confirmed_at"/>
+    </resultMap>
+
     <insert id="insert"
             parameterType="com.pangu.infrastructure.persistence.entity.OutboxEventRow"
             useGeneratedKeys="true"
@@ -15,5 +29,43 @@
             CAST(#{payloadJson} AS JSONB), #{status}
         )
     </insert>
+
+    <select id="claimReminderPending" resultMap="OutboxEventRowMap">
+        UPDATE t_outbox_event
+        SET status = 2,
+            attempts = attempts + 1,
+            last_attempt_at = CURRENT_TIMESTAMP,
+            last_error = NULL
+        WHERE event_id IN (
+            SELECT event_id
+            FROM t_outbox_event
+            WHERE event_type = 4
+              AND status IN (1, 4)
+              AND attempts &lt; 5
+            ORDER BY create_time ASC
+            LIMIT #{limit}
+            FOR UPDATE SKIP LOCKED
+        )
+        RETURNING event_id, event_type, business_ref_id, tenant_id, payload_json::text AS payload_json,
+                  status, attempts, last_error, last_attempt_at, confirmed_at
+    </select>
+
+    <update id="markConfirmed">
+        UPDATE t_outbox_event
+        SET status = 3,
+            confirmed_at = CURRENT_TIMESTAMP,
+            last_error = NULL
+        WHERE event_id = #{eventId}
+          AND event_type = 4
+    </update>
+
+    <update id="markFailed">
+        UPDATE t_outbox_event
+        SET status = 4,
+            last_error = #{lastError},
+            last_attempt_at = CURRENT_TIMESTAMP
+        WHERE event_id = #{eventId}
+          AND event_type = 4
+    </update>
 
 </mapper>

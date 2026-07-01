@@ -18,6 +18,7 @@ public enum LockErrorCode implements ErrorCode {
     // ============ 状态机 / 签名（VALIDATION / 400） ============
     LOCK_INVALID_TRANSITION(40110, "治理锁状态流转不合法", 400, ErrorType.BIZ, false),
     LOCK_SIGNER_CONFLICT(40111, "终签与初签审批人不能为同一人", 400, ErrorType.BIZ, false),
+    LOCK_ROLE_FORBIDDEN(40112, "当前角色无权执行治理锁签署", 403, ErrorType.BIZ, false),
 
     // ============ 业务冲突（BUSINESS / 409 / 404） ============
     LOCK_ALREADY_EXISTS(41001, "目标实体已存在锁定记录", 409, ErrorType.BIZ, false),

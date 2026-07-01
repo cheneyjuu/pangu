@@ -65,6 +65,12 @@ public class VotingSubject {
     /** 投票截止时间。 */
     private Instant voteEndAt;
 
+    /** Clock Suspend 生效时间；非空表示投票倒计时已因 HANDOVER_LOCK 暂停。 */
+    private Instant clockSuspendedAt;
+
+    /** 触发 Clock Suspend 的换届选举议题 ID。 */
+    private Long clockSuspendedBySubjectId;
+
     /** 议题发起人 sys_user.user_id（M3-2 起记录；旧记录可为 null）。 */
     private Long proposedByUserId;
 

@@ -1,6 +1,7 @@
 package com.pangu.infrastructure.persistence.mapper;
 
 import com.pangu.infrastructure.persistence.entity.DenominatorItemRow;
+import com.pangu.infrastructure.persistence.entity.DenominatorSnapshotRow;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
@@ -10,11 +11,11 @@ import java.util.List;
 /**
  * 投票分母快照 Mapper。
  *
- * <p>承担 {@code DefaultVotingDenominatorResolver} 的双重去重计算与快照写入：
+ * <p>承担 {@code DefaultVotingDenominatorResolver} 的双重去重计算与冻结快照写入：
  * <ul>
  *   <li>{@link #selectDenominatorItems}：基于 {@code c_owner_property} 的窗口函数双重去重；</li>
- *   <li>{@link #upsertSnapshot}：议题维度幂等 upsert（同议题重复 settle 仅刷新该行）；</li>
- *   <li>{@link #deleteItemsBySnapshotId} + {@link #insertItems}：先删后插同步行级明细。</li>
+ *   <li>{@link #insertSnapshotIfAbsent}：议题维度首次插入，同议题复用既有冻结快照；</li>
+ *   <li>{@link #deleteItemsBySnapshotId} + {@link #insertItems}：仅首次冻结时写入行级明细。</li>
  * </ul>
  */
 @Mapper
@@ -32,16 +33,18 @@ public interface VotingDenominatorSnapshotMapper {
                                                      @Param("scope") int scope,
                                                      @Param("scopeReferenceId") Long scopeReferenceId);
 
+    DenominatorSnapshotRow selectSnapshotBySubjectId(@Param("subjectId") Long subjectId);
+
     /**
-     * 议题维度幂等 upsert，返回 snapshot_id（PG INSERT ... RETURNING）。
+     * 议题维度首次插入，返回 snapshot_id；已存在时返回 null，由调用方读取既有冻结快照。
      */
-    Long upsertSnapshot(@Param("subjectId") Long subjectId,
-                        @Param("scope") int scope,
-                        @Param("scopeReferenceId") Long scopeReferenceId,
-                        @Param("totalArea") BigDecimal totalArea,
-                        @Param("totalOwnerCount") long totalOwnerCount,
-                        @Param("itemCount") long itemCount,
-                        @Param("aggregateHash") String aggregateHash);
+    Long insertSnapshotIfAbsent(@Param("subjectId") Long subjectId,
+                                @Param("scope") int scope,
+                                @Param("scopeReferenceId") Long scopeReferenceId,
+                                @Param("totalArea") BigDecimal totalArea,
+                                @Param("totalOwnerCount") long totalOwnerCount,
+                                @Param("itemCount") long itemCount,
+                                @Param("aggregateHash") String aggregateHash);
 
     int deleteItemsBySnapshotId(@Param("snapshotId") Long snapshotId);
 

@@ -23,4 +23,7 @@ public class VoteItemRow {
 
     private Instant votedAt;
     private String signatureHash;
+
+    /** 1-ONLINE, 2-PAPER, 3-OFFLINE_PROXY。 */
+    private Integer voteChannel;
 }

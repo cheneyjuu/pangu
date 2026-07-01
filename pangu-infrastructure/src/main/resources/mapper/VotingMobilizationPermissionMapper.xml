@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pangu.infrastructure.persistence.mapper.VotingMobilizationPermissionMapper">
+
+    <resultMap id="VotingMobilizationPermissionRowMap"
+               type="com.pangu.infrastructure.persistence.entity.VotingMobilizationPermissionRow">
+        <id property="permissionId" column="permission_id"/>
+        <result property="subjectId" column="subject_id"/>
+        <result property="tenantId" column="tenant_id"/>
+        <result property="buildingId" column="building_id"/>
+        <result property="userId" column="user_id"/>
+        <result property="roleKey" column="role_key"/>
+        <result property="canRemind" column="can_remind"/>
+        <result property="canOfflineProxy" column="can_offline_proxy"/>
+        <result property="activatedAt" column="activated_at"/>
+        <result property="expiresAt" column="expires_at"/>
+        <result property="deactivatedAt" column="deactivated_at"/>
+        <result property="status" column="status"/>
+    </resultMap>
+
+    <insert id="activateForSubject">
+        INSERT INTO t_voting_mobilization_permission (
+            subject_id, tenant_id, building_id, user_id, role_key,
+            can_remind, can_offline_proxy, activated_at, expires_at, deactivated_at, status
+        )
+        SELECT DISTINCT
+            #{subjectId},
+            ub.tenant_id,
+            ub.building_id,
+            ub.user_id,
+            r.role_key,
+            TRUE,
+            TRUE,
+            #{activatedAt}::timestamptz,
+            #{expiresAt}::timestamptz,
+            NULL::timestamptz,
+            1
+        FROM sys_user_building ub
+        JOIN sys_user_role ur ON ur.user_id = ub.user_id
+        JOIN sys_role r ON r.role_id = ur.role_id
+        JOIN sys_user u ON u.user_id = ub.user_id
+        WHERE ub.tenant_id = #{tenantId}
+          AND ub.status = 1
+          AND u.status = '0'
+          AND r.role_key IN ('OWNER_REPRESENTATIVE', 'GRID_OPERATOR')
+        <choose>
+            <when test="scope == 2">
+                AND ub.building_id = #{scopeReferenceId}
+            </when>
+            <when test="scope == 1">
+            </when>
+            <otherwise>
+                AND 1 = 0
+            </otherwise>
+        </choose>
+        ON CONFLICT (subject_id, user_id, building_id)
+        DO UPDATE SET
+            can_remind = EXCLUDED.can_remind,
+            can_offline_proxy = EXCLUDED.can_offline_proxy,
+            activated_at = EXCLUDED.activated_at,
+            expires_at = EXCLUDED.expires_at,
+            deactivated_at = NULL::timestamptz,
+            status = 1
+    </insert>
+
+    <update id="deactivateForSubject">
+        UPDATE t_voting_mobilization_permission
+        SET status = 2,
+            deactivated_at = #{deactivatedAt}::timestamptz
+        WHERE subject_id = #{subjectId}
+          AND status = 1
+    </update>
+
+    <select id="selectActiveBySubjectAndUser" resultMap="VotingMobilizationPermissionRowMap">
+        SELECT permission_id, subject_id, tenant_id, building_id, user_id, role_key,
+               can_remind, can_offline_proxy, activated_at, expires_at, deactivated_at, status
+        FROM t_voting_mobilization_permission
+        WHERE subject_id = #{subjectId}
+          AND tenant_id = #{tenantId}
+          AND user_id = #{userId}
+          AND status = 1
+          AND deactivated_at IS NULL
+          AND (expires_at IS NULL OR expires_at &gt; #{now}::timestamptz)
+        ORDER BY building_id ASC
+    </select>
+</mapper>

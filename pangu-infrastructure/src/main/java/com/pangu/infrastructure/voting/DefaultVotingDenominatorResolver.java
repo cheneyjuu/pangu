@@ -6,6 +6,7 @@ import com.pangu.domain.model.voting.VotingScope;
 import com.pangu.domain.model.voting.VotingSubject;
 import com.pangu.infrastructure.crypto.MerkleHashCalculator;
 import com.pangu.infrastructure.persistence.entity.DenominatorItemRow;
+import com.pangu.infrastructure.persistence.entity.DenominatorSnapshotRow;
 import com.pangu.infrastructure.persistence.mapper.VotingDenominatorSnapshotMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -43,6 +44,13 @@ public class DefaultVotingDenominatorResolver implements VotingDenominatorResolv
     @Override
     @Transactional
     public Denominator resolve(VotingSubject subject) {
+        if (subject != null && subject.getSubjectId() != null) {
+            DenominatorSnapshotRow existing = snapshotMapper.selectSnapshotBySubjectId(subject.getSubjectId());
+            if (existing != null) {
+                return new Denominator(existing.getTotalArea(), existing.getTotalOwnerCount(),
+                        existing.getAggregateHash(), existing.getSnapshotId());
+            }
+        }
         VotingScope scope = validateAndNormalizeScope(subject);
 
         List<DenominatorItemRow> items = snapshotMapper.selectDenominatorItems(
@@ -78,9 +86,17 @@ public class DefaultVotingDenominatorResolver implements VotingDenominatorResolv
         String aggregateHash = MerkleHashCalculator.merkleRoot(rowHashes);
 
         // 3. 议题维度幂等 upsert + 行级明细先删后插
-        Long snapshotId = snapshotMapper.upsertSnapshot(
+        Long snapshotId = snapshotMapper.insertSnapshotIfAbsent(
                 subject.getSubjectId(), scope.getDbValue(), subject.getScopeReferenceId(),
                 totalArea, totalOwnerCount, (long) items.size(), aggregateHash);
+        if (snapshotId == null) {
+            DenominatorSnapshotRow existing = snapshotMapper.selectSnapshotBySubjectId(subject.getSubjectId());
+            if (existing == null) {
+                throw new IllegalStateException("分母快照并发插入后读取失败 subjectId=" + subject.getSubjectId());
+            }
+            return new Denominator(existing.getTotalArea(), existing.getTotalOwnerCount(),
+                    existing.getAggregateHash(), existing.getSnapshotId());
+        }
         snapshotMapper.deleteItemsBySnapshotId(snapshotId);
         snapshotMapper.insertItems(snapshotId, items);
 

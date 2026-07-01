@@ -2,9 +2,11 @@ package com.pangu.infrastructure.repository;
 
 import com.pangu.domain.model.user.AssignableUser;
 import com.pangu.domain.model.user.BuildingAssignment;
+import com.pangu.domain.model.user.BuildingOccupant;
 import com.pangu.domain.repository.BuildingAssignmentRepository;
 import com.pangu.infrastructure.persistence.entity.AssignableUserRow;
 import com.pangu.infrastructure.persistence.entity.BuildingAssignmentRow;
+import com.pangu.infrastructure.persistence.entity.BuildingOccupantRow;
 import com.pangu.infrastructure.persistence.mapper.BuildingAssignmentMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Repository;
@@ -31,6 +33,18 @@ public class BuildingAssignmentRepositoryImpl implements BuildingAssignmentRepos
     public List<AssignableUser> listUsersByRole(String roleKey, Long tenantId) {
         return mapper.selectUsersByRole(roleKey, tenantId).stream()
                 .map(this::toAssignableUser).toList();
+    }
+
+    @Override
+    public List<AssignableUser> searchAssignableUsers(String keyword, Long tenantId, int limit) {
+        return mapper.searchUsers(keyword, tenantId, limit).stream()
+                .map(this::toAssignableUser).toList();
+    }
+
+    @Override
+    public List<BuildingOccupant> listOccupants(Long buildingId, Long tenantId) {
+        return mapper.selectOccupantsByBuilding(buildingId, tenantId).stream()
+                .map(this::toOccupant).toList();
     }
 
     @Override
@@ -80,11 +94,20 @@ public class BuildingAssignmentRepositoryImpl implements BuildingAssignmentRepos
     }
 
     private AssignableUser toAssignableUser(AssignableUserRow row) {
+        // complianceIssues 计算放在 application 层（service 拿到合规阈值常量），
+        // 这里只透传原始字段（phone/realNameVerified/buildingCount）。
         return new AssignableUser(
                 row.getUserId(),
                 row.getNickName(),
                 row.getRoleKey(),
-                row.getBuildingCount() == null ? 0L : row.getBuildingCount());
+                row.getPhone(),
+                row.getRealNameVerified() == null ? 0 : row.getRealNameVerified(),
+                row.getBuildingCount() == null ? 0L : row.getBuildingCount(),
+                List.of());
+    }
+
+    private BuildingOccupant toOccupant(BuildingOccupantRow row) {
+        return new BuildingOccupant(row.getUserId(), row.getNickName(), row.getRoleKey());
     }
 
     private BuildingAssignment toAssignment(BuildingAssignmentRow row) {

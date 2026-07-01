@@ -79,27 +79,45 @@
     </select>
 
     <!-- ===================== 提名候选人:按手机号检索业主 ===================== -->
-    <!-- phone 作普通明文列映射(走 idx_account_phone 前缀匹配),不选 real_name(SM4 加密列) -->
+    <!-- phone 作普通明文列映射,realName 走 SM4 raw 密文(application 解密) -->
     <resultMap id="OwnerLookupResultMap"
                type="com.pangu.infrastructure.persistence.entity.OwnerLookupRow">
         <id property="uid" column="uid"/>
         <result property="phone" column="phone"/>
         <result property="buildingId" column="building_id"/>
         <result property="roomId" column="room_id"/>
+        <result property="realName" column="real_name"/>
     </resultMap>
 
-    <select id="searchOwnersByPhonePrefix" resultMap="OwnerLookupResultMap">
+    <!-- 手机号片段搜索(前缀/中段/尾号通用,截 20 条).real_name 留 NULL 让 application 跳过解密. -->
+    <select id="searchOwnersByPhoneFragment" resultMap="OwnerLookupResultMap">
         SELECT cu.uid AS uid,
                a.phone AS phone,
                MIN(op.building_id) AS building_id,
-               MIN(op.room_id) AS room_id
+               MIN(op.room_id) AS room_id,
+               NULL AS real_name
         FROM t_account a
         JOIN c_user cu ON cu.account_id = a.account_id
         JOIN c_owner_property op ON op.uid = cu.uid AND op.tenant_id = #{tenantId}
-        WHERE a.phone LIKE CONCAT(#{phonePrefix}, '%')
+        WHERE a.phone LIKE CONCAT('%', #{phoneFragment}, '%')
         GROUP BY cu.uid, a.phone
         ORDER BY a.phone
         LIMIT 20
+    </select>
+
+    <!-- 姓名/拼音搜索预扫描池:本租户全部业主(含 SM4 密文 real_name),application 解密后过滤. -->
+    <select id="listNominatableOwnersWithName" resultMap="OwnerLookupResultMap">
+        SELECT cu.uid AS uid,
+               a.phone AS phone,
+               MIN(op.building_id) AS building_id,
+               MIN(op.room_id) AS room_id,
+               a.real_name AS real_name
+        FROM t_account a
+        JOIN c_user cu ON cu.account_id = a.account_id
+        JOIN c_owner_property op ON op.uid = cu.uid AND op.tenant_id = #{tenantId}
+        GROUP BY cu.uid, a.phone, a.real_name
+        ORDER BY cu.uid DESC
+        LIMIT #{limit}
     </select>
 
     <!-- ===================== M4 业主名册（读侧） ===================== -->

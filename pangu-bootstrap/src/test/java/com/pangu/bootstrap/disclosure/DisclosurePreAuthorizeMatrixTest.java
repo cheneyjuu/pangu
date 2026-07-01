@@ -7,11 +7,13 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.Map;
 
 import static org.hamcrest.Matchers.is;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -43,6 +45,9 @@ public class DisclosurePreAuthorizeMatrixTest {
 
     @Autowired
     private JwtTokenProvider jwtTokenProvider;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     private static final long TENANT_RUSHI = 10001L;
 
@@ -150,5 +155,18 @@ public class DisclosurePreAuthorizeMatrixTest {
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code", is(41104)));
+    }
+
+    @Test
+    public void legacyFundDisclosurePublishPermission_removedFromCatalogAndGrants() {
+        Integer permissionRows = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM sys_permission WHERE permission_key = 'fund:disclosure:publish'",
+                Integer.class);
+        Integer grantRows = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM sys_role_permission WHERE permission_key = 'fund:disclosure:publish'",
+                Integer.class);
+
+        assertEquals(0, permissionRows);
+        assertEquals(0, grantRows);
     }
 }

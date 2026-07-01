@@ -14,11 +14,12 @@
         <result property="choice" column="choice"/>
         <result property="votedAt" column="voted_at"/>
         <result property="signatureHash" column="signature_hash"/>
+        <result property="voteChannel" column="vote_channel"/>
     </resultMap>
 
     <select id="selectBySubjectId" resultMap="VoteItemRowMap">
         SELECT vote_id, subject_id, opid, uid, target_id, property_area,
-               choice, voted_at, signature_hash
+               choice, voted_at, signature_hash, vote_channel
         FROM t_vote_item
         WHERE subject_id = #{subjectId}
     </select>
@@ -26,9 +27,9 @@
     <!-- M3-2: 投票提交。voted_at 由 DB DEFAULT CURRENT_TIMESTAMP 兜底。 -->
     <insert id="insert" useGeneratedKeys="true" keyProperty="voteId" keyColumn="vote_id">
         INSERT INTO t_vote_item (
-            subject_id, opid, uid, target_id, property_area, choice, signature_hash
+            subject_id, opid, uid, target_id, property_area, choice, signature_hash, vote_channel
         ) VALUES (
-            #{subjectId}, #{opid}, #{uid}, #{targetId}, #{propertyArea}, #{choice}, #{signatureHash}
+            #{subjectId}, #{opid}, #{uid}, #{targetId}, #{propertyArea}, #{choice}, #{signatureHash}, #{voteChannel}
         )
     </insert>
 

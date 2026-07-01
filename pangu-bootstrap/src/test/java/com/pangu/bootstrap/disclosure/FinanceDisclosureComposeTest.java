@@ -5,9 +5,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pangu.application.disclosure.FinanceDisclosureApplicationException;
 import com.pangu.application.disclosure.FinanceDisclosureApplicationService;
 import com.pangu.application.disclosure.command.ComposeCommand;
+import com.pangu.domain.context.UserContext;
+import com.pangu.domain.context.UserContextHolder;
 import com.pangu.domain.model.disclosure.DisclosureStatus;
 import com.pangu.domain.model.disclosure.DisclosureType;
 import com.pangu.domain.model.disclosure.FinanceDisclosureSnapshot;
+import com.pangu.domain.model.user.AuthenticationLevel;
+import com.pangu.domain.model.user.DataScopeType;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -16,6 +20,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.math.BigDecimal;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -49,13 +54,18 @@ public class FinanceDisclosureComposeTest {
     @Autowired
     private ObjectMapper objectMapper;
 
+    @Autowired
+    private UserContextHolder userContextHolder;
+
     @BeforeEach
     public void setUp() {
         cleanUp();
+        setRole("COMMITTEE_DIRECTOR", COMPOSE_USER_ID);
     }
 
     @AfterEach
     public void tearDown() {
+        userContextHolder.clear();
         cleanUp();
     }
 
@@ -91,6 +101,23 @@ public class FinanceDisclosureComposeTest {
                         + "VALUES (?, ?, ?, ?, ?, CAST(? AS TIMESTAMP), ?)",
                 accountId, businessType, direction, amount, amount, occurredAt,
                 "h".repeat(64));
+    }
+
+    private void setRole(String roleKey, long userId) {
+        userContextHolder.set(new UserContext(
+                userId + 100000L,
+                UserContext.IdentityType.SYS_USER,
+                userId,
+                TEST_TENANT_ID,
+                9001L,
+                "GOV_SUPER_ADMIN".equals(roleKey) || "COMMUNITY_ADMIN".equals(roleKey)
+                        ? UserContext.DeptCategory.G : UserContext.DeptCategory.B,
+                "GOV_SUPER_ADMIN".equals(roleKey) || "COMMUNITY_ADMIN".equals(roleKey) ? 2 : 10,
+                DataScopeType.ALL_COMMUNITY,
+                AuthenticationLevel.L1,
+                roleKey,
+                Set.of(),
+                Set.of()));
     }
 
     // ===== compose 正向 =====
@@ -157,6 +184,21 @@ public class FinanceDisclosureComposeTest {
                         TEST_TENANT_ID, "2026-08",
                         DisclosureType.MAINTENANCE_FUND, COMPOSE_USER_ID)));
         assertEquals(FinanceDisclosureApplicationException.Reason.LEDGER_QUERY_EMPTY,
+                ex.getReason());
+    }
+
+    @Test
+    public void gridOperatorCannotComposeEvenIfPermissionMisconfigured() {
+        setRole("GRID_OPERATOR", COMPOSE_USER_ID);
+        Long accountId = seedAccount(new BigDecimal("100.00"));
+        seedEntry(accountId, 2, 1, new BigDecimal("10.00"), "2026-12-05 10:00:00");
+
+        FinanceDisclosureApplicationException ex = assertThrows(
+                FinanceDisclosureApplicationException.class,
+                () -> service.compose(new ComposeCommand(
+                        TEST_TENANT_ID, "2026-12",
+                        DisclosureType.MAINTENANCE_FUND, COMPOSE_USER_ID)));
+        assertEquals(FinanceDisclosureApplicationException.Reason.DISCLOSURE_ROLE_FORBIDDEN,
                 ex.getReason());
     }
 }

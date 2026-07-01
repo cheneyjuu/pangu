@@ -10,6 +10,8 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.util.List;
+
 import static org.hamcrest.Matchers.is;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -48,6 +50,7 @@ public class DisclosureHandoverEndToEndTest {
 
     /** 本类直插的 DRAFT 快照 id（用于精准清理其治理锁）。 */
     private Long composedSnapshotId;
+    private List<ActiveElectionBackup> suppressedActiveElections = List.of();
 
     @BeforeEach
     public void setUp() {
@@ -60,6 +63,7 @@ public class DisclosureHandoverEndToEndTest {
     }
 
     private void cleanUp() {
+        restoreSuppressedActiveElections();
         // 先删快照（解除对 governance_lock 的 FK 引用），再删恢复发布时产生的治理锁
         jdbcTemplate.update(
                 "DELETE FROM t_finance_disclosure_snapshot WHERE tenant_id = ? AND period = ?",
@@ -74,6 +78,29 @@ public class DisclosureHandoverEndToEndTest {
                 "DELETE FROM t_voting_subject WHERE tenant_id = ? AND title LIKE ?",
                 TENANT_RUSHI, TITLE_PREFIX + "%");
         composedSnapshotId = null;
+    }
+
+    private void suppressExistingActiveElections() {
+        suppressedActiveElections = jdbcTemplate.query(
+                "SELECT subject_id, status FROM t_voting_subject "
+                        + "WHERE tenant_id = ? AND subject_type = 1 AND status IN (2, 3, 4) "
+                        + "AND title NOT LIKE ?",
+                (rs, rowNum) -> new ActiveElectionBackup(rs.getLong("subject_id"), rs.getInt("status")),
+                TENANT_RUSHI, TITLE_PREFIX + "%");
+        for (ActiveElectionBackup backup : suppressedActiveElections) {
+            jdbcTemplate.update(
+                    "UPDATE t_voting_subject SET status = 5, settled_at = CURRENT_TIMESTAMP WHERE subject_id = ?",
+                    backup.subjectId());
+        }
+    }
+
+    private void restoreSuppressedActiveElections() {
+        for (ActiveElectionBackup backup : suppressedActiveElections) {
+            jdbcTemplate.update(
+                    "UPDATE t_voting_subject SET status = ?, settled_at = NULL WHERE subject_id = ?",
+                    backup.status(), backup.subjectId());
+        }
+        suppressedActiveElections = List.of();
     }
 
     /** 直插一条 DRAFT 财务公示快照（绕过 compose 的资金台账聚合，聚焦熔断闸门）。 */
@@ -104,6 +131,7 @@ public class DisclosureHandoverEndToEndTest {
         String dir = "Bearer " + jwtTokenProvider.generateToken(ACC_DIR, "SYS_USER", USR_DIR, TENANT_RUSHI);
 
         composedSnapshotId = seedDraftSnapshot();
+        suppressExistingActiveElections();
         long electionId = seedPublishedElection();
 
         // 1. 换届在途 → 发布被熔断 409 / 41109
@@ -125,5 +153,8 @@ public class DisclosureHandoverEndToEndTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status", is("PUBLISHED")));
         assertEquals(3, snapshotStatus(composedSnapshotId), "恢复后快照应为 PUBLISHED");
+    }
+
+    private record ActiveElectionBackup(long subjectId, int status) {
     }
 }

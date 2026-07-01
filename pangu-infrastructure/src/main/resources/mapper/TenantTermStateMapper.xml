@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pangu.infrastructure.persistence.mapper.TenantTermStateMapper">
+
+    <resultMap id="TenantTermStateRowMap"
+               type="com.pangu.infrastructure.persistence.entity.TenantTermStateRow">
+        <id property="tenantId" column="tenant_id"/>
+        <result property="termStatus" column="term_status"/>
+        <result property="termLockedAt" column="term_locked_at"/>
+        <result property="termLockedBySubjectId" column="term_locked_by_subject_id"/>
+        <result property="termUnlockedAt" column="term_unlocked_at"/>
+        <result property="termUnlockedByUserId" column="term_unlocked_by_user_id"/>
+    </resultMap>
+
+    <select id="selectByTenantId" resultMap="TenantTermStateRowMap">
+        SELECT tenant_id, term_status, term_locked_at, term_locked_by_subject_id,
+               term_unlocked_at, term_unlocked_by_user_id
+        FROM t_tenant_term_state
+        WHERE tenant_id = #{tenantId}
+    </select>
+
+    <insert id="upsertHandoverLock">
+        INSERT INTO t_tenant_term_state(
+            tenant_id, term_status, term_locked_at, term_locked_by_subject_id,
+            term_unlocked_at, term_unlocked_by_user_id
+        )
+        VALUES(#{tenantId}, 2, CURRENT_TIMESTAMP, #{subjectId}, NULL, NULL)
+        ON CONFLICT (tenant_id) DO UPDATE
+        SET term_status = 2,
+            term_locked_at = CURRENT_TIMESTAMP,
+            term_locked_by_subject_id = EXCLUDED.term_locked_by_subject_id,
+            term_unlocked_at = NULL,
+            term_unlocked_by_user_id = NULL,
+            version = t_tenant_term_state.version + 1,
+            update_time = CURRENT_TIMESTAMP
+    </insert>
+
+    <update id="releaseHandoverLock">
+        UPDATE t_tenant_term_state
+        SET term_status = 1,
+            term_unlocked_at = CURRENT_TIMESTAMP,
+            term_unlocked_by_user_id = #{confirmedByUserId},
+            version = version + 1,
+            update_time = CURRENT_TIMESTAMP
+        WHERE tenant_id = #{tenantId}
+    </update>
+</mapper>

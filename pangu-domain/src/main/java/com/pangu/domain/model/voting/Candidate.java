@@ -33,4 +33,16 @@ public class Candidate {
 
     /** 资格审查状态（提名时 PENDING_PARTY_REVIEW；过党组前置审查后 PENDING_COMMITTEE_REVIEW；居委会资格审查后 APPROVED/REJECTED；仅 APPROVED 计入结算） */
     private CandidateStatus qualificationStatus;
+
+    /** 驳回理由码：C1-C5，仅 REJECTED 时有值。 */
+    private String rejectReasonCode;
+
+    /** 驳回证据链 JSON 字符串，对应 DB JSONB。 */
+    private String rejectEvidenceJson;
+
+    /** 驳回审查人 sys_user.user_id。 */
+    private Long rejectReviewerUserId;
+
+    /** 驳回发生阶段：PARTY_REVIEW / COMMITTEE_REVIEW。 */
+    private String rejectReviewStage;
 }

@@ -6,6 +6,7 @@ package com.pangu.domain.model.voting;
  * <p>当前期允许的状态流转（单向不可逆）：
  * <pre>
  *   DRAFT --(publish)--&gt; PUBLISHED --(open vote)--&gt; VOTING --(deadline)--&gt; CLOSED --(settle)--&gt; SETTLED
+ *   DRAFT --(submit election review)--&gt; PENDING_COMMITTEE --(approve)--&gt; PENDING_STREET --(approve)--&gt; PUBLISHED
  *   DRAFT --(cancel by proposer)--&gt; CANCELLED
  *   PUBLISHED --(force cancel by GOV)--&gt; CANCELLED
  * </pre>
@@ -19,7 +20,9 @@ public enum SubjectStatus {
     VOTING(3),
     CLOSED(4),
     SETTLED(5),
-    CANCELLED(6);
+    CANCELLED(6),
+    PENDING_COMMITTEE(7),
+    PENDING_STREET(8);
 
     private final int dbValue;
 

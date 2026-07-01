@@ -5,14 +5,19 @@ import com.pangu.application.voting.VotingApplicationException;
 import com.pangu.application.voting.command.NominateCandidateCommand;
 import com.pangu.application.voting.command.PartyReviewCandidateCommand;
 import com.pangu.application.voting.command.ReviewCandidateCommand;
+import com.pangu.domain.context.UserContext;
+import com.pangu.domain.context.UserContextHolder;
 import com.pangu.domain.model.voting.Candidate;
 import com.pangu.domain.model.voting.CandidateStatus;
 import com.pangu.domain.model.voting.SubjectStatus;
 import com.pangu.domain.model.voting.SubjectType;
 import com.pangu.domain.model.voting.VotingScope;
 import com.pangu.domain.model.voting.VotingSubject;
+import com.pangu.domain.model.user.AuthenticationLevel;
+import com.pangu.domain.model.user.DataScopeType;
 import com.pangu.domain.repository.ElectionCandidateRegistry;
 import com.pangu.domain.repository.VotingSubjectRepository;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -29,6 +34,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
@@ -55,6 +61,8 @@ public class ElectionCandidateServiceTest {
     private VotingSubjectRepository subjectRepository;
     @Mock
     private ElectionCandidateRegistry electionCandidateRegistry;
+    @Mock
+    private UserContextHolder userContextHolder;
 
     @InjectMocks
     private ElectionCandidateService service;
@@ -68,6 +76,7 @@ public class ElectionCandidateServiceTest {
     private static final int COMMITTEE = CandidateStatus.PENDING_COMMITTEE_REVIEW.getDbValue(); // 5
     private static final int APPROVED = CandidateStatus.APPROVED.getDbValue();               // 2
     private static final int REJECTED = CandidateStatus.REJECTED.getDbValue();               // 3
+    private static final String REJECT_EVIDENCE = "{\"rule\":\"insufficientMaterial\",\"files\":[\"oss://evidence/1.pdf\"]}";
 
     private VotingSubject electionSubject(SubjectStatus status) {
         return VotingSubject.builder()
@@ -86,6 +95,31 @@ public class ElectionCandidateServiceTest {
 
     private NominateCandidateCommand nominateCmd() {
         return new NominateCandidateCommand(SUBJECT_ID, UID, "张三", true, TENANT, OPERATOR);
+    }
+
+    @BeforeEach
+    public void setUp() {
+        when(userContextHolder.current()).thenReturn(ctx("GOV_OPERATOR", 2));
+    }
+
+    private UserContext ctx(String roleKey, Integer deptType) {
+        return new UserContext(
+                999805L,
+                UserContext.IdentityType.SYS_USER,
+                OPERATOR,
+                TENANT,
+                101L,
+                UserContext.DeptCategory.G,
+                deptType,
+                DataScopeType.ALL_COMMUNITY,
+                AuthenticationLevel.L1,
+                roleKey,
+                java.util.Set.of("candidate:nominate"),
+                java.util.Set.of());
+    }
+
+    private void mockRole(String roleKey) {
+        when(userContextHolder.current()).thenReturn(ctx(roleKey, "COMMUNITY_ADMIN".equals(roleKey) ? 2 : 5));
     }
 
     private Candidate candidate(CandidateStatus status) {
@@ -129,6 +163,26 @@ public class ElectionCandidateServiceTest {
     }
 
     @Test
+    public void nominate_gridOperatorRejectedEvenWithLegacyPermission() {
+        when(userContextHolder.current()).thenReturn(ctx("GRID_OPERATOR", 5));
+        when(subjectRepository.findById(SUBJECT_ID)).thenReturn(Optional.of(electionSubject(SubjectStatus.DRAFT)));
+        VotingApplicationException ex = assertThrows(VotingApplicationException.class,
+                () -> service.nominate(nominateCmd()));
+        assertEquals(VotingApplicationException.Reason.PROPOSE_FORBIDDEN_FOR_TYPE, ex.getReason());
+        verify(electionCandidateRegistry, never()).nominate(anyLong(), anyLong(), anyString(), anyBoolean());
+    }
+
+    @Test
+    public void nominate_committeeDirectorRejectedEvenWithLegacyPermission() {
+        when(userContextHolder.current()).thenReturn(ctx("COMMITTEE_DIRECTOR", 10));
+        when(subjectRepository.findById(SUBJECT_ID)).thenReturn(Optional.of(electionSubject(SubjectStatus.DRAFT)));
+        VotingApplicationException ex = assertThrows(VotingApplicationException.class,
+                () -> service.nominate(nominateCmd()));
+        assertEquals(VotingApplicationException.Reason.PROPOSE_FORBIDDEN_FOR_TYPE, ex.getReason());
+        verify(electionCandidateRegistry, never()).nominate(anyLong(), anyLong(), anyString(), anyBoolean());
+    }
+
+    @Test
     public void nominate_tenantMismatchRejected() {
         VotingSubject s = electionSubject(SubjectStatus.DRAFT);
         s.setTenantId(88888L);
@@ -162,35 +216,57 @@ public class ElectionCandidateServiceTest {
 
     @Test
     public void partyReview_approve_pendingPartyToCommittee() {
+        mockRole("PARTY_SECRETARY");
         when(electionCandidateRegistry.findById(555L))
                 .thenReturn(Optional.of(candidate(CandidateStatus.PENDING_PARTY_REVIEW)));
-        when(electionCandidateRegistry.updateQualification(eq(555L), eq(PARTY), eq(COMMITTEE))).thenReturn(1);
+        when(electionCandidateRegistry.updateQualification(
+                eq(555L), eq(PARTY), eq(COMMITTEE), any(), any(), any(), any())).thenReturn(1);
         Candidate result = service.partyReview(new PartyReviewCandidateCommand(555L, true, OPERATOR));
         assertEquals(CandidateStatus.PENDING_COMMITTEE_REVIEW, result.getQualificationStatus());
-        verify(electionCandidateRegistry).updateQualification(eq(555L), eq(PARTY), eq(COMMITTEE));
+        verify(electionCandidateRegistry).updateQualification(
+                eq(555L), eq(PARTY), eq(COMMITTEE), any(), any(), any(), any());
     }
 
     @Test
     public void partyReview_reject_pendingPartyToRejected() {
+        mockRole("PARTY_SECRETARY");
         when(electionCandidateRegistry.findById(555L))
                 .thenReturn(Optional.of(candidate(CandidateStatus.PENDING_PARTY_REVIEW)));
-        when(electionCandidateRegistry.updateQualification(eq(555L), eq(PARTY), eq(REJECTED))).thenReturn(1);
-        Candidate result = service.partyReview(new PartyReviewCandidateCommand(555L, false, OPERATOR));
+        when(electionCandidateRegistry.updateQualification(
+                eq(555L), eq(PARTY), eq(REJECTED), eq("C1"), eq(REJECT_EVIDENCE),
+                eq(OPERATOR), eq("PARTY_REVIEW"))).thenReturn(1);
+        Candidate result = service.partyReview(new PartyReviewCandidateCommand(
+                555L, false, OPERATOR, "C1", REJECT_EVIDENCE));
         assertEquals(CandidateStatus.REJECTED, result.getQualificationStatus());
+        verify(electionCandidateRegistry).updateQualification(
+                eq(555L), eq(PARTY), eq(REJECTED), eq("C1"), eq(REJECT_EVIDENCE),
+                eq(OPERATOR), eq("PARTY_REVIEW"));
+    }
+
+    @Test
+    public void partyReview_rejectWithoutReasonCode_rejected() {
+        mockRole("PARTY_SECRETARY");
+        VotingApplicationException ex = assertThrows(VotingApplicationException.class,
+                () -> service.partyReview(new PartyReviewCandidateCommand(555L, false, OPERATOR, null, REJECT_EVIDENCE)));
+        assertEquals(VotingApplicationException.Reason.REJECT_REASON_CODE_REQUIRED, ex.getReason());
+        verify(electionCandidateRegistry, never()).findById(anyLong());
     }
 
     @Test
     public void partyReview_alreadyAdvancedToCommittee_conflict() {
+        mockRole("PARTY_SECRETARY");
         when(electionCandidateRegistry.findById(555L))
                 .thenReturn(Optional.of(candidate(CandidateStatus.PENDING_COMMITTEE_REVIEW)));
         VotingApplicationException ex = assertThrows(VotingApplicationException.class,
                 () -> service.partyReview(new PartyReviewCandidateCommand(555L, true, OPERATOR)));
         assertEquals(VotingApplicationException.Reason.CANDIDATE_REVIEW_CONFLICT, ex.getReason());
-        verify(electionCandidateRegistry, never()).updateQualification(anyLong(), anyInt(), anyInt());
+        verify(electionCandidateRegistry, never()).updateQualification(
+                anyLong(), anyInt(), anyInt(), any(), any(), any(), any());
     }
 
     @Test
     public void partyReview_candidateNotFound() {
+        mockRole("PARTY_SECRETARY");
         when(electionCandidateRegistry.findById(555L)).thenReturn(Optional.empty());
         VotingApplicationException ex = assertThrows(VotingApplicationException.class,
                 () -> service.partyReview(new PartyReviewCandidateCommand(555L, true, OPERATOR)));
@@ -201,6 +277,7 @@ public class ElectionCandidateServiceTest {
 
     @Test
     public void review_candidateNotFound() {
+        mockRole("COMMUNITY_ADMIN");
         when(electionCandidateRegistry.findById(555L)).thenReturn(Optional.empty());
         VotingApplicationException ex = assertThrows(VotingApplicationException.class,
                 () -> service.review(new ReviewCandidateCommand(555L, true, OPERATOR)));
@@ -209,30 +286,36 @@ public class ElectionCandidateServiceTest {
 
     @Test
     public void review_terminalStateConflict() {
+        mockRole("COMMUNITY_ADMIN");
         when(electionCandidateRegistry.findById(555L))
                 .thenReturn(Optional.of(candidate(CandidateStatus.APPROVED)));
         VotingApplicationException ex = assertThrows(VotingApplicationException.class,
                 () -> service.review(new ReviewCandidateCommand(555L, true, OPERATOR)));
         assertEquals(VotingApplicationException.Reason.CANDIDATE_REVIEW_CONFLICT, ex.getReason());
-        verify(electionCandidateRegistry, never()).updateQualification(anyLong(), anyInt(), anyInt());
+        verify(electionCandidateRegistry, never()).updateQualification(
+                anyLong(), anyInt(), anyInt(), any(), any(), any(), any());
     }
 
     @Test
     public void review_skipPartyPreReview_conflict() {
         // 候选人仍在党组前置审查阶段（未过前置审查），直接居委会资格通过应被状态机拒绝。
+        mockRole("COMMUNITY_ADMIN");
         when(electionCandidateRegistry.findById(555L))
                 .thenReturn(Optional.of(candidate(CandidateStatus.PENDING_PARTY_REVIEW)));
         VotingApplicationException ex = assertThrows(VotingApplicationException.class,
                 () -> service.review(new ReviewCandidateCommand(555L, true, OPERATOR)));
         assertEquals(VotingApplicationException.Reason.CANDIDATE_REVIEW_CONFLICT, ex.getReason());
-        verify(electionCandidateRegistry, never()).updateQualification(anyLong(), anyInt(), anyInt());
+        verify(electionCandidateRegistry, never()).updateQualification(
+                anyLong(), anyInt(), anyInt(), any(), any(), any(), any());
     }
 
     @Test
     public void review_optimisticUpdateZeroRows_conflict() {
+        mockRole("COMMUNITY_ADMIN");
         when(electionCandidateRegistry.findById(555L))
                 .thenReturn(Optional.of(candidate(CandidateStatus.PENDING_COMMITTEE_REVIEW)));
-        when(electionCandidateRegistry.updateQualification(eq(555L), eq(COMMITTEE), eq(APPROVED))).thenReturn(0);
+        when(electionCandidateRegistry.updateQualification(
+                eq(555L), eq(COMMITTEE), eq(APPROVED), any(), any(), any(), any())).thenReturn(0);
         VotingApplicationException ex = assertThrows(VotingApplicationException.class,
                 () -> service.review(new ReviewCandidateCommand(555L, true, OPERATOR)));
         assertEquals(VotingApplicationException.Reason.CANDIDATE_REVIEW_CONFLICT, ex.getReason());
@@ -240,20 +323,45 @@ public class ElectionCandidateServiceTest {
 
     @Test
     public void review_approveHappyPath() {
+        mockRole("COMMUNITY_ADMIN");
         when(electionCandidateRegistry.findById(555L))
                 .thenReturn(Optional.of(candidate(CandidateStatus.PENDING_COMMITTEE_REVIEW)));
-        when(electionCandidateRegistry.updateQualification(eq(555L), eq(COMMITTEE), eq(APPROVED))).thenReturn(1);
+        when(electionCandidateRegistry.updateQualification(
+                eq(555L), eq(COMMITTEE), eq(APPROVED), any(), any(), any(), any())).thenReturn(1);
         Candidate result = service.review(new ReviewCandidateCommand(555L, true, OPERATOR));
         assertEquals(CandidateStatus.APPROVED, result.getQualificationStatus());
-        verify(electionCandidateRegistry).updateQualification(eq(555L), eq(COMMITTEE), eq(APPROVED));
+        verify(electionCandidateRegistry).updateQualification(
+                eq(555L), eq(COMMITTEE), eq(APPROVED), any(), any(), any(), any());
     }
 
     @Test
     public void review_rejectHappyPath() {
+        mockRole("COMMUNITY_ADMIN");
         when(electionCandidateRegistry.findById(555L))
                 .thenReturn(Optional.of(candidate(CandidateStatus.PENDING_COMMITTEE_REVIEW)));
-        when(electionCandidateRegistry.updateQualification(eq(555L), eq(COMMITTEE), eq(REJECTED))).thenReturn(1);
-        Candidate result = service.review(new ReviewCandidateCommand(555L, false, OPERATOR));
+        when(electionCandidateRegistry.updateQualification(
+                eq(555L), eq(COMMITTEE), eq(REJECTED), eq("C2"), eq(REJECT_EVIDENCE),
+                eq(OPERATOR), eq("COMMITTEE_REVIEW"))).thenReturn(1);
+        Candidate result = service.review(new ReviewCandidateCommand(
+                555L, false, OPERATOR, "C2", REJECT_EVIDENCE));
         assertEquals(CandidateStatus.REJECTED, result.getQualificationStatus());
+    }
+
+    @Test
+    public void govSuperAdminCannotPartyReviewEvenIfPermissionMisconfigured() {
+        mockRole("GOV_SUPER_ADMIN");
+        VotingApplicationException ex = assertThrows(VotingApplicationException.class,
+                () -> service.partyReview(new PartyReviewCandidateCommand(555L, true, OPERATOR)));
+        assertEquals(VotingApplicationException.Reason.CANDIDATE_REVIEW_FORBIDDEN, ex.getReason());
+        verify(electionCandidateRegistry, never()).findById(anyLong());
+    }
+
+    @Test
+    public void govSuperAdminCannotCommitteeReviewEvenIfPermissionMisconfigured() {
+        mockRole("GOV_SUPER_ADMIN");
+        VotingApplicationException ex = assertThrows(VotingApplicationException.class,
+                () -> service.review(new ReviewCandidateCommand(555L, true, OPERATOR)));
+        assertEquals(VotingApplicationException.Reason.CANDIDATE_REVIEW_FORBIDDEN, ex.getReason());
+        verify(electionCandidateRegistry, never()).findById(anyLong());
     }
 }

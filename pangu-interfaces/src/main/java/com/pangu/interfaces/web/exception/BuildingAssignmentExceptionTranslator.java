@@ -17,6 +17,8 @@ public final class BuildingAssignmentExceptionTranslator {
             case USER_NOT_FOUND -> BuildingAssignmentErrorCode.USER_NOT_FOUND;
             case BUILDING_NOT_IN_SCOPE -> BuildingAssignmentErrorCode.BUILDING_NOT_IN_SCOPE;
             case ASSIGNMENT_NOT_FOUND -> BuildingAssignmentErrorCode.ASSIGNMENT_NOT_FOUND;
+            case USER_NOT_COMPLIANT -> BuildingAssignmentErrorCode.USER_NOT_COMPLIANT;
+            case BUILDING_OCCUPIED_BY_SAME_ROLE -> BuildingAssignmentErrorCode.BUILDING_OCCUPIED_BY_SAME_ROLE;
         };
     }
 }

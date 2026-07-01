@@ -4,6 +4,7 @@ import com.pangu.application.voting.VoteSubmissionService;
 import com.pangu.application.voting.VotingApplicationException;
 import com.pangu.application.voting.command.CastVoteCommand;
 import com.pangu.domain.context.UserContextHolder;
+import com.pangu.domain.gateway.VoteCastMonitorGateway;
 import com.pangu.domain.model.asset.OwnerPropertyVotingView;
 import com.pangu.domain.model.voting.Candidate;
 import com.pangu.domain.model.voting.CandidateStatus;
@@ -65,6 +66,8 @@ public class ElectionVoteSubmissionTest {
     private UserContextHolder userContextHolder;
     @Mock
     private ElectionCandidateRegistry electionCandidateRegistry;
+    @Mock
+    private VoteCastMonitorGateway voteCastMonitorGateway;
 
     @InjectMocks
     private VoteSubmissionService service;
@@ -184,5 +187,6 @@ public class ElectionVoteSubmissionTest {
         long voteId = service.cast(cmd(CANDIDATE_ID, VoteChoice.SUPPORT));
         assertEquals(777L, voteId);
         verify(voteItemRepository).insert(eq(SUBJECT_ID), any(), any());
+        verify(voteCastMonitorGateway).recordCast(any());
     }
 }

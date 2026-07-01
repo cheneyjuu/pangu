@@ -72,7 +72,18 @@ public interface ElectionCandidateRegistry {
      * @param newStatusDbValue   目标状态 db 值（PENDING_COMMITTEE_REVIEW=5 / APPROVED=2 / REJECTED=3）
      * @return affected rows（0 表示已被并发审查或当前状态非 expectedFrom）
      */
-    int updateQualification(Long candidateId, int expectedFromDbValue, int newStatusDbValue);
+    int updateQualification(Long candidateId,
+                            int expectedFromDbValue,
+                            int newStatusDbValue,
+                            String rejectReasonCode,
+                            String rejectEvidenceJson,
+                            Long rejectReviewerUserId,
+                            String rejectReviewStage);
+
+    default int updateQualification(Long candidateId, int expectedFromDbValue, int newStatusDbValue) {
+        return updateQualification(candidateId, expectedFromDbValue, newStatusDbValue,
+                null, null, null, null);
+    }
 
     /**
      * 统计某 opid 在某议题已投出的 SUPPORT 票数（maxWinners 计数门用）。

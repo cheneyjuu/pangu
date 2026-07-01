@@ -3,6 +3,7 @@ package com.pangu.domain.repository;
 import com.pangu.domain.model.voting.VotingScope;
 
 import java.math.BigDecimal;
+import java.util.Optional;
 
 /**
  * 投票分母只读读取端口（领域定义；实现在 infrastructure）。
@@ -24,12 +25,33 @@ public interface VotingDenominatorReader {
      */
     DenominatorTotals previewTotals(Long tenantId, VotingScope scope, Long scopeReferenceId);
 
+    Optional<FrozenDenominatorSnapshot> findFrozenSnapshot(Long subjectId);
+
     /**
      * 分母总量值对象（只读预览，非法定快照）。
      *
      * @param totalArea       去重后总专有面积
      * @param totalOwnerCount 去重后总业主人数
      */
-    record DenominatorTotals(BigDecimal totalArea, long totalOwnerCount) {
+    record DenominatorTotals(
+            BigDecimal totalArea,
+            long totalOwnerCount,
+            Long denominatorSnapshotId,
+            String denominatorMerkleRoot
+    ) {
+        public DenominatorTotals(BigDecimal totalArea, long totalOwnerCount) {
+            this(totalArea, totalOwnerCount, null, null);
+        }
+    }
+
+    /**
+     * 已落定的分母快照元数据。
+     */
+    record FrozenDenominatorSnapshot(
+            Long snapshotId,
+            BigDecimal totalArea,
+            long totalOwnerCount,
+            String merkleRoot
+    ) {
     }
 }

@@ -13,6 +13,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.hamcrest.Matchers.is;
@@ -53,6 +54,8 @@ public class ProposalHandoverEndToEndTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    private List<ActiveElectionBackup> suppressedActiveElections = List.of();
+
     @BeforeEach
     public void setUp() {
         cleanUp();
@@ -64,9 +67,33 @@ public class ProposalHandoverEndToEndTest {
     }
 
     private void cleanUp() {
+        restoreSuppressedActiveElections();
         jdbcTemplate.update(
                 "DELETE FROM t_voting_subject WHERE tenant_id = ? AND title LIKE ?",
                 TENANT_RUSHI, TITLE_PREFIX + "%");
+    }
+
+    private void suppressExistingActiveElections() {
+        suppressedActiveElections = jdbcTemplate.query(
+                "SELECT subject_id, status FROM t_voting_subject "
+                        + "WHERE tenant_id = ? AND subject_type = 1 AND status IN (2, 3, 4) "
+                        + "AND title NOT LIKE ?",
+                (rs, rowNum) -> new ActiveElectionBackup(rs.getLong("subject_id"), rs.getInt("status")),
+                TENANT_RUSHI, TITLE_PREFIX + "%");
+        for (ActiveElectionBackup backup : suppressedActiveElections) {
+            jdbcTemplate.update(
+                    "UPDATE t_voting_subject SET status = 5, settled_at = CURRENT_TIMESTAMP WHERE subject_id = ?",
+                    backup.subjectId());
+        }
+    }
+
+    private void restoreSuppressedActiveElections() {
+        for (ActiveElectionBackup backup : suppressedActiveElections) {
+            jdbcTemplate.update(
+                    "UPDATE t_voting_subject SET status = ?, settled_at = NULL WHERE subject_id = ?",
+                    backup.status(), backup.subjectId());
+        }
+        suppressedActiveElections = List.of();
     }
 
     /** 种一条在途 ELECTION（PUBLISHED）。 */
@@ -90,6 +117,7 @@ public class ProposalHandoverEndToEndTest {
     @Test
     public void generalProposeFrozenDuringHandover_thenAutoRecoversAfterSettlement() throws Exception {
         String comm = "Bearer " + jwtTokenProvider.generateToken(ACC_COMM, "SYS_USER", USR_COMM, TENANT_RUSHI);
+        suppressExistingActiveElections();
         long electionId = seedPublishedElection();
 
         // 1. 换届在途 → 新 GENERAL 立项被熔断 409 / 40926
@@ -112,5 +140,8 @@ public class ProposalHandoverEndToEndTest {
                         .content(generalProposeBody()))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.data.subjectType", is("GENERAL")));
+    }
+
+    private record ActiveElectionBackup(long subjectId, int status) {
     }
 }

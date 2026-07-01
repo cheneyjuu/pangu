@@ -6,7 +6,7 @@
     <!--
         装配管理端身份上下文。
         - sys_user → t_account（自然人主体 ID）
-        - sys_user → sys_dept（dept_category / dept.tenant_id）
+        - sys_user → sys_dept（dept_category / dept_type / dept.tenant_id）
         - sys_user → sys_user_role → sys_role（role_key + effective_data_scope）
         - effective_data_scope 优先级：sys_user_role.effective_data_scope（如设置）→ sys_role.fixed_data_scope → sys_role.default_data_scope
     -->
@@ -18,6 +18,7 @@
             u.dept_id        AS deptId,
             d.tenant_id      AS deptTenantId,
             d.dept_category  AS deptCategory,
+            d.dept_type      AS deptType,
             r.role_id        AS roleId,
             r.role_key       AS roleKey,
             COALESCE(ur.effective_data_scope, r.fixed_data_scope, r.default_data_scope) AS effectiveDataScope
@@ -25,7 +26,8 @@
         LEFT JOIN sys_dept d        ON u.dept_id = d.dept_id
         LEFT JOIN sys_user_role ur  ON u.user_id = ur.user_id
         LEFT JOIN sys_role r        ON ur.role_id = r.role_id AND r.status = '0'
-        WHERE u.user_id = #{userId}
+        WHERE u.account_id = #{accountId}
+          AND u.user_id = #{userId}
           AND u.status = '0'
         LIMIT 1
     </select>
@@ -39,9 +41,57 @@
             c.auth_level  AS authLevel
         FROM c_user c
         INNER JOIN t_account a ON c.account_id = a.account_id
-        WHERE c.uid = #{uid}
+        WHERE c.account_id = #{accountId}
+          AND c.uid = #{uid}
         LIMIT 1
     </select>
+
+    <select id="loadFaceAuthIdentity"
+            resultType="com.pangu.infrastructure.persistence.mapper.UserContextMapper$FaceAuthIdentityRow">
+        SELECT
+            real_name         AS realNameCipher,
+            id_card_encrypted AS idCardCipher
+        FROM t_account
+        WHERE account_id = #{accountId}
+          AND status = 1
+        LIMIT 1
+    </select>
+
+    <update id="upgradeCUserAuthLevel">
+        UPDATE c_user
+        SET auth_level = GREATEST(auth_level, #{authLevel}),
+            update_time = CURRENT_TIMESTAMP
+        WHERE uid = #{uid}
+          AND account_id = #{accountId}
+    </update>
+
+    <update id="markAccountRealNameVerified">
+        UPDATE t_account
+        SET real_name_verified = 1,
+            update_time = CURRENT_TIMESTAMP
+        WHERE account_id = #{accountId}
+    </update>
+
+    <insert id="insertFaceAuthAttestation">
+        INSERT INTO t_owner_face_auth_attestation (
+            uid,
+            account_id,
+            provider,
+            provider_request_id,
+            provider_result,
+            verified,
+            auth_level_after
+        )
+        VALUES (
+            #{uid},
+            #{accountId},
+            #{provider},
+            #{providerRequestId},
+            #{providerResult},
+            #{verified},
+            #{authLevelAfter}
+        )
+    </insert>
 
     <!-- 给定角色反查能力点（permission_key）集合。 -->
     <select id="selectPermissionsByRoleId" resultType="java.lang.String">
@@ -56,6 +106,16 @@
         FROM sys_user_building
         WHERE user_id = #{userId}
           AND status = 1
+    </select>
+
+    <!-- C_USER 登录默认 tenant：从业主名下房产中任选一条（按 opid 升序取第一个稳定）。 -->
+    <select id="selectDefaultTenantByUid" resultType="java.lang.Long">
+        SELECT tenant_id
+        FROM c_owner_property
+        WHERE uid = #{uid}
+          AND account_status = 1
+        ORDER BY opid ASC
+        LIMIT 1
     </select>
 
 </mapper>

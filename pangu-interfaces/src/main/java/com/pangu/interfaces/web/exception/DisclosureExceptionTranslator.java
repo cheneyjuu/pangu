@@ -24,6 +24,7 @@ public final class DisclosureExceptionTranslator {
             case LEDGER_QUERY_EMPTY -> DisclosureErrorCode.LEDGER_QUERY_EMPTY;
             case SNAPSHOT_CONCURRENT_MODIFICATION -> DisclosureErrorCode.SNAPSHOT_CONCURRENT_MODIFICATION;
             case HANDOVER_IN_PROGRESS -> DisclosureErrorCode.HANDOVER_IN_PROGRESS;
+            case DISCLOSURE_ROLE_FORBIDDEN -> DisclosureErrorCode.DISCLOSURE_ROLE_FORBIDDEN;
         };
     }
 }

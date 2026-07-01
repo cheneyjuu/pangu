@@ -83,9 +83,16 @@ public final class ElectionExceptionTranslator {
             case CANDIDATE_NOT_VOTABLE -> ElectionErrorCode.CANDIDATE_NOT_VOTABLE;
             case CANDIDATE_ALREADY_NOMINATED -> ElectionErrorCode.CANDIDATE_ALREADY_NOMINATED;
             case CANDIDATE_REVIEW_CONFLICT -> ElectionErrorCode.CANDIDATE_REVIEW_CONFLICT;
+            case CANDIDATE_REVIEW_FORBIDDEN -> ElectionErrorCode.CANDIDATE_REVIEW_FORBIDDEN;
             case VOTE_LIMIT_EXCEEDED -> ElectionErrorCode.VOTE_LIMIT_EXCEEDED;
             case SUBJECT_NOT_NOMINATABLE -> ElectionErrorCode.SUBJECT_NOT_NOMINATABLE;
+            case ELECTION_NO_APPROVED_CANDIDATE -> ElectionErrorCode.ELECTION_NO_APPROVED_CANDIDATE;
             case PROPOSE_FROZEN_HANDOVER -> ElectionErrorCode.PROPOSE_FROZEN_HANDOVER;
+            case SUBJECT_NOT_PENDING_COMMITTEE -> ElectionErrorCode.SUBJECT_NOT_PENDING_COMMITTEE;
+            case SUBJECT_NOT_PENDING_STREET -> ElectionErrorCode.SUBJECT_NOT_PENDING_STREET;
+            case REVIEW_REJECT_REASON_REQUIRED -> ElectionErrorCode.REVIEW_REJECT_REASON_REQUIRED;
+            case REJECT_REASON_CODE_REQUIRED -> ElectionErrorCode.REJECT_REASON_CODE_REQUIRED;
+            case REJECT_EVIDENCE_REQUIRED -> ElectionErrorCode.REJECT_EVIDENCE_REQUIRED;
         };
     }
 }

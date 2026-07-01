@@ -15,6 +15,11 @@ public record CommitteeReviewCommand(
         Long waiverId,
         Long approverUserId,
         boolean approve,
-        String opinion
+        String opinion,
+        String rejectReasonCode,
+        String rejectEvidenceJson
 ) {
+    public CommitteeReviewCommand(Long waiverId, Long approverUserId, boolean approve, String opinion) {
+        this(waiverId, approverUserId, approve, opinion, null, null);
+    }
 }

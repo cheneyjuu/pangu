@@ -1,15 +1,20 @@
 package com.pangu.application.waiver;
 
 import com.pangu.application.support.PayloadHasher;
+import com.pangu.application.support.ApplicationRoleGuard;
+import com.pangu.application.support.LockedTransactionTemplate;
+import com.pangu.application.support.StateMutationTemplate;
 import com.pangu.application.waiver.command.CommitteeReviewCommand;
 import com.pangu.application.waiver.command.RevokeWaiverCommand;
 import com.pangu.application.waiver.command.StreetReviewCommand;
 import com.pangu.application.waiver.command.SubmitDraftCommand;
+import com.pangu.application.voting.RejectEvidencePolicy;
+import com.pangu.domain.context.UserContextHolder;
 import com.pangu.domain.lock.DistributedLockTemplate;
-import com.pangu.domain.lock.DistributedLockTemplate.DistributedLockAcquisitionException;
 import com.pangu.domain.model.voting.CandidatePoolSnapshot;
 import com.pangu.domain.model.voting.VotingSubject;
 import com.pangu.domain.model.waiver.PartyRatioWaiver;
+import com.pangu.domain.model.waiver.WaiverStatus;
 import com.pangu.domain.policy.ReasonTextPolicy;
 import com.pangu.domain.repository.ElectionCandidateRegistry;
 import com.pangu.domain.repository.PartyRatioWaiverRepository;
@@ -46,6 +51,9 @@ import java.util.Optional;
  *
  * <p>本服务对外只抛 {@link WaiverApplicationException}；状态机与 dept_type 校验由聚合根
  * {@link PartyRatioWaiver} 完成，本服务捕获 {@link IllegalStateException} 转译。
+ *
+ * <p>初审 / 终审借鉴 {@code CampaignApplyService} 的动作路由，但审批不自动连续推进：
+ * waiver 审批每一步都需要真实角色签署，public 方法只触发一个明确动作。
  */
 @Slf4j
 @Service
@@ -54,6 +62,8 @@ public class WaiverApplicationService {
 
     /** Redis 锁 TTL（远大于单次事务执行时间，但短于业务上限以防死锁）。 */
     private static final Duration WAIVER_LOCK_TTL = Duration.ofSeconds(30);
+    private static final String WAIVER_COMMITTEE_REVIEW_ROLE = "COMMUNITY_ADMIN";
+    private static final String WAIVER_STREET_REVIEW_ROLE = "GOV_SUPER_ADMIN";
 
     private final PartyRatioWaiverRepository waiverRepository;
     private final VotingSubjectRepository subjectRepository;
@@ -62,6 +72,7 @@ public class WaiverApplicationService {
     private final DistributedLockTemplate lockTemplate;
     private final PayloadHasher payloadHasher;
     private final TransactionTemplate transactionTemplate;
+    private final UserContextHolder userContextHolder;
 
     /**
      * 居委会发起申请并直接进入初审待审。
@@ -101,16 +112,11 @@ public class WaiverApplicationService {
         // 锁外发起 → 锁内开事务 → 事务提交后释放锁。
         // 用 TransactionTemplate 而非 @Transactional 是为绕开 Spring 自调用代理失效问题：
         // 在锁回调里通过 this.method() 调用一个带 @Transactional 的方法，AOP advice 不会被触发。
-        try {
-            return lockTemplate.executeWithLock(lockKey, WAIVER_LOCK_TTL, () ->
-                    transactionTemplate.execute(status -> doSubmitDraftWithinTx(cmd)));
-        } catch (DistributedLockAcquisitionException e) {
-            // 锁被另一线程占用 → 语义上等同于「同议题已有一份正在提交/活跃」
-            // 三层防御里第①层即被拦下，对客户端统一为 WAIVER_ALREADY_PENDING 友好错误码。
-            throw new WaiverApplicationException(
-                    WaiverApplicationException.Reason.WAIVER_ALREADY_PENDING,
-                    "本议题已有另一份放宽申请正在提交中，请稍后再试", e);
-        }
+        return LockedTransactionTemplate.execute(lockTemplate, transactionTemplate, lockKey, WAIVER_LOCK_TTL,
+                () -> doSubmitDraftWithinTx(cmd),
+                e -> new WaiverApplicationException(
+                        WaiverApplicationException.Reason.WAIVER_ALREADY_PENDING,
+                        "本议题已有另一份放宽申请正在提交中，请稍后再试", e));
     }
 
     /**
@@ -136,7 +142,7 @@ public class WaiverApplicationService {
                 cmd.requestedRatio(), pool.partyCount(), pool.eligibleCount(),
                 cmd.reasonText(), cmd.reasonEvidenceKeys());
         try {
-            waiver.transitionTo(com.pangu.domain.model.waiver.WaiverStatus.PENDING_COMMITTEE);
+            waiver.transitionTo(WaiverStatus.PENDING_COMMITTEE);
         } catch (IllegalStateException e) {
             throw new WaiverApplicationException(
                     WaiverApplicationException.Reason.INVALID_TRANSITION, e.getMessage(), e);
@@ -155,24 +161,13 @@ public class WaiverApplicationService {
     /** 居委会初审。 */
     @Transactional
     public PartyRatioWaiver reviewByCommittee(CommitteeReviewCommand cmd) {
-        PartyRatioWaiver waiver = loadForUpdate(cmd.waiverId());
-        try {
-            if (cmd.approve()) {
-                waiver.approveByCommittee(cmd.approverUserId(), cmd.opinion());
-            } else {
-                waiver.reject(cmd.approverUserId(), cmd.opinion());
-            }
-        } catch (IllegalStateException e) {
-            throw mapStateException(e);
-        }
-        try {
-            waiverRepository.update(waiver);
-        } catch (OptimisticLockException e) {
-            throw new WaiverApplicationException(
-                    WaiverApplicationException.Reason.CONCURRENT_MODIFICATION,
-                    "Waiver 已被其他操作并发修改，请刷新后重试", e);
-        }
-        return waiver;
+        return executeReview(WaiverReviewAction.COMMITTEE_REVIEW,
+                cmd.waiverId(),
+                cmd.approverUserId(),
+                cmd.approve(),
+                cmd.opinion(),
+                cmd.rejectReasonCode(),
+                cmd.rejectEvidenceJson());
     }
 
     /**
@@ -181,44 +176,68 @@ public class WaiverApplicationService {
      */
     @Transactional
     public PartyRatioWaiver reviewByStreet(StreetReviewCommand cmd) {
-        PartyRatioWaiver waiver = loadForUpdate(cmd.waiverId());
-        try {
-            if (cmd.approve()) {
-                waiver.approveByStreet(cmd.approverUserId(), cmd.opinion());
-                String hash = payloadHasher.hashWaiverApproval(waiver);
-                waiver.lockLocalPayloadHash(hash);
-            } else {
-                waiver.reject(cmd.approverUserId(), cmd.opinion());
+        return executeReview(WaiverReviewAction.STREET_REVIEW,
+                cmd.waiverId(),
+                cmd.approverUserId(),
+                cmd.approve(),
+                cmd.opinion(),
+                cmd.rejectReasonCode(),
+                cmd.rejectEvidenceJson());
+    }
+
+    private PartyRatioWaiver executeReview(WaiverReviewAction action,
+                                           Long waiverId,
+                                           Long approverUserId,
+                                           boolean approve,
+                                           String opinion,
+                                           String rejectReasonCode,
+                                           String rejectEvidenceJson) {
+        assertRole(action.requiredRole, action.forbiddenMessage);
+        RejectEvidencePolicy.requireForReject(approve, rejectReasonCode, rejectEvidenceJson);
+        return StateMutationTemplate.execute(
+                () -> loadForUpdate(waiverId),
+                waiver -> applyReview(action, waiver, approverUserId, approve, opinion,
+                        rejectReasonCode, rejectEvidenceJson),
+                this::updateWaiver,
+                this::mapStateException);
+    }
+
+    private void applyReview(WaiverReviewAction action,
+                             PartyRatioWaiver waiver,
+                             Long approverUserId,
+                             boolean approve,
+                             String opinion,
+                             String rejectReasonCode,
+                             String rejectEvidenceJson) {
+        if (approve) {
+            action.approveTransition.apply(waiver, approverUserId, opinion);
+            if (action.lockPayloadHashAfterApprove) {
+                lockLocalPayloadHash(waiver);
             }
-        } catch (IllegalStateException e) {
-            throw mapStateException(e);
+            return;
         }
-        try {
-            waiverRepository.update(waiver);
-        } catch (OptimisticLockException e) {
-            throw new WaiverApplicationException(
-                    WaiverApplicationException.Reason.CONCURRENT_MODIFICATION,
-                    "Waiver 已被其他操作并发修改，请刷新后重试", e);
-        }
-        return waiver;
+        waiver.reject(approverUserId, opinion, rejectReasonCode, rejectEvidenceJson);
+    }
+
+    private void lockLocalPayloadHash(PartyRatioWaiver waiver) {
+        String hash = payloadHasher.hashWaiverApproval(waiver);
+        waiver.lockLocalPayloadHash(hash);
+    }
+
+    private void assertRole(String expectedRole, String message) {
+        ApplicationRoleGuard.requireRole(userContextHolder, expectedRole, message,
+                msg -> new WaiverApplicationException(
+                        WaiverApplicationException.Reason.APPROVER_DEPT_INVALID, msg));
     }
 
     /** 人工撤销。 */
     @Transactional
     public PartyRatioWaiver revoke(RevokeWaiverCommand cmd) {
-        PartyRatioWaiver waiver = loadForUpdate(cmd.waiverId());
-        try {
-            waiver.revokeManually();
-        } catch (IllegalStateException e) {
-            throw mapStateException(e);
-        }
-        try {
-            waiverRepository.update(waiver);
-        } catch (OptimisticLockException e) {
-            throw new WaiverApplicationException(
-                    WaiverApplicationException.Reason.CONCURRENT_MODIFICATION,
-                    "Waiver 已被其他操作并发修改，请刷新后重试", e);
-        }
+        PartyRatioWaiver waiver = StateMutationTemplate.execute(
+                () -> loadForUpdate(cmd.waiverId()),
+                PartyRatioWaiver::revokeManually,
+                this::updateWaiver,
+                this::mapStateException);
         log.info("Waiver 已被 user={} 人工撤销 waiverId={}", cmd.operatorUserId(), cmd.waiverId());
         return waiver;
     }
@@ -235,6 +254,16 @@ public class WaiverApplicationService {
                         "Waiver 不存在 waiverId=" + waiverId));
     }
 
+    private void updateWaiver(PartyRatioWaiver waiver) {
+        try {
+            waiverRepository.update(waiver);
+        } catch (OptimisticLockException e) {
+            throw new WaiverApplicationException(
+                    WaiverApplicationException.Reason.CONCURRENT_MODIFICATION,
+                    "Waiver 已被其他操作并发修改，请刷新后重试", e);
+        }
+    }
+
     private WaiverApplicationException mapStateException(IllegalStateException e) {
         String msg = e.getMessage() == null ? "" : e.getMessage();
         if (msg.contains("终审与初审审批人不能为同一人")) {
@@ -248,5 +277,38 @@ public class WaiverApplicationService {
     /** 仅供测试与监控 hooks，提供默认 ratio 常量。 */
     public static BigDecimal defaultRatioFloor() {
         return new BigDecimal("0.50");
+    }
+
+    private enum WaiverReviewAction {
+        COMMITTEE_REVIEW(
+                WAIVER_COMMITTEE_REVIEW_ROLE,
+                "Waiver 居委会初审仅限居委会管理员",
+                false,
+                PartyRatioWaiver::approveByCommittee),
+        STREET_REVIEW(
+                WAIVER_STREET_REVIEW_ROLE,
+                "Waiver 街道终审仅限街道办",
+                true,
+                PartyRatioWaiver::approveByStreet);
+
+        private final String requiredRole;
+        private final String forbiddenMessage;
+        private final boolean lockPayloadHashAfterApprove;
+        private final WaiverApproveTransition approveTransition;
+
+        WaiverReviewAction(String requiredRole,
+                           String forbiddenMessage,
+                           boolean lockPayloadHashAfterApprove,
+                           WaiverApproveTransition approveTransition) {
+            this.requiredRole = requiredRole;
+            this.forbiddenMessage = forbiddenMessage;
+            this.lockPayloadHashAfterApprove = lockPayloadHashAfterApprove;
+            this.approveTransition = approveTransition;
+        }
+    }
+
+    @FunctionalInterface
+    private interface WaiverApproveTransition {
+        void apply(PartyRatioWaiver waiver, Long approverUserId, String opinion);
     }
 }

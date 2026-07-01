@@ -1,6 +1,7 @@
 package com.pangu.application.voting;
 
 import com.pangu.application.support.PayloadHasher;
+import com.pangu.application.handover.TenantTermLockService;
 import com.pangu.application.voting.command.SettleSubjectCommand;
 import com.pangu.domain.model.attestation.AttestationPayload;
 import com.pangu.domain.model.attestation.AttestationReceipt;
@@ -61,6 +62,8 @@ public class VotingApplicationService {
     private final VotingEngineRouter engineRouter;
     private final JudicialChainPort judicialChainPort;
     private final PayloadHasher payloadHasher;
+    private final TenantTermLockService tenantTermLockService;
+    private final VotingMobilizationService votingMobilizationService;
 
     /**
      * 触发议题结算。幂等：重复调用对已 SETTLED 的议题直接返回历史快照。
@@ -152,6 +155,8 @@ public class VotingApplicationService {
                     VotingApplicationException.Reason.CONCURRENT_SETTLEMENT,
                     "议题在结算过程中被并发修改 subjectId=" + cmd.subjectId());
         }
+        votingMobilizationService.deactivateForSubject(cmd.subjectId(), Instant.now());
+        tenantTermLockService.engageAfterElectionSettled(subject);
 
         log.info("Subject settled subjectId={} type={} statisticsVersion={} passed={} txHash={}",
                 cmd.subjectId(), subject.getSubjectType(), newSettleVersion,

@@ -3,13 +3,15 @@ package com.pangu.interfaces.web.controller.dto.voting;
 import com.pangu.domain.model.asset.OwnerSummary;
 
 /**
- * 业主检索视图（提名候选人「按手机号关联业主」）。
+ * 业主检索视图（提名候选人「按手机号 / 姓名 / 拼音关联业主」）。
  *
- * <p>手机号脱敏回显（{@code 138****0012}）用于辨识；{@code uid} 保留供提名调用自动带入。
- * 不含姓名（{@code real_name} 为 SM4 加密列，检索链路不解密）。
+ * <p>手机号脱敏回显（{@code 138****0012}），{@code uid} 保留供提名调用自动带入。
+ * 姓名 {@code name} 在姓名/拼音搜索链路由 application 解密后填入；手机号 fast-path 下为 {@code null}。
+ * 候选人最终公示后姓名本就公开，提名管理端展示明文姓名的隐私敞口与公示一致。
  */
 public record OwnerSearchResponse(
         Long uid,
+        String name,
         String phoneMasked,
         Long buildingId,
         Long roomId
@@ -17,6 +19,7 @@ public record OwnerSearchResponse(
     public static OwnerSearchResponse from(OwnerSummary owner) {
         return new OwnerSearchResponse(
                 owner.getUid(),
+                owner.getRealName(),
                 maskPhone(owner.getPhone()),
                 owner.getBuildingId(),
                 owner.getRoomId());

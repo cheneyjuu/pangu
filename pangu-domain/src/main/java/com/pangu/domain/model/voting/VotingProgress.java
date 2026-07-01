@@ -8,7 +8,8 @@ import java.math.RoundingMode;
  *
  * <p>区别于结算产物 {@link VotingResult}：本对象服务于「投票进行中」的实时进度看板，
  * 由 {@link VotingProgressCalculator} 依据与 {@link AbstractVotingEngine#settle} 完全一致的
- * 去重 / 双 2/3 门槛口径计算，但<strong>不落快照、非法定值</strong>——结算快照才是唯一法定结论。
+ * 去重 / 双 2/3 门槛口径计算，但<strong>不产生结算快照、非法定结论</strong>——结算快照才是唯一法定结论。
+ * 对已立项冰封分母的议题，本对象会携带分母快照 ID 与 Merkle root，供前端展示存证依据。
  *
  * <p>SETTLED 态进度可由结算快照直接构造（participating/quorum/passed 精确）；
  * 此时 support 字段因快照表无 support 列而为 null，调用方需容忍。
@@ -26,6 +27,8 @@ import java.math.RoundingMode;
  * @param quorumSatisfied         是否达到双 2/3 法定门槛
  * @param settled                 是否已结算（true 表示数据来自法定快照）
  * @param passed                  议题是否通过（仅 settled 时有意义）
+ * @param denominatorSnapshotId   分母快照 ID；已冰封存证时非空
+ * @param denominatorMerkleRoot   分母行级明细 Merkle root；已冰封存证时非空
  */
 public record VotingProgress(
         Long subjectId,
@@ -40,7 +43,9 @@ public record VotingProgress(
         Long supportOwnerCount,
         boolean quorumSatisfied,
         boolean settled,
-        boolean passed
+        boolean passed,
+        Long denominatorSnapshotId,
+        String denominatorMerkleRoot
 ) {
 
     /** 参与面积占比（4 位小数，分母 0 返 0；口径同 {@link VotingResult}）。 */

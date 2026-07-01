@@ -11,11 +11,18 @@
         <result property="name" column="name"/>
         <result property="isPartyMember" column="is_party_member"/>
         <result property="qualificationStatus" column="qualification_status"/>
+        <result property="rejectReasonCode" column="reject_reason_code"/>
+        <result property="rejectEvidenceJson" column="reject_evidence_json"/>
+        <result property="rejectReviewerUserId" column="reject_reviewer_user_id"/>
+        <result property="rejectReviewStage" column="reject_review_stage"/>
+        <result property="rejectedAt" column="rejected_at"/>
         <result property="createTime" column="create_time"/>
     </resultMap>
 
     <sql id="all_columns">
-        candidate_id, subject_id, uid, name, is_party_member, qualification_status, create_time
+        candidate_id, subject_id, uid, name, is_party_member, qualification_status,
+        reject_reason_code, reject_evidence_json::text AS reject_evidence_json,
+        reject_reviewer_user_id, reject_review_stage, rejected_at, create_time
     </sql>
 
     <!-- 提名写入：status=PENDING_PARTY_REVIEW(1)，create_time 由 DB DEFAULT 兜底。 -->
@@ -32,6 +39,22 @@
     <update id="updateQualification">
         UPDATE t_election_candidate
         SET qualification_status = #{newStatus}
+        <choose>
+            <when test="rejectReasonCode != null">
+                , reject_reason_code = #{rejectReasonCode}
+                , reject_evidence_json = CAST(#{rejectEvidenceJson} AS jsonb)
+                , reject_reviewer_user_id = #{rejectReviewerUserId}
+                , reject_review_stage = #{rejectReviewStage}
+                , rejected_at = CURRENT_TIMESTAMP
+            </when>
+            <otherwise>
+                , reject_reason_code = NULL
+                , reject_evidence_json = NULL
+                , reject_reviewer_user_id = NULL
+                , reject_review_stage = NULL
+                , rejected_at = NULL
+            </otherwise>
+        </choose>
         WHERE candidate_id = #{candidateId}
           AND qualification_status = #{expectedFrom}
     </update>

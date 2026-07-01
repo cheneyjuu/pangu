@@ -3,12 +3,14 @@ package com.pangu.infrastructure.voting;
 import com.pangu.domain.model.voting.VotingScope;
 import com.pangu.domain.repository.VotingDenominatorReader;
 import com.pangu.infrastructure.persistence.entity.DenominatorItemRow;
+import com.pangu.infrastructure.persistence.entity.DenominatorSnapshotRow;
 import com.pangu.infrastructure.persistence.mapper.VotingDenominatorSnapshotMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * {@link VotingDenominatorReader} 默认实现：只读复用 {@code selectDenominatorItems} 的 room_id 双重去重查询。
@@ -54,5 +56,21 @@ public class VotingDenominatorReaderImpl implements VotingDenominatorReader {
                 .count();
 
         return new DenominatorTotals(totalArea, totalOwnerCount);
+    }
+
+    @Override
+    public Optional<FrozenDenominatorSnapshot> findFrozenSnapshot(Long subjectId) {
+        if (subjectId == null) {
+            return Optional.empty();
+        }
+        DenominatorSnapshotRow row = snapshotMapper.selectSnapshotBySubjectId(subjectId);
+        if (row == null) {
+            return Optional.empty();
+        }
+        return Optional.of(new FrozenDenominatorSnapshot(
+                row.getSnapshotId(),
+                row.getTotalArea(),
+                row.getTotalOwnerCount(),
+                row.getAggregateHash()));
     }
 }

@@ -15,7 +15,12 @@ import java.util.Objects;
  *
  * <p>状态流转矩阵（M3-2 锁定）：
  * <pre>
- *     DRAFT      --publish--&gt;     PUBLISHED
+ *     DRAFT      --publish--&gt;     PUBLISHED      (GENERAL/MAJOR)
+ *     DRAFT      --submit--&gt;      PENDING_COMMITTEE
+ *     PENDING_COMMITTEE --approve--&gt; PENDING_STREET
+ *     PENDING_COMMITTEE --reject--&gt;  DRAFT
+ *     PENDING_STREET    --approve--&gt; PUBLISHED
+ *     PENDING_STREET    --reject--&gt;  DRAFT
  *     DRAFT      --cancel(self)--&gt; CANCELLED
  *     PUBLISHED  --openVoting--&gt;  VOTING       (scheduler 自动)
  *     PUBLISHED  --cancel(gov)--&gt; CANCELLED
@@ -33,7 +38,10 @@ public final class VotingSubjectActions {
 
     static {
         TRANSITIONS = new EnumMap<>(SubjectStatus.class);
-        TRANSITIONS.put(SubjectStatus.DRAFT,     EnumSet.of(SubjectStatus.PUBLISHED, SubjectStatus.CANCELLED));
+        TRANSITIONS.put(SubjectStatus.DRAFT,     EnumSet.of(SubjectStatus.PUBLISHED, SubjectStatus.CANCELLED,
+                SubjectStatus.PENDING_COMMITTEE));
+        TRANSITIONS.put(SubjectStatus.PENDING_COMMITTEE, EnumSet.of(SubjectStatus.PENDING_STREET, SubjectStatus.DRAFT));
+        TRANSITIONS.put(SubjectStatus.PENDING_STREET,    EnumSet.of(SubjectStatus.PUBLISHED, SubjectStatus.DRAFT));
         TRANSITIONS.put(SubjectStatus.PUBLISHED, EnumSet.of(SubjectStatus.VOTING,    SubjectStatus.CANCELLED));
         TRANSITIONS.put(SubjectStatus.VOTING,    EnumSet.of(SubjectStatus.CLOSED));
         TRANSITIONS.put(SubjectStatus.CLOSED,    EnumSet.of(SubjectStatus.SETTLED));
@@ -108,6 +116,48 @@ public final class VotingSubjectActions {
         subject.setStatus(SubjectStatus.PUBLISHED);
     }
 
+    /** ELECTION: DRAFT → PENDING_COMMITTEE。 */
+    public static void submitForCommitteeReview(VotingSubject subject) {
+        Objects.requireNonNull(subject, "subject 不能为空");
+        ensureElection(subject);
+        ensureTransition(subject.getStatus(), SubjectStatus.PENDING_COMMITTEE);
+        subject.setStatus(SubjectStatus.PENDING_COMMITTEE);
+    }
+
+    /** ELECTION: PENDING_COMMITTEE → PENDING_STREET。 */
+    public static void committeeApprove(VotingSubject subject) {
+        Objects.requireNonNull(subject, "subject 不能为空");
+        ensureElection(subject);
+        ensureTransition(subject.getStatus(), SubjectStatus.PENDING_STREET);
+        subject.setStatus(SubjectStatus.PENDING_STREET);
+    }
+
+    /** ELECTION: PENDING_COMMITTEE → DRAFT。 */
+    public static void committeeReject(VotingSubject subject, String reason) {
+        Objects.requireNonNull(subject, "subject 不能为空");
+        ensureElection(subject);
+        ensureRejectReason(reason);
+        ensureTransition(subject.getStatus(), SubjectStatus.DRAFT);
+        subject.setStatus(SubjectStatus.DRAFT);
+    }
+
+    /** ELECTION: PENDING_STREET → PUBLISHED。 */
+    public static void streetApprove(VotingSubject subject) {
+        Objects.requireNonNull(subject, "subject 不能为空");
+        ensureElection(subject);
+        ensureTransition(subject.getStatus(), SubjectStatus.PUBLISHED);
+        subject.setStatus(SubjectStatus.PUBLISHED);
+    }
+
+    /** ELECTION: PENDING_STREET → DRAFT。 */
+    public static void streetReject(VotingSubject subject, String reason) {
+        Objects.requireNonNull(subject, "subject 不能为空");
+        ensureElection(subject);
+        ensureRejectReason(reason);
+        ensureTransition(subject.getStatus(), SubjectStatus.DRAFT);
+        subject.setStatus(SubjectStatus.DRAFT);
+    }
+
     /** PUBLISHED → VOTING。仅 scheduler 调用；要求当前时间 ≥ vote_start_at。 */
     public static void openVoting(VotingSubject subject, Instant now) {
         Objects.requireNonNull(subject, "subject 不能为空");
@@ -170,6 +220,23 @@ public final class VotingSubjectActions {
         if (!allowed.contains(to)) {
             throw new IllegalSubjectTransitionException(
                     "非法状态跳转 from=" + from + " to=" + to);
+        }
+    }
+
+    private static void ensureElection(VotingSubject subject) {
+        if (subject.getSubjectType() != SubjectType.ELECTION) {
+            throw new IllegalSubjectTransitionException(
+                    "仅 ELECTION 议题允许双签审批 subjectId=" + subject.getSubjectId()
+                            + " subjectType=" + subject.getSubjectType());
+        }
+    }
+
+    private static void ensureRejectReason(String reason) {
+        if (reason == null || reason.isBlank()) {
+            throw new IllegalArgumentException("review reject reason 不能为空");
+        }
+        if (reason.length() > 500) {
+            throw new IllegalArgumentException("review reject reason 长度超过 500");
         }
     }
 

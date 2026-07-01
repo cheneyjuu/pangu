@@ -18,7 +18,7 @@ import java.time.Instant;
  *   <li>{@link SubjectType#MAJOR}：街道办 / 业委会主任；</li>
  *   <li>{@link SubjectType#GENERAL}：街道办 / 业委会主任 / 物业经理。</li>
  * </ul>
- * 角色与 SubjectType 的最终匹配由 service 层依据 {@code voting:subject:create} 角色绑定判定。
+ * 角色与 SubjectType 的最终匹配由 controller 类型化权限和 service 层 role/dept_type 护栏共同判定。
  */
 public record ProposeRequest(
         @NotBlank @Size(max = 200) String title,

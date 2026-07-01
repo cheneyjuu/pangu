@@ -17,6 +17,11 @@ public record StreetReviewCommand(
         Long waiverId,
         Long approverUserId,
         boolean approve,
-        String opinion
+        String opinion,
+        String rejectReasonCode,
+        String rejectEvidenceJson
 ) {
+    public StreetReviewCommand(Long waiverId, Long approverUserId, boolean approve, String opinion) {
+        this(waiverId, approverUserId, approve, opinion, null, null);
+    }
 }

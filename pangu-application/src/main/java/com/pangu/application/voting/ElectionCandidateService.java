@@ -1,8 +1,11 @@
 package com.pangu.application.voting;
 
+import com.pangu.application.support.ApplicationRoleGuard;
 import com.pangu.application.voting.command.NominateCandidateCommand;
 import com.pangu.application.voting.command.PartyReviewCandidateCommand;
 import com.pangu.application.voting.command.ReviewCandidateCommand;
+import com.pangu.domain.context.UserContext;
+import com.pangu.domain.context.UserContextHolder;
 import com.pangu.domain.gateway.PropertyGateway;
 import com.pangu.domain.model.asset.OwnerSummary;
 import com.pangu.domain.model.voting.Candidate;
@@ -13,12 +16,14 @@ import com.pangu.domain.model.voting.SubjectType;
 import com.pangu.domain.model.voting.VotingSubject;
 import com.pangu.domain.repository.ElectionCandidateRegistry;
 import com.pangu.domain.repository.VotingSubjectRepository;
+import com.pangu.domain.security.NameDecryptor;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Set;
 
 /**
  * 选举候选人编排服务（M3-3 引入）。
@@ -43,9 +48,22 @@ public class ElectionCandidateService {
     private final VotingSubjectRepository subjectRepository;
     private final ElectionCandidateRegistry electionCandidateRegistry;
     private final PropertyGateway propertyGateway;
+    private final NameDecryptor nameDecryptor;
+    private final UserContextHolder userContextHolder;
 
-    /** 手机号前缀检索最小位数：低于此长度不查，避免无意义的全表前缀扫描。 */
-    private static final int MIN_PHONE_PREFIX_LENGTH = 3;
+    /** 数字 keyword（手机号）检索最小位数：低于此长度不查，避免无意义的全表扫描。 */
+    private static final int MIN_PHONE_FRAGMENT_LENGTH = 3;
+    /** 姓名 keyword 检索最小位数：1 字符即可（中文一字也常用）。 */
+    private static final int MIN_NAME_KEYWORD_LENGTH = 1;
+    /** 姓名匹配预扫描池上限：本租户业主超过此值时只取前 N 条。 */
+    private static final int NAME_SEARCH_POOL_LIMIT = 1000;
+    /** 姓名搜索结果上限。 */
+    private static final int NAME_SEARCH_RESULT_LIMIT = 20;
+    /** 选举候选人录入执行人：G 端基层经办员。 */
+    private static final String ELECTION_NOMINATE_ROLE = "GOV_OPERATOR";
+    private static final Set<Integer> ELECTION_NOMINATE_DEPT_TYPES = Set.of(2, 5);
+    private static final String PARTY_REVIEW_ROLE = "PARTY_SECRETARY";
+    private static final String COMMITTEE_REVIEW_ROLE = "COMMUNITY_ADMIN";
 
     /**
      * 提名候选人。要求议题存在、为 ELECTION、status ∈ {DRAFT, PUBLISHED}。
@@ -61,6 +79,14 @@ public class ElectionCandidateService {
                     VotingApplicationException.Reason.SUBJECT_NOT_NOMINATABLE,
                     "非 ELECTION 议题不支持候选人提名 subjectId=" + cmd.subjectId()
                             + " type=" + subject.getSubjectType());
+        }
+        UserContext ctx = userContextHolder.current();
+        if (!canNominateElection(ctx)) {
+            throw new VotingApplicationException(
+                    VotingApplicationException.Reason.PROPOSE_FORBIDDEN_FOR_TYPE,
+                    "ELECTION 候选人提名仅限 G 端基层经办员（dept_type IN (2,5)），当前角色="
+                            + ApplicationRoleGuard.currentRole(ctx)
+                            + " deptType=" + (ctx == null ? null : ctx.deptType()));
         }
         if (subject.getStatus() != SubjectStatus.DRAFT && subject.getStatus() != SubjectStatus.PUBLISHED) {
             throw new VotingApplicationException(
@@ -87,6 +113,12 @@ public class ElectionCandidateService {
         return candidateId;
     }
 
+    private boolean canNominateElection(UserContext ctx) {
+        return ctx != null
+                && ELECTION_NOMINATE_ROLE.equals(ctx.roleKey())
+                && ELECTION_NOMINATE_DEPT_TYPES.contains(ctx.deptType());
+    }
+
     /**
      * 党组书记前置审查：PENDING_PARTY_REVIEW → PENDING_COMMITTEE_REVIEW（通过）/ REJECTED（驳回）。
      *
@@ -94,31 +126,13 @@ public class ElectionCandidateService {
      */
     @Transactional
     public Candidate partyReview(PartyReviewCandidateCommand cmd) {
-        Candidate candidate = electionCandidateRegistry.findById(cmd.candidateId())
-                .orElseThrow(() -> new VotingApplicationException(
-                        VotingApplicationException.Reason.CANDIDATE_NOT_FOUND,
-                        "候选人不存在 candidateId=" + cmd.candidateId()));
-        CandidateStatus from = candidate.getQualificationStatus();
-        try {
-            if (cmd.approve()) {
-                ElectionCandidateActions.partyApprove(candidate);
-            } else {
-                ElectionCandidateActions.partyReject(candidate);
-            }
-        } catch (ElectionCandidateActions.IllegalCandidateTransitionException e) {
-            throw new VotingApplicationException(
-                    VotingApplicationException.Reason.CANDIDATE_REVIEW_CONFLICT, e.getMessage(), e);
-        }
-        int updated = electionCandidateRegistry.updateQualification(
-                candidate.getCandidateId(), from.getDbValue(), candidate.getQualificationStatus().getDbValue());
-        if (updated != 1) {
-            throw new VotingApplicationException(
-                    VotingApplicationException.Reason.CANDIDATE_REVIEW_CONFLICT,
-                    "候选人已被并发审查 candidateId=" + cmd.candidateId());
-        }
-        log.info("Candidate party-reviewed candidateId={} approve={} newStatus={} operatorUserId={}",
-                cmd.candidateId(), cmd.approve(), candidate.getQualificationStatus(), cmd.operatorUserId());
-        return candidate;
+        return executeCandidateReview(
+                CandidateReviewAction.PARTY_REVIEW,
+                cmd.candidateId(),
+                cmd.approve(),
+                cmd.operatorUserId(),
+                cmd.rejectReasonCode(),
+                cmd.rejectEvidenceJson());
     }
 
     /**
@@ -129,31 +143,13 @@ public class ElectionCandidateService {
      */
     @Transactional
     public Candidate review(ReviewCandidateCommand cmd) {
-        Candidate candidate = electionCandidateRegistry.findById(cmd.candidateId())
-                .orElseThrow(() -> new VotingApplicationException(
-                        VotingApplicationException.Reason.CANDIDATE_NOT_FOUND,
-                        "候选人不存在 candidateId=" + cmd.candidateId()));
-        CandidateStatus from = candidate.getQualificationStatus();
-        try {
-            if (cmd.approve()) {
-                ElectionCandidateActions.approve(candidate);
-            } else {
-                ElectionCandidateActions.reject(candidate);
-            }
-        } catch (ElectionCandidateActions.IllegalCandidateTransitionException e) {
-            throw new VotingApplicationException(
-                    VotingApplicationException.Reason.CANDIDATE_REVIEW_CONFLICT, e.getMessage(), e);
-        }
-        int updated = electionCandidateRegistry.updateQualification(
-                candidate.getCandidateId(), from.getDbValue(), candidate.getQualificationStatus().getDbValue());
-        if (updated != 1) {
-            throw new VotingApplicationException(
-                    VotingApplicationException.Reason.CANDIDATE_REVIEW_CONFLICT,
-                    "候选人已被并发审查 candidateId=" + cmd.candidateId());
-        }
-        log.info("Candidate reviewed candidateId={} approve={} newStatus={} operatorUserId={}",
-                cmd.candidateId(), cmd.approve(), candidate.getQualificationStatus(), cmd.operatorUserId());
-        return candidate;
+        return executeCandidateReview(
+                CandidateReviewAction.COMMITTEE_REVIEW,
+                cmd.candidateId(),
+                cmd.approve(),
+                cmd.operatorUserId(),
+                cmd.rejectReasonCode(),
+                cmd.rejectEvidenceJson());
     }
 
     /**
@@ -161,6 +157,66 @@ public class ElectionCandidateService {
      */
     public List<Candidate> listCandidates(Long subjectId) {
         return electionCandidateRegistry.findBySubject(subjectId);
+    }
+
+    private void requireRole(String expectedRole, String message) {
+        ApplicationRoleGuard.requireRole(userContextHolder, expectedRole, message,
+                msg -> new VotingApplicationException(
+                        VotingApplicationException.Reason.CANDIDATE_REVIEW_FORBIDDEN, msg));
+    }
+
+    private Candidate executeCandidateReview(CandidateReviewAction action,
+                                             Long candidateId,
+                                             boolean approve,
+                                             Long operatorUserId,
+                                             String rejectReasonCode,
+                                             String rejectEvidenceJson) {
+        requireRole(action.requiredRole, action.forbiddenMessage);
+        RejectEvidencePolicy.requireForReject(approve, rejectReasonCode, rejectEvidenceJson);
+        Candidate candidate = electionCandidateRegistry.findById(candidateId)
+                .orElseThrow(() -> new VotingApplicationException(
+                        VotingApplicationException.Reason.CANDIDATE_NOT_FOUND,
+                        "候选人不存在 candidateId=" + candidateId));
+
+        CandidateStatus from = candidate.getQualificationStatus();
+        applyCandidateTransition(action, candidate, approve);
+        int updated = electionCandidateRegistry.updateQualification(
+                candidate.getCandidateId(),
+                from.getDbValue(),
+                candidate.getQualificationStatus().getDbValue(),
+                approve ? null : rejectReasonCode,
+                approve ? null : rejectEvidenceJson,
+                approve ? null : operatorUserId,
+                approve ? null : action.reviewStage);
+        if (updated != 1) {
+            throw new VotingApplicationException(
+                    VotingApplicationException.Reason.CANDIDATE_REVIEW_CONFLICT,
+                    "候选人已被并发审查 candidateId=" + candidateId);
+        }
+        if (!approve) {
+            candidate.setRejectReasonCode(rejectReasonCode);
+            candidate.setRejectEvidenceJson(rejectEvidenceJson);
+            candidate.setRejectReviewerUserId(operatorUserId);
+            candidate.setRejectReviewStage(action.reviewStage);
+        }
+        log.info("Candidate review action={} candidateId={} approve={} newStatus={} operatorUserId={}",
+                action.reviewStage, candidateId, approve, candidate.getQualificationStatus(), operatorUserId);
+        return candidate;
+    }
+
+    private void applyCandidateTransition(CandidateReviewAction action,
+                                          Candidate candidate,
+                                          boolean approve) {
+        try {
+            if (approve) {
+                action.approveTransition.apply(candidate);
+            } else {
+                action.rejectTransition.apply(candidate);
+            }
+        } catch (ElectionCandidateActions.IllegalCandidateTransitionException e) {
+            throw new VotingApplicationException(
+                    VotingApplicationException.Reason.CANDIDATE_REVIEW_CONFLICT, e.getMessage(), e);
+        }
     }
 
     /**
@@ -171,19 +227,104 @@ public class ElectionCandidateService {
     }
 
     /**
-     * 提名候选人时按手机号前缀检索本租户业主，用于自动关联 uid（uid 内部 id 不便记忆）。
+     * 提名候选人前按关键词检索业主，自动分流到「手机号 / 姓名」两种路径：
+     * <ul>
+     *   <li>关键词全数字 → 调 {@link PropertyGateway#searchOwnersByPhone}，
+     *       SQL 模糊匹配前缀/中段/尾号，截 20 条；</li>
+     *   <li>关键词含非数字字符 → 拉本租户业主池（≤ {@value #NAME_SEARCH_POOL_LIMIT}），
+     *       逐条 {@link NameDecryptor} 解密 {@code real_name}，做 contains 过滤。</li>
+     * </ul>
      *
-     * <p>守卫：手机号前缀去空白后不足 {@value #MIN_PHONE_PREFIX_LENGTH} 位直接返回空列表，
-     * 避免无意义的全表前缀扫描。命中由 SQL 限本租户业主 + 上限 20 条。
+     * <p>守卫：
+     * 数字 keyword 不足 {@value #MIN_PHONE_FRAGMENT_LENGTH} 位 / 姓名 keyword 为空 → 返回空列表。
+     * 命中结果统一截 {@value #NAME_SEARCH_RESULT_LIMIT} 条。
      */
-    public List<OwnerSummary> searchNominatableOwners(String phonePrefix, Long tenantId) {
-        if (phonePrefix == null) {
+    public List<OwnerSummary> searchNominatableOwners(String keyword, Long tenantId) {
+        if (keyword == null) {
             return List.of();
         }
-        String prefix = phonePrefix.trim();
-        if (prefix.length() < MIN_PHONE_PREFIX_LENGTH) {
+        String k = keyword.trim();
+        if (k.isEmpty()) {
             return List.of();
         }
-        return propertyGateway.searchOwnersByPhone(prefix, tenantId);
+        if (isAllDigits(k)) {
+            if (k.length() < MIN_PHONE_FRAGMENT_LENGTH) {
+                return List.of();
+            }
+            return propertyGateway.searchOwnersByPhone(k, tenantId);
+        }
+        if (k.length() < MIN_NAME_KEYWORD_LENGTH) {
+            return List.of();
+        }
+        return searchByName(k, tenantId);
+    }
+
+    /**
+     * 姓名匹配：从本租户业主池逐条解密 real_name，做姓名 contains 过滤。
+     */
+    private List<OwnerSummary> searchByName(String keyword, Long tenantId) {
+        List<OwnerSummary> pool = propertyGateway.listAllNominatableOwners(tenantId, NAME_SEARCH_POOL_LIMIT);
+        return pool.stream()
+                .map(this::decryptRealName)
+                .filter(owner -> owner.getRealName() != null && owner.getRealName().contains(keyword))
+                .limit(NAME_SEARCH_RESULT_LIMIT)
+                .toList();
+    }
+
+    /** 用 NameDecryptor 把 OwnerSummary 的 SM4 密文 realName 替换为明文（密文非法则保留原值）。 */
+    private OwnerSummary decryptRealName(OwnerSummary owner) {
+        String decrypted = nameDecryptor.safeDecrypt(owner.getRealName());
+        return OwnerSummary.builder()
+                .uid(owner.getUid())
+                .phone(owner.getPhone())
+                .buildingId(owner.getBuildingId())
+                .roomId(owner.getRoomId())
+                .realName(decrypted)
+                .build();
+    }
+
+    private static boolean isAllDigits(String s) {
+        for (int i = 0; i < s.length(); i++) {
+            if (!Character.isDigit(s.charAt(i))) return false;
+        }
+        return true;
+    }
+
+    private enum CandidateReviewAction {
+        PARTY_REVIEW(
+                PARTY_REVIEW_ROLE,
+                "候选人党组前置审查仅限党组织书记",
+                "PARTY_REVIEW",
+                ElectionCandidateActions::partyApprove,
+                ElectionCandidateActions::partyReject),
+        COMMITTEE_REVIEW(
+                COMMITTEE_REVIEW_ROLE,
+                "候选人居委会资格审查仅限居委会",
+                "COMMITTEE_REVIEW",
+                ElectionCandidateActions::approve,
+                ElectionCandidateActions::reject);
+
+        private final String requiredRole;
+        private final String forbiddenMessage;
+        private final String reviewStage;
+        private final CandidateTransition approveTransition;
+        private final CandidateTransition rejectTransition;
+
+        CandidateReviewAction(String requiredRole,
+                              String forbiddenMessage,
+                              String reviewStage,
+                              CandidateTransition approveTransition,
+                              CandidateTransition rejectTransition) {
+            this.requiredRole = requiredRole;
+            this.forbiddenMessage = forbiddenMessage;
+            this.reviewStage = reviewStage;
+            this.approveTransition = approveTransition;
+            this.rejectTransition = rejectTransition;
+        }
+    }
+
+    @FunctionalInterface
+    private interface CandidateTransition {
+        void apply(Candidate candidate);
     }
 }

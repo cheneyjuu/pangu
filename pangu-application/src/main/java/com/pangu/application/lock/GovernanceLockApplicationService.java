@@ -3,8 +3,11 @@ package com.pangu.application.lock;
 import com.pangu.application.lock.command.CommitteeUnlockCommand;
 import com.pangu.application.lock.command.LockCommand;
 import com.pangu.application.lock.command.StreetUnlockCommand;
+import com.pangu.application.support.ApplicationRoleGuard;
+import com.pangu.application.support.LockedTransactionTemplate;
+import com.pangu.application.support.StateMutationTemplate;
+import com.pangu.domain.context.UserContextHolder;
 import com.pangu.domain.lock.DistributedLockTemplate;
-import com.pangu.domain.lock.DistributedLockTemplate.DistributedLockAcquisitionException;
 import com.pangu.domain.model.lock.GovernanceLock;
 import com.pangu.domain.model.lock.LockEntityType;
 import com.pangu.domain.repository.GovernanceLockRepository;
@@ -46,10 +49,13 @@ public class GovernanceLockApplicationService {
 
     /** Redis 锁 TTL（远大于单次事务执行时间，但短于业务上限以防死锁）。 */
     private static final Duration LOCK_TTL = Duration.ofSeconds(30);
+    private static final String COMMITTEE_UNLOCK_ROLE = "COMMITTEE_DIRECTOR";
+    private static final String STREET_UNLOCK_ROLE = "GOV_SUPER_ADMIN";
 
     private final GovernanceLockRepository lockRepository;
     private final DistributedLockTemplate lockTemplate;
     private final TransactionTemplate transactionTemplate;
+    private final UserContextHolder userContextHolder;
 
     /**
      * 锁定指定业务实体。先 Redis 锁串行化，再事务内行锁查询，最后落库由唯一索引兜底。
@@ -57,14 +63,11 @@ public class GovernanceLockApplicationService {
     public GovernanceLock lock(LockCommand cmd) {
         String key = String.format("lock:gov:tenant:%d:type:%s:entity:%d",
                 cmd.tenantId(), cmd.entityType().name(), cmd.entityId());
-        try {
-            return lockTemplate.executeWithLock(key, LOCK_TTL, () ->
-                    transactionTemplate.execute(status -> doLockWithinTx(cmd)));
-        } catch (DistributedLockAcquisitionException e) {
-            throw new GovernanceLockApplicationException(
-                    GovernanceLockApplicationException.Reason.LOCK_ALREADY_EXISTS,
-                    "目标实体正在被另一线程锁定，请稍后再试", e);
-        }
+        return LockedTransactionTemplate.execute(lockTemplate, transactionTemplate, key, LOCK_TTL,
+                () -> doLockWithinTx(cmd),
+                e -> new GovernanceLockApplicationException(
+                        GovernanceLockApplicationException.Reason.LOCK_ALREADY_EXISTS,
+                        "目标实体正在被另一线程锁定，请稍后再试", e));
     }
 
     /**
@@ -92,39 +95,27 @@ public class GovernanceLockApplicationService {
     /** 业委会主任解锁初签。 */
     @Transactional
     public GovernanceLock committeeSign(CommitteeUnlockCommand cmd) {
-        GovernanceLock lock = loadForUpdate(cmd.lockId());
-        try {
-            lock.signByCommittee(cmd.approverUserId(), cmd.signature());
-        } catch (IllegalStateException e) {
-            throw mapStateException(e);
-        }
-        try {
-            lockRepository.update(lock);
-        } catch (OptimisticLockException e) {
-            throw new GovernanceLockApplicationException(
-                    GovernanceLockApplicationException.Reason.LOCK_CONCURRENT_MODIFICATION,
-                    "治理锁已被其他操作并发修改，请刷新后重试", e);
-        }
-        return lock;
+        return executeSign(LockSignAction.COMMITTEE_SIGN,
+                cmd.lockId(), cmd.approverUserId(), cmd.signature());
     }
 
     /** 街道办解锁终签。 */
     @Transactional
     public GovernanceLock streetSign(StreetUnlockCommand cmd) {
-        GovernanceLock lock = loadForUpdate(cmd.lockId());
-        try {
-            lock.signByStreet(cmd.approverUserId(), cmd.signature());
-        } catch (IllegalStateException e) {
-            throw mapStateException(e);
-        }
-        try {
-            lockRepository.update(lock);
-        } catch (OptimisticLockException e) {
-            throw new GovernanceLockApplicationException(
-                    GovernanceLockApplicationException.Reason.LOCK_CONCURRENT_MODIFICATION,
-                    "治理锁已被其他操作并发修改，请刷新后重试", e);
-        }
-        return lock;
+        return executeSign(LockSignAction.STREET_SIGN,
+                cmd.lockId(), cmd.approverUserId(), cmd.signature());
+    }
+
+    private GovernanceLock executeSign(LockSignAction action,
+                                       Long lockId,
+                                       Long approverUserId,
+                                       String signature) {
+        requireRole(action.requiredRole, action.forbiddenMessage);
+        return StateMutationTemplate.execute(
+                () -> loadForUpdate(lockId),
+                lock -> action.transition.apply(lock, approverUserId, signature),
+                this::updateLock,
+                this::mapStateException);
     }
 
     /**
@@ -152,6 +143,22 @@ public class GovernanceLockApplicationService {
                         "治理锁不存在 lockId=" + lockId));
     }
 
+    private void requireRole(String expectedRole, String message) {
+        ApplicationRoleGuard.requireRole(userContextHolder, expectedRole, message,
+                msg -> new GovernanceLockApplicationException(
+                        GovernanceLockApplicationException.Reason.LOCK_ROLE_FORBIDDEN, msg));
+    }
+
+    private void updateLock(GovernanceLock lock) {
+        try {
+            lockRepository.update(lock);
+        } catch (OptimisticLockException e) {
+            throw new GovernanceLockApplicationException(
+                    GovernanceLockApplicationException.Reason.LOCK_CONCURRENT_MODIFICATION,
+                    "治理锁已被其他操作并发修改，请刷新后重试", e);
+        }
+    }
+
     private GovernanceLockApplicationException mapStateException(IllegalStateException e) {
         String msg = e.getMessage() == null ? "" : e.getMessage();
         if (msg.contains("终签与初签审批人不能为同一人")) {
@@ -160,5 +167,33 @@ public class GovernanceLockApplicationService {
         }
         return new GovernanceLockApplicationException(
                 GovernanceLockApplicationException.Reason.LOCK_INVALID_TRANSITION, msg, e);
+    }
+
+    private enum LockSignAction {
+        COMMITTEE_SIGN(
+                COMMITTEE_UNLOCK_ROLE,
+                "仅业委会主任可执行治理锁初签",
+                GovernanceLock::signByCommittee),
+        STREET_SIGN(
+                STREET_UNLOCK_ROLE,
+                "仅街道办超管可执行治理锁终签",
+                GovernanceLock::signByStreet);
+
+        private final String requiredRole;
+        private final String forbiddenMessage;
+        private final LockSignTransition transition;
+
+        LockSignAction(String requiredRole,
+                       String forbiddenMessage,
+                       LockSignTransition transition) {
+            this.requiredRole = requiredRole;
+            this.forbiddenMessage = forbiddenMessage;
+            this.transition = transition;
+        }
+    }
+
+    @FunctionalInterface
+    private interface LockSignTransition {
+        void apply(GovernanceLock lock, Long approverUserId, String signature);
     }
 }

@@ -1,12 +1,15 @@
 package com.pangu.bootstrap.voting;
 
+import com.pangu.application.handover.TenantTermLockService;
 import com.pangu.application.voting.ProposalLifecycleService;
 import com.pangu.application.voting.VotingApplicationException;
 import com.pangu.application.voting.VotingApplicationService;
+import com.pangu.application.voting.VotingProgressQueryService;
 import com.pangu.application.voting.command.ProposeSubjectCommand;
 import com.pangu.application.voting.command.SettleSubjectCommand;
 import com.pangu.domain.model.voting.ElectionSubject;
 import com.pangu.domain.model.voting.SubjectType;
+import com.pangu.domain.model.voting.VotingProgress;
 import com.pangu.domain.model.voting.VotingScope;
 import com.pangu.domain.model.voting.VotingSubject;
 import com.pangu.domain.repository.VotingResultRepository;
@@ -21,6 +24,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -56,19 +60,45 @@ public class ElectionProposeAndRouterTest {
     private VotingApplicationService votingApplicationService;
 
     @Autowired
+    private VotingProgressQueryService votingProgressQueryService;
+
+    @Autowired
     private VotingSubjectRepository votingSubjectRepository;
+
+    @Autowired
+    private TenantTermLockService tenantTermLockService;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    @Autowired
+    private com.pangu.domain.context.UserContextHolder userContextHolder;
+
     @BeforeEach
     public void setUp() {
         cleanUp();
+        // M5 起 ELECTION 立项加角色护栏（仅 G 端 GOV_OPERATOR）。
+        // 测试直接调 service，无 JWT 上下文 → 默认 ANONYMOUS 会被拒；
+        // 显式注入一个白名单内角色让既有正向测试继续工作。
+        userContextHolder.set(new com.pangu.domain.context.UserContext(
+                999805L,
+                com.pangu.domain.context.UserContext.IdentityType.SYS_USER,
+                800005L,
+                TEST_TENANT_ID,
+                101L,
+                com.pangu.domain.context.UserContext.DeptCategory.G,
+                2,
+                com.pangu.domain.model.user.DataScopeType.ALL_COMMUNITY,
+                com.pangu.domain.model.user.AuthenticationLevel.L1,
+                "GOV_OPERATOR",
+                java.util.Set.of(),
+                java.util.Set.of()));
     }
 
     @AfterEach
     public void tearDown() {
         cleanUp();
+        userContextHolder.clear();
     }
 
     private void cleanUp() {
@@ -88,6 +118,7 @@ public class ElectionProposeAndRouterTest {
         jdbcTemplate.update(
                 "DELETE FROM t_election_candidate WHERE subject_id IN "
                         + "(SELECT subject_id FROM t_voting_subject WHERE tenant_id = ?)", TEST_TENANT_ID);
+        jdbcTemplate.update("DELETE FROM t_tenant_term_state WHERE tenant_id = ?", TEST_TENANT_ID);
         jdbcTemplate.update("DELETE FROM t_voting_subject WHERE tenant_id = ?", TEST_TENANT_ID);
         jdbcTemplate.update("DELETE FROM c_owner_property WHERE tenant_id = ?", TEST_TENANT_ID);
         jdbcTemplate.update(
@@ -128,6 +159,11 @@ public class ElectionProposeAndRouterTest {
                 Long.class, uid, TEST_TENANT_ID, TEST_BUILDING, roomId, area);
     }
 
+    private void seedFrozenDenominatorOwner(String phone, Long roomId, BigDecimal area) {
+        Long uid = insertUser(phone);
+        insertOwnership(uid, roomId, area);
+    }
+
     private Long insertApprovedCandidate(Long subjectId, Long uid, String name, int isParty) {
         return jdbcTemplate.queryForObject(
                 "INSERT INTO t_election_candidate(subject_id, uid, name, is_party_member, qualification_status) "
@@ -153,6 +189,8 @@ public class ElectionProposeAndRouterTest {
 
     @Test
     public void propose_electionWithMaxWinners_persistsAndRebuildsElectionSubject() {
+        seedFrozenDenominatorOwner("77500000011", 650011L, new BigDecimal("100.00"));
+
         VotingSubject draft = proposalLifecycleService.propose(electionCmd(3));
         assertNotNull(draft.getSubjectId());
 
@@ -165,6 +203,33 @@ public class ElectionProposeAndRouterTest {
         ElectionSubject electionSubject = assertInstanceOf(ElectionSubject.class, reloaded,
                 "toAggregate 应把 ELECTION 行还原为 ElectionSubject");
         assertEquals(3, electionSubject.getMaxWinners());
+
+        Map<String, Object> snapshot = jdbcTemplate.queryForMap(
+                "SELECT snapshot_id, total_area, total_owner_count, aggregate_hash "
+                        + "FROM t_voting_denominator_snapshot WHERE subject_id = ?",
+                draft.getSubjectId());
+        assertEquals(0, new BigDecimal("100.00").compareTo((BigDecimal) snapshot.get("total_area")));
+        assertEquals(1L, ((Number) snapshot.get("total_owner_count")).longValue());
+        assertEquals(64, ((String) snapshot.get("aggregate_hash")).length());
+    }
+
+    @Test
+    public void propose_electionFreezesDenominatorMerkle_forProgressEvenIfPropertyChangesLater() {
+        seedFrozenDenominatorOwner("77500000021", 650021L, new BigDecimal("100.00"));
+        VotingSubject draft = proposalLifecycleService.propose(electionCmd(3));
+
+        Map<String, Object> frozen = jdbcTemplate.queryForMap(
+                "SELECT snapshot_id, aggregate_hash FROM t_voting_denominator_snapshot WHERE subject_id = ?",
+                draft.getSubjectId());
+
+        seedFrozenDenominatorOwner("77500000022", 650022L, new BigDecimal("900.00"));
+
+        VotingProgress progress = votingProgressQueryService.queryProgress(draft.getSubjectId(), TEST_TENANT_ID);
+        assertEquals(0, new BigDecimal("100.00").compareTo(progress.totalArea()),
+                "进度应使用立项时已冻结分母，而不是后续新增房产");
+        assertEquals(1L, progress.totalOwnerCount());
+        assertEquals(((Number) frozen.get("snapshot_id")).longValue(), progress.denominatorSnapshotId());
+        assertEquals(frozen.get("aggregate_hash"), progress.denominatorMerkleRoot());
     }
 
     // ===== trigger 13 反例 =====
@@ -225,6 +290,20 @@ public class ElectionProposeAndRouterTest {
         Integer finalStatus = jdbcTemplate.queryForObject(
                 "SELECT status FROM t_voting_subject WHERE subject_id = ?", Integer.class, subjectId);
         assertEquals(5, finalStatus, "议题应被翻转为 SETTLED(5)");
+
+        Map<String, Object> termState = jdbcTemplate.queryForMap(
+                "SELECT term_status, term_locked_by_subject_id FROM t_tenant_term_state WHERE tenant_id = ?",
+                TEST_TENANT_ID);
+        assertEquals(2, ((Number) termState.get("term_status")).intValue(),
+                "ELECTION 结算后租户应进入 HANDOVER_LOCK");
+        assertEquals(subjectId, ((Number) termState.get("term_locked_by_subject_id")).longValue(),
+                "任期锁应记录触发结算的 ELECTION 议题");
+
+        tenantTermLockService.confirmHandover(TEST_TENANT_ID, PROPOSER_ID);
+        Integer releasedStatus = jdbcTemplate.queryForObject(
+                "SELECT term_status FROM t_tenant_term_state WHERE tenant_id = ?",
+                Integer.class, TEST_TENANT_ID);
+        assertEquals(1, releasedStatus, "街道备案通过后应恢复 NORMAL");
     }
 
     private static String rootMessage(Throwable ex) {

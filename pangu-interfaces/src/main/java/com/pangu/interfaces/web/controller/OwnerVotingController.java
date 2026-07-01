@@ -4,10 +4,12 @@ import com.pangu.application.voting.ElectionCandidateService;
 import com.pangu.application.voting.ProposalLifecycleService;
 import com.pangu.application.voting.VoteSubmissionService;
 import com.pangu.application.voting.VotingApplicationException;
+import com.pangu.application.voting.VotingProgressQueryService;
 import com.pangu.application.voting.command.CastVoteCommand;
 import com.pangu.domain.model.voting.Candidate;
 import com.pangu.domain.model.voting.SubjectStatus;
 import com.pangu.domain.model.voting.VoteItem;
+import com.pangu.domain.model.voting.VotingProgress;
 import com.pangu.domain.model.voting.VotingScope;
 import com.pangu.domain.model.voting.VotingSubject;
 import com.pangu.domain.repository.OwnerPropertyVotingRepository;
@@ -17,6 +19,7 @@ import com.pangu.interfaces.security.SecurityUtils;
 import com.pangu.interfaces.web.controller.dto.voting.CandidateResponse;
 import com.pangu.interfaces.web.controller.dto.voting.CastVoteRequest;
 import com.pangu.interfaces.web.controller.dto.voting.OwnerSubjectResponse;
+import com.pangu.interfaces.web.controller.dto.voting.SubjectProgressResponse;
 import com.pangu.interfaces.web.controller.dto.voting.VoteAcknowledgement;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -55,6 +58,7 @@ public class OwnerVotingController extends BaseController {
     private final VoteItemRepository voteItemRepository;
     private final OwnerPropertyVotingRepository ownerPropertyVotingRepository;
     private final ElectionCandidateService electionCandidateService;
+    private final VotingProgressQueryService votingProgressQueryService;
 
     /** "我的议题"列表：按 building 范围 + 状态过滤。 */
     @GetMapping("/voting-subjects")
@@ -106,6 +110,23 @@ public class OwnerVotingController extends BaseController {
         return success(candidates.stream().map(CandidateResponse::from).toList());
     }
 
+    /**
+     * 业主侧议题进度查询（双过半实时进度 / 法定结算快照）。
+     *
+     * <p>与管理端 {@code SubjectAdminController.progress} 同口径，但鉴权为
+     * {@code isAuthenticated()}——业主无 {@code voting:subject:audit} 权限，
+     * 通过 {@link #assertSubjectVisibleForOwner} 校验议题对该业主可见即可放行。
+     */
+    @GetMapping("/voting-subjects/{subjectId}/progress")
+    @PreAuthorize("isAuthenticated()")
+    public Result<SubjectProgressResponse> progressForOwner(@PathVariable("subjectId") Long subjectId) {
+        Long uid = requireUid();
+        Long tenantId = requireTenantId();
+        assertSubjectVisibleForOwner(subjectId, uid, tenantId);
+        VotingProgress progress = votingProgressQueryService.queryProgress(subjectId, tenantId);
+        return success(SubjectProgressResponse.from(progress));
+    }
+
     /** 业主投票提交。返回 voteId + voted=true，刻意不返回当前票数。 */
     @PostMapping("/voting-subjects/{subjectId}/votes")
     @PreAuthorize("isAuthenticated()")
@@ -119,7 +140,8 @@ public class OwnerVotingController extends BaseController {
                 request.opid(),
                 request.targetId(),
                 request.choice(),
-                request.signatureHash());
+                request.signatureHash(),
+                request.voteChannel());
         long voteId = voteSubmissionService.cast(cmd);
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(success("投票成功", VoteAcknowledgement.of(voteId)));

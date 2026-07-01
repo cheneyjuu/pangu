@@ -33,6 +33,14 @@ public interface VotingSubjectMapper {
                       @Param("expectedVersion") long expectedVersion);
 
     /**
+     * 状态翻转 + 追加 review_history JSONB 审计记录。
+     */
+    int updateStatusWithReviewHistory(@Param("subjectId") Long subjectId,
+                                      @Param("newStatus") int newStatus,
+                                      @Param("expectedVersion") long expectedVersion,
+                                      @Param("reviewEntryJson") String reviewEntryJson);
+
+    /**
      * 调度器扫描：{@code status = 3 (VOTING) AND vote_end_at < now()} 的议题，
      * 按 vote_end_at 升序返回前 {@code limit} 条。
      */
@@ -57,6 +65,17 @@ public interface VotingSubjectMapper {
      */
     List<VotingSubjectRow> selectPublishedReadyForOpen(@Param("now") Instant now,
                                                         @Param("limit") int limit);
+
+    /**
+     * HANDOVER_LOCK 生效时暂停非 ELECTION 的 PUBLISHED/VOTING 议题倒计时。
+     */
+    int suspendVotingClocksForHandover(@Param("tenantId") Long tenantId,
+                                       @Param("electionSubjectId") Long electionSubjectId);
+
+    /**
+     * HANDOVER_LOCK 解除时按暂停时长顺延 vote_start_at/vote_end_at 并清空暂停标记。
+     */
+    int resumeVotingClocksAfterHandover(@Param("tenantId") Long tenantId);
 
     /**
      * "我的议题"：tenant + status 范围 + scope 过滤。当 buildingIds 为空时仅返回 COMMUNITY 议题。
@@ -91,4 +110,3 @@ public interface VotingSubjectMapper {
      */
     Long selectActiveElectionSubjectId(@Param("tenantId") Long tenantId);
 }
-

@@ -85,7 +85,9 @@ public class VotingProgressCalculator {
                 (long) supportUids.size(),
                 quorumSatisfied,
                 false,
-                false);
+                false,
+                totals.denominatorSnapshotId(),
+                totals.denominatorMerkleRoot());
     }
 
     /** 双 2/3 门槛：面积与人数同时满足 {@code 3 * 参与 >= 2 * 总量}（口径同引擎 checkQuorum）。 */

@@ -66,3 +66,32 @@ platform:
   voting:
     deadline-cron: "0 * * * * *"   # 每分钟整扫一次到期议题
     deadline-batch-size: 100
+    reminder-outbox-cron: "15 * * * * *"  # 每分钟第 15 秒消费催票通知 outbox
+    reminder-outbox-batch-size: 50
+    reminder-delivery-mode: database       # database=展开逐户投递明细；mock=仅日志
+    reminder-delivery-cron: "30 * * * * *" # 每分钟第 30 秒投递催票明细
+    reminder-delivery-batch-size: 50
+    sms-provider-mode: mock                # mock=本地回执；http=调用外部短信网关
+    sms-provider:
+      endpoint:
+      bearer-token:
+      timeout-millis: 3000
+      # 可选：真实供应商模板编码；为空时沿用投递明细 messageTemplate。
+      template-code:
+      # 可选：按逗号配置回执 ID 字段，支持点路径，如 data.messageId。
+      provider-message-id-fields:
+      # 可选：按业务响应字段校验成功码，支持点路径；为空时只按 HTTP 2xx + 回执 ID 判断。
+      success-code-field:
+      success-code-values:
+      # 可选：配置后发送 HMAC-SHA256(timestamp + "\n" + body) 签名。
+      signature-secret:
+      signature-header: X-Pangu-Signature
+      signature-timestamp-header: X-Pangu-Timestamp
+    monitor:
+      # 无签名票数 / 成功写票总数超过该阈值时触发纸票/线下票占比告警。
+      unsigned-ratio-threshold: "0.30"
+      # 相邻写票间隔小于 30 秒的次数达到该阈值时触发快速连续投票告警。
+      rapid-interval-threshold: 1
+  handover:
+    # HANDOVER_LOCK 下资金类敏感操作的大额阈值；>= 阈值熔断，< 阈值放行。
+    large-amount-threshold: "10000.00"

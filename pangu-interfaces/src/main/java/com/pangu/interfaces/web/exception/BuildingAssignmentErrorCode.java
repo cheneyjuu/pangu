@@ -10,6 +10,8 @@ package com.pangu.interfaces.web.exception;
  *   42403  用户不存在/非可分配角色（404）
  *   42404  楼栋越界（403）—— 楼栋不在分配者租户
  *   42405  撤销记录不存在（404）
+ *   42406  目标用户不满足合规要求（422）—— 账号停用 / 未实名 / 楼栋上限
+ *   42407  楼栋已被同角色占用（409）—— 前端 force=true 二次确认转移
  * </pre>
  *
  * <p>与 {@link com.pangu.application.admin.BuildingAssignmentApplicationException.Reason}
@@ -21,7 +23,9 @@ public enum BuildingAssignmentErrorCode implements ErrorCode {
     FORBIDDEN(42402, "当前角色无权分配楼栋责任田", 403, ErrorType.BIZ, false),
     USER_NOT_FOUND(42403, "目标用户不存在或不持可分配角色", 404, ErrorType.BIZ, false),
     BUILDING_NOT_IN_SCOPE(42404, "楼栋不在分配者数据范围内", 403, ErrorType.BIZ, false),
-    ASSIGNMENT_NOT_FOUND(42405, "无生效的楼栋分配记录，无需撤销", 404, ErrorType.BIZ, false);
+    ASSIGNMENT_NOT_FOUND(42405, "无生效的楼栋分配记录，无需撤销", 404, ErrorType.BIZ, false),
+    USER_NOT_COMPLIANT(42406, "目标用户不满足合规要求", 422, ErrorType.BIZ, false),
+    BUILDING_OCCUPIED_BY_SAME_ROLE(42407, "该楼栋已被同角色其他用户占用", 409, ErrorType.BIZ, false);
 
     private final int code;
     private final String message;

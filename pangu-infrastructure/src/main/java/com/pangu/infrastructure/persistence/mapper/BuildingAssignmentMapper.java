@@ -3,6 +3,7 @@ package com.pangu.infrastructure.persistence.mapper;
 import com.pangu.infrastructure.persistence.annotation.DataScope;
 import com.pangu.infrastructure.persistence.entity.AssignableUserRow;
 import com.pangu.infrastructure.persistence.entity.BuildingAssignmentRow;
+import com.pangu.infrastructure.persistence.entity.BuildingOccupantRow;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
@@ -21,6 +22,23 @@ public interface BuildingAssignmentMapper {
     /** 同租户内某角色用户 + 已生效楼栋数（tenantId=null 时跨租户）。 */
     List<AssignableUserRow> selectUsersByRole(@Param("roleKey") String roleKey,
                                               @Param("tenantId") Long tenantId);
+
+    /**
+     * 模糊搜索可分配角色用户。
+     *
+     * <p>三字段 OR：nick_name ILIKE / phone = / phone LIKE %tail。
+     * 受可分配角色（GRID_OPERATOR / VOLUNTEER / OWNER_REPRESENTATIVE）固定过滤；
+     * tenantId=null 时跨租户。{@code limit} 由 service 层注入硬上限。
+     */
+    List<AssignableUserRow> searchUsers(@Param("keyword") String keyword,
+                                        @Param("tenantId") Long tenantId,
+                                        @Param("limit") int limit);
+
+    /**
+     * 某楼栋当前所有 status=1 的占用者（含不同角色）。
+     */
+    List<BuildingOccupantRow> selectOccupantsByBuilding(@Param("buildingId") Long buildingId,
+                                                        @Param("tenantId") Long tenantId);
 
     /** distinct building_id（@DataScope 行级兜底 + 显式 tenant_id 过滤）。 */
     @DataScope(buildingAlias = "op")

@@ -51,11 +51,17 @@ public interface OwnerPropertyMapper {
     List<Long> selectBuildingIdsByUid(@Param("uid") Long uid, @Param("tenantId") Long tenantId);
 
     /**
-     * 按手机号前缀检索本租户业主（换届选举提名候选人定位业主）。
-     * phone 走 idx_account_phone 索引前缀匹配，一行一业主，上限 20 条。
+     * 按手机号片段（前缀 / 中段 / 尾号）模糊检索本租户业主。
+     * phone {@code LIKE '%xxx%'} 不走索引前缀但租户内业主规模有限，可接受；上限 20 条。
      */
-    List<OwnerLookupRow> searchOwnersByPhonePrefix(@Param("tenantId") Long tenantId,
-                                                   @Param("phonePrefix") String phonePrefix);
+    List<OwnerLookupRow> searchOwnersByPhoneFragment(@Param("tenantId") Long tenantId,
+                                                    @Param("phoneFragment") String phoneFragment);
+
+    /**
+     * 拉取本租户全部可提名业主含 SM4 密文 {@code real_name}（供 application 层解密做姓名/拼音匹配）。
+     */
+    List<OwnerLookupRow> listNominatableOwnersWithName(@Param("tenantId") Long tenantId,
+                                                       @Param("limit") int limit);
 
     /**
      * 业主名册分页查询（M4 读侧）。

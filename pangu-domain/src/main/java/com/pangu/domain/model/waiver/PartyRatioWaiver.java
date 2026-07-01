@@ -54,10 +54,14 @@ public class PartyRatioWaiver {
     private Long committeeApprover;
     private Instant committeeApprovalAt;
     private String committeeOpinion;
+    private String committeeRejectReasonCode;
+    private String committeeRejectEvidenceJson;
 
     private Long streetApprover;
     private Instant streetApprovalAt;
     private String streetOpinion;
+    private String streetRejectReasonCode;
+    private String streetRejectEvidenceJson;
 
     private Instant appliedAt;
 
@@ -177,11 +181,17 @@ public class PartyRatioWaiver {
      * 需 {@code waiver:approve:committee}；PENDING_STREET 阶段需 {@code waiver:approve:street}。
      */
     public void reject(Long approverUserId, String opinion) {
+        reject(approverUserId, opinion, null, null);
+    }
+
+    public void reject(Long approverUserId, String opinion, String reasonCode, String evidenceJson) {
         if (status == WaiverStatus.PENDING_COMMITTEE) {
             requireApprover(approverUserId, "居委会初审人");
             this.committeeApprover = approverUserId;
             this.committeeApprovalAt = Instant.now();
             this.committeeOpinion = opinion;
+            this.committeeRejectReasonCode = reasonCode;
+            this.committeeRejectEvidenceJson = evidenceJson;
         } else if (status == WaiverStatus.PENDING_STREET) {
             requireApprover(approverUserId, "街道办终审人");
             if (committeeApprover != null && committeeApprover.equals(approverUserId)) {
@@ -190,6 +200,8 @@ public class PartyRatioWaiver {
             this.streetApprover = approverUserId;
             this.streetApprovalAt = Instant.now();
             this.streetOpinion = opinion;
+            this.streetRejectReasonCode = reasonCode;
+            this.streetRejectEvidenceJson = evidenceJson;
         } else {
             throw new IllegalStateException("Only PENDING_* can be rejected, current=" + status);
         }
@@ -263,9 +275,13 @@ public class PartyRatioWaiver {
     public Long getCommitteeApprover() { return committeeApprover; }
     public Instant getCommitteeApprovalAt() { return committeeApprovalAt; }
     public String getCommitteeOpinion() { return committeeOpinion; }
+    public String getCommitteeRejectReasonCode() { return committeeRejectReasonCode; }
+    public String getCommitteeRejectEvidenceJson() { return committeeRejectEvidenceJson; }
     public Long getStreetApprover() { return streetApprover; }
     public Instant getStreetApprovalAt() { return streetApprovalAt; }
     public String getStreetOpinion() { return streetOpinion; }
+    public String getStreetRejectReasonCode() { return streetRejectReasonCode; }
+    public String getStreetRejectEvidenceJson() { return streetRejectEvidenceJson; }
     public Instant getAppliedAt() { return appliedAt; }
     public String getLocalPayloadHash() { return localPayloadHash; }
     public Instant getLocalPayloadLockedAt() { return localPayloadLockedAt; }
@@ -298,7 +314,9 @@ public class PartyRatioWaiver {
             BigDecimal requestedRatio, long partyPoolSize, long totalEligibleSize,
             String reasonText, String reasonEvidenceKeys, WaiverStatus status,
             Long committeeApprover, Instant committeeApprovalAt, String committeeOpinion,
+            String committeeRejectReasonCode, String committeeRejectEvidenceJson,
             Long streetApprover, Instant streetApprovalAt, String streetOpinion,
+            String streetRejectReasonCode, String streetRejectEvidenceJson,
             Instant appliedAt, String localPayloadHash, Instant localPayloadLockedAt,
             String blockchainTxHash, String blockchainChainProvider,
             int chainAttestStatus, int chainAttestAttempts, String chainAttestLastError,
@@ -317,9 +335,13 @@ public class PartyRatioWaiver {
         w.committeeApprover = committeeApprover;
         w.committeeApprovalAt = committeeApprovalAt;
         w.committeeOpinion = committeeOpinion;
+        w.committeeRejectReasonCode = committeeRejectReasonCode;
+        w.committeeRejectEvidenceJson = committeeRejectEvidenceJson;
         w.streetApprover = streetApprover;
         w.streetApprovalAt = streetApprovalAt;
         w.streetOpinion = streetOpinion;
+        w.streetRejectReasonCode = streetRejectReasonCode;
+        w.streetRejectEvidenceJson = streetRejectEvidenceJson;
         w.appliedAt = appliedAt;
         w.localPayloadHash = localPayloadHash;
         w.localPayloadLockedAt = localPayloadLockedAt;

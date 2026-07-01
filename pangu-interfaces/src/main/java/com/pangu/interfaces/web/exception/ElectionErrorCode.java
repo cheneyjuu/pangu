@@ -73,8 +73,15 @@ public enum ElectionErrorCode implements ErrorCode {
     CANDIDATE_NOT_VOTABLE(40943, "候选人不可被投票（不属于本议题或资格未通过）", 409, ErrorType.BIZ, false),
     CANDIDATE_ALREADY_NOMINATED(40944, "该业主已被提名为本议题候选人", 409, ErrorType.BIZ, false),
     CANDIDATE_REVIEW_CONFLICT(40945, "候选人资格已被审查或状态不允许该操作", 409, ErrorType.BIZ, false),
+    CANDIDATE_REVIEW_FORBIDDEN(40954, "当前角色无权执行候选人审查", 403, ErrorType.BIZ, false),
     VOTE_LIMIT_EXCEEDED(40946, "已投满本次选举的应选名额", 409, ErrorType.BIZ, false),
     SUBJECT_NOT_NOMINATABLE(40947, "议题当前状态不允许增改候选人名单", 409, ErrorType.BIZ, false),
+    ELECTION_NO_APPROVED_CANDIDATE(40948, "选举议题至少需要 1 名通过资格审查的候选人才能公示", 409, ErrorType.BIZ, false),
+    SUBJECT_NOT_PENDING_COMMITTEE(40949, "议题不在居委会初审中", 409, ErrorType.BIZ, false),
+    SUBJECT_NOT_PENDING_STREET(40950, "议题不在街道办终审中", 409, ErrorType.BIZ, false),
+    REVIEW_REJECT_REASON_REQUIRED(40951, "审批驳回必须填写原因", 400, ErrorType.BIZ, false),
+    REJECT_REASON_CODE_REQUIRED(40952, "审批驳回必须选择 C1-C5 客观理由码", 400, ErrorType.BIZ, false),
+    REJECT_EVIDENCE_REQUIRED(40953, "审批驳回必须提交证据链", 400, ErrorType.BIZ, false),
 
     // ============ 系统/外部依赖（SYSTEM / 500） ============
     DENOMINATOR_RESOLVE_FAILED(50010, "分母快照生成失败，请稍后重试", 500, ErrorType.SYSTEM, true),

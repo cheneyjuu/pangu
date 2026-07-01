@@ -3,10 +3,16 @@ package com.pangu.infrastructure.persistence.entity;
 import lombok.Data;
 
 /**
- * 业主手机号检索行 → {@code OwnerSummary} 中转。
+ * 业主提名检索行 → {@code OwnerSummary} 中转。
  *
- * <p>用于「按手机号关联业主」（换届选举提名候选人定位业主）。
- * phone 作普通明文列映射（不走 SM4 TypeHandler），不含 real_name（加密列，检索链路不解密）。
+ * <p>用于候选人提名定位业主，两条查询共用：
+ * <ul>
+ *   <li>{@code searchOwnersByPhoneFragment}：手机号模糊，{@code realName} 留 {@code null}；</li>
+ *   <li>{@code listNominatableOwnersWithName}：拉本租户全部业主含 SM4 密文 {@code realName}，
+ *       由 application 层 {@code NameDecryptor} 解密后做姓名/拼音匹配。</li>
+ * </ul>
+ *
+ * <p>{@code realName} 不挂 SM4 TypeHandler，保留密文交给上层处理。
  */
 @Data
 public class OwnerLookupRow {
@@ -22,4 +28,8 @@ public class OwnerLookupRow {
 
     /** 代表房产房间 ID（同一业主多套房时取其一）。 */
     private Long roomId;
+
+    /** 业主真实姓名 SM4 密文（手机号路径下为 {@code null}）。 */
+    private String realName;
 }
+

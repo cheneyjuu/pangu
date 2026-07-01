@@ -8,6 +8,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.List;
@@ -32,6 +33,9 @@ public class ControllerIntegrationTest {
 
     @Autowired
     private JwtTokenProvider jwtTokenProvider;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     @Test
     public void testLoginAndRolesGridManager() throws Exception {
@@ -65,9 +69,11 @@ public class ControllerIntegrationTest {
 
         // permissions 出现在 response.user_info（来自 UserContextLoader 实时反查）
         Map<String, Object> userInfo = (Map<String, Object>) data.get("user_info");
+        assert userInfo.get("dept_type").equals(5);
         List<String> permissions = (List<String>) userInfo.get("permissions");
         assert permissions != null && permissions.contains("voting:subject:publish");
-        assert permissions.contains("candidate:nominate");
+        // V3.20 起 ELECTION 候选人提名只授 GOV_OPERATOR；网格员仅保留催票/责任田相关能力。
+        assert !permissions.contains("candidate:nominate");
         assert permissions.contains("waiver:read");
     }
 
@@ -103,6 +109,140 @@ public class ControllerIntegrationTest {
         Map<String, Object> userInfo = (Map<String, Object>) data.get("user_info");
         List<String> permissions = (List<String>) userInfo.get("permissions");
         assert permissions == null || permissions.isEmpty();
+    }
+
+    @Test
+    public void testOwnerFaceAuthContextRejectsMockIdentity() throws Exception {
+        String token = jwtTokenProvider.generateToken(999913L, "C_USER", 70002L, 10001L);
+
+        mockMvc.perform(post("/api/v1/me/auth/face/context")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code", is(200)))
+                .andExpect(jsonPath("$.data.eligible", is(false)))
+                .andExpect(jsonPath("$.data.realName", nullValue()))
+                .andExpect(jsonPath("$.data.idCardNumber", nullValue()))
+                .andExpect(jsonPath("$.data.reason", containsString("测试或占位数据")));
+    }
+
+    @Test
+    public void testOwnerFaceAuthContextUsesRegisteredIdentity() throws Exception {
+        jdbcTemplate.update("""
+                UPDATE t_account
+                SET real_name = ?, id_card_encrypted = ?
+                WHERE account_id = 999913
+                """, "李四", "110101199003070011");
+
+        try {
+            String token = jwtTokenProvider.generateToken(999913L, "C_USER", 70002L, 10001L);
+
+            mockMvc.perform(post("/api/v1/me/auth/face/context")
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.code", is(200)))
+                    .andExpect(jsonPath("$.data.eligible", is(true)))
+                    .andExpect(jsonPath("$.data.realName", is("李四")))
+                    .andExpect(jsonPath("$.data.idCardNumber", is("110101199003070011")))
+                    .andExpect(jsonPath("$.data.maskedRealName", is("李*")))
+                    .andExpect(jsonPath("$.data.maskedIdCardNumber", is("110***********0011")))
+                    .andExpect(jsonPath("$.data.reason", nullValue()));
+        } finally {
+            jdbcTemplate.update("""
+                    UPDATE t_account
+                    SET real_name = ?, id_card_encrypted = ?
+                    WHERE account_id = 999913
+                    """, "MOCK_李四", "MOCK_ID_999913");
+        }
+    }
+
+    @Test
+    public void testSysUserCannotPrepareOwnerFaceAuthContext() throws Exception {
+        String token = jwtTokenProvider.generateToken(999804L, "SYS_USER", 800004L, 10001L);
+
+        mockMvc.perform(post("/api/v1/me/auth/face/context")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code", is(403)));
+    }
+
+    @Test
+    public void testOwnerFaceAuthUpgradesCurrentCUserToL3() throws Exception {
+        String providerRequestId = "wx-face-controller-test-70002";
+        jdbcTemplate.update("DELETE FROM t_owner_face_auth_attestation WHERE provider = ? AND provider_request_id = ?",
+                "WECHAT", providerRequestId);
+        jdbcTemplate.update("UPDATE c_user SET auth_level = 2 WHERE uid = 70002");
+
+        try {
+            String token = jwtTokenProvider.generateToken(999913L, "C_USER", 70002L, 10001L);
+            Map<String, Object> request = Map.of(
+                    "provider", "wechat",
+                    "providerRequestId", providerRequestId,
+                    "providerResult", "verifyResult=0"
+            );
+
+            mockMvc.perform(post("/api/v1/me/auth/face")
+                            .header("Authorization", "Bearer " + token)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(request)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.code", is(200)))
+                    .andExpect(jsonPath("$.data.verified", is(true)))
+                    .andExpect(jsonPath("$.data.attestationId", is("WECHAT:" + providerRequestId)))
+                    .andExpect(jsonPath("$.data.newAuthLevel", is(3)));
+
+            Integer authLevel = jdbcTemplate.queryForObject(
+                    "SELECT auth_level FROM c_user WHERE uid = 70002", Integer.class);
+            Integer attestationCount = jdbcTemplate.queryForObject("""
+                    SELECT COUNT(*)
+                    FROM t_owner_face_auth_attestation
+                    WHERE uid = 70002
+                      AND provider = 'WECHAT'
+                      AND provider_request_id = ?
+                      AND verified = 1
+                      AND auth_level_after = 3
+                    """, Integer.class, providerRequestId);
+            assert authLevel != null && authLevel == 3;
+            assert attestationCount != null && attestationCount == 1;
+        } finally {
+            jdbcTemplate.update("UPDATE c_user SET auth_level = 2 WHERE uid = 70002");
+            jdbcTemplate.update("DELETE FROM t_owner_face_auth_attestation WHERE provider = ? AND provider_request_id = ?",
+                    "WECHAT", providerRequestId);
+        }
+    }
+
+    @Test
+    public void testSysUserCannotSubmitOwnerFaceAuth() throws Exception {
+        String token = jwtTokenProvider.generateToken(999804L, "SYS_USER", 800004L, 10001L);
+        Map<String, Object> request = Map.of(
+                "provider", "wechat",
+                "providerRequestId", "wx-face-sys-user-forbidden",
+                "providerResult", "verifyResult=0"
+        );
+
+        mockMvc.perform(post("/api/v1/me/auth/face")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code", is(403)));
+    }
+
+    @Test
+    public void testOwnerFaceAuthRejectsUnsupportedProvider() throws Exception {
+        String token = jwtTokenProvider.generateToken(999913L, "C_USER", 70002L, 10001L);
+        Map<String, Object> request = Map.of(
+                "provider", "tencent",
+                "providerRequestId", "tencent-face-not-enabled",
+                "providerResult", "verifyResult=0"
+        );
+
+        mockMvc.perform(post("/api/v1/me/auth/face")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code", is(400)))
+                .andExpect(jsonPath("$.msg", containsString("WECHAT")));
     }
 
     @Test

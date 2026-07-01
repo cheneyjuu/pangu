@@ -29,10 +29,14 @@ public class PartyRatioWaiverRow {
     private Long committeeApprover;
     private Instant committeeApprovalAt;
     private String committeeOpinion;
+    private String committeeRejectReasonCode;
+    private String committeeRejectEvidenceJson;
 
     private Long streetApprover;
     private Instant streetApprovalAt;
     private String streetOpinion;
+    private String streetRejectReasonCode;
+    private String streetRejectEvidenceJson;
 
     private Instant appliedAt;
 

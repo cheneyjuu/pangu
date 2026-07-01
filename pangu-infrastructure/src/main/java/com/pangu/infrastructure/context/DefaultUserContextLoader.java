@@ -43,7 +43,7 @@ public class DefaultUserContextLoader implements UserContextLoader {
     }
 
     private UserContext loadSysUser(Long accountId, Long userId, Long tenantIdHint) {
-        UserContextMapper.SysUserContextRow row = userContextMapper.loadSysUserContext(userId);
+        UserContextMapper.SysUserContextRow row = userContextMapper.loadSysUserContext(accountId, userId);
         if (row == null) {
             log.warn("SYS_USER context load miss: userId={}", userId);
             return null;
@@ -79,6 +79,7 @@ public class DefaultUserContextLoader implements UserContextLoader {
                 effectiveTenantId,
                 row.getDeptId(),
                 deptCategory,
+                row.getDeptType(),
                 scope,
                 authLevel,
                 row.getRoleKey(),
@@ -88,7 +89,7 @@ public class DefaultUserContextLoader implements UserContextLoader {
     }
 
     private UserContext loadCUser(Long accountId, Long uid, Long tenantIdHint) {
-        UserContextMapper.CUserContextRow row = userContextMapper.loadCUserContext(uid);
+        UserContextMapper.CUserContextRow row = userContextMapper.loadCUserContext(accountId, uid);
         if (row == null) {
             log.warn("C_USER context load miss: uid={}", uid);
             return null;
@@ -97,11 +98,17 @@ public class DefaultUserContextLoader implements UserContextLoader {
                 ? AuthenticationLevel.of(row.getAuthLevel())
                 : AuthenticationLevel.L1;
         // 业主默认 dataScopeType 为 null —— C 端业务接口走 ABAC + opid 校验，不依赖行级 dataScope
+        // 修复：JWT 未带 tenantIdHint 时（如首次登录），从业主名下任一房产反查作为默认值。
+        // 否则后端 OwnerVotingController 等会因 tenantId=null 拒绝服务（40332）。
+        Long effectiveTenantId = tenantIdHint != null
+                ? tenantIdHint
+                : userContextMapper.selectDefaultTenantByUid(uid);
         return new UserContext(
                 accountId != null ? accountId : row.getAccountId(),
                 UserContext.IdentityType.C_USER,
                 uid,
-                tenantIdHint,
+                effectiveTenantId,
+                null,
                 null,
                 null,
                 null,
