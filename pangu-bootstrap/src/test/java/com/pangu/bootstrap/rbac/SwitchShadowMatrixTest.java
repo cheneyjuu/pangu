@@ -72,7 +72,7 @@ public class SwitchShadowMatrixTest {
                 .andExpect(jsonPath("$.data.shadows[0].role_key", is("COMMUNITY_ADMIN")))
                 .andExpect(jsonPath("$.data.shadows[0].active", is(true)))
                 .andExpect(jsonPath("$.data.shadows[1].user_id", is((int) USR_LIU_GRID)))
-                .andExpect(jsonPath("$.data.shadows[1].role_key", is("GRID_OPERATOR")))
+                .andExpect(jsonPath("$.data.shadows[1].role_key", is("GRID_MEMBER")))
                 .andExpect(jsonPath("$.data.shadows[1].active", is(false)));
     }
 
@@ -92,7 +92,7 @@ public class SwitchShadowMatrixTest {
                 .andExpect(jsonPath("$.data.user_info.account_id", is((int) ACC_LIU)))
                 .andExpect(jsonPath("$.data.user_info.identity_type", is("SYS_USER")))
                 .andExpect(jsonPath("$.data.user_info.active_identity_id", is((int) USR_LIU_GRID)))
-                .andExpect(jsonPath("$.data.user_info.role_key", is("GRID_OPERATOR")))
+                .andExpect(jsonPath("$.data.user_info.role_key", is("GRID_MEMBER")))
                 .andExpect(jsonPath("$.data.active_shadow.active", is(true)))
                 .andReturn()
                 .getResponse()

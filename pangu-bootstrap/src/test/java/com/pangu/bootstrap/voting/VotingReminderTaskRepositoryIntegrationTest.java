@@ -42,7 +42,7 @@ public class VotingReminderTaskRepositoryIntegrationTest {
                 INSERT INTO t_voting_mobilization_permission (
                     subject_id, tenant_id, building_id, user_id, role_key,
                     can_remind, can_offline_proxy, activated_at, expires_at, status
-                ) VALUES (?, ?, ?, ?, 'GRID_OPERATOR', TRUE, TRUE,
+                ) VALUES (?, ?, ?, ?, 'GRID_MEMBER', TRUE, TRUE,
                     CURRENT_TIMESTAMP - INTERVAL '1 hour',
                     CURRENT_TIMESTAMP + INTERVAL '1 day',
                     1)

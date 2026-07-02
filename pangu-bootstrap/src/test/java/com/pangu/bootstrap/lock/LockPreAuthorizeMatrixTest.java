@@ -21,7 +21,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *
  * <p>覆盖 V2.5 注册的两条 lock permission 在 V1.1 求是小区 seed 用户矩阵下的拒绝场景：
  * <ul>
- *     <li>陈网格员（GRID_OPERATOR）—— 两个 unlock endpoint 全 403；</li>
+ *     <li>陈网格员（GRID_MEMBER）—— 两个 unlock endpoint 全 403；</li>
  *     <li>刘主任（COMMUNITY_ADMIN）—— 两个 unlock endpoint 全 403；</li>
  *     <li>周主任（COMMITTEE_DIRECTOR，仅 lock:unlock:committee）—— street-sign 应 403；</li>
  *     <li>李四（C_USER，无 sys_role）—— committee-sign 应 403；</li>
@@ -48,7 +48,7 @@ public class LockPreAuthorizeMatrixTest {
     private static final long TENANT_RUSHI = 10001L;
 
     // V1.1 求是小区 seed
-    private static final long ACC_GRID = 999804L, USR_GRID = 800004L;       // 陈网格员 GRID_OPERATOR（无任何 lock 权限）
+    private static final long ACC_GRID = 999804L, USR_GRID = 800004L;       // 陈网格员 GRID_MEMBER（无任何 lock 权限）
     private static final long ACC_STREET = 999801L, USR_STREET = 800001L;   // 王街道   GOV_SUPER_ADMIN（仅 street-sign）
     private static final long ACC_COMM = 999803L, USR_COMM = 800003L;       // 刘主任   COMMUNITY_ADMIN（V3.24 起无 lock 权限）
     private static final long ACC_DIR  = 999811L, USR_DIR  = 800101L;       // 周主任   COMMITTEE_DIRECTOR（仅 lock:unlock:committee）

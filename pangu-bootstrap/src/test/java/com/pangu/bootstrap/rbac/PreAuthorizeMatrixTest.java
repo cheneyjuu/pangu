@@ -23,7 +23,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *
  * <p>覆盖 V1.1 求是小区 4 类典型用户对 5 个 endpoint 的拒绝场景：
  * <ul>
- *     <li>陈网格员（GRID_OPERATOR，仅有 waiver:read）→ submit 应 403</li>
+ *     <li>陈网格员（GRID_MEMBER，仅有 waiver:read）→ submit 应 403</li>
  *     <li>刘主任（COMMUNITY_ADMIN，无 waiver:approve:street）→ street-review 应 403</li>
  *     <li>张三业主代表（OWNER_REPRESENTATIVE B 端，仅 waiver:read）→ submit 应 403</li>
  *     <li>赵经理（PROPERTY_MANAGER S 端，仅 waiver:read）→ committee-review 应 403</li>
@@ -50,7 +50,7 @@ public class PreAuthorizeMatrixTest {
 
     // V1.1 求是小区 seed 关键身份
     private static final long ACC_STREET = 999801L, USR_STREET = 800001L;   // 王街道 GOV_SUPER_ADMIN
-    private static final long ACC_GRID = 999804L, USR_GRID = 800004L;       // 陈网格员 GRID_OPERATOR
+    private static final long ACC_GRID = 999804L, USR_GRID = 800004L;       // 陈网格员 GRID_MEMBER
     private static final long ACC_COMM = 999803L, USR_COMM = 800003L;       // 刘主任 COMMUNITY_ADMIN
     private static final long ACC_REP  = 999812L, USR_REP  = 800102L;       // 张三 OWNER_REPRESENTATIVE
     private static final long ACC_PROP = 999821L, USR_PROP = 800201L;       // 赵经理 PROPERTY_MANAGER

@@ -43,7 +43,7 @@
         WHERE ub.tenant_id = #{tenantId}
           AND ub.status = 1
           AND u.status = '0'
-          AND r.role_key IN ('OWNER_REPRESENTATIVE', 'GRID_OPERATOR')
+          AND r.role_key IN ('OWNER_REPRESENTATIVE', 'GRID_MEMBER')
         <choose>
             <when test="scope == 2">
                 AND ub.building_id = #{scopeReferenceId}

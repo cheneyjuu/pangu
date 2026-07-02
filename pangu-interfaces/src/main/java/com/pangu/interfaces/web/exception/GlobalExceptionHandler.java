@@ -1,7 +1,8 @@
 package com.pangu.interfaces.web.exception;
 
-import com.pangu.application.admin.RoleAdminApplicationException;
 import com.pangu.application.admin.BuildingAssignmentApplicationException;
+import com.pangu.application.admin.RoleAdminApplicationException;
+import com.pangu.application.admin.WorkIdentityApplicationException;
 import com.pangu.application.disclosure.FinanceDisclosureApplicationException;
 import com.pangu.application.dispute.DisputeApplicationException;
 import com.pangu.application.lock.GovernanceLockApplicationException;
@@ -177,6 +178,24 @@ public class GlobalExceptionHandler {
                 errorCode.isNeedRetry());
     }
 
+    /**
+     * 工作身份授权应用层业务异常 → WorkIdentityErrorCode。
+     */
+    @ExceptionHandler(WorkIdentityApplicationException.class)
+    public Result<Object> handleWorkIdentityApplicationException(
+            WorkIdentityApplicationException ex, HttpServletResponse response) {
+        WorkIdentityErrorCode errorCode = WorkIdentityExceptionTranslator.translate(ex);
+        response.setStatus(errorCode.getHttpStatus());
+        log.info("WorkIdentity business exception reason={} code={} msg={}",
+                ex.getReason(), errorCode.getCode(), ex.getMessage());
+        return Result.fail(
+                errorCode.getCode(),
+                ex.getMessage() != null ? ex.getMessage() : errorCode.getMessage(),
+                null,
+                errorCode.getErrorType(),
+                errorCode.isNeedRetry());
+    }
+
     /** Bean Validation 失败 → 400 PARAM_ERROR，message 拼接所有字段错误。 */
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public Result<Object> handleValidationException(MethodArgumentNotValidException ex,
@@ -257,4 +276,3 @@ public class GlobalExceptionHandler {
                 errorCode.isNeedRetry());
     }
 }
-

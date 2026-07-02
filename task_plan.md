@@ -235,6 +235,8 @@
 | `GET /reminder/tasks` 返回空列表 | shennong live smoke 第 2 次 | 当前本地库没有活跃 VOTING + ACTIVE `canRemind` 催票任务；pending/notify 分支按 smoke 设计跳过 |
 | HTTP provider live smoke 启动 pangu 提权被拒 | provider live smoke 第 1 次 | Codex 使用限额触发自动审批拒绝；已停止 fake SMS 服务并清理 990481 fixture，保留可重复 harness，待额度恢复或用户显式允许后执行 |
 | HTTP provider live smoke 启动失败：`No default constructor found` | provider live smoke 第 2 次 | `HttpVotingReminderSmsProvider` 同时存在生产构造器和测试构造器，Spring 未能选择生产构造器；给生产构造器补 `@Autowired` 后定向测试与 live smoke 通过 |
+| Flyway checksum mismatch for V1/V1.2/V1.4/V3.x | 网格员角色重命名聚焦测试第 1 次 | 不改已应用历史迁移；恢复历史迁移文本，只在新增 V3.30 中执行 `GRID_OPERATOR -> GRID_MEMBER` 迁移 |
+| `sys_dept_building_scope` reset 写入 30003 被触发器拒绝 | 网格员范围聚焦测试第 2 次（同一 BeforeEach 重复 7 次） | V1 注释/责任田 seed 中有 30003，但当前 `c_owner_property` 无该楼栋；测试清理只恢复产权表真实存在的 30001/30002 |
 
 ## Next Tasks
 - shennong-app：开发环境保留全局 `USE_MOCK=true`，但催票工作台已独立 `USE_REMINDER_MOCK=false` 默认走真实接口；本地 pending/notify live smoke 已跑通，后续如需复验，先执行 `scripts/prepare-reminder-smoke.sql`，完成后可用 `scripts/cleanup-reminder-smoke.sql` 清理 fixture。
@@ -244,3 +246,27 @@
 - 真实供应商：作为后续可选项保留；拿到参数后再运行 `DRY_RUN=true START_FAKE_SMS=false ... scripts/smoke-http-sms-provider.sh` 做真实网关联调。
 - V3.28 已用于资金流水链上存证字段与信托分期链上确认 guard；后续迁移从 V3.29+ 开始。
 - `voting:subject:create` 仍保留给 GENERAL/MAJOR 通用立项；ELECTION 立项 / 提交初审已切到 `voting:subject:create:election`。`voting:subject:publish` 仍保留给 GENERAL/MAJOR 日常公示，ELECTION 发布只能走 `voting:subject:review:street`。
+
+## Current Goal: 网格员静态角色与跨小区数据范围
+
+### Goal
+核验并补齐：网格员可跨小区；楼栋数据范围只能由居委会侧人员分配；`GRID_MEMBER` 是全系统统一静态角色，具体 1/2/3 号网格由 `sys_dept.dept_type=5` 网格组织节点与楼栋行级范围解耦承载。
+
+### Phases
+| # | 内容 | Status |
+|---|---|---|
+| 1 | 核验现有角色、部门、楼栋责任田、工作身份授权实现 | complete |
+| 2 | 对照需求列出缺口与冲突，确认无需外部法规查询的技术边界 | complete |
+| 3 | 若缺失，补齐数据库迁移、应用服务、接口与测试 | complete |
+| 4 | 跑聚焦验证并记录结果 | complete |
+
+### Verification Checklist
+- [x] 只有居委会侧管理身份能为网格员/网格节点配置楼栋范围，业委会侧身份被拒绝。
+- [x] `GRID_MEMBER` 作为静态 role_key 存在并用于网格员分身，不再依赖新建 5 个角色表达 5 个网格。
+- [x] 居委会节点可一键生成 5 个 `dept_type=5` 网格组织节点，重复调用保持幂等。
+- [x] 网格分身的 `dept_id` 指向 `dept_type=5` 网格节点，`effective_data_scope=OWNER_GROUP`。
+- [x] 楼栋范围通过 `sys_dept_building_scope` 挂在网格组织节点上；`OWNER_GROUP` 登录上下文从节点范围与历史用户责任田并集反查授权楼栋。
+
+### Verification Result
+- `mvn -pl pangu-bootstrap -am -Dtest=WorkIdentityAdminTest,BuildingAssignmentTest,SwitchShadowMatrixTest,SysUserRoleTriggerTest -Dsurefire.failIfNoSpecifiedTests=false test`：35 tests，0 failures，0 errors。
+- `mvn test`：536 tests，0 failures，0 errors，1 skipped。

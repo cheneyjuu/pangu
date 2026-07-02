@@ -24,7 +24,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *
  * <p>用 V1.1 求是小区 seed 用户对 4 条权限通路反复打靶：
  * <ul>
- *     <li>陈网格员（GRID_OPERATOR） —— 三条带 hasAuthority 的全 403；</li>
+ *     <li>陈网格员（GRID_MEMBER） —— 三条带 hasAuthority 的全 403；</li>
  *     <li>李四（C_USER，无 sys_role） —— compose / publish / audit 全 403，
  *         GET 单期通过 {@code isAuthenticated()} 但 service 层因 snapshotId 不存在抛 404；</li>
  *     <li>刘主任（COMMUNITY_ADMIN） —— compose / audit 通过；publish 应 403；</li>
@@ -52,7 +52,7 @@ public class DisclosurePreAuthorizeMatrixTest {
     private static final long TENANT_RUSHI = 10001L;
 
     // V1.1 求是小区 seed
-    private static final long ACC_GRID = 999804L, USR_GRID = 800004L;       // 陈网格员 GRID_OPERATOR（无 disclosure:* 任一权限）
+    private static final long ACC_GRID = 999804L, USR_GRID = 800004L;       // 陈网格员 GRID_MEMBER（无 disclosure:* 任一权限）
     private static final long ACC_COMM = 999803L, USR_COMM = 800003L;       // 刘主任   COMMUNITY_ADMIN（compose + audit）
     private static final long ACC_DIR  = 999811L, USR_DIR  = 800101L;       // 周主任   COMMITTEE_DIRECTOR（compose + publish）
     private static final long ACC_LISI = 999913L, UID_LISI = 70002L;        // 李四     C_USER（无 sys_role）

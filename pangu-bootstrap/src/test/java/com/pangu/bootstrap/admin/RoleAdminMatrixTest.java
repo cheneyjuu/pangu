@@ -33,7 +33,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *
  * <p>覆盖：
  * <ol>
- *   <li>非 GOV_SUPER_ADMIN（GRID_OPERATOR / COMMITTEE_DIRECTOR / C_USER）— 三个 endpoint 全 403；</li>
+ *   <li>非 GOV_SUPER_ADMIN（GRID_MEMBER / COMMITTEE_DIRECTOR / C_USER）— 三个 endpoint 全 403；</li>
  *   <li>GOV_SUPER_ADMIN 正向通路 — createRole / assignPermission / deleteRole happy path；</li>
  *   <li>应用层校验失败 — invalid dept (42101) / duplicate roleKey (42202)；</li>
  *   <li>仓储层 → DB 触发器兜底 — 系统角色保护 (42301 trigger 7) / 不存在角色 (42201)；</li>
@@ -59,7 +59,7 @@ public class RoleAdminMatrixTest {
 
     // V1.1 求是小区 seed
     private static final long ACC_WANG = 999801L, USR_WANG = 800001L;       // 王街道  GOV_SUPER_ADMIN（admin:role:manage 唯一持有者）
-    private static final long ACC_GRID = 999804L, USR_GRID = 800004L;       // 陈网格员 GRID_OPERATOR
+    private static final long ACC_GRID = 999804L, USR_GRID = 800004L;       // 陈网格员 GRID_MEMBER
     private static final long ACC_DIR  = 999811L, USR_DIR  = 800101L;       // 周主任   COMMITTEE_DIRECTOR
     private static final long ACC_LISI = 999913L, UID_LISI = 70002L;        // 李四     C_USER
 

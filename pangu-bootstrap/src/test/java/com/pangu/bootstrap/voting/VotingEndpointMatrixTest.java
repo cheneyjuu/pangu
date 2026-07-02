@@ -25,7 +25,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * <p>V1.1 求是小区 seed + V1.4/V3.0 角色授权：
  * <ul>
  *   <li>吴经办员（GOV_OPERATOR，role 14）—— create:election + audit，可提交初审；</li>
- *   <li>陈网格员（GRID_OPERATOR，role 4）—— 有 publish/audit，无 create/cancel/双签审批；</li>
+ *   <li>陈网格员（GRID_MEMBER，role 4）—— 有 publish/audit，无 create/cancel/双签审批；</li>
  *   <li>刘主任（COMMUNITY_ADMIN，role 2）—— create + publish + audit + committee-review，无 cancel/street-review；</li>
  *   <li>王街道（GOV_SUPER_ADMIN，role 1）—— street-review + cancel；</li>
  *   <li>李四（C_USER，无 sys_role）—— G 端全 403，C 端 isAuthenticated 通过到 service 层。</li>
@@ -52,7 +52,7 @@ public class VotingEndpointMatrixTest {
 
     private static final long ACC_STREET = 999801L, USR_STREET = 800001L; // 王街道 GOV_SUPER_ADMIN
     private static final long ACC_OPERATOR = 999805L, USR_OPERATOR = 800005L; // 吴经办员 GOV_OPERATOR
-    private static final long ACC_GRID = 999804L, USR_GRID = 800004L;   // 陈网格员 GRID_OPERATOR（publish/audit）
+    private static final long ACC_GRID = 999804L, USR_GRID = 800004L;   // 陈网格员 GRID_MEMBER（publish/audit）
     private static final long ACC_COMM = 999803L, USR_COMM = 800003L;   // 刘主任 COMMUNITY_ADMIN（create/publish/audit）
     private static final long ACC_LISI = 999913L, UID_LISI = 70002L;    // 李四 C_USER（无 sys_role）
 

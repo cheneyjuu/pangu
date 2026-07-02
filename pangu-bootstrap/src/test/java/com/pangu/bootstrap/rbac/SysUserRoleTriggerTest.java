@@ -20,7 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>对应设计文档 §8 trigger 1-3，含义：
  * <ul>
  *     <li><b>Trigger 1</b>：role.allowed_dept_category 必须 = user.dept.dept_category；
- *         OWNER_REPRESENTATIVE/VOLUNTEER/GRID_OPERATOR 对 dept_type 有硬性要求。</li>
+ *         OWNER_REPRESENTATIVE/VOLUNTEER/GRID_MEMBER 对 dept_type 有硬性要求。</li>
  *     <li><b>Trigger 2</b>（DEFERRED）：上述三个角色必须有 ≥1 条 sys_user_building 生效记录，
  *         否则 COMMIT 阶段抛错。</li>
  *     <li><b>Trigger 3</b>：role.fixed_data_scope NOT NULL 时，sys_user_role.effective_data_scope
@@ -134,7 +134,7 @@ public class SysUserRoleTriggerTest {
     // ===================================================================
     @Test
     public void trigger1_roleCategoryMismatch_gOnBDept_rejected() {
-        // role_id=4 GRID_OPERATOR (cat=G) 不能挂在 cat=B 的业委会用户身上
+        // role_id=4 GRID_MEMBER (cat=G) 不能挂在 cat=B 的业委会用户身上
         DataAccessException ex = assertThrows(DataAccessException.class, () ->
                 jdbcTemplate.update(
                         "INSERT INTO sys_user_role(user_id, role_id, effective_data_scope) "
@@ -142,13 +142,13 @@ public class SysUserRoleTriggerTest {
                         userOnOwnerCom));
         assertTrue(rootMessage(ex).contains("[trigger 1]"),
                 "应抛 trigger 1 端归属不一致错误，实际：" + rootMessage(ex));
-        assertTrue(rootMessage(ex).contains("GRID_OPERATOR"),
-                "错误信息应提到 GRID_OPERATOR，实际：" + rootMessage(ex));
+        assertTrue(rootMessage(ex).contains("GRID_MEMBER"),
+                "错误信息应提到 GRID_MEMBER，实际：" + rootMessage(ex));
     }
 
     @Test
     public void trigger1_gridOperatorOnNonGridDept_rejected() {
-        // role_id=4 GRID_OPERATOR 必须挂在 dept_type=5；这里挂到 dept_type=2 居委会上 → 拒绝
+        // role_id=4 GRID_MEMBER 必须挂在 dept_type=5；这里挂到 dept_type=2 居委会上 → 拒绝
         DataAccessException ex = assertThrows(DataAccessException.class, () ->
                 jdbcTemplate.update(
                         "INSERT INTO sys_user_role(user_id, role_id, effective_data_scope) "
@@ -157,7 +157,7 @@ public class SysUserRoleTriggerTest {
         assertTrue(rootMessage(ex).contains("[trigger 1]"),
                 "应抛 trigger 1，实际：" + rootMessage(ex));
         assertTrue(rootMessage(ex).contains("dept_type=5"),
-                "错误信息应提示 GRID_OPERATOR 必须挂 dept_type=5，实际：" + rootMessage(ex));
+                "错误信息应提示 GRID_MEMBER 必须挂 dept_type=5，实际：" + rootMessage(ex));
     }
 
     @Test
@@ -179,7 +179,7 @@ public class SysUserRoleTriggerTest {
     // ===================================================================
     @Test
     public void trigger3_gridOperatorEffectiveScopeViolatesFixed_rejected() {
-        // role_id=4 GRID_OPERATOR fixed=OWNER_GROUP；尝试挂上去用 ALL_COMMUNITY → 拒绝
+        // role_id=4 GRID_MEMBER fixed=OWNER_GROUP；尝试挂上去用 ALL_COMMUNITY → 拒绝
         DataAccessException ex = assertThrows(DataAccessException.class, () ->
                 jdbcTemplate.update(
                         "INSERT INTO sys_user_role(user_id, role_id, effective_data_scope) "
@@ -193,7 +193,7 @@ public class SysUserRoleTriggerTest {
 
     // ===================================================================
     // Trigger 2 反例（DEFERRED INITIALLY DEFERRED）：
-    //   特殊角色（OWNER_REPRESENTATIVE/GRID_OPERATOR/VOLUNTEER）必须有 ≥1 sys_user_building，
+    //   特殊角色（OWNER_REPRESENTATIVE/GRID_MEMBER/VOLUNTEER）必须有 ≥1 sys_user_building，
     //   否则在 COMMIT 阶段抛错。Spring 通常包装成 TransactionSystemException。
     // ===================================================================
     @Test

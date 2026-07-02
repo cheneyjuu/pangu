@@ -23,7 +23,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *
  * <p>用 V1.1 求是小区 seed 用户对 2 条 G 端权限通路 + C 端 isAuthenticated 通路反复打靶：
  * <ul>
- *     <li>陈网格员（GRID_OPERATOR） —— 三条 G 端 endpoint 全 403；</li>
+ *     <li>陈网格员（GRID_MEMBER） —— 三条 G 端 endpoint 全 403；</li>
  *     <li>李四（C_USER，无 sys_role） —— G 端 dispute:audit / decide 全 403；
  *         C 端 isAuthenticated 通路通过到 service 层；</li>
  *     <li>SYS_USER（陈网格员）调 C 端 endpoint —— authentication 通过但 service 层
@@ -50,7 +50,7 @@ public class DisputePreAuthorizeMatrixTest {
     private static final long TENANT_RUSHI = 10001L;
 
     // V1.1 求是小区 seed
-    private static final long ACC_GRID = 999804L, USR_GRID = 800004L;       // 陈网格员 GRID_OPERATOR（无 dispute:* 任一权限）
+    private static final long ACC_GRID = 999804L, USR_GRID = 800004L;       // 陈网格员 GRID_MEMBER（无 dispute:* 任一权限）
     private static final long ACC_COMM = 999803L, USR_COMM = 800003L;       // 刘主任   COMMUNITY_ADMIN（dispute:audit + dispute:decide）
     private static final long ACC_LISI = 999913L, UID_LISI = 70002L;        // 李四     C_USER（无 sys_role）
 

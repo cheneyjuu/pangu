@@ -5,7 +5,7 @@
 --
 -- Fixture:
 --   subject_id = 990480
---   worker     = 13800000004 / sys_user 800004 / GRID_OPERATOR
+--   worker     = 13800000004 / sys_user 800004 / GRID_MEMBER
 --   owner      = uid 70001 / building 30001 / room 30001101
 
 BEGIN;
@@ -111,7 +111,7 @@ INSERT INTO t_voting_mobilization_permission (
     10001,
     30001,
     800004,
-    'GRID_OPERATOR',
+    'GRID_MEMBER',
     TRUE,
     TRUE,
     CURRENT_TIMESTAMP,

@@ -1583,3 +1583,69 @@
 
 ### Next
 - V3.28 已用于资金流水链上存证字段与信托分期链上确认 guard；后续迁移从 V3.29+ 开始。
+
+## Session: 2026-07-01
+
+### RBAC + ABAC 工作身份授权 — backend complete
+- 业务口径确认：同一个自然人账号通过多个 `sys_user` 工作身份承担多职责；`sys_user_role` 仍保持一分身一角色。示例：同一 `t_account` 下 `GOV_OPERATOR` 经办员分身 + `GRID_OPERATOR` 网格员分身，网格员分身再通过 `sys_user_building` 绑定楼栋 ABAC。
+- 后端已新增工作身份授权模块：
+  - `/api/v1/admin/work-identities/accounts/search?keyword=...`
+  - `/api/v1/admin/work-identities/accounts/{accountId}`
+  - `/api/v1/admin/work-identities/dept-options?roleKey=...`
+  - `/api/v1/admin/work-identities/building-options?deptId=...`
+  - `POST /api/v1/admin/work-identities/accounts/{accountId}/shadows`
+- 写侧事务中完成：账号校验、角色与部门类型校验、新增 `sys_user`、绑定 `sys_user_role`，并在 OWNER_GROUP 角色下按目标部门租户同步绑定楼栋，满足 deferred trigger。街道超管 `tenantId=null` 时，楼栋选项与写入都以所选部门的 `tenant_id` 为准。
+- 测试：
+  - `WorkIdentityAdminTest` 覆盖给吴经办员新增网格员分身、绑定楼栋、`/auth/shadows` 列出双分身、`switch-shadow` 切到网格员；
+  - 覆盖街道超管无当前租户时按目标网格租户读取楼栋并创建楼栋责任田身份；
+  - 覆盖缺楼栋、非楼栋角色带楼栋、重复部门身份、角色部门类型不匹配、无 `admin:user:assign-role` 权限等负例。
+- 验证：
+  - `mvn -pl pangu-bootstrap -am -Dtest=WorkIdentityAdminTest,BuildingAssignmentTest,SwitchShadowMatrixTest -Dsurefire.failIfNoSpecifiedTests=false test`：28 tests，0 failures，0 errors；
+  - `mvn test`：534 tests，0 failures，0 errors，1 skipped。
+
+### RBAC + ABAC 工作身份授权 — yaochi management complete
+- 管理端已接入“工作身份与授权”页面：检索自然人账号、查看既有工作身份、按角色选择兼容部门、为 OWNER_GROUP 类角色同步选择楼栋责任田。
+- 前端仍以后端为准：页面只编排交互，角色/部门匹配、重复身份、楼栋必填/禁止、授权权限均由后端接口校验。
+- 楼栋下拉不再依赖当前登录租户的楼栋责任田视图，而是调用工作身份授权专用楼栋选项接口，按所选部门租户取可绑定楼栋。
+- 验证：
+  - `npm run build` 通过，仅保留 Vite chunk size 常规提示；
+  - 浏览器联调：街道超管登录 `yaochi`，进入“工作身份与授权”，检索 `13800000005`，选择 `GRID_OPERATOR` + 求是第一网格，楼栋列表显示 `#30001/#30002/#30005`，选择 `#30005` 后创建成功，页面显示该自然人已有 `GOV_OPERATOR` 与 `GRID_OPERATOR` 两个工作身份。
+
+### RBAC + ABAC 工作身份授权 — live smoke
+- 用当前源码打包并启动 `pangu-bootstrap` jar，Flyway 校验 45 个迁移通过，当前 schema version `3.29`，未再出现 V3.27/V3.28 unresolved migration。
+- 通过真实 HTTP 调用验证：
+  - `POST /auth/login` 登录 `13800000005`；
+  - `GET /auth/shadows` 返回 `GOV_OPERATOR` 与新建 `GRID_OPERATOR` 两个工作分身；
+  - `POST /auth/switch-shadow` 切换到新建网格员身份成功，返回 `role_key=GRID_OPERATOR`、`effective_data_scope=OWNER_GROUP`，楼栋范围包含 `30005`。
+
+### Error: yaochi sandbox write blocked
+- 现象：当前会话 writable root 仅包含 `/Users/juchen/Documents/workspace/pangu`；首次尝试用补丁工具修改 `/Users/juchen/Documents/workspace/yaochi` 被权限层拒绝。
+- 原因：`yaochi` 不在当前沙箱可写根；需要显式授权后才能安全写入该仓库。
+- 处理口径：不绕过权限写入；拿到授权后再完成管理端页面，并用 `npm run build` 验证。
+
+## Session: 2026-07-02
+
+### 网格员静态角色与网格节点楼栋范围 — backend complete
+- 已将网格员对外静态角色键统一为 `GRID_MEMBER`；新增 `V3.30__grid_member_dept_scope.sql` 在既有库中执行 `GRID_OPERATOR -> GRID_MEMBER` 迁移，并同步历史动员权限记录。
+- 新增 `sys_dept_building_scope` 作为 `dept_type=5` 网格组织节点的楼栋范围表；`OWNER_GROUP` 登录上下文从该表与历史 `sys_user_building` 并集反查授权楼栋。
+- 工作身份授权新增网格节点楼栋范围接口：
+  - `POST /api/v1/admin/work-identities/depts/{communityDeptId}/grid-nodes`
+  - `GET /api/v1/admin/work-identities/depts/{deptId}/building-scope`
+  - `PUT /api/v1/admin/work-identities/depts/{deptId}/building-scope`
+- `grid-nodes` 会在居委会 `dept_type=2` 节点下生成 1-5 号 `dept_type=5` 网格组织节点，重复调用不重复建节点。
+- `GRID_MEMBER` 分身创建不再写个人 `sys_user_building`，只要求所属网格节点已有楼栋范围；测试断言新建网格分身个人责任田行数为 0。
+- 网格楼栋范围写入收紧为 `COMMUNITY_ADMIN + dept_type=2 + G端`；街道超管和业委会主任都不能替网格员配置楼栋范围。业委会主任仍可配置自治侧志愿者/业主代表责任田。
+- `docs/权限矩阵.md` 已同步网格员楼栋范围红线：业委会侧不得配置 `GRID_MEMBER`。
+- 验证：
+  - `mvn -pl pangu-bootstrap -am -Dtest=WorkIdentityAdminTest,BuildingAssignmentTest,SwitchShadowMatrixTest,SysUserRoleTriggerTest -Dsurefire.failIfNoSpecifiedTests=false test`：35 tests，0 failures，0 errors；
+  - `mvn test`：536 tests，0 failures，0 errors，1 skipped。
+
+### Error: Flyway 历史迁移误改
+- 现象：首次聚焦测试触发 Flyway checksum mismatch，涉及 V1/V1.2/V1.4/V3.x。
+- 原因：机械替换 `GRID_OPERATOR -> GRID_MEMBER` 时误改已应用历史迁移。
+- 处理口径：恢复历史迁移文本，角色键变更只通过新增 V3.30 表达；以后不得为改名直接修改已应用迁移。
+
+### Error: 30003 楼栋 seed 不一致
+- 现象：`WorkIdentityAdminTest` 的 `BeforeEach` 重置网格范围时，`sys_dept_building_scope` 触发器反复拒绝 `building_id=30003`。
+- 原因：旧 `sys_user_building` seed 注释/责任田包含 30003，但当前 `c_owner_property` 只有 30001、30002、30005。
+- 处理口径：测试重置只使用产权表真实存在的 30001/30002；新增范围验证使用 30005。

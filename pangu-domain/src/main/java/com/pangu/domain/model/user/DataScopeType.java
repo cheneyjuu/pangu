@@ -7,7 +7,7 @@ package com.pangu.domain.model.user;
  * <ul>
  *   <li>{@link #ALL_COMMUNITY}  社区全量视野（业委会主任、街道办、党组织书记）</li>
  *   <li>{@link #OWNER_GROUP}    业主集合（业主代表 / 网格员 / 志愿者，
- *                                以 {@code sys_user_building} 为权威反查楼栋）</li>
+ *                                以用户责任田或网格节点范围反查楼栋）</li>
  *   <li>{@link #ORG_ONLY}       仅本部门（物业 / 服务商：只看自家数据）</li>
  * </ul>
  *
@@ -19,7 +19,7 @@ public enum DataScopeType {
     /** 社区全量视野 */
     ALL_COMMUNITY("ALL_COMMUNITY", "社区全量"),
 
-    /** 楼栋反查集合（OWNER_REPRESENTATIVE / GRID_OPERATOR / VOLUNTEER） */
+    /** 楼栋反查集合（OWNER_REPRESENTATIVE / GRID_MEMBER / VOLUNTEER） */
     OWNER_GROUP("OWNER_GROUP", "业主集合"),
 
     /** 仅本部门（物业 / 服务商） */

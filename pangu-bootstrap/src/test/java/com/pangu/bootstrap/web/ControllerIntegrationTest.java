@@ -39,7 +39,7 @@ public class ControllerIntegrationTest {
 
     @Test
     public void testLoginAndRolesGridManager() throws Exception {
-        // V1.1 seed: 陈网格员 phone=13800000004 / account_id=999804 / sys_user.user_id=800004 / role=GRID_OPERATOR
+        // V1.1 seed: 陈网格员 phone=13800000004 / account_id=999804 / sys_user.user_id=800004 / role=GRID_MEMBER
         Map<String, Object> request = Map.of(
                 "username", "13800000004",
                 "smsCode", "123456"

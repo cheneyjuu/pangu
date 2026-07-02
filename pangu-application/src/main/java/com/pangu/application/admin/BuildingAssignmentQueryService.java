@@ -40,9 +40,9 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class BuildingAssignmentQueryService {
 
-    /** 可分配的执行角色白名单——这三类是 OWNER_GROUP 数据范围，靠 sys_user_building 反查。 */
+    /** 可分配的执行角色白名单。GRID_MEMBER 走网格节点范围，其余 OWNER_GROUP 角色走用户责任田。 */
     public static final Set<String> ASSIGNABLE_ROLES =
-            Set.of("GRID_OPERATOR", "VOLUNTEER", "OWNER_REPRESENTATIVE");
+            Set.of("GRID_MEMBER", "VOLUNTEER", "OWNER_REPRESENTATIVE");
 
     /** 搜索返回上限——防 N+1 把整张表拉回。 */
     public static final int SEARCH_LIMIT = 50;
@@ -64,7 +64,7 @@ public class BuildingAssignmentQueryService {
         if (!ASSIGNABLE_ROLES.contains(roleKey)) {
             throw new BuildingAssignmentApplicationException(
                     BuildingAssignmentApplicationException.Reason.PARAM_INVALID,
-                    "roleKey 必须为 GRID_OPERATOR/VOLUNTEER/OWNER_REPRESENTATIVE 之一，实际：" + roleKey);
+                    "roleKey 必须为 GRID_MEMBER/VOLUNTEER/OWNER_REPRESENTATIVE 之一，实际：" + roleKey);
         }
         UserContext ctx = userContextHolder.current();
         return repository.listUsersByRole(roleKey, ctx == null ? null : ctx.tenantId()).stream()

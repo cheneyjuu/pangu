@@ -189,7 +189,7 @@ public class FinanceDisclosureComposeTest {
 
     @Test
     public void gridOperatorCannotComposeEvenIfPermissionMisconfigured() {
-        setRole("GRID_OPERATOR", COMPOSE_USER_ID);
+        setRole("GRID_MEMBER", COMPOSE_USER_ID);
         Long accountId = seedAccount(new BigDecimal("100.00"));
         seedEntry(accountId, 2, 1, new BigDecimal("10.00"), "2026-12-05 10:00:00");
 

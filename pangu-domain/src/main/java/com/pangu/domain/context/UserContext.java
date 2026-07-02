@@ -25,7 +25,7 @@ import java.util.Set;
  * @param authLevel            认证等级（C 端 L1/L3 实名状态；管理端通常 L1）
  * @param roleKey              角色 key；C 端为 null
  * @param permissions          能力点 key 集合；@PreAuthorize 取此集合
- * @param authorizedBuildingIds OWNER_GROUP 时由 {@code sys_user_building} 反查得到的楼栋集合；其它 scope 为 emptySet
+ * @param authorizedBuildingIds OWNER_GROUP 时由用户责任田或网格节点范围反查得到的楼栋集合；其它 scope 为 emptySet
  */
 public record UserContext(
         Long accountId,

@@ -28,7 +28,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * <p>V1.1 求是小区 seed + V1.4 角色授权：
  * <ul>
  *   <li>吴经办员（GOV_OPERATOR，role 14）—— 有 {@code candidate:nominate}，且 service 层允许提名；</li>
- *   <li>陈网格员（GRID_OPERATOR，role 4）—— V3.20 后已回收 {@code candidate:nominate}；</li>
+ *   <li>陈网格员（GRID_MEMBER，role 4）—— V3.20 后已回收 {@code candidate:nominate}；</li>
  *   <li>刘主任（COMMUNITY_ADMIN，role 2）—— 有 {@code candidate:approve} + {@code voting:subject:audit}，无 nominate；</li>
  *   <li>李四（C_USER）—— G 端候选人 endpoint 全 403，仅 C 端只读列表 isAuthenticated 通过。</li>
  * </ul>

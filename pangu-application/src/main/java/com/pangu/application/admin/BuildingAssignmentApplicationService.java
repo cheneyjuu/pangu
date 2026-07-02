@@ -23,7 +23,7 @@ import java.util.Set;
  * 改为 service 层校验：
  * <ol>
  *   <li>{@link #requireAssigner()} 校验调用者 roleKey ∈ {@link #ASSIGNER_ROLES}
- *       （超管/居委会管理员/党组书记/业委会主任）；</li>
+ *       （超管/居委会管理员/党组书记/业委会主任）；网格员范围额外收紧为居委会管理员；</li>
  *   <li>{@code assign} 进一步校验目标用户角色 ∈
  *       {@link BuildingAssignmentQueryService#ASSIGNABLE_ROLES} 且同租户；</li>
  *   <li>合规检查：账号状态（SQL 已过滤 u.status='0'）/ 实名 / 楼栋上限；</li>
@@ -54,6 +54,18 @@ public class BuildingAssignmentApplicationService {
 
     @Transactional
     public void assign(Long userId, Long buildingId, String targetRoleKey, boolean force) {
+        assign(userId, buildingId, targetRoleKey, null, force);
+    }
+
+    /**
+     * 在指定租户内分配楼栋。
+     *
+     * <p>普通小区管理员沿用当前登录租户；街道超管 {@code tenantId=null} 时，
+     * 工作身份创建流程可传入目标部门租户，避免跨租户视图无法写入
+     * {@code sys_user_building.tenant_id}。
+     */
+    @Transactional
+    public void assign(Long userId, Long buildingId, String targetRoleKey, Long targetTenantId, boolean force) {
         if (userId == null || buildingId == null) {
             throw new BuildingAssignmentApplicationException(
                     BuildingAssignmentApplicationException.Reason.PARAM_INVALID,
@@ -67,11 +79,16 @@ public class BuildingAssignmentApplicationService {
         if (!BuildingAssignmentQueryService.ASSIGNABLE_ROLES.contains(targetRoleKey)) {
             throw new BuildingAssignmentApplicationException(
                     BuildingAssignmentApplicationException.Reason.PARAM_INVALID,
-                    "targetRoleKey 必须为 GRID_OPERATOR/VOLUNTEER/OWNER_REPRESENTATIVE 之一，实际："
+                    "targetRoleKey 必须为 GRID_MEMBER/VOLUNTEER/OWNER_REPRESENTATIVE 之一，实际："
                             + targetRoleKey);
         }
         UserContext ctx = requireAssigner();
-        Long tenantId = ctx.tenantId();
+        if (WorkIdentityRoleRules.isGridMember(targetRoleKey) && !isCommunityAdmin(ctx)) {
+            throw new BuildingAssignmentApplicationException(
+                    BuildingAssignmentApplicationException.Reason.FORBIDDEN,
+                    "网格员楼栋范围只能由居委会管理身份分配，当前角色=" + ctx.roleKey());
+        }
+        Long tenantId = resolveTenant(ctx, targetTenantId);
 
         // 目标用户须持指定可分配角色（同租户；街道超管 tenantId=null 跨租户）
         if (!repository.userHasAssignableRole(userId, targetRoleKey, tenantId)) {
@@ -154,6 +171,18 @@ public class BuildingAssignmentApplicationService {
                 userId, buildingId, ctx.userId(), writeTenantId, force);
     }
 
+    private Long resolveTenant(UserContext ctx, Long targetTenantId) {
+        if (ctx.tenantId() != null) {
+            if (targetTenantId != null && !ctx.tenantId().equals(targetTenantId)) {
+                throw new BuildingAssignmentApplicationException(
+                        BuildingAssignmentApplicationException.Reason.BUILDING_NOT_IN_SCOPE,
+                        "目标租户不在当前数据范围内：tenantId=" + targetTenantId);
+            }
+            return ctx.tenantId();
+        }
+        return targetTenantId;
+    }
+
     @Transactional
     public void revoke(Long userId, Long buildingId) {
         if (userId == null || buildingId == null) {
@@ -185,5 +214,12 @@ public class BuildingAssignmentApplicationService {
                             + (ctx == null ? "null" : ctx.roleKey()));
         }
         return ctx;
+    }
+
+    private boolean isCommunityAdmin(UserContext ctx) {
+        return WorkIdentityRoleRules.COMMUNITY_ADMIN.equals(ctx.roleKey())
+                && ctx.deptCategory() == UserContext.DeptCategory.G
+                && ctx.deptType() != null
+                && ctx.deptType() == 2;
     }
 }

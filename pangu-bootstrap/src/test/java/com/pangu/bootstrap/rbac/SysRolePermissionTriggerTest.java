@@ -22,7 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * <p>测试不直接修改 V1.4 的预置 13 个角色 / 17 个 permission，
  * 只通过新建临时角色（is_system=0）+ 已存在的红线 / 非红线 permission 来验证 trigger 6 反例；
- * trigger 7 用 role_id=4 GRID_OPERATOR（is_system=1）做 DELETE 反例。
+ * trigger 7 用 role_id=4 GRID_MEMBER（is_system=1）做 DELETE 反例。
  */
 @SpringBootTest
 public class SysRolePermissionTriggerTest {
@@ -117,16 +117,16 @@ public class SysRolePermissionTriggerTest {
     // ===================================================================
     @Test
     public void trigger7_systemRoleCannotBeDeleted_rejected() {
-        // 直接尝试删除 role_id=4 GRID_OPERATOR (is_system=1)
+        // 直接尝试删除 role_id=4 GRID_MEMBER (is_system=1)
         // 注意：role 是被 sys_user_role 引用的，外键 ON DELETE CASCADE 但 trigger 7 BEFORE DELETE 先抛
         DataAccessException ex = assertThrows(DataAccessException.class, () ->
                 jdbcTemplate.update("DELETE FROM sys_role WHERE role_id = 4"));
         assertTrue(rootMessage(ex).contains("[trigger 7]"),
                 "应抛 trigger 7 系统角色禁删，实际：" + rootMessage(ex));
-        assertTrue(rootMessage(ex).contains("GRID_OPERATOR")
+        assertTrue(rootMessage(ex).contains("GRID_MEMBER")
                         || rootMessage(ex).contains("系统角色")
                         || rootMessage(ex).contains("不可删除"),
-                "错误信息应提到 GRID_OPERATOR 或系统角色不可删除，实际：" + rootMessage(ex));
+                "错误信息应提到 GRID_MEMBER 或系统角色不可删除，实际：" + rootMessage(ex));
     }
 
     private static String rootMessage(Throwable ex) {

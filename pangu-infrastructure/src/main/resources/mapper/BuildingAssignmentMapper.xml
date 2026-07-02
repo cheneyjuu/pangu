@@ -63,7 +63,7 @@
         JOIN sys_role r ON r.role_id = ur.role_id
         JOIN sys_dept d ON d.dept_id = u.dept_id
         LEFT JOIN t_account a ON a.account_id = u.account_id
-        WHERE r.role_key IN ('GRID_OPERATOR','VOLUNTEER','OWNER_REPRESENTATIVE')
+        WHERE r.role_key IN ('GRID_MEMBER','VOLUNTEER','OWNER_REPRESENTATIVE')
           AND u.status = '0'
           AND (
               u.nick_name ILIKE CONCAT('%', #{keyword}, '%')
@@ -96,7 +96,10 @@
     <select id="selectDistinctBuildings" resultType="long">
         SELECT DISTINCT op.building_id
         FROM c_owner_property op
-        WHERE op.tenant_id = #{tenantId}
+        WHERE 1 = 1
+        <if test="tenantId != null">
+            AND op.tenant_id = #{tenantId}
+        </if>
         ORDER BY op.building_id ASC
     </select>
 

@@ -164,7 +164,7 @@ public class ElectionCandidateServiceTest {
 
     @Test
     public void nominate_gridOperatorRejectedEvenWithLegacyPermission() {
-        when(userContextHolder.current()).thenReturn(ctx("GRID_OPERATOR", 5));
+        when(userContextHolder.current()).thenReturn(ctx("GRID_MEMBER", 5));
         when(subjectRepository.findById(SUBJECT_ID)).thenReturn(Optional.of(electionSubject(SubjectStatus.DRAFT)));
         VotingApplicationException ex = assertThrows(VotingApplicationException.class,
                 () -> service.nominate(nominateCmd()));

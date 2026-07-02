@@ -27,7 +27,7 @@ public interface BuildingAssignmentMapper {
      * 模糊搜索可分配角色用户。
      *
      * <p>三字段 OR：nick_name ILIKE / phone = / phone LIKE %tail。
-     * 受可分配角色（GRID_OPERATOR / VOLUNTEER / OWNER_REPRESENTATIVE）固定过滤；
+     * 受可分配角色（GRID_MEMBER / VOLUNTEER / OWNER_REPRESENTATIVE）固定过滤；
      * tenantId=null 时跨租户。{@code limit} 由 service 层注入硬上限。
      */
     List<AssignableUserRow> searchUsers(@Param("keyword") String keyword,

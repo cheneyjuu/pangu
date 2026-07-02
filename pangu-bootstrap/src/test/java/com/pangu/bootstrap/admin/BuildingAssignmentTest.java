@@ -86,7 +86,7 @@ public class BuildingAssignmentTest {
         mockMvc.perform(post("/api/v1/admin/building-assignments/users/" + USR_GRID + "/buildings")
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(assignBody(bid, "GRID_OPERATOR")))
+                        .content(assignBody(bid, "GRID_MEMBER")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code", is(200)));
 
@@ -125,6 +125,18 @@ public class BuildingAssignmentTest {
                 .andExpect(status().isOk());
     }
 
+    @Test
+    public void committeeDirector_assignGridMember_forbidden() throws Exception {
+        String token = jwtTokenProvider.generateToken(ACC_DIRECTOR, "SYS_USER", USR_DIRECTOR, TENANT_RUSHI);
+
+        mockMvc.perform(post("/api/v1/admin/building-assignments/users/" + USR_GRID + "/buildings")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(assignBody(30005L, "GRID_MEMBER")))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code", is(42402)));
+    }
+
     // ===== 3. 非白名单角色 业委会委员 → 403/42402 =====
 
     @Test
@@ -133,7 +145,7 @@ public class BuildingAssignmentTest {
         mockMvc.perform(post("/api/v1/admin/building-assignments/users/" + USR_GRID + "/buildings")
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(assignBody(30001L, "GRID_OPERATOR")))
+                        .content(assignBody(30001L, "GRID_MEMBER")))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code", is(42402)));
     }
@@ -147,7 +159,7 @@ public class BuildingAssignmentTest {
         mockMvc.perform(post("/api/v1/admin/building-assignments/users/" + USR_GRID + "/buildings")
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(assignBody(99999L, "GRID_OPERATOR")))
+                        .content(assignBody(99999L, "GRID_MEMBER")))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code", is(42404)));
     }
@@ -157,11 +169,11 @@ public class BuildingAssignmentTest {
     @Test
     public void communityAdmin_assignNonAssignableUser_404_42403() throws Exception {
         String token = jwtTokenProvider.generateToken(ACC_COMMUNITY_ADMIN, "SYS_USER", USR_COMMUNITY_ADMIN, TENANT_RUSHI);
-        // 给物业经理(800201) 分配 GRID_OPERATOR 楼栋 → 该用户角色不是 GRID_OPERATOR
+        // 给物业经理(800201) 分配 GRID_MEMBER 楼栋 → 该用户角色不是 GRID_MEMBER
         mockMvc.perform(post("/api/v1/admin/building-assignments/users/" + USR_PROPERTY_MGR + "/buildings")
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(assignBody(30001L, "GRID_OPERATOR")))
+                        .content(assignBody(30001L, "GRID_MEMBER")))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code", is(42403)));
     }
@@ -175,7 +187,7 @@ public class BuildingAssignmentTest {
         mockMvc.perform(post("/api/v1/admin/building-assignments/users/" + USR_GRID + "/buildings")
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(assignBody(30001L, "GRID_OPERATOR")))
+                        .content(assignBody(30001L, "GRID_MEMBER")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code", is(200)));
     }
@@ -210,11 +222,11 @@ public class BuildingAssignmentTest {
     public void communityAdmin_listGridOperators_200() throws Exception {
         String token = jwtTokenProvider.generateToken(ACC_COMMUNITY_ADMIN, "SYS_USER", USR_COMMUNITY_ADMIN, TENANT_RUSHI);
         mockMvc.perform(get("/api/v1/admin/building-assignments/users")
-                        .param("roleKey", "GRID_OPERATOR")
+                        .param("roleKey", "GRID_MEMBER")
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code", is(200)))
-                .andExpect(jsonPath("$.data[0].roleKey", is("GRID_OPERATOR")));
+                .andExpect(jsonPath("$.data[0].roleKey", is("GRID_MEMBER")));
     }
 
     @Test
@@ -239,7 +251,7 @@ public class BuildingAssignmentTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code", is(200)))
                 .andExpect(jsonPath("$.data[?(@.userId==" + USR_GRID + ")]").exists())
-                .andExpect(jsonPath("$.data[?(@.userId==" + USR_GRID + ")].roleKey", hasItem("GRID_OPERATOR")));
+                .andExpect(jsonPath("$.data[?(@.userId==" + USR_GRID + ")].roleKey", hasItem("GRID_MEMBER")));
     }
 
     @Test
@@ -266,7 +278,7 @@ public class BuildingAssignmentTest {
     @Test
     public void search_excludesNonAssignableRoles() throws Exception {
         // 业委会主任不在可分配 3 角色，搜「周主任」应 0 命中。
-        // 刘主任已在 D-mini 具备 GRID_OPERATOR 分身，因此不能再作为此负例。
+        // 刘主任已在 D-mini 具备 GRID_MEMBER 分身，因此不能再作为此负例。
         String token = jwtTokenProvider.generateToken(ACC_COMMUNITY_ADMIN, "SYS_USER", USR_COMMUNITY_ADMIN, TENANT_RUSHI);
         mockMvc.perform(get("/api/v1/admin/building-assignments/search")
                         .param("keyword", "周主任")
@@ -278,33 +290,33 @@ public class BuildingAssignmentTest {
 
     @Test
     public void listOccupants_returnsAllRoles() throws Exception {
-        // seed: 30001 被 800004(GRID_OPERATOR) + 800102(OWNER_REPRESENTATIVE) 同占
+        // seed: 30001 被 800004(GRID_MEMBER) + 800102(OWNER_REPRESENTATIVE) 同占
         String token = jwtTokenProvider.generateToken(ACC_COMMUNITY_ADMIN, "SYS_USER", USR_COMMUNITY_ADMIN, TENANT_RUSHI);
         mockMvc.perform(get("/api/v1/admin/building-assignments/buildings/30001/occupants")
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code", is(200)))
                 .andExpect(jsonPath("$.data.buildingId", is(30001)))
-                .andExpect(jsonPath("$.data.occupants[?(@.userId==" + USR_GRID + ")].roleKey", hasItem("GRID_OPERATOR")))
+                .andExpect(jsonPath("$.data.occupants[?(@.userId==" + USR_GRID + ")].roleKey", hasItem("GRID_MEMBER")))
                 .andExpect(jsonPath("$.data.occupants[?(@.userId==800102)].roleKey", hasItem("OWNER_REPRESENTATIVE")));
     }
 
     @Test
     public void assign_buildingOccupiedBySameRole_409_42407() throws Exception {
-        // D-mini seed 增加了第二个 GRID_OPERATOR 分身 800006。
-        // 30001 已被 800004 GRID_OPERATOR 占；试图给 800006 分 30001 → 同角色互斥，应拒。
+        // D-mini seed 增加了第二个 GRID_MEMBER 分身 800006。
+        // 30001 已被 800004 GRID_MEMBER 占；试图给 800006 分 30001 → 同角色互斥，应拒。
         String token = jwtTokenProvider.generateToken(ACC_COMMUNITY_ADMIN, "SYS_USER", USR_COMMUNITY_ADMIN, TENANT_RUSHI);
         mockMvc.perform(post("/api/v1/admin/building-assignments/users/" + USR_LIU_GRID_SHADOW + "/buildings")
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(assignBody(30001L, "GRID_OPERATOR")))
+                        .content(assignBody(30001L, "GRID_MEMBER")))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code", is(42407)));
     }
 
     @Test
     public void assign_buildingOccupiedByDifferentRole_200() throws Exception {
-        // 30001 已被 800004 GRID_OPERATOR 占；给志愿者 800104 分 30001 不冲突（不同角色可共享）
+        // 30001 已被 800004 GRID_MEMBER 占；给志愿者 800104 分 30001 不冲突（不同角色可共享）
         String token = jwtTokenProvider.generateToken(ACC_COMMUNITY_ADMIN, "SYS_USER", USR_COMMUNITY_ADMIN, TENANT_RUSHI);
         // 先清场（防上轮残留）
         mockMvc.perform(delete("/api/v1/admin/building-assignments/users/" + USR_VOLUNTEER + "/buildings/30001")

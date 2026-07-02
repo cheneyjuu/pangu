@@ -1,0 +1,241 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pangu.infrastructure.persistence.mapper.WorkIdentityMapper">
+
+    <resultMap id="AccountCandidateMap"
+               type="com.pangu.infrastructure.persistence.mapper.WorkIdentityMapper$AccountCandidateRow">
+        <id property="accountId" column="account_id"/>
+        <result property="phone" column="phone"/>
+        <result property="realNameCipher" column="real_name_cipher"/>
+        <result property="realNameVerified" column="real_name_verified"/>
+        <result property="status" column="status"/>
+    </resultMap>
+
+    <resultMap id="ShadowMap"
+               type="com.pangu.infrastructure.persistence.mapper.WorkIdentityMapper$ShadowRow">
+        <id property="userId" column="user_id"/>
+        <result property="accountId" column="account_id"/>
+        <result property="deptId" column="dept_id"/>
+        <result property="tenantId" column="tenant_id"/>
+        <result property="userName" column="user_name"/>
+        <result property="nickName" column="nick_name"/>
+        <result property="deptType" column="dept_type"/>
+        <result property="deptCategory" column="dept_category"/>
+        <result property="deptName" column="dept_name"/>
+        <result property="roleId" column="role_id"/>
+        <result property="roleKey" column="role_key"/>
+        <result property="roleName" column="role_name"/>
+        <result property="effectiveDataScope" column="effective_data_scope"/>
+    </resultMap>
+
+    <resultMap id="DeptOptionMap"
+               type="com.pangu.infrastructure.persistence.mapper.WorkIdentityMapper$DeptOptionRow">
+        <id property="deptId" column="dept_id"/>
+        <result property="parentId" column="parent_id"/>
+        <result property="ancestors" column="ancestors"/>
+        <result property="deptName" column="dept_name"/>
+        <result property="deptType" column="dept_type"/>
+        <result property="deptCategory" column="dept_category"/>
+        <result property="tenantId" column="tenant_id"/>
+    </resultMap>
+
+    <sql id="AccountColumns">
+        a.account_id,
+        a.phone,
+        a.real_name AS real_name_cipher,
+        a.real_name_verified,
+        a.status
+    </sql>
+
+    <select id="searchAccountCandidates" resultMap="AccountCandidateMap">
+        SELECT DISTINCT
+            <include refid="AccountColumns"/>
+        FROM t_account a
+        LEFT JOIN sys_user u ON u.account_id = a.account_id
+        WHERE a.status = 1
+          AND (
+              a.phone LIKE CONCAT('%', #{keyword}, '%')
+              OR a.real_name ILIKE CONCAT('%', #{keyword}, '%')
+              OR u.nick_name ILIKE CONCAT('%', #{keyword}, '%')
+              OR u.user_name ILIKE CONCAT('%', #{keyword}, '%')
+          )
+        ORDER BY a.account_id ASC
+        LIMIT #{limit}
+    </select>
+
+    <select id="listAccountNameSearchPool" resultMap="AccountCandidateMap">
+        SELECT
+            <include refid="AccountColumns"/>
+        FROM t_account a
+        WHERE a.status = 1
+        ORDER BY a.account_id DESC
+        LIMIT #{limit}
+    </select>
+
+    <select id="selectAccount" resultMap="AccountCandidateMap">
+        SELECT
+            <include refid="AccountColumns"/>
+        FROM t_account a
+        WHERE a.account_id = #{accountId}
+        LIMIT 1
+    </select>
+
+    <sql id="ShadowColumns">
+        u.user_id,
+        u.account_id,
+        u.dept_id,
+        d.tenant_id,
+        u.user_name,
+        u.nick_name,
+        d.dept_type,
+        d.dept_category,
+        d.dept_name,
+        r.role_id,
+        r.role_key,
+        r.role_name,
+        COALESCE(ur.effective_data_scope, r.fixed_data_scope, r.default_data_scope) AS effective_data_scope
+    </sql>
+
+    <select id="selectShadowsByAccount" resultMap="ShadowMap">
+        SELECT
+            <include refid="ShadowColumns"/>
+        FROM sys_user u
+        JOIN sys_dept d ON d.dept_id = u.dept_id
+        LEFT JOIN sys_user_role ur ON ur.user_id = u.user_id
+        LEFT JOIN sys_role r ON r.role_id = ur.role_id AND r.status = '0'
+        WHERE u.account_id = #{accountId}
+          AND u.status = '0'
+        ORDER BY u.user_id ASC
+    </select>
+
+    <select id="selectShadow" resultMap="ShadowMap">
+        SELECT
+            <include refid="ShadowColumns"/>
+        FROM sys_user u
+        JOIN sys_dept d ON d.dept_id = u.dept_id
+        LEFT JOIN sys_user_role ur ON ur.user_id = u.user_id
+        LEFT JOIN sys_role r ON r.role_id = ur.role_id AND r.status = '0'
+        WHERE u.account_id = #{accountId}
+          AND u.user_id = #{userId}
+          AND u.status = '0'
+        LIMIT 1
+    </select>
+
+    <select id="selectActiveBuildingIds" resultType="long">
+        SELECT DISTINCT building_id
+        FROM (
+            SELECT ub.building_id
+            FROM sys_user_building ub
+            WHERE ub.user_id = #{userId}
+              AND ub.status = 1
+            UNION
+            SELECT dbs.building_id
+            FROM sys_dept_building_scope dbs
+            JOIN sys_user u ON u.dept_id = dbs.dept_id
+            JOIN sys_user_role ur ON ur.user_id = u.user_id
+            JOIN sys_role r ON r.role_id = ur.role_id
+            WHERE u.user_id = #{userId}
+              AND r.role_key = 'GRID_MEMBER'
+              AND dbs.status = 1
+        ) scoped
+        ORDER BY building_id ASC
+    </select>
+
+    <select id="selectDeptBuildingScopeIds" resultType="long">
+        SELECT DISTINCT building_id
+        FROM sys_dept_building_scope
+        WHERE dept_id = #{deptId}
+          AND status = 1
+        ORDER BY building_id ASC
+    </select>
+
+    <select id="selectDeptOptions" resultMap="DeptOptionMap">
+        SELECT dept_id, parent_id, ancestors, dept_name, dept_type, dept_category, tenant_id
+        FROM sys_dept
+        WHERE status = '0'
+          AND dept_category = #{deptCategory}
+        <if test="tenantId != null">
+          AND (tenant_id = #{tenantId} OR tenant_id IS NULL)
+        </if>
+        ORDER BY tenant_id NULLS FIRST, dept_type ASC, dept_id ASC
+    </select>
+
+    <select id="selectGridChildren" resultMap="DeptOptionMap">
+        SELECT dept_id, parent_id, ancestors, dept_name, dept_type, dept_category, tenant_id
+        FROM sys_dept
+        WHERE parent_id = #{communityDeptId}
+          AND dept_type = 5
+          AND dept_category = 'G'
+          AND status = '0'
+        ORDER BY order_num ASC, dept_id ASC
+    </select>
+
+    <select id="selectDistinctBuildings" resultType="long">
+        SELECT DISTINCT building_id
+        FROM c_owner_property
+        WHERE tenant_id = #{tenantId}
+        ORDER BY building_id ASC
+    </select>
+
+    <select id="selectDept" resultMap="DeptOptionMap">
+        SELECT dept_id, parent_id, ancestors, dept_name, dept_type, dept_category, tenant_id
+        FROM sys_dept
+        WHERE dept_id = #{deptId}
+          AND status = '0'
+        LIMIT 1
+    </select>
+
+    <select id="existsAccountDept" resultType="boolean">
+        SELECT EXISTS(
+            SELECT 1 FROM sys_user
+            WHERE account_id = #{accountId}
+              AND dept_id = #{deptId}
+              AND status = '0'
+        )
+    </select>
+
+    <update id="deactivateDeptBuildingScope">
+        UPDATE sys_dept_building_scope
+        SET status = 2,
+            updated_at = now()
+        WHERE dept_id = #{deptId}
+          AND status = 1
+    </update>
+
+    <insert id="upsertDeptBuildingScope">
+        INSERT INTO sys_dept_building_scope (dept_id, tenant_id, building_id, assigned_by, status)
+        SELECT DISTINCT #{deptId}, op.tenant_id, #{buildingId}, #{assignedBy}, 1
+        FROM c_owner_property op
+        WHERE op.building_id = #{buildingId}
+        ON CONFLICT (dept_id, tenant_id, building_id)
+        DO UPDATE SET
+            assigned_by = EXCLUDED.assigned_by,
+            status = 1,
+            updated_at = now()
+    </insert>
+
+    <insert id="insertSysUser"
+            parameterType="com.pangu.infrastructure.persistence.mapper.WorkIdentityMapper$SysUserInsertRow"
+            useGeneratedKeys="true"
+            keyProperty="userId"
+            keyColumn="user_id">
+        INSERT INTO sys_user (account_id, dept_id, user_name, nick_name, status)
+        VALUES (#{accountId}, #{deptId}, #{userName}, #{nickName}, '0')
+    </insert>
+
+    <insert id="insertGridDept"
+            parameterType="com.pangu.infrastructure.persistence.mapper.WorkIdentityMapper$GridDeptInsertRow"
+            useGeneratedKeys="true"
+            keyProperty="deptId"
+            keyColumn="dept_id">
+        INSERT INTO sys_dept (parent_id, ancestors, dept_name, dept_type, dept_category, tenant_id, order_num, status)
+        VALUES (#{parentId}, #{ancestors}, #{deptName}, 5, 'G', #{tenantId}, #{orderNum}, '0')
+    </insert>
+
+    <insert id="insertSysUserRole">
+        INSERT INTO sys_user_role (user_id, role_id, effective_data_scope, granted_by)
+        VALUES (#{userId}, #{roleId}, #{effectiveDataScope}, #{grantedBy})
+    </insert>
+
+</mapper>
