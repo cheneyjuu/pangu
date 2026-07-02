@@ -5,8 +5,10 @@ import com.pangu.application.owner.OwnerProfileView;
 import com.pangu.application.owner.OwnerQueryService;
 import com.pangu.domain.common.Page;
 import com.pangu.domain.gateway.dto.OwnerQuery;
+import com.pangu.domain.model.asset.OwnerPropertyDetail;
 import com.pangu.interfaces.security.SecurityUtils;
 import com.pangu.interfaces.web.controller.dto.PageResponse;
+import com.pangu.interfaces.web.controller.dto.owner.MyOwnerPropertyResponse;
 import com.pangu.interfaces.web.controller.dto.owner.OwnerDetailResponse;
 import com.pangu.interfaces.web.controller.dto.owner.OwnerListResponse;
 import com.pangu.interfaces.web.exception.AppException;
@@ -18,6 +20,8 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.List;
 
 /**
  * 业主名册管理端只读 API（M4 读侧）。
@@ -74,6 +78,20 @@ public class OwnerController extends BaseController {
         OwnerDetailView view = ownerQueryService.getOwnerDetail(uid, requireTenantId())
                 .orElseThrow(() -> new AppException(CommonErrorCode.NOT_FOUND, "业主不存在或不在本小区"));
         return success(OwnerDetailResponse.from(view));
+    }
+
+    @GetMapping("/me/properties")
+    @PreAuthorize("isAuthenticated()")
+    public Result<List<MyOwnerPropertyResponse>> myProperties() {
+        Long uid = SecurityUtils.getUid();
+        Long tenantId = requireTenantId();
+        if (uid == null) {
+            throw new AppException(CommonErrorCode.FORBIDDEN, "未识别到业主身份，禁止访问名下房产");
+        }
+        List<OwnerPropertyDetail> properties = ownerQueryService.listOwnerProperties(uid, tenantId);
+        return success(properties.stream()
+                .map(p -> MyOwnerPropertyResponse.from(p, uid, tenantId))
+                .toList());
     }
 
     private String normalizePhonePrefix(String phone) {

@@ -50,6 +50,11 @@ public class OwnerQueryService {
         });
     }
 
+    /** 当前业主名下房产列表（C 端私有空间报修、投票房产切换复用）。 */
+    public List<OwnerPropertyDetail> listOwnerProperties(Long uid, Long tenantId) {
+        return propertyGateway.listPropertiesByUid(uid, tenantId);
+    }
+
     private OwnerProfileView toProfileView(OwnerProfile profile) {
         return new OwnerProfileView(
                 profile.uid(),

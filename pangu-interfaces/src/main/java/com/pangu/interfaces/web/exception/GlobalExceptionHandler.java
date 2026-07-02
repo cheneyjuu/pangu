@@ -6,6 +6,7 @@ import com.pangu.application.admin.WorkIdentityApplicationException;
 import com.pangu.application.disclosure.FinanceDisclosureApplicationException;
 import com.pangu.application.dispute.DisputeApplicationException;
 import com.pangu.application.lock.GovernanceLockApplicationException;
+import com.pangu.application.repair.RepairWorkOrderApplicationException;
 import com.pangu.application.voting.VotingApplicationException;
 import com.pangu.application.waiver.WaiverApplicationException;
 import com.pangu.interfaces.web.controller.Result;
@@ -188,6 +189,24 @@ public class GlobalExceptionHandler {
         response.setStatus(errorCode.getHttpStatus());
         log.info("WorkIdentity business exception reason={} code={} msg={}",
                 ex.getReason(), errorCode.getCode(), ex.getMessage());
+        return Result.fail(
+                errorCode.getCode(),
+                ex.getMessage() != null ? ex.getMessage() : errorCode.getMessage(),
+                null,
+                errorCode.getErrorType(),
+                errorCode.isNeedRetry());
+    }
+
+    /**
+     * 维修报修工单应用层业务异常 → RepairWorkOrderErrorCode。
+     */
+    @ExceptionHandler(RepairWorkOrderApplicationException.class)
+    public Result<Object> handleRepairWorkOrderApplicationException(
+            RepairWorkOrderApplicationException ex, HttpServletResponse response) {
+        RepairWorkOrderErrorCode errorCode = RepairWorkOrderExceptionTranslator.translate(ex);
+        response.setStatus(errorCode.getHttpStatus());
+        log.info("RepairWorkOrder business exception reason={} code={} msg={}",
+                ex.reason(), errorCode.getCode(), ex.getMessage());
         return Result.fail(
                 errorCode.getCode(),
                 ex.getMessage() != null ? ex.getMessage() : errorCode.getMessage(),

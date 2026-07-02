@@ -1,0 +1,268 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pangu.infrastructure.persistence.mapper.RepairWorkOrderMapper">
+
+    <resultMap id="RepairWorkOrderResultMap"
+               type="com.pangu.infrastructure.persistence.entity.RepairWorkOrderRow">
+        <id property="workOrderId" column="work_order_id"/>
+        <result property="orderNo" column="order_no"/>
+        <result property="tenantId" column="tenant_id"/>
+        <result property="title" column="title"/>
+        <result property="description" column="description"/>
+        <result property="source" column="source"/>
+        <result property="spaceScope" column="space_scope"/>
+        <result property="status" column="status"/>
+        <result property="reporterAccountId" column="reporter_account_id"/>
+        <result property="reporterUid" column="reporter_uid"/>
+        <result property="reporterUserId" column="reporter_user_id"/>
+        <result property="roomId" column="room_id"/>
+        <result property="buildingId" column="building_id"/>
+        <result property="locationText" column="location_text"/>
+        <result property="needManualLocation" column="need_manual_location"/>
+        <result property="locationLocked" column="location_locked"/>
+        <result property="assignedUserId" column="assigned_user_id"/>
+        <result property="assigneeRoleKey" column="assignee_role_key"/>
+        <result property="assigneeDeptId" column="assignee_dept_id"/>
+        <result property="category" column="category"/>
+        <result property="riskLevel" column="risk_level"/>
+        <result property="surveySummary" column="survey_summary"/>
+        <result property="planBudget" column="plan_budget"/>
+        <result property="fundSource" column="fund_source"/>
+        <result property="fundGateBlocked" column="fund_gate_blocked"/>
+        <result property="satisfactionScore" column="satisfaction_score"/>
+        <result property="satisfactionComment" column="satisfaction_comment"/>
+        <result property="version" column="version"/>
+        <result property="createTime" column="create_time"/>
+        <result property="updateTime" column="update_time"/>
+    </resultMap>
+
+    <resultMap id="RepairWorkOrderEventResultMap"
+               type="com.pangu.infrastructure.persistence.entity.RepairWorkOrderEventRow">
+        <id property="eventId" column="event_id"/>
+        <result property="workOrderId" column="work_order_id"/>
+        <result property="tenantId" column="tenant_id"/>
+        <result property="action" column="action"/>
+        <result property="fromStatus" column="from_status"/>
+        <result property="toStatus" column="to_status"/>
+        <result property="actorAccountId" column="actor_account_id"/>
+        <result property="actorIdentityType" column="actor_identity_type"/>
+        <result property="actorIdentityId" column="actor_identity_id"/>
+        <result property="remark" column="remark"/>
+        <result property="payloadJson" column="payload_json"/>
+        <result property="createTime" column="create_time"/>
+    </resultMap>
+
+    <resultMap id="OwnerPropertyDetailResultMap"
+               type="com.pangu.infrastructure.persistence.entity.OwnerPropertyDetailRow">
+        <id property="opid" column="opid"/>
+        <result property="buildingId" column="building_id"/>
+        <result property="roomId" column="room_id"/>
+        <result property="buildArea" column="build_area"/>
+        <result property="votingDelegate" column="is_voting_delegate"/>
+        <result property="accountStatus" column="account_status"/>
+    </resultMap>
+
+    <sql id="BaseColumns">
+        work_order_id, order_no, tenant_id, title, description, source, space_scope, status,
+        reporter_account_id, reporter_uid, reporter_user_id, room_id, building_id, location_text,
+        need_manual_location, location_locked, assigned_user_id, assignee_role_key, assignee_dept_id,
+        category, risk_level, survey_summary, plan_budget, fund_source, fund_gate_blocked,
+        satisfaction_score, satisfaction_comment, version, create_time, update_time
+    </sql>
+
+    <select id="selectOwnerProperty" resultMap="OwnerPropertyDetailResultMap">
+        SELECT opid, building_id, room_id, build_area, is_voting_delegate, account_status
+        FROM c_owner_property
+        WHERE uid = #{uid}
+          AND tenant_id = #{tenantId}
+          AND opid = #{opid}
+    </select>
+
+    <select id="existsBuilding" resultType="boolean">
+        SELECT EXISTS (
+            SELECT 1 FROM c_owner_property
+            WHERE tenant_id = #{tenantId}
+              AND building_id = #{buildingId}
+        )
+    </select>
+
+    <select id="findDuplicate" resultMap="RepairWorkOrderResultMap">
+        SELECT <include refid="BaseColumns"/>
+        FROM t_repair_work_order
+        WHERE tenant_id = #{tenantId}
+          AND reporter_account_id = #{reporterAccountId}
+          AND space_scope = #{spaceScope}
+          AND LOWER(title) = LOWER(#{title})
+          AND create_time &gt;= #{since}
+          AND status NOT IN ('ARCHIVED', 'REJECTED', 'CANCELLED')
+          AND (
+              (#{roomId,jdbcType=BIGINT} IS NULL AND room_id IS NULL)
+              OR room_id = #{roomId,jdbcType=BIGINT}
+          )
+          AND (
+              (#{buildingId,jdbcType=BIGINT} IS NULL AND building_id IS NULL)
+              OR building_id = #{buildingId,jdbcType=BIGINT}
+          )
+        ORDER BY create_time DESC
+        LIMIT 1
+    </select>
+
+    <insert id="insert"
+            parameterType="com.pangu.infrastructure.persistence.entity.RepairWorkOrderRow"
+            useGeneratedKeys="true"
+            keyProperty="workOrderId"
+            keyColumn="work_order_id">
+        INSERT INTO t_repair_work_order (
+            tenant_id, title, description, source, space_scope, status,
+            reporter_account_id, reporter_uid, reporter_user_id, room_id, building_id, location_text,
+            need_manual_location, location_locked, assigned_user_id, assignee_role_key, assignee_dept_id,
+            category, risk_level, survey_summary, plan_budget, fund_source, fund_gate_blocked,
+            satisfaction_score, satisfaction_comment, version
+        ) VALUES (
+            #{tenantId}, #{title}, #{description}, #{source}, #{spaceScope}, #{status},
+            #{reporterAccountId}, #{reporterUid}, #{reporterUserId}, #{roomId}, #{buildingId}, #{locationText},
+            #{needManualLocation}, #{locationLocked}, #{assignedUserId}, #{assigneeRoleKey}, #{assigneeDeptId},
+            #{category}, #{riskLevel}, #{surveySummary}, #{planBudget}, #{fundSource}, #{fundGateBlocked},
+            #{satisfactionScore}, #{satisfactionComment}, #{version}
+        )
+    </insert>
+
+    <select id="findById" resultMap="RepairWorkOrderResultMap">
+        SELECT <include refid="BaseColumns"/>
+        FROM t_repair_work_order
+        WHERE work_order_id = #{workOrderId}
+    </select>
+
+    <select id="findByIdForOwner" resultMap="RepairWorkOrderResultMap">
+        SELECT wo.<include refid="BaseColumns"/>
+        FROM t_repair_work_order wo
+        WHERE wo.work_order_id = #{workOrderId}
+          AND wo.tenant_id = #{tenantId}
+          AND (
+              wo.reporter_account_id = #{accountId}
+              OR (
+                  wo.space_scope = 'PUBLIC'
+                  AND wo.building_id IN (
+                      SELECT DISTINCT op.building_id
+                      FROM c_owner_property op
+                      WHERE op.uid = #{uid}
+                        AND op.tenant_id = #{tenantId}
+                        AND op.account_status = 1
+                  )
+              )
+          )
+    </select>
+
+    <select id="listForOwner" resultMap="RepairWorkOrderResultMap">
+        SELECT wo.<include refid="BaseColumns"/>
+        FROM t_repair_work_order wo
+        WHERE wo.tenant_id = #{tenantId}
+          AND (
+              wo.reporter_account_id = #{accountId}
+              OR (
+                  wo.space_scope = 'PUBLIC'
+                  AND wo.building_id IN (
+                      SELECT DISTINCT op.building_id
+                      FROM c_owner_property op
+                      WHERE op.uid = #{uid}
+                        AND op.tenant_id = #{tenantId}
+                        AND op.account_status = 1
+                  )
+              )
+          )
+        ORDER BY wo.create_time DESC, wo.work_order_id DESC
+        LIMIT 50
+    </select>
+
+    <sql id="AdminFilter">
+        wo.tenant_id = #{tenantId}
+        <if test="status != null">AND wo.status = #{status}</if>
+        <if test="scope != null">AND wo.space_scope = #{scope}</if>
+        <if test="keyword != null">
+            AND (
+                wo.title ILIKE CONCAT('%', #{keyword}, '%')
+                OR wo.order_no ILIKE CONCAT('%', #{keyword}, '%')
+                OR wo.location_text ILIKE CONCAT('%', #{keyword}, '%')
+            )
+        </if>
+        <if test="roleKey == 'GRID_MEMBER' or roleKey == 'VOLUNTEER' or roleKey == 'OWNER_REPRESENTATIVE'">
+            AND (
+                wo.assigned_user_id = #{userId}
+                <if test="buildingIds != null and buildingIds.size() > 0">
+                    OR wo.building_id IN
+                    <foreach collection="buildingIds" item="bid" open="(" separator="," close=")">
+                        #{bid}
+                    </foreach>
+                </if>
+            )
+        </if>
+    </sql>
+
+    <select id="listForAdmin" resultMap="RepairWorkOrderResultMap">
+        SELECT wo.<include refid="BaseColumns"/>
+        FROM t_repair_work_order wo
+        WHERE <include refid="AdminFilter"/>
+        ORDER BY wo.create_time DESC, wo.work_order_id DESC
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <select id="countForAdmin" resultType="long">
+        SELECT COUNT(1)
+        FROM t_repair_work_order wo
+        WHERE <include refid="AdminFilter"/>
+    </select>
+
+    <update id="update" parameterType="com.pangu.infrastructure.persistence.entity.RepairWorkOrderRow">
+        UPDATE t_repair_work_order
+        SET title = #{title},
+            description = #{description},
+            status = #{status},
+            room_id = #{roomId},
+            building_id = #{buildingId},
+            location_text = #{locationText},
+            need_manual_location = #{needManualLocation},
+            location_locked = #{locationLocked},
+            assigned_user_id = #{assignedUserId},
+            assignee_role_key = #{assigneeRoleKey},
+            assignee_dept_id = #{assigneeDeptId},
+            category = #{category},
+            risk_level = #{riskLevel},
+            survey_summary = #{surveySummary},
+            plan_budget = #{planBudget},
+            fund_source = #{fundSource},
+            fund_gate_blocked = #{fundGateBlocked},
+            satisfaction_score = #{satisfactionScore},
+            satisfaction_comment = #{satisfactionComment},
+            version = version + 1,
+            update_time = CURRENT_TIMESTAMP
+        WHERE work_order_id = #{workOrderId}
+          AND version = #{version}
+    </update>
+
+    <insert id="insertEvent"
+            parameterType="com.pangu.infrastructure.persistence.entity.RepairWorkOrderEventRow"
+            useGeneratedKeys="true"
+            keyProperty="eventId"
+            keyColumn="event_id">
+        INSERT INTO t_repair_work_order_event (
+            work_order_id, tenant_id, action, from_status, to_status,
+            actor_account_id, actor_identity_type, actor_identity_id,
+            remark, payload_json
+        ) VALUES (
+            #{workOrderId}, #{tenantId}, #{action}, #{fromStatus}, #{toStatus},
+            #{actorAccountId}, #{actorIdentityType}, #{actorIdentityId},
+            #{remark}, CAST(#{payloadJson} AS JSONB)
+        )
+    </insert>
+
+    <select id="listEvents" resultMap="RepairWorkOrderEventResultMap">
+        SELECT event_id, work_order_id, tenant_id, action, from_status, to_status,
+               actor_account_id, actor_identity_type, actor_identity_id,
+               remark, payload_json::text AS payload_json, create_time
+        FROM t_repair_work_order_event
+        WHERE work_order_id = #{workOrderId}
+          AND tenant_id = #{tenantId}
+        ORDER BY create_time ASC, event_id ASC
+    </select>
+</mapper>
