@@ -111,7 +111,23 @@
             UNION
             SELECT dbs.building_id
             FROM sys_dept_building_scope dbs
-            JOIN sys_user u ON u.dept_id = dbs.dept_id
+            JOIN (
+                SELECT ugds.grid_dept_id AS dept_id
+                FROM sys_user_grid_dept_scope ugds
+                WHERE ugds.user_id = #{userId}
+                  AND ugds.status = 1
+                UNION
+                SELECT u.dept_id
+                FROM sys_user u
+                WHERE u.user_id = #{userId}
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM sys_user_grid_dept_scope ugds
+                      WHERE ugds.user_id = u.user_id
+                        AND ugds.status = 1
+                  )
+            ) grid_dept ON grid_dept.dept_id = dbs.dept_id
+            JOIN sys_user u ON u.user_id = #{userId}
             JOIN sys_user_role ur ON ur.user_id = u.user_id
             JOIN sys_role r ON r.role_id = ur.role_id
             WHERE u.user_id = #{userId}
@@ -132,7 +148,23 @@
             UNION
             SELECT dbs.tenant_id, dbs.building_id
             FROM sys_dept_building_scope dbs
-            JOIN sys_user u ON u.dept_id = dbs.dept_id
+            JOIN (
+                SELECT ugds.grid_dept_id AS dept_id
+                FROM sys_user_grid_dept_scope ugds
+                WHERE ugds.user_id = #{userId}
+                  AND ugds.status = 1
+                UNION
+                SELECT u.dept_id
+                FROM sys_user u
+                WHERE u.user_id = #{userId}
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM sys_user_grid_dept_scope ugds
+                      WHERE ugds.user_id = u.user_id
+                        AND ugds.status = 1
+                  )
+            ) grid_dept ON grid_dept.dept_id = dbs.dept_id
+            JOIN sys_user u ON u.user_id = #{userId}
             JOIN sys_user_role ur ON ur.user_id = u.user_id
             JOIN sys_role r ON r.role_id = ur.role_id
             WHERE u.user_id = #{userId}

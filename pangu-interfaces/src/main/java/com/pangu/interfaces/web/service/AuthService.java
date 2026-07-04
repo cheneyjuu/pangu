@@ -6,8 +6,11 @@ import com.pangu.domain.gateway.PropertyGateway;
 import com.pangu.domain.model.asset.PropertyOwnership;
 import com.pangu.infrastructure.persistence.mapper.AccountMapper;
 import com.pangu.infrastructure.persistence.mapper.IdentityShadowMapper;
+import com.pangu.infrastructure.persistence.mapper.SysMenuMapper;
 import com.pangu.interfaces.security.JwtTokenProvider;
 import com.pangu.interfaces.web.controller.dto.LoginRequest;
+import com.pangu.interfaces.web.controller.dto.NavMenuResponse;
+import com.pangu.interfaces.web.controller.dto.NavPageResponse;
 import com.pangu.interfaces.web.controller.dto.SwitchShadowRequest;
 import com.pangu.interfaces.web.controller.dto.SwitchTenantRequest;
 import com.pangu.interfaces.web.exception.AppException;
@@ -46,6 +49,9 @@ public class AuthService {
 
     @Autowired
     private IdentityShadowMapper identityShadowMapper;
+
+    @Autowired
+    private SysMenuMapper sysMenuMapper;
 
     @Autowired
     private UserContextLoader userContextLoader;
@@ -124,6 +130,45 @@ public class AuthService {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("shadows", shadows);
         return result;
+    }
+
+    /**
+     * 当前身份可见管理端导航菜单。
+     *
+     * <p>菜单从后端 {@code sys_menu + sys_role_menu} 下发，按 {@code order_num}
+     * 排序。接口鉴权仍由对应业务 endpoint 的 {@code @PreAuthorize} 最终兜底。
+     */
+    public List<NavMenuResponse> listMenus(String authHeader) {
+        UserContext ctx = loadContextFromToken(authHeader);
+        List<SysMenuMapper.SysMenuRow> rows = ctx.isSysUser()
+                ? sysMenuMapper.selectGrantedMenusByUserId(ctx.userId())
+                : List.of();
+        return toMenuTree(rows);
+    }
+
+    private List<NavMenuResponse> toMenuTree(List<SysMenuMapper.SysMenuRow> rows) {
+        Map<Long, List<SysMenuMapper.SysMenuRow>> childrenByParent = rows.stream()
+                .filter(row -> row.getParentId() != null && row.getParentId() != 0L)
+                .collect(Collectors.groupingBy(SysMenuMapper.SysMenuRow::getParentId, LinkedHashMap::new, Collectors.toList()));
+
+        return rows.stream()
+                .filter(row -> row.getParentId() != null && row.getParentId() == 0L)
+                .map(parent -> {
+                    List<NavPageResponse> pages = childrenByParent.getOrDefault(parent.getMenuId(), List.of()).stream()
+                            .map(child -> new NavPageResponse(child.getRouteId(), child.getMenuName(), child.getOrderNum()))
+                            .toList();
+                    if (pages.isEmpty()) {
+                        return null;
+                    }
+                    return new NavMenuResponse(
+                            parent.getRouteId(),
+                            parent.getMenuName(),
+                            parent.getIcon(),
+                            parent.getOrderNum(),
+                            pages);
+                })
+                .filter(item -> item != null)
+                .toList();
     }
 
     /**
@@ -226,6 +271,19 @@ public class AuthService {
         return token;
     }
 
+    private UserContext loadContextFromToken(String authHeader) {
+        String token = extractValidToken(authHeader);
+        Long accountId = jwtTokenProvider.getAccountIdFromToken(token);
+        String identityType = jwtTokenProvider.getIdentityTypeFromToken(token);
+        Long activeIdentityId = jwtTokenProvider.getActiveIdentityIdFromToken(token);
+        Long tenantId = jwtTokenProvider.getTenantIdFromToken(token);
+        return userContextLoader.load(
+                accountId,
+                UserContext.IdentityType.valueOf(identityType),
+                activeIdentityId,
+                tenantId);
+    }
+
     private Map<String, Object> buildUserInfo(UserContext ctx) {
         Map<String, Object> userInfo = new LinkedHashMap<>();
         userInfo.put("account_id", ctx.accountId());
@@ -236,7 +294,19 @@ public class AuthService {
         userInfo.put("auth_level", ctx.authLevel().getValue());
         userInfo.put("role_key", ctx.roleKey());
         userInfo.put("permissions", ctx.permissions());
+        userInfo.put("menu_permissions", menuRouteIds(ctx));
         return userInfo;
+    }
+
+    private List<String> menuRouteIds(UserContext ctx) {
+        if (!ctx.isSysUser()) {
+            return List.of();
+        }
+        return sysMenuMapper.selectGrantedMenusByUserId(ctx.userId()).stream()
+                .filter(row -> row.getParentId() != null && row.getParentId() != 0L)
+                .map(SysMenuMapper.SysMenuRow::getRouteId)
+                .distinct()
+                .toList();
     }
 
     private Map<String, Object> buildShadowInfo(IdentityShadowMapper.SysUserShadowRow row, boolean active) {

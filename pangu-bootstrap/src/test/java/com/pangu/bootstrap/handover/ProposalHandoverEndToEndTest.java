@@ -108,6 +108,7 @@ public class ProposalHandoverEndToEndTest {
         Map<String, Object> body = new HashMap<>();
         body.put("title", TITLE_PREFIX + "加装电梯表决");
         body.put("subjectType", "GENERAL");
+        body.put("content", "<p>加装电梯表决方案</p>");
         body.put("scope", "COMMUNITY");
         body.put("voteStartAt", "2026-07-01T00:00:00Z");
         body.put("voteEndAt", "2026-07-15T00:00:00Z");

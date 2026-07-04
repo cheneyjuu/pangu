@@ -37,6 +37,20 @@ public class WorkIdentityQueryService {
 
     @Transactional(readOnly = true)
     public List<WorkIdentityAccount> searchAccounts(String keyword) {
+        return searchAccounts(keyword, null);
+    }
+
+    @Transactional(readOnly = true)
+    public List<WorkIdentityAccount> listAccounts(String roleKey) {
+        String normalizedRoleKey = normalizeOptionalRoleKey(roleKey);
+        return listAccountNameSearchPool(normalizedRoleKey, SEARCH_LIMIT).stream()
+                .limit(SEARCH_LIMIT)
+                .map(this::toAccount)
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<WorkIdentityAccount> searchAccounts(String keyword, String roleKey) {
         if (keyword == null) {
             return List.of();
         }
@@ -44,20 +58,21 @@ public class WorkIdentityQueryService {
         if (k.isEmpty()) {
             return List.of();
         }
+        String normalizedRoleKey = normalizeOptionalRoleKey(roleKey);
         Map<Long, WorkIdentityRepository.AccountCandidate> candidates = new LinkedHashMap<>();
         if (isAllDigits(k)) {
             if (k.length() < MIN_PHONE_FRAGMENT_LENGTH) {
                 return List.of();
             }
-            repository.searchAccountCandidates(k, SEARCH_LIMIT)
+            searchCandidates(k, normalizedRoleKey, SEARCH_LIMIT)
                     .forEach(row -> candidates.putIfAbsent(row.accountId(), row));
         } else {
             if (k.length() < MIN_NAME_KEYWORD_LENGTH) {
                 return List.of();
             }
-            repository.searchAccountCandidates(k, SEARCH_LIMIT)
+            searchCandidates(k, normalizedRoleKey, SEARCH_LIMIT)
                     .forEach(row -> candidates.putIfAbsent(row.accountId(), row));
-            repository.listAccountNameSearchPool(NAME_SEARCH_POOL_LIMIT).stream()
+            listAccountNameSearchPool(normalizedRoleKey, NAME_SEARCH_POOL_LIMIT).stream()
                     .filter(row -> decrypt(row.realNameCipher()).contains(k))
                     .limit(SEARCH_LIMIT)
                     .forEach(row -> candidates.putIfAbsent(row.accountId(), row));
@@ -66,6 +81,32 @@ public class WorkIdentityQueryService {
                 .limit(SEARCH_LIMIT)
                 .map(this::toAccount)
                 .toList();
+    }
+
+    private String normalizeOptionalRoleKey(String roleKey) {
+        if (roleKey == null || roleKey.isBlank()) {
+            return null;
+        }
+        String normalized = roleKey.trim();
+        roleByKey(normalized);
+        return normalized;
+    }
+
+    private List<WorkIdentityRepository.AccountCandidate> searchCandidates(
+            String keyword,
+            String roleKey,
+            int limit) {
+        if (roleKey == null) {
+            return repository.searchAccountCandidates(keyword, limit);
+        }
+        return repository.searchAccountCandidatesByRole(keyword, roleKey, limit);
+    }
+
+    private List<WorkIdentityRepository.AccountCandidate> listAccountNameSearchPool(String roleKey, int limit) {
+        if (roleKey == null) {
+            return repository.listAccountNameSearchPool(limit);
+        }
+        return repository.listAccountNameSearchPoolByRole(roleKey, limit);
     }
 
     @Transactional(readOnly = true)
@@ -93,6 +134,52 @@ public class WorkIdentityQueryService {
     }
 
     @Transactional(readOnly = true)
+    public List<WorkIdentityDeptOption> listGridNodes(Long communityDeptId) {
+        if (communityDeptId == null) {
+            throw new WorkIdentityApplicationException(
+                    WorkIdentityApplicationException.Reason.PARAM_INVALID,
+                    "communityDeptId 必填");
+        }
+        WorkIdentityDeptOption communityDept = repository.findDept(communityDeptId)
+                .orElseThrow(() -> new WorkIdentityApplicationException(
+                        WorkIdentityApplicationException.Reason.DEPT_NOT_FOUND,
+                        "居委会部门不存在或已停用：deptId=" + communityDeptId));
+        if (communityDept.deptType() == null || communityDept.deptType() != 2
+                || !"G".equals(communityDept.deptCategory())) {
+            throw new WorkIdentityApplicationException(
+                    WorkIdentityApplicationException.Reason.ROLE_DEPT_MISMATCH,
+                    "只能读取 G 端 dept_type=2 居委会节点下的网格：deptId=" + communityDeptId);
+        }
+        UserContext ctx = userContextHolder.current();
+        if (ctx != null && ctx.tenantId() != null && communityDept.tenantId() != null
+                && !ctx.tenantId().equals(communityDept.tenantId())) {
+            throw new WorkIdentityApplicationException(
+                    WorkIdentityApplicationException.Reason.FORBIDDEN,
+                    "居委会节点不在当前数据范围内：deptId=" + communityDeptId);
+        }
+        return repository.listGridChildren(communityDeptId);
+    }
+
+    @Transactional(readOnly = true)
+    public List<WorkIdentityDeptOption> listAssignedGridNodes(Long userId) {
+        if (userId == null) {
+            throw new WorkIdentityApplicationException(
+                    WorkIdentityApplicationException.Reason.PARAM_INVALID,
+                    "userId 必填");
+        }
+        WorkIdentityShadow shadow = repository.findShadowByUserId(userId)
+                .orElseThrow(() -> new WorkIdentityApplicationException(
+                        WorkIdentityApplicationException.Reason.ACCOUNT_NOT_FOUND,
+                        "工作身份不存在或已停用：userId=" + userId));
+        if (!WorkIdentityRoleRules.isGridMember(shadow.roleKey())) {
+            throw new WorkIdentityApplicationException(
+                    WorkIdentityApplicationException.Reason.ROLE_DEPT_MISMATCH,
+                    "只有 GRID_MEMBER 工作身份可读取网格分配：userId=" + userId);
+        }
+        return repository.listAssignedGridDepts(userId);
+    }
+
+    @Transactional(readOnly = true)
     public List<WorkIdentityBuildingScope> listBuildingOptions(Long deptId) {
         if (deptId == null) {
             throw new WorkIdentityApplicationException(
@@ -115,7 +202,10 @@ public class WorkIdentityQueryService {
                     WorkIdentityApplicationException.Reason.FORBIDDEN,
                     "目标部门不在当前数据范围内：deptId=" + deptId);
         }
-        return repository.listBuildingOptions(gridNode ? null : dept.tenantId());
+        if (gridNode) {
+            return repository.listBuildingOptionsByTenants(effectiveCommunityTenantScope(dept));
+        }
+        return repository.listBuildingOptions(dept.tenantId());
     }
 
     @Transactional(readOnly = true)
@@ -188,7 +278,10 @@ public class WorkIdentityQueryService {
                 shadow.roleKey(),
                 shadow.roleName(),
                 shadow.effectiveDataScope(),
-                repository.listActiveBuildingIds(shadow.userId()));
+                repository.listActiveBuildingIds(shadow.userId()),
+                WorkIdentityRoleRules.isGridMember(shadow.roleKey())
+                        ? repository.listAssignedGridDepts(shadow.userId())
+                        : List.of());
     }
 
     private static boolean isAllDigits(String s) {
@@ -198,5 +291,18 @@ public class WorkIdentityQueryService {
             }
         }
         return true;
+    }
+
+    private List<Long> effectiveCommunityTenantScope(WorkIdentityDeptOption gridDept) {
+        if (gridDept.parentId() == null) {
+            throw new WorkIdentityApplicationException(
+                    WorkIdentityApplicationException.Reason.ROLE_DEPT_MISMATCH,
+                    "网格节点缺少上级居委会，不能选择楼栋：deptId=" + gridDept.deptId());
+        }
+        List<Long> tenantIds = repository.listCommunityTenantScope(gridDept.parentId());
+        if (tenantIds.isEmpty() && gridDept.tenantId() != null) {
+            return List.of(gridDept.tenantId());
+        }
+        return tenantIds;
     }
 }

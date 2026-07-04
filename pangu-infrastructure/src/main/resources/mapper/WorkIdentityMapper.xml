@@ -70,6 +70,25 @@
         LIMIT #{limit}
     </select>
 
+    <select id="searchAccountCandidatesByRole" resultMap="AccountCandidateMap">
+        SELECT DISTINCT
+            <include refid="AccountColumns"/>
+        FROM t_account a
+        JOIN sys_user u ON u.account_id = a.account_id AND u.status = '0'
+        JOIN sys_user_role ur ON ur.user_id = u.user_id
+        JOIN sys_role r ON r.role_id = ur.role_id AND r.status = '0'
+        WHERE a.status = 1
+          AND r.role_key = #{roleKey}
+          AND (
+              a.phone LIKE CONCAT('%', #{keyword}, '%')
+              OR a.real_name ILIKE CONCAT('%', #{keyword}, '%')
+              OR u.nick_name ILIKE CONCAT('%', #{keyword}, '%')
+              OR u.user_name ILIKE CONCAT('%', #{keyword}, '%')
+          )
+        ORDER BY a.account_id ASC
+        LIMIT #{limit}
+    </select>
+
     <select id="listAccountNameSearchPool" resultMap="AccountCandidateMap">
         SELECT
             <include refid="AccountColumns"/>
@@ -79,11 +98,32 @@
         LIMIT #{limit}
     </select>
 
+    <select id="listAccountNameSearchPoolByRole" resultMap="AccountCandidateMap">
+        SELECT DISTINCT
+            <include refid="AccountColumns"/>
+        FROM t_account a
+        JOIN sys_user u ON u.account_id = a.account_id AND u.status = '0'
+        JOIN sys_user_role ur ON ur.user_id = u.user_id
+        JOIN sys_role r ON r.role_id = ur.role_id AND r.status = '0'
+        WHERE a.status = 1
+          AND r.role_key = #{roleKey}
+        ORDER BY a.account_id DESC
+        LIMIT #{limit}
+    </select>
+
     <select id="selectAccount" resultMap="AccountCandidateMap">
         SELECT
             <include refid="AccountColumns"/>
         FROM t_account a
         WHERE a.account_id = #{accountId}
+        LIMIT 1
+    </select>
+
+    <select id="selectAccountByPhone" resultMap="AccountCandidateMap">
+        SELECT
+            <include refid="AccountColumns"/>
+        FROM t_account a
+        WHERE a.phone = #{phone}
         LIMIT 1
     </select>
 
@@ -128,6 +168,18 @@
         LIMIT 1
     </select>
 
+    <select id="selectShadowByUserId" resultMap="ShadowMap">
+        SELECT
+            <include refid="ShadowColumns"/>
+        FROM sys_user u
+        JOIN sys_dept d ON d.dept_id = u.dept_id
+        LEFT JOIN sys_user_role ur ON ur.user_id = u.user_id
+        LEFT JOIN sys_role r ON r.role_id = ur.role_id AND r.status = '0'
+        WHERE u.user_id = #{userId}
+          AND u.status = '0'
+        LIMIT 1
+    </select>
+
     <select id="selectActiveBuildingIds" resultType="long">
         SELECT DISTINCT building_id
         FROM (
@@ -138,7 +190,23 @@
             UNION
             SELECT dbs.building_id
             FROM sys_dept_building_scope dbs
-            JOIN sys_user u ON u.dept_id = dbs.dept_id
+            JOIN (
+                SELECT ugds.grid_dept_id AS dept_id
+                FROM sys_user_grid_dept_scope ugds
+                WHERE ugds.user_id = #{userId}
+                  AND ugds.status = 1
+                UNION
+                SELECT u.dept_id
+                FROM sys_user u
+                WHERE u.user_id = #{userId}
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM sys_user_grid_dept_scope ugds
+                      WHERE ugds.user_id = u.user_id
+                        AND ugds.status = 1
+                  )
+            ) grid_dept ON grid_dept.dept_id = dbs.dept_id
+            JOIN sys_user u ON u.user_id = #{userId}
             JOIN sys_user_role ur ON ur.user_id = u.user_id
             JOIN sys_role r ON r.role_id = ur.role_id
             WHERE u.user_id = #{userId}
@@ -177,6 +245,32 @@
         ORDER BY order_num ASC, dept_id ASC
     </select>
 
+    <select id="selectAssignedGridDepts" resultMap="DeptOptionMap">
+        WITH assigned_grid AS (
+            SELECT ugds.grid_dept_id AS dept_id
+            FROM sys_user_grid_dept_scope ugds
+            WHERE ugds.user_id = #{userId}
+              AND ugds.status = 1
+            UNION
+            SELECT u.dept_id
+            FROM sys_user u
+            WHERE u.user_id = #{userId}
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM sys_user_grid_dept_scope ugds
+                  WHERE ugds.user_id = u.user_id
+                    AND ugds.status = 1
+              )
+        )
+        SELECT d.dept_id, d.parent_id, d.ancestors, d.dept_name, d.dept_type, d.dept_category, d.tenant_id
+        FROM assigned_grid ag
+        JOIN sys_dept d ON d.dept_id = ag.dept_id
+        WHERE d.status = '0'
+          AND d.dept_type = 5
+          AND d.dept_category = 'G'
+        ORDER BY d.order_num ASC, d.dept_id ASC
+    </select>
+
     <select id="selectDistinctBuildings" resultMap="BuildingScopeMap">
         SELECT DISTINCT tenant_id, building_id
         FROM c_owner_property
@@ -185,6 +279,31 @@
             AND tenant_id = #{tenantId}
         </if>
         ORDER BY tenant_id ASC, building_id ASC
+    </select>
+
+    <select id="selectDistinctBuildingsByTenants" resultMap="BuildingScopeMap">
+        SELECT DISTINCT tenant_id, building_id
+        FROM c_owner_property
+        <choose>
+            <when test="tenantIds != null and tenantIds.size() > 0">
+                WHERE tenant_id IN
+                <foreach collection="tenantIds" item="tenantId" open="(" separator="," close=")">
+                    #{tenantId}
+                </foreach>
+            </when>
+            <otherwise>
+                WHERE 1 = 0
+            </otherwise>
+        </choose>
+        ORDER BY tenant_id ASC, building_id ASC
+    </select>
+
+    <select id="selectCommunityTenantScope" resultType="long">
+        SELECT tenant_id
+        FROM sys_dept_tenant_scope
+        WHERE dept_id = #{communityDeptId}
+          AND status = 1
+        ORDER BY tenant_id ASC
     </select>
 
     <select id="selectDept" resultMap="DeptOptionMap">
@@ -202,6 +321,23 @@
               AND dept_id = #{deptId}
               AND status = '0'
         )
+    </select>
+
+    <select id="countActiveUsersByDept" resultType="long">
+        SELECT COUNT(DISTINCT user_id)
+        FROM (
+            SELECT u.user_id
+            FROM sys_user u
+            WHERE u.dept_id = #{deptId}
+              AND u.status = '0'
+            UNION
+            SELECT ugds.user_id
+            FROM sys_user_grid_dept_scope ugds
+            JOIN sys_user u ON u.user_id = ugds.user_id
+            WHERE ugds.grid_dept_id = #{deptId}
+              AND ugds.status = 1
+              AND u.status = '0'
+        ) bound_users
     </select>
 
     <update id="deactivateDeptBuildingScope">
@@ -225,6 +361,24 @@
             updated_at = now()
     </insert>
 
+    <update id="deactivateUserGridDeptAssignments">
+        UPDATE sys_user_grid_dept_scope
+        SET status = 2,
+            updated_at = now()
+        WHERE user_id = #{userId}
+          AND status = 1
+    </update>
+
+    <insert id="upsertUserGridDeptAssignment">
+        INSERT INTO sys_user_grid_dept_scope (user_id, grid_dept_id, assigned_by, status)
+        VALUES (#{userId}, #{gridDeptId}, #{assignedBy}, 1)
+        ON CONFLICT (user_id, grid_dept_id)
+        DO UPDATE SET
+            assigned_by = EXCLUDED.assigned_by,
+            status = 1,
+            updated_at = now()
+    </insert>
+
     <insert id="insertSysUser"
             parameterType="com.pangu.infrastructure.persistence.mapper.WorkIdentityMapper$SysUserInsertRow"
             useGeneratedKeys="true"
@@ -234,6 +388,28 @@
         VALUES (#{accountId}, #{deptId}, #{userName}, #{nickName}, '0')
     </insert>
 
+    <insert id="insertAccount"
+            parameterType="com.pangu.infrastructure.persistence.mapper.WorkIdentityMapper$AccountInsertRow"
+            useGeneratedKeys="true"
+            keyProperty="accountId"
+            keyColumn="account_id">
+        INSERT INTO t_account (phone, real_name, real_name_verified, status)
+        VALUES (
+            #{phone},
+            #{realName,typeHandler=com.pangu.infrastructure.persistence.handler.Sm4EncryptTypeHandler},
+            #{realNameVerified},
+            1
+        )
+    </insert>
+
+    <update id="updateAccountLastActiveIdentity">
+        UPDATE t_account
+        SET last_active_identity_id = #{identityId},
+            last_active_identity_type = #{identityType},
+            update_time = CURRENT_TIMESTAMP
+        WHERE account_id = #{accountId}
+    </update>
+
     <insert id="insertGridDept"
             parameterType="com.pangu.infrastructure.persistence.mapper.WorkIdentityMapper$GridDeptInsertRow"
             useGeneratedKeys="true"
@@ -242,6 +418,26 @@
         INSERT INTO sys_dept (parent_id, ancestors, dept_name, dept_type, dept_category, tenant_id, order_num, status)
         VALUES (#{parentId}, #{ancestors}, #{deptName}, 5, 'G', #{tenantId}, #{orderNum}, '0')
     </insert>
+
+    <update id="updateGridDeptName">
+        UPDATE sys_dept
+        SET dept_name = #{deptName},
+            update_time = now()
+        WHERE dept_id = #{deptId}
+          AND dept_type = 5
+          AND dept_category = 'G'
+          AND status = '0'
+    </update>
+
+    <update id="deactivateGridDept">
+        UPDATE sys_dept
+        SET status = '1',
+            update_time = now()
+        WHERE dept_id = #{deptId}
+          AND dept_type = 5
+          AND dept_category = 'G'
+          AND status = '0'
+    </update>
 
     <insert id="insertSysUserRole">
         INSERT INTO sys_user_role (user_id, role_id, effective_data_scope, granted_by)

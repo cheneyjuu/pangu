@@ -16,6 +16,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * 工作身份授权写侧编排。
@@ -30,6 +32,7 @@ import java.util.List;
 public class WorkIdentityApplicationService {
 
     private static final int DEFAULT_GRID_NODE_COUNT = 5;
+    private static final Pattern MAINLAND_MOBILE = Pattern.compile("^1[3-9]\\d{9}$");
 
     private final WorkIdentityRepository repository;
     private final WorkIdentityQueryService queryService;
@@ -120,6 +123,41 @@ public class WorkIdentityApplicationService {
     }
 
     @Transactional
+    public WorkIdentityAccount createAccountWithIdentity(String phone,
+                                                         String realName,
+                                                         CreateWorkIdentityCommand identityCommand) {
+        String normalizedPhone = normalizePhone(phone);
+        String normalizedRealName = normalizeRealName(realName);
+        if (identityCommand == null) {
+            throw new WorkIdentityApplicationException(
+                    WorkIdentityApplicationException.Reason.PARAM_INVALID,
+                    "工作身份参数不能为空");
+        }
+        if (repository.findAccountByPhone(normalizedPhone).isPresent()) {
+            throw new WorkIdentityApplicationException(
+                    WorkIdentityApplicationException.Reason.DUPLICATE_IDENTITY,
+                    "手机号已存在，请搜索该自然人后编辑工作身份：" + normalizedPhone);
+        }
+        Long accountId;
+        try {
+            accountId = repository.insertAccount(normalizedPhone, normalizedRealName, 0);
+        } catch (WorkIdentityRepository.DuplicateWorkIdentityException e) {
+            throw new WorkIdentityApplicationException(
+                    WorkIdentityApplicationException.Reason.DUPLICATE_IDENTITY,
+                    "手机号已存在，请搜索该自然人后编辑工作身份：" + normalizedPhone, e);
+        }
+        WorkIdentityShadow shadow = create(new CreateWorkIdentityCommand(
+                accountId,
+                identityCommand.deptId(),
+                identityCommand.roleKey(),
+                identityCommand.nickName(),
+                identityCommand.buildingIds(),
+                identityCommand.forceBuildingTransfer()));
+        repository.updateLastActiveIdentity(accountId, shadow.userId(), UserContext.IdentityType.SYS_USER.name());
+        return queryService.getAccount(accountId);
+    }
+
+    @Transactional
     public List<WorkIdentityBuildingScope> replaceGridDeptBuildingScopeLegacy(Long deptId, List<Long> buildingIds) {
         if (deptId == null) {
             throw new WorkIdentityApplicationException(
@@ -175,8 +213,132 @@ public class WorkIdentityApplicationService {
                         WorkIdentityApplicationException.Reason.DEPT_NOT_FOUND,
                         "部门不存在或已停用：deptId=" + deptId));
         requireCommunityGridScopeOperator(ctx, dept);
+        validateGridBuildingScopesAllowed(dept, normalized);
         replaceDeptBuildingScope(dept.deptId(), normalized, ctx.userId());
         return repository.listDeptBuildingScopes(dept.deptId());
+    }
+
+    @Transactional
+    public WorkIdentityDeptOption createGridNode(Long communityDeptId, String deptName) {
+        if (communityDeptId == null) {
+            throw new WorkIdentityApplicationException(
+                    WorkIdentityApplicationException.Reason.PARAM_INVALID,
+                    "communityDeptId 必填");
+        }
+        UserContext ctx = requireOperator();
+        WorkIdentityDeptOption communityDept = repository.findDept(communityDeptId)
+                .orElseThrow(() -> new WorkIdentityApplicationException(
+                        WorkIdentityApplicationException.Reason.DEPT_NOT_FOUND,
+                        "居委会部门不存在或已停用：deptId=" + communityDeptId));
+        return createGridNodeUnderCommunity(ctx, communityDept, deptName);
+    }
+
+    @Transactional
+    public WorkIdentityDeptOption createGridNode(String deptName) {
+        UserContext ctx = requireOperator();
+        WorkIdentityDeptOption communityDept = currentCommunityDept(ctx);
+        return createGridNodeUnderCommunity(ctx, communityDept, deptName);
+    }
+
+    @Transactional
+    public WorkIdentityDeptOption updateGridNode(Long deptId, String deptName) {
+        if (deptId == null) {
+            throw new WorkIdentityApplicationException(
+                    WorkIdentityApplicationException.Reason.PARAM_INVALID,
+                    "deptId 必填");
+        }
+        String normalizedName = normalizeGridName(deptName);
+        UserContext ctx = requireOperator();
+        WorkIdentityDeptOption gridDept = repository.findDept(deptId)
+                .orElseThrow(() -> new WorkIdentityApplicationException(
+                        WorkIdentityApplicationException.Reason.DEPT_NOT_FOUND,
+                        "网格节点不存在或已停用：deptId=" + deptId));
+        requireCommunityGridScopeOperator(ctx, gridDept);
+        boolean duplicateName = repository.listGridChildren(gridDept.parentId()).stream()
+                .anyMatch(dept -> !dept.deptId().equals(deptId)
+                        && normalizedName.equals(dept.deptName()));
+        if (duplicateName) {
+            throw new WorkIdentityApplicationException(
+                    WorkIdentityApplicationException.Reason.DUPLICATE_IDENTITY,
+                    "同一居委会下已存在同名网格节点：" + normalizedName);
+        }
+        int affected = repository.updateGridDeptName(deptId, normalizedName);
+        if (affected == 0) {
+            throw new WorkIdentityApplicationException(
+                    WorkIdentityApplicationException.Reason.DEPT_NOT_FOUND,
+                    "网格节点不存在或已停用：deptId=" + deptId);
+        }
+        return repository.findDept(deptId)
+                .orElseThrow(() -> new WorkIdentityApplicationException(
+                        WorkIdentityApplicationException.Reason.DEPT_NOT_FOUND,
+                        "网格节点更新后未能回读：deptId=" + deptId));
+    }
+
+    @Transactional
+    public void deleteGridNode(Long deptId) {
+        if (deptId == null) {
+            throw new WorkIdentityApplicationException(
+                    WorkIdentityApplicationException.Reason.PARAM_INVALID,
+                    "deptId 必填");
+        }
+        UserContext ctx = requireOperator();
+        WorkIdentityDeptOption gridDept = repository.findDept(deptId)
+                .orElseThrow(() -> new WorkIdentityApplicationException(
+                        WorkIdentityApplicationException.Reason.DEPT_NOT_FOUND,
+                        "网格节点不存在或已停用：deptId=" + deptId));
+        requireCommunityGridScopeOperator(ctx, gridDept);
+        long activeUsers = repository.countActiveUsersByDept(deptId);
+        if (activeUsers > 0) {
+            throw new WorkIdentityApplicationException(
+                    WorkIdentityApplicationException.Reason.ROLE_BINDING_INCONSISTENT,
+                    "网格节点下仍有有效工作身份，需先迁移或停用网格员：deptId=" + deptId);
+        }
+        repository.replaceDeptBuildingScope(deptId, List.of(), ctx.userId());
+        int affected = repository.deactivateGridDept(deptId);
+        if (affected == 0) {
+            throw new WorkIdentityApplicationException(
+                    WorkIdentityApplicationException.Reason.DEPT_NOT_FOUND,
+                    "网格节点不存在或已停用：deptId=" + deptId);
+        }
+    }
+
+    @Transactional
+    public List<WorkIdentityDeptOption> replaceGridMemberGridNodes(Long userId, List<Long> gridDeptIds) {
+        if (userId == null) {
+            throw new WorkIdentityApplicationException(
+                    WorkIdentityApplicationException.Reason.PARAM_INVALID,
+                    "userId 必填");
+        }
+        List<Long> normalized = normalizeGridDeptIds(gridDeptIds);
+        if (normalized.isEmpty()) {
+            throw new WorkIdentityApplicationException(
+                    WorkIdentityApplicationException.Reason.BUILDING_REQUIRED,
+                    "网格员必须至少分配一个网格");
+        }
+        UserContext ctx = requireOperator();
+        WorkIdentityShadow shadow = repository.findShadowByUserId(userId)
+                .orElseThrow(() -> new WorkIdentityApplicationException(
+                        WorkIdentityApplicationException.Reason.ACCOUNT_NOT_FOUND,
+                        "工作身份不存在或已停用：userId=" + userId));
+        if (!WorkIdentityRoleRules.isGridMember(shadow.roleKey())) {
+            throw new WorkIdentityApplicationException(
+                    WorkIdentityApplicationException.Reason.ROLE_DEPT_MISMATCH,
+                    "只有 GRID_MEMBER 工作身份可分配网格：userId=" + userId);
+        }
+        for (Long gridDeptId : normalized) {
+            WorkIdentityDeptOption gridDept = repository.findDept(gridDeptId)
+                    .orElseThrow(() -> new WorkIdentityApplicationException(
+                            WorkIdentityApplicationException.Reason.DEPT_NOT_FOUND,
+                            "网格节点不存在或已停用：deptId=" + gridDeptId));
+            requireCommunityGridScopeOperator(ctx, gridDept);
+            if (repository.listDeptBuildingScopes(gridDept.deptId()).isEmpty()) {
+                throw new WorkIdentityApplicationException(
+                        WorkIdentityApplicationException.Reason.BUILDING_REQUIRED,
+                        "网格节点必须先配置至少一个楼栋范围：deptId=" + gridDept.deptId());
+            }
+        }
+        repository.replaceUserGridDeptAssignments(userId, normalized, ctx.userId());
+        return repository.listAssignedGridDepts(userId);
     }
 
     @Transactional
@@ -210,6 +372,51 @@ public class WorkIdentityApplicationService {
             }
         }
         return repository.listGridChildren(communityDeptId);
+    }
+
+    private String normalizeGridName(String deptName) {
+        if (deptName == null || deptName.isBlank()) {
+            throw new WorkIdentityApplicationException(
+                    WorkIdentityApplicationException.Reason.PARAM_INVALID,
+                    "机构名称不能为空");
+        }
+        String normalized = deptName.trim();
+        if (normalized.length() > 100) {
+            throw new WorkIdentityApplicationException(
+                    WorkIdentityApplicationException.Reason.PARAM_INVALID,
+                    "机构名称不能超过100个字符");
+        }
+        return normalized;
+    }
+
+    private String normalizePhone(String phone) {
+        if (phone == null || phone.isBlank()) {
+            throw new WorkIdentityApplicationException(
+                    WorkIdentityApplicationException.Reason.PARAM_INVALID,
+                    "手机号不能为空");
+        }
+        String normalized = phone.trim();
+        if (!MAINLAND_MOBILE.matcher(normalized).matches()) {
+            throw new WorkIdentityApplicationException(
+                    WorkIdentityApplicationException.Reason.PARAM_INVALID,
+                    "手机号格式不正确");
+        }
+        return normalized;
+    }
+
+    private String normalizeRealName(String realName) {
+        if (realName == null || realName.isBlank()) {
+            throw new WorkIdentityApplicationException(
+                    WorkIdentityApplicationException.Reason.PARAM_INVALID,
+                    "姓名不能为空");
+        }
+        String normalized = realName.trim();
+        if (normalized.length() > 50) {
+            throw new WorkIdentityApplicationException(
+                    WorkIdentityApplicationException.Reason.PARAM_INVALID,
+                    "姓名不能超过50个字符");
+        }
+        return normalized;
     }
 
     private void validateCommand(CreateWorkIdentityCommand cmd) {
@@ -276,6 +483,51 @@ public class WorkIdentityApplicationService {
         }
     }
 
+    private WorkIdentityDeptOption currentCommunityDept(UserContext ctx) {
+        if (ctx.deptId() == null) {
+            throw new WorkIdentityApplicationException(
+                    WorkIdentityApplicationException.Reason.FORBIDDEN,
+                    "当前身份未绑定居委会组织节点，不能创建网格");
+        }
+        WorkIdentityDeptOption communityDept = repository.findDept(ctx.deptId())
+                .orElseThrow(() -> new WorkIdentityApplicationException(
+                        WorkIdentityApplicationException.Reason.DEPT_NOT_FOUND,
+                        "当前居委会组织节点不存在或已停用：deptId=" + ctx.deptId()));
+        requireCommunityNodeOperator(ctx, communityDept);
+        return communityDept;
+    }
+
+    private WorkIdentityDeptOption createGridNodeUnderCommunity(
+            UserContext ctx,
+            WorkIdentityDeptOption communityDept,
+            String deptName) {
+        String normalizedName = normalizeGridName(deptName);
+        requireCommunityNodeOperator(ctx, communityDept);
+
+        List<WorkIdentityDeptOption> existing = repository.listGridChildren(communityDept.deptId());
+        boolean duplicateName = existing.stream()
+                .anyMatch(dept -> normalizedName.equals(dept.deptName()));
+        if (duplicateName) {
+            throw new WorkIdentityApplicationException(
+                    WorkIdentityApplicationException.Reason.DUPLICATE_IDENTITY,
+                    "同一居委会下已存在同名网格节点：" + normalizedName);
+        }
+
+        String ancestors = communityDept.ancestors() == null || communityDept.ancestors().isBlank()
+                ? String.valueOf(communityDept.deptId())
+                : communityDept.ancestors() + "," + communityDept.deptId();
+        Long deptId = repository.insertGridDept(
+                communityDept.deptId(),
+                ancestors,
+                normalizedName,
+                communityDept.tenantId(),
+                existing.size() + 1);
+        return repository.findDept(deptId)
+                .orElseThrow(() -> new WorkIdentityApplicationException(
+                        WorkIdentityApplicationException.Reason.DEPT_NOT_FOUND,
+                        "网格节点创建后未能回读：deptId=" + deptId));
+    }
+
     private void requireCommunityOperator(UserContext ctx) {
         if (!WorkIdentityRoleRules.COMMUNITY_ADMIN.equals(ctx.roleKey()) || ctx.deptType() == null
                 || ctx.deptType() != 2 || ctx.deptCategory() != UserContext.DeptCategory.G) {
@@ -302,12 +554,40 @@ public class WorkIdentityApplicationService {
                             WorkIdentityApplicationException.Reason.DEPT_NOT_FOUND,
                             "部门不存在或已停用：deptId=" + deptId));
             List<WorkIdentityBuildingScope> scopes = normalizeLegacyBuildingScopes(buildingIds, dept.tenantId());
+            validateGridBuildingScopesAllowed(dept, scopes);
             repository.replaceDeptBuildingScope(deptId, scopes, assignedBy);
         } catch (IllegalArgumentException e) {
             throw new WorkIdentityApplicationException(
                     WorkIdentityApplicationException.Reason.PARAM_INVALID,
                     e.getMessage(), e);
         }
+    }
+
+    private void validateGridBuildingScopesAllowed(
+            WorkIdentityDeptOption gridDept,
+            List<WorkIdentityBuildingScope> requestedScopes) {
+        Set<Long> allowedTenantIds = effectiveCommunityTenantScope(gridDept);
+        for (WorkIdentityBuildingScope scope : requestedScopes) {
+            if (!allowedTenantIds.contains(scope.tenantId())) {
+                throw new WorkIdentityApplicationException(
+                        WorkIdentityApplicationException.Reason.FORBIDDEN,
+                        "楼栋不在该居委会管辖的小区范围内：tenantId=" + scope.tenantId()
+                                + ", buildingId=" + scope.buildingId());
+            }
+        }
+    }
+
+    private Set<Long> effectiveCommunityTenantScope(WorkIdentityDeptOption gridDept) {
+        if (gridDept.parentId() == null) {
+            throw new WorkIdentityApplicationException(
+                    WorkIdentityApplicationException.Reason.ROLE_DEPT_MISMATCH,
+                    "网格节点缺少上级居委会，不能配置楼栋范围：deptId=" + gridDept.deptId());
+        }
+        List<Long> tenantIds = repository.listCommunityTenantScope(gridDept.parentId());
+        if (tenantIds.isEmpty() && gridDept.tenantId() != null) {
+            return Set.of(gridDept.tenantId());
+        }
+        return Set.copyOf(tenantIds);
     }
 
     private void validateRoleDept(SysRole role, WorkIdentityDeptOption dept) {
@@ -335,6 +615,22 @@ public class WorkIdentityApplicationService {
                 throw new WorkIdentityApplicationException(
                         WorkIdentityApplicationException.Reason.PARAM_INVALID,
                         "buildingIds 不允许包含 null");
+            }
+            normalized.add(id);
+        }
+        return List.copyOf(normalized);
+    }
+
+    private List<Long> normalizeGridDeptIds(List<Long> gridDeptIds) {
+        if (gridDeptIds == null || gridDeptIds.isEmpty()) {
+            return List.of();
+        }
+        LinkedHashSet<Long> normalized = new LinkedHashSet<>();
+        for (Long id : gridDeptIds) {
+            if (id == null) {
+                throw new WorkIdentityApplicationException(
+                        WorkIdentityApplicationException.Reason.PARAM_INVALID,
+                        "gridDeptIds 不允许包含 null");
             }
             normalized.add(id);
         }

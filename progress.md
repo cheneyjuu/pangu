@@ -1649,3 +1649,65 @@
 - 现象：`WorkIdentityAdminTest` 的 `BeforeEach` 重置网格范围时，`sys_dept_building_scope` 触发器反复拒绝 `building_id=30003`。
 - 原因：旧 `sys_user_building` seed 注释/责任田包含 30003，但当前 `c_owner_property` 只有 30001、30002、30005。
 - 处理口径：测试重置只使用产权表真实存在的 30001/30002；新增范围验证使用 30005。
+
+## Session: 2026-07-04
+
+### 网格管理标准操作路径 — partial complete
+- pangu 后端 `POST /api/v1/admin/work-identities/depts/{communityDeptId}/grid-nodes` 已兼容请求体 `{ "deptName": "1号网格" }`，支持居委会在指定节点下按输入名称新建单个 `dept_type=5` 网格节点；无请求体时保留原批量生成 1-5 号网格兼容行为。
+- 新增 `sys_dept_tenant_scope` 作为居委会管辖小区范围来源；网格楼栋候选和保存都被限制在上级居委会管辖 tenant 集合内，`sys_dept_building_scope` 触发器同步兜底校验跨小区范围。
+- yaochi 管理端菜单已对齐到【系统管理】下的【组织架构管理】和【用户账号管理】；组织架构管理页已从“一键生成 1-5 号网格”改为“选居委会 + 输入机构名称 + 新增下级”，楼栋范围改为【分配管辖范围】弹窗并按小区 tenant 分组展示。
+- 验证：
+  - `mvn -pl pangu-bootstrap -am -Dtest=WorkIdentityAdminTest -Dsurefire.failIfNoSpecifiedTests=false test`：12 tests，0 failures，0 errors；
+  - `mvn -pl pangu-bootstrap -am -Dtest=RepairWorkOrderFlowTest -Dsurefire.failIfNoSpecifiedTests=false test`：4 tests，0 failures，0 errors；
+  - `mvn test`：545 tests，0 failures，0 errors，1 skipped；
+  - yaochi `npm run build` 通过，仅保留 Vite chunk size 常规提示；
+  - shennong-app `npm run type-check` 通过。
+
+### Error: ProposalHandoverEndToEndTest 正文字段误判
+- 现象：全量 `mvn test` 连续两次在 `ProposalHandoverEndToEndTest.generalProposeFrozenDuringHandover_thenAutoRecoversAfterSettlement` 失败，接口返回 403 / 40923“GENERAL/MAJOR 议题立项必须填写正文”，而测试预期 409 / 40926 换届熔断。
+- 原因：第一次补测时仍未带正文；第二次使用了错误字段 `contentHtml`，但后端 `ProposeRequest` 的真实字段是 `content`。
+- 处理口径：以后补立项测试请求时先看 DTO 字段名，GENERAL/MAJOR 正文统一传 `content`；本次已改为 `content` 后全量通过。
+
+### 网格管理标准操作路径 — complete
+- pangu 后端补齐标准三步路径：
+  - 第一步：`POST /api/v1/admin/work-identities/depts/{communityDeptId}/grid-nodes` 支持按输入名称新建单个网格节点；
+  - 第二步：`sys_dept_tenant_scope` 限定居委会管辖小区，网格楼栋候选与保存都必须落在上级居委会管辖 tenant 集合内；
+  - 第三步：新增 `POST /api/v1/admin/work-identities/accounts`，在同一事务中创建自然人账号、绑定 `sys_user` + `sys_user_role`、回填 `last_active_identity_*`，避免新账号无法登录。
+- V3.34 增加矛盾调解的网格数据范围边界：`t_owner_dispute.related_property_opid` 关联房产；`GRID_MEMBER` 只读授权 `dispute:audit`，列表按当前网格 `tenant_id + building_id` 过滤，仍禁止审核/裁决。
+- yaochi 管理端完成：
+  - 菜单对齐【系统管理】→【组织架构管理】/【用户账号管理】；
+  - 组织架构管理支持【新增下级】网格和【分配管辖范围】弹窗；
+  - 用户账号管理支持【新增用户】并默认网格员角色，也保留给既有自然人新增工作身份；
+  - 新增【矛盾调解】页面，按后端 `dispute:audit` 权限进入，网格员只能看到后端返回的本网格范围数据。
+- shennong-app 本轮未新增页面；移动端现有催票/维修处理继续依赖后端登录上下文的 `OWNER_GROUP` 楼栋范围，已通过类型检查确认未受契约变更影响。
+- 验证：
+  - `mvn -pl pangu-bootstrap -am -Dtest=WorkIdentityAdminTest -Dsurefire.failIfNoSpecifiedTests=false test`：13 tests，0 failures，0 errors；
+  - `mvn -pl pangu-bootstrap -am -Dtest=WorkIdentityAdminTest,RepairWorkOrderFlowTest,DisputePreAuthorizeMatrixTest,DisputeWorkflowTest,VotingReminderDeliveryDispatchServiceTest,VotingReminderTaskServiceTest -Dsurefire.failIfNoSpecifiedTests=false test`：46 tests，0 failures，0 errors；
+  - `mvn test`：546 tests，0 failures，0 errors，1 skipped；
+  - yaochi `npm run build` 通过，仅保留 Vite chunk size 常规提示；
+  - shennong-app `npm run type-check` 通过。
+
+### Figma 设计对齐：网格组织 / 角色数据范围 / 数据范围分配 — backend progress
+- 已按 shennong 设计确认三个菜单的后端契约：
+  - 【网格组织管理】需要网格列表、新建、改名、删除空网格、配置跨小区楼栋范围；
+  - 【角色与数据范围配置】中网格员保持静态 RBAC 角色 `GRID_MEMBER`，实际行级范围通过网格聚合，不在角色页写死；
+  - 【数据范围分配】需要把网格员分配到一个或多个网格节点，并由这些网格聚合 `AllowedBuildingIds`。
+- pangu 后端新增网格员-网格分配权威表 `sys_user_grid_dept_scope`；当存在显式分配时，`GRID_MEMBER` 的 `OWNER_GROUP` 楼栋范围优先从分配网格聚合；没有显式分配时兼容原 `sys_user.dept_id` 所属网格。
+- 新增接口：
+  - `GET /api/v1/admin/work-identities/users/{userId}/grid-nodes`：读取网格员当前分配的网格；
+  - `PUT /api/v1/admin/work-identities/users/{userId}/grid-nodes`：替换网格员分配网格，支持多个网格节点。
+- `GET /api/v1/admin/work-identities/accounts/search` 新增可选 `roleKey` 过滤，支持【数据范围分配】先按 `GRID_MEMBER` 精准检索网格员账号，再进入网格分配。
+- 登录上下文、工作身份回读、投票动员权限激活均已改为读取显式网格分配后的聚合楼栋范围，避免只按 `sys_user.dept_id` 得到单网格范围。
+- `WorkIdentityShadowResponse` 新增 `gridNodes`，账号搜索/详情可直接回显网格员当前分配网格；无显式分配时仍回显其 `sys_user.dept_id` 所属网格，显式多网格分配后回显全部分配节点。
+- yaochi 管理端补齐设计页对齐：
+  - 菜单改为【网格组织管理】、【角色与数据范围】、【数据范围分配】；
+  - 【网格组织管理】接入网格新增、改名、删除空网格、按 tenant 分组分配管辖范围；
+  - 【角色与数据范围】补齐原设计的双 tab：`权限矩阵配置` 使用真实角色/权限接口展示并授撤权限、配置角色级数据范围；`用户角色分配` 使用工作身份接口搜索自然人账号并创建新工作身份；
+  - 【角色与数据范围】将 `OWNER_GROUP` 展示为“按网格 / 楼栋（AllowedBuildingIds）”，并对 `GRID_MEMBER` 明确提示“静态 RBAC 角色，具体网格在数据范围分配维护”；
+  - 【数据范围分配】在 `COMMUNITY_ADMIN` 身份下搜索 `GRID_MEMBER`，调用 `GET/PUT /users/{userId}/grid-nodes` 分配一个或多个网格；志愿者/业主代表仍走个人楼栋责任田接口；
+  - 前端类型已消费 `WorkIdentityShadowResponse.gridNodes`，账号搜索回显当前分配网格与聚合楼栋数。
+- 验证：
+  - `mvn -pl pangu-bootstrap -am -Dtest=WorkIdentityAdminTest -Dsurefire.failIfNoSpecifiedTests=false test`：18 tests，0 failures，0 errors；
+  - `mvn -pl pangu-bootstrap -am -Dtest=WorkIdentityAdminTest,RoleAdminMatrixTest,RoleAdminQueryServiceTest -Dsurefire.failIfNoSpecifiedTests=false test`：37 tests，0 failures，0 errors；
+  - yaochi `npm run build` 通过，仅保留 Vite chunk size 常规提示；
+  - `git diff --check` 通过。

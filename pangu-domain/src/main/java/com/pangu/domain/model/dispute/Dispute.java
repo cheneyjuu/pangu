@@ -95,6 +95,7 @@ public class Dispute {
     private Long disputeId;
     private Long tenantId;
     private Long raisedByOwnerId;
+    private Long relatedPropertyOpid;
     private DisputeKind disputeKind;
     private String relatedEntityType;
     private Long relatedEntityId;
@@ -119,6 +120,13 @@ public class Dispute {
     public static Dispute open(Long tenantId, Long raisedByOwnerId, DisputeKind kind,
                                 String relatedEntityType, Long relatedEntityId,
                                 String businessPayloadJson) {
+        return open(tenantId, raisedByOwnerId, null, kind, relatedEntityType, relatedEntityId,
+                businessPayloadJson);
+    }
+
+    public static Dispute open(Long tenantId, Long raisedByOwnerId, Long relatedPropertyOpid,
+                                DisputeKind kind, String relatedEntityType, Long relatedEntityId,
+                                String businessPayloadJson) {
         if (tenantId == null) {
             throw new IllegalArgumentException("tenantId must not be null");
         }
@@ -131,6 +139,7 @@ public class Dispute {
         Dispute d = new Dispute();
         d.tenantId = tenantId;
         d.raisedByOwnerId = raisedByOwnerId;
+        d.relatedPropertyOpid = relatedPropertyOpid;
         d.disputeKind = kind;
         d.relatedEntityType = relatedEntityType;
         d.relatedEntityId = relatedEntityId;
@@ -259,6 +268,7 @@ public class Dispute {
     public void setDisputeId(Long disputeId) { this.disputeId = disputeId; }
     public Long getTenantId() { return tenantId; }
     public Long getRaisedByOwnerId() { return raisedByOwnerId; }
+    public Long getRelatedPropertyOpid() { return relatedPropertyOpid; }
     public DisputeKind getDisputeKind() { return disputeKind; }
     public String getRelatedEntityType() { return relatedEntityType; }
     public Long getRelatedEntityId() { return relatedEntityId; }
@@ -280,10 +290,22 @@ public class Dispute {
             DisputeStatus status, String businessPayloadJson,
             Instant raisedAt, Instant escalatedAt, Instant closedAt,
             String litigationOutcome, String litigationJudgementUrl, long version) {
+        return rehydrate(disputeId, tenantId, raisedByOwnerId, null, kind, relatedEntityType, relatedEntityId,
+                currentReviewLevel, status, businessPayloadJson, raisedAt, escalatedAt, closedAt,
+                litigationOutcome, litigationJudgementUrl, version);
+    }
+
+    public static Dispute rehydrate(
+            Long disputeId, Long tenantId, Long raisedByOwnerId, Long relatedPropertyOpid,
+            DisputeKind kind, String relatedEntityType, Long relatedEntityId, int currentReviewLevel,
+            DisputeStatus status, String businessPayloadJson,
+            Instant raisedAt, Instant escalatedAt, Instant closedAt,
+            String litigationOutcome, String litigationJudgementUrl, long version) {
         Dispute d = new Dispute();
         d.disputeId = disputeId;
         d.tenantId = tenantId;
         d.raisedByOwnerId = raisedByOwnerId;
+        d.relatedPropertyOpid = relatedPropertyOpid;
         d.disputeKind = kind;
         d.relatedEntityType = relatedEntityType;
         d.relatedEntityId = relatedEntityId;

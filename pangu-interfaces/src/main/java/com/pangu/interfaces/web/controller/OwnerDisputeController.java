@@ -59,7 +59,7 @@ public class OwnerDisputeController extends BaseController {
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<Result<DisputeResponse>> open(@Valid @RequestBody OpenDisputeRequest request) {
         OpenCommand cmd = new OpenCommand(
-                requireTenantId(), requireUid(), request.disputeKind(),
+                requireTenantId(), requireUid(), request.relatedPropertyOpid(), request.disputeKind(),
                 request.relatedEntityType(), request.relatedEntityId(),
                 request.businessPayloadJson());
         Dispute d = disputeApplicationService.open(cmd);

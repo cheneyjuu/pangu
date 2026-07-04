@@ -15,14 +15,25 @@ public interface WorkIdentityMapper {
     List<AccountCandidateRow> searchAccountCandidates(@Param("keyword") String keyword,
                                                       @Param("limit") int limit);
 
+    List<AccountCandidateRow> searchAccountCandidatesByRole(@Param("keyword") String keyword,
+                                                            @Param("roleKey") String roleKey,
+                                                            @Param("limit") int limit);
+
     List<AccountCandidateRow> listAccountNameSearchPool(@Param("limit") int limit);
 
+    List<AccountCandidateRow> listAccountNameSearchPoolByRole(@Param("roleKey") String roleKey,
+                                                              @Param("limit") int limit);
+
     AccountCandidateRow selectAccount(@Param("accountId") Long accountId);
+
+    AccountCandidateRow selectAccountByPhone(@Param("phone") String phone);
 
     List<ShadowRow> selectShadowsByAccount(@Param("accountId") Long accountId);
 
     ShadowRow selectShadow(@Param("accountId") Long accountId,
                            @Param("userId") Long userId);
+
+    ShadowRow selectShadowByUserId(@Param("userId") Long userId);
 
     List<Long> selectActiveBuildingIds(@Param("userId") Long userId);
 
@@ -33,12 +44,20 @@ public interface WorkIdentityMapper {
 
     List<DeptOptionRow> selectGridChildren(@Param("communityDeptId") Long communityDeptId);
 
+    List<DeptOptionRow> selectAssignedGridDepts(@Param("userId") Long userId);
+
     List<BuildingScopeRow> selectDistinctBuildings(@Param("tenantId") Long tenantId);
+
+    List<BuildingScopeRow> selectDistinctBuildingsByTenants(@Param("tenantIds") List<Long> tenantIds);
+
+    List<Long> selectCommunityTenantScope(@Param("communityDeptId") Long communityDeptId);
 
     DeptOptionRow selectDept(@Param("deptId") Long deptId);
 
     boolean existsAccountDept(@Param("accountId") Long accountId,
                               @Param("deptId") Long deptId);
+
+    long countActiveUsersByDept(@Param("deptId") Long deptId);
 
     int deactivateDeptBuildingScope(@Param("deptId") Long deptId);
 
@@ -47,9 +66,26 @@ public interface WorkIdentityMapper {
                                 @Param("buildingId") Long buildingId,
                                 @Param("assignedBy") Long assignedBy);
 
+    int deactivateUserGridDeptAssignments(@Param("userId") Long userId);
+
+    int upsertUserGridDeptAssignment(@Param("userId") Long userId,
+                                     @Param("gridDeptId") Long gridDeptId,
+                                     @Param("assignedBy") Long assignedBy);
+
+    int insertAccount(AccountInsertRow row);
+
+    int updateAccountLastActiveIdentity(@Param("accountId") Long accountId,
+                                        @Param("identityId") Long identityId,
+                                        @Param("identityType") String identityType);
+
     int insertSysUser(SysUserInsertRow row);
 
     int insertGridDept(GridDeptInsertRow row);
+
+    int updateGridDeptName(@Param("deptId") Long deptId,
+                           @Param("deptName") String deptName);
+
+    int deactivateGridDept(@Param("deptId") Long deptId);
 
     int insertSysUserRole(@Param("userId") Long userId,
                           @Param("roleId") Long roleId,
@@ -63,6 +99,14 @@ public interface WorkIdentityMapper {
         private String realNameCipher;
         private Integer realNameVerified;
         private Integer status;
+    }
+
+    @Data
+    class AccountInsertRow {
+        private Long accountId;
+        private String phone;
+        private String realName;
+        private Integer realNameVerified;
     }
 
     @Data

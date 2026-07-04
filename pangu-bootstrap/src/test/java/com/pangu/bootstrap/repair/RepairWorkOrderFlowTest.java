@@ -39,6 +39,8 @@ public class RepairWorkOrderFlowTest {
     private static final long USR_GRID = 800004L;
     private static final long ACC_STREET = 999801L;
     private static final long USR_STREET = 800001L;
+    private static final long USR_COMMUNITY = 800003L;
+    private static final long DEPT_COMMUNITY = 101L;
     private static final long DEPT_GRID = 104L;
     private static final long TENANT_CROSS = 10002L;
     private static final long CROSS_ROOM = 10002300101L;
@@ -55,6 +57,10 @@ public class RepairWorkOrderFlowTest {
                 DELETE FROM sys_dept_building_scope
                 WHERE dept_id = ? AND tenant_id = ? AND building_id = 30001
                 """, DEPT_GRID, TENANT_CROSS);
+        jdbcTemplate.update("""
+                DELETE FROM sys_dept_tenant_scope
+                WHERE dept_id = ? AND tenant_id = ?
+                """, DEPT_COMMUNITY, TENANT_CROSS);
         jdbcTemplate.update("""
                 DELETE FROM c_owner_property
                 WHERE uid = 70001 AND tenant_id = ? AND room_id = ?
@@ -156,11 +162,17 @@ public class RepairWorkOrderFlowTest {
                 ON CONFLICT DO NOTHING
                 """, TENANT_CROSS, CROSS_ROOM);
         jdbcTemplate.update("""
+                INSERT INTO sys_dept_tenant_scope (dept_id, tenant_id, assigned_by, status)
+                VALUES (?, ?, ?, 1)
+                ON CONFLICT (dept_id, tenant_id)
+                DO UPDATE SET status = 1, assigned_by = EXCLUDED.assigned_by, updated_at = now()
+                """, DEPT_COMMUNITY, TENANT_CROSS, USR_COMMUNITY);
+        jdbcTemplate.update("""
                 INSERT INTO sys_dept_building_scope (dept_id, tenant_id, building_id, assigned_by, status)
-                VALUES (?, ?, 30001, 800003, 1)
+                VALUES (?, ?, 30001, ?, 1)
                 ON CONFLICT (dept_id, tenant_id, building_id)
                 DO UPDATE SET status = 1, assigned_by = EXCLUDED.assigned_by, updated_at = now()
-                """, DEPT_GRID, TENANT_CROSS);
+                """, DEPT_GRID, TENANT_CROSS, USR_COMMUNITY);
         String title = "IT-报修-跨小区网格-" + System.nanoTime();
         jdbcTemplate.update("""
                 INSERT INTO t_repair_work_order

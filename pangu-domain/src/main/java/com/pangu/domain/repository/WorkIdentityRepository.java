@@ -17,13 +17,21 @@ public interface WorkIdentityRepository {
 
     List<AccountCandidate> searchAccountCandidates(String keyword, int limit);
 
+    List<AccountCandidate> searchAccountCandidatesByRole(String keyword, String roleKey, int limit);
+
     List<AccountCandidate> listAccountNameSearchPool(int limit);
 
+    List<AccountCandidate> listAccountNameSearchPoolByRole(String roleKey, int limit);
+
     Optional<AccountCandidate> findAccount(Long accountId);
+
+    Optional<AccountCandidate> findAccountByPhone(String phone);
 
     List<WorkIdentityShadow> listShadows(Long accountId);
 
     Optional<WorkIdentityShadow> findShadow(Long accountId, Long userId);
+
+    Optional<WorkIdentityShadow> findShadowByUserId(Long userId);
 
     List<Long> listActiveBuildingIds(Long userId);
 
@@ -33,17 +41,35 @@ public interface WorkIdentityRepository {
 
     List<WorkIdentityDeptOption> listGridChildren(Long communityDeptId);
 
+    List<WorkIdentityDeptOption> listAssignedGridDepts(Long userId);
+
     List<WorkIdentityBuildingScope> listBuildingOptions(Long tenantId);
+
+    List<WorkIdentityBuildingScope> listBuildingOptionsByTenants(List<Long> tenantIds);
+
+    List<Long> listCommunityTenantScope(Long communityDeptId);
 
     Optional<WorkIdentityDeptOption> findDept(Long deptId);
 
     boolean accountHasDept(Long accountId, Long deptId);
 
+    long countActiveUsersByDept(Long deptId);
+
     void replaceDeptBuildingScope(Long deptId, List<WorkIdentityBuildingScope> scopes, Long assignedBy);
+
+    void replaceUserGridDeptAssignments(Long userId, List<Long> gridDeptIds, Long assignedBy);
+
+    Long insertAccount(String phone, String realName, int realNameVerified);
+
+    void updateLastActiveIdentity(Long accountId, Long identityId, String identityType);
 
     Long insertSysUser(Long accountId, Long deptId, String userName, String nickName);
 
     Long insertGridDept(Long parentId, String ancestors, String deptName, Long tenantId, int orderNum);
+
+    int updateGridDeptName(Long deptId, String deptName);
+
+    int deactivateGridDept(Long deptId);
 
     void insertSysUserRole(Long userId, Long roleId, String effectiveDataScope, Long grantedBy);
 

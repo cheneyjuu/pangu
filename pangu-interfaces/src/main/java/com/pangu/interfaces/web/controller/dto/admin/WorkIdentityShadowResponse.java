@@ -21,7 +21,8 @@ public record WorkIdentityShadowResponse(
         String roleKey,
         String roleName,
         String effectiveDataScope,
-        List<Long> buildingIds) {
+        List<Long> buildingIds,
+        List<WorkIdentityDeptOptionResponse> gridNodes) {
 
     public static WorkIdentityShadowResponse from(WorkIdentityShadow shadow) {
         return new WorkIdentityShadowResponse(
@@ -38,6 +39,9 @@ public record WorkIdentityShadowResponse(
                 shadow.roleKey(),
                 shadow.roleName(),
                 shadow.effectiveDataScope(),
-                shadow.buildingIds());
+                shadow.buildingIds(),
+                shadow.gridNodes().stream()
+                        .map(WorkIdentityDeptOptionResponse::from)
+                        .toList());
     }
 }

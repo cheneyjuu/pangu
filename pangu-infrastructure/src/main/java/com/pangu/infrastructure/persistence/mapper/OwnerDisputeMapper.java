@@ -1,10 +1,12 @@
 package com.pangu.infrastructure.persistence.mapper;
 
 import com.pangu.infrastructure.persistence.entity.OwnerDisputeRow;
+import com.pangu.domain.model.user.WorkIdentityBuildingScope;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
 import java.util.List;
+import java.util.Set;
 
 /**
  * t_owner_dispute Mapper（{@code DisputeRepositoryImpl} 用）。
@@ -35,6 +37,13 @@ public interface OwnerDisputeMapper {
                                                 @Param("status") String status,
                                                 @Param("limit") int limit,
                                                 @Param("offset") int offset);
+
+    List<OwnerDisputeRow> selectForJurisdictionByBuildingScopes(
+            @Param("buildingScopes") Set<WorkIdentityBuildingScope> buildingScopes,
+            @Param("level") Integer level,
+            @Param("status") String status,
+            @Param("limit") int limit,
+            @Param("offset") int offset);
 
     int insert(OwnerDisputeRow row);
 

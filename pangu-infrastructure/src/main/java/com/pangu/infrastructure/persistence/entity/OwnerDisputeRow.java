@@ -17,6 +17,7 @@ public class OwnerDisputeRow {
     private Long disputeId;
     private Long tenantId;
     private Long raisedByOwnerId;
+    private Long relatedPropertyOpid;
     private String disputeKind;
     private String relatedEntityType;
     private Long relatedEntityId;

@@ -1,12 +1,14 @@
 package com.pangu.interfaces.web.controller;
 
 import com.pangu.interfaces.web.controller.dto.LoginRequest;
+import com.pangu.interfaces.web.controller.dto.NavMenuResponse;
 import com.pangu.interfaces.web.controller.dto.SwitchShadowRequest;
 import com.pangu.interfaces.web.controller.dto.SwitchTenantRequest;
 import com.pangu.interfaces.web.service.AuthService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -37,7 +39,16 @@ public class AuthController extends BaseController {
     }
 
     /**
-     * 3. 管理端工作分身切换
+     * 3. 当前身份可见管理端菜单
+     */
+    @GetMapping("/menus")
+    public Result<List<NavMenuResponse>> listMenus(
+            @RequestHeader("Authorization") String authHeader) {
+        return success(authService.listMenus(authHeader));
+    }
+
+    /**
+     * 4. 管理端工作分身切换
      */
     @PostMapping("/switch-shadow")
     public Result<Map<String, Object>> switchShadow(
@@ -47,7 +58,7 @@ public class AuthController extends BaseController {
     }
 
     /**
-     * 4. C端业主跨小区多租户切换接口
+     * 5. C端业主跨小区多租户切换接口
      */
     @PostMapping("/switch-tenant")
     public Result<Map<String, Object>> switchTenant(

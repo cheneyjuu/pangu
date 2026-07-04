@@ -9,6 +9,7 @@ public record DisputeResponse(
         Long disputeId,
         Long tenantId,
         Long raisedByOwnerId,
+        Long relatedPropertyOpid,
         String disputeKind,
         String relatedEntityType,
         Long relatedEntityId,
@@ -25,6 +26,7 @@ public record DisputeResponse(
     public static DisputeResponse from(Dispute d) {
         return new DisputeResponse(
                 d.getDisputeId(), d.getTenantId(), d.getRaisedByOwnerId(),
+                d.getRelatedPropertyOpid(),
                 d.getDisputeKind().name(), d.getRelatedEntityType(), d.getRelatedEntityId(),
                 d.getCurrentReviewLevel(), d.getStatus().name(),
                 d.getBusinessPayloadJson(),

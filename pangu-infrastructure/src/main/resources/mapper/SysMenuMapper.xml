@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pangu.infrastructure.persistence.mapper.SysMenuMapper">
+
+    <select id="selectVisibleMenus"
+            resultType="com.pangu.infrastructure.persistence.mapper.SysMenuMapper$SysMenuRow">
+        SELECT menu_id AS menuId,
+               parent_id AS parentId,
+               route_id AS routeId,
+               menu_name AS menuName,
+               icon,
+               order_num AS orderNum,
+               required_permission AS requiredPermission,
+               required_any_permissions AS requiredAnyPermissions,
+               required_role_keys AS requiredRoleKeys
+        FROM sys_menu
+        WHERE visible = 1
+          AND status = '0'
+          AND route_id IS NOT NULL
+        ORDER BY parent_id ASC, order_num ASC, menu_id ASC
+    </select>
+
+    <select id="selectGrantedMenusByUserId"
+            resultType="com.pangu.infrastructure.persistence.mapper.SysMenuMapper$SysMenuRow">
+        SELECT DISTINCT
+               m.menu_id AS menuId,
+               m.parent_id AS parentId,
+               m.route_id AS routeId,
+               m.menu_name AS menuName,
+               m.icon,
+               m.order_num AS orderNum,
+               m.required_permission AS requiredPermission,
+               m.required_any_permissions AS requiredAnyPermissions,
+               m.required_role_keys AS requiredRoleKeys
+        FROM sys_user_role ur
+        JOIN sys_role_menu rm ON rm.role_id = ur.role_id
+        JOIN sys_menu m ON m.menu_id = rm.menu_id
+        WHERE ur.user_id = #{userId}
+          AND m.visible = 1
+          AND m.status = '0'
+          AND m.route_id IS NOT NULL
+        ORDER BY m.parent_id ASC, m.order_num ASC, m.menu_id ASC
+    </select>
+
+</mapper>

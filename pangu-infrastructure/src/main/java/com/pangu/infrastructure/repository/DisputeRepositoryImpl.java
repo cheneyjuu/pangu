@@ -3,6 +3,7 @@ package com.pangu.infrastructure.repository;
 import com.pangu.domain.model.dispute.Dispute;
 import com.pangu.domain.model.dispute.DisputeKind;
 import com.pangu.domain.model.dispute.DisputeStatus;
+import com.pangu.domain.model.user.WorkIdentityBuildingScope;
 import com.pangu.domain.repository.DisputeRepository;
 import com.pangu.infrastructure.persistence.entity.OwnerDisputeRow;
 import com.pangu.infrastructure.persistence.mapper.OwnerDisputeMapper;
@@ -11,6 +12,7 @@ import org.springframework.stereotype.Repository;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * {@link DisputeRepository} 默认实现：MyBatis row ↔ {@link Dispute} 聚合根双向翻译。
@@ -51,6 +53,16 @@ public class DisputeRepositoryImpl implements DisputeRepository {
     }
 
     @Override
+    public List<Dispute> findForJurisdictionByBuildingScopes(Set<WorkIdentityBuildingScope> buildingScopes,
+                                                             Integer reviewLevel,
+                                                             String status,
+                                                             int limit,
+                                                             int offset) {
+        return mapper.selectForJurisdictionByBuildingScopes(buildingScopes, reviewLevel, status, limit, offset)
+                .stream().map(this::toAggregate).toList();
+    }
+
+    @Override
     public Dispute insert(Dispute dispute) {
         OwnerDisputeRow row = toRow(dispute);
         mapper.insert(row);
@@ -77,6 +89,7 @@ public class DisputeRepositoryImpl implements DisputeRepository {
         r.setDisputeId(d.getDisputeId());
         r.setTenantId(d.getTenantId());
         r.setRaisedByOwnerId(d.getRaisedByOwnerId());
+        r.setRelatedPropertyOpid(d.getRelatedPropertyOpid());
         r.setDisputeKind(d.getDisputeKind().name());
         r.setRelatedEntityType(d.getRelatedEntityType());
         r.setRelatedEntityId(d.getRelatedEntityId());
@@ -95,6 +108,7 @@ public class DisputeRepositoryImpl implements DisputeRepository {
     private Dispute toAggregate(OwnerDisputeRow r) {
         return Dispute.rehydrate(
                 r.getDisputeId(), r.getTenantId(), r.getRaisedByOwnerId(),
+                r.getRelatedPropertyOpid(),
                 DisputeKind.valueOf(r.getDisputeKind()),
                 r.getRelatedEntityType(), r.getRelatedEntityId(),
                 r.getCurrentReviewLevel(),

@@ -9,9 +9,12 @@ import com.pangu.application.dispute.command.OpenCommand;
 import com.pangu.application.dispute.command.StartReviewCommand;
 import com.pangu.application.dispute.command.WithdrawCommand;
 import com.pangu.application.support.StateMutationTemplate;
+import com.pangu.domain.context.UserContext;
+import com.pangu.domain.context.UserContextHolder;
 import com.pangu.domain.model.dispute.Decision;
 import com.pangu.domain.model.dispute.Dispute;
 import com.pangu.domain.model.dispute.DisputeEvidence;
+import com.pangu.domain.model.user.DataScopeType;
 import com.pangu.domain.repository.DisputeDecisionRepository;
 import com.pangu.domain.repository.DisputeDecisionRepository.DuplicateDecisionException;
 import com.pangu.domain.repository.DisputeEvidenceRepository;
@@ -47,12 +50,13 @@ public class DisputeApplicationService {
     private final DisputeRepository disputeRepository;
     private final DisputeEvidenceRepository evidenceRepository;
     private final DisputeDecisionRepository decisionRepository;
+    private final UserContextHolder userContextHolder;
 
     /** 业主提起异议：返回带主键的聚合。 */
     @Transactional
     public Dispute open(OpenCommand cmd) {
         Dispute d = Dispute.open(
-                cmd.tenantId(), cmd.raisedByOwnerId(), cmd.disputeKind(),
+                cmd.tenantId(), cmd.raisedByOwnerId(), cmd.relatedPropertyOpid(), cmd.disputeKind(),
                 cmd.relatedEntityType(), cmd.relatedEntityId(),
                 cmd.businessPayloadJson());
         return disputeRepository.insert(d);
@@ -158,6 +162,11 @@ public class DisputeApplicationService {
     /** 仲裁工作台。 */
     public List<Dispute> listJurisdiction(Long tenantId, Integer level, String status,
                                           int limit, int offset) {
+        UserContext ctx = userContextHolder.current();
+        if (ctx != null && ctx.dataScopeType() == DataScopeType.OWNER_GROUP) {
+            return disputeRepository.findForJurisdictionByBuildingScopes(
+                    ctx.authorizedBuildingScopes(), level, status, limit, offset);
+        }
         return disputeRepository.findForJurisdiction(tenantId, level, status, limit, offset);
     }
 

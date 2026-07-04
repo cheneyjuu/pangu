@@ -26,27 +26,41 @@
         )
         SELECT DISTINCT
             #{subjectId},
-            ub.tenant_id,
-            ub.building_id,
-            ub.user_id,
-            r.role_key,
+            scoped.tenant_id,
+            scoped.building_id,
+            scoped.user_id,
+            scoped.role_key,
             TRUE,
             TRUE,
             #{activatedAt}::timestamptz,
             #{expiresAt}::timestamptz,
             NULL::timestamptz,
             1
-        FROM sys_user_building ub
-        JOIN sys_user_role ur ON ur.user_id = ub.user_id
-        JOIN sys_role r ON r.role_id = ur.role_id
-        JOIN sys_user u ON u.user_id = ub.user_id
-        WHERE ub.tenant_id = #{tenantId}
-          AND ub.status = 1
-          AND u.status = '0'
-          AND r.role_key IN ('OWNER_REPRESENTATIVE', 'GRID_MEMBER')
+        FROM (
+            SELECT ub.tenant_id, ub.building_id, ub.user_id, r.role_key
+            FROM sys_user_building ub
+            JOIN sys_user_role ur ON ur.user_id = ub.user_id
+            JOIN sys_role r ON r.role_id = ur.role_id
+            JOIN sys_user u ON u.user_id = ub.user_id
+            WHERE ub.status = 1
+              AND u.status = '0'
+              AND r.role_key IN ('OWNER_REPRESENTATIVE', 'GRID_MEMBER')
+            UNION
+            SELECT dbs.tenant_id, dbs.building_id, u.user_id, r.role_key
+            FROM sys_dept_building_scope dbs
+            JOIN sys_user_grid_dept_scope ugds ON ugds.grid_dept_id = dbs.dept_id
+            JOIN sys_user u ON u.user_id = ugds.user_id
+            JOIN sys_user_role ur ON ur.user_id = u.user_id
+            JOIN sys_role r ON r.role_id = ur.role_id
+            WHERE dbs.status = 1
+              AND ugds.status = 1
+              AND u.status = '0'
+              AND r.role_key = 'GRID_MEMBER'
+        ) scoped
+        WHERE scoped.tenant_id = #{tenantId}
         <choose>
             <when test="scope == 2">
-                AND ub.building_id = #{scopeReferenceId}
+                AND scoped.building_id = #{scopeReferenceId}
             </when>
             <when test="scope == 1">
             </when>

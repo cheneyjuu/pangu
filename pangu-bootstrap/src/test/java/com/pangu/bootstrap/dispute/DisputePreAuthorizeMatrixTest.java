@@ -2,16 +2,21 @@ package com.pangu.bootstrap.dispute;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pangu.interfaces.security.JwtTokenProvider;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.Map;
 
 import static org.hamcrest.Matchers.is;
+import static org.hamcrest.Matchers.hasItem;
+import static org.hamcrest.Matchers.not;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -23,7 +28,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *
  * <p>用 V1.1 求是小区 seed 用户对 2 条 G 端权限通路 + C 端 isAuthenticated 通路反复打靶：
  * <ul>
- *     <li>陈网格员（GRID_MEMBER） —— 三条 G 端 endpoint 全 403；</li>
+ *     <li>陈网格员（GRID_MEMBER） —— 仲裁工作台只读且按楼栋过滤；审查/决议仍 403；</li>
  *     <li>李四（C_USER，无 sys_role） —— G 端 dispute:audit / decide 全 403；
  *         C 端 isAuthenticated 通路通过到 service 层；</li>
  *     <li>SYS_USER（陈网格员）调 C 端 endpoint —— authentication 通过但 service 层
@@ -47,22 +52,45 @@ public class DisputePreAuthorizeMatrixTest {
     @Autowired
     private JwtTokenProvider jwtTokenProvider;
 
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
     private static final long TENANT_RUSHI = 10001L;
 
     // V1.1 求是小区 seed
-    private static final long ACC_GRID = 999804L, USR_GRID = 800004L;       // 陈网格员 GRID_MEMBER（无 dispute:* 任一权限）
+    private static final long ACC_GRID = 999804L, USR_GRID = 800004L;       // 陈网格员 GRID_MEMBER（仅 dispute:audit）
     private static final long ACC_COMM = 999803L, USR_COMM = 800003L;       // 刘主任   COMMUNITY_ADMIN（dispute:audit + dispute:decide）
     private static final long ACC_LISI = 999913L, UID_LISI = 70002L;        // 李四     C_USER（无 sys_role）
 
-    // ===== G 端 endpoint：陈网格员（无 dispute:*）全 403 =====
+    private static final long GRID_SCOPE_ROOM = 10001990101L;
+    private static final long OUTSIDE_SCOPE_ROOM = 10001990501L;
+
+    @BeforeEach
+    @AfterEach
+    public void cleanupGridScopeDisputes() {
+        jdbcTemplate.update("DELETE FROM t_owner_dispute WHERE related_entity_type = 'GRID_SCOPE_TEST'");
+        jdbcTemplate.update("""
+                DELETE FROM c_owner_property
+                WHERE uid = ? AND tenant_id = ? AND room_id IN (?, ?)
+                """, UID_LISI, TENANT_RUSHI, GRID_SCOPE_ROOM, OUTSIDE_SCOPE_ROOM);
+    }
+
+    // ===== G 端 endpoint：陈网格员可读本网格调解工作台，但不能审查/决议 =====
 
     @Test
-    public void gridOperatorCannotListGovDisputes_403() throws Exception {
+    public void gridOperatorCanListOnlyBuildingScopedGovDisputes() throws Exception {
+        Long scopedOpid = insertOwnerProperty(30001L, GRID_SCOPE_ROOM);
+        Long outsideOpid = insertOwnerProperty(30005L, OUTSIDE_SCOPE_ROOM);
+        Long scopedDisputeId = insertGridScopeDispute(scopedOpid, 9901L);
+        Long outsideDisputeId = insertGridScopeDispute(outsideOpid, 9905L);
+
         String token = jwtTokenProvider.generateToken(ACC_GRID, "SYS_USER", USR_GRID, TENANT_RUSHI);
         mockMvc.perform(get("/api/v1/gov/disputes")
+                        .param("limit", "200")
                         .header("Authorization", "Bearer " + token))
-                .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.code", is(403)));
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[*].disputeId", hasItem(scopedDisputeId.intValue())))
+                .andExpect(jsonPath("$.data[*].disputeId", not(hasItem(outsideDisputeId.intValue()))));
     }
 
     @Test
@@ -207,5 +235,25 @@ public class DisputePreAuthorizeMatrixTest {
     public void anonymousAccess_ownerDisputes_forbidden() throws Exception {
         mockMvc.perform(get("/api/v1/disputes"))
                 .andExpect(status().isForbidden());
+    }
+
+    private Long insertOwnerProperty(Long buildingId, Long roomId) {
+        return jdbcTemplate.queryForObject("""
+                INSERT INTO c_owner_property
+                    (uid, tenant_id, building_id, room_id, build_area, is_voting_delegate, account_status)
+                VALUES (?, ?, ?, ?, 88.00, 0, 1)
+                RETURNING opid
+                """, Long.class, UID_LISI, TENANT_RUSHI, buildingId, roomId);
+    }
+
+    private Long insertGridScopeDispute(Long relatedPropertyOpid, Long relatedEntityId) {
+        return jdbcTemplate.queryForObject("""
+                INSERT INTO t_owner_dispute (
+                    tenant_id, raised_by_owner_id, related_property_opid, dispute_kind,
+                    related_entity_type, related_entity_id, current_review_level, status, business_payload
+                ) VALUES (?, ?, ?, 'EXPENSE_VOUCHER_DISPUTE',
+                    'GRID_SCOPE_TEST', ?, 1, 'RAISED', '{}'::jsonb)
+                RETURNING dispute_id
+                """, Long.class, TENANT_RUSHI, UID_LISI, relatedPropertyOpid, relatedEntityId);
     }
 }

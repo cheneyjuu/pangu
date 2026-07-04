@@ -8,6 +8,7 @@
         <id property="disputeId" column="dispute_id"/>
         <result property="tenantId" column="tenant_id"/>
         <result property="raisedByOwnerId" column="raised_by_owner_id"/>
+        <result property="relatedPropertyOpid" column="related_property_opid"/>
         <result property="disputeKind" column="dispute_kind"/>
         <result property="relatedEntityType" column="related_entity_type"/>
         <result property="relatedEntityId" column="related_entity_id"/>
@@ -25,7 +26,7 @@
     </resultMap>
 
     <sql id="all_columns">
-        dispute_id, tenant_id, raised_by_owner_id, dispute_kind,
+        dispute_id, tenant_id, raised_by_owner_id, related_property_opid, dispute_kind,
         related_entity_type, related_entity_id, current_review_level, status,
         business_payload::text AS business_payload,
         raised_at, escalated_at, closed_at,
@@ -69,18 +70,51 @@
         LIMIT #{limit} OFFSET #{offset}
     </select>
 
+    <select id="selectForJurisdictionByBuildingScopes" resultMap="OwnerDisputeRowMap">
+        SELECT
+            d.dispute_id, d.tenant_id, d.raised_by_owner_id, d.related_property_opid, d.dispute_kind,
+            d.related_entity_type, d.related_entity_id, d.current_review_level, d.status,
+            d.business_payload::text AS business_payload,
+            d.raised_at, d.escalated_at, d.closed_at,
+            d.litigation_outcome, d.litigation_judgement_url,
+            d.version, d.create_time, d.update_time
+        FROM t_owner_dispute d
+        JOIN c_owner_property op
+          ON op.opid = d.related_property_opid
+         AND op.tenant_id = d.tenant_id
+        WHERE
+        <choose>
+            <when test="buildingScopes != null and buildingScopes.size() > 0">
+                <foreach collection="buildingScopes" item="bs" open="(" separator=" OR " close=")">
+                    (op.tenant_id = #{bs.tenantId} AND op.building_id = #{bs.buildingId})
+                </foreach>
+            </when>
+            <otherwise>
+                1 = 0
+            </otherwise>
+        </choose>
+        <if test="level != null">
+            AND d.current_review_level = #{level}
+        </if>
+        <if test="status != null">
+            AND d.status = #{status}
+        </if>
+        ORDER BY d.raised_at DESC
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+
     <insert id="insert"
             parameterType="com.pangu.infrastructure.persistence.entity.OwnerDisputeRow"
             useGeneratedKeys="true"
             keyProperty="disputeId"
             keyColumn="dispute_id">
         INSERT INTO t_owner_dispute (
-            tenant_id, raised_by_owner_id, dispute_kind,
+            tenant_id, raised_by_owner_id, related_property_opid, dispute_kind,
             related_entity_type, related_entity_id, current_review_level, status,
             business_payload, raised_at, escalated_at, closed_at,
             litigation_outcome, litigation_judgement_url, version
         ) VALUES (
-            #{tenantId}, #{raisedByOwnerId}, #{disputeKind},
+            #{tenantId}, #{raisedByOwnerId}, #{relatedPropertyOpid}, #{disputeKind},
             #{relatedEntityType}, #{relatedEntityId}, #{currentReviewLevel}, #{status},
             CAST(#{businessPayload} AS JSONB),
             #{raisedAt}, #{escalatedAt}, #{closedAt},

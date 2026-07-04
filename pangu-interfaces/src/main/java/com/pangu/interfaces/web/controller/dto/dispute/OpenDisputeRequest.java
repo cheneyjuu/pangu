@@ -11,6 +11,7 @@ import jakarta.validation.constraints.NotNull;
  */
 public record OpenDisputeRequest(
         @NotNull DisputeKind disputeKind,
+        Long relatedPropertyOpid,
         String relatedEntityType,
         Long relatedEntityId,
         String businessPayloadJson
