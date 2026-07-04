@@ -4,8 +4,11 @@ import com.pangu.application.owner.OwnerDetailView;
 import com.pangu.application.owner.OwnerProfileView;
 import com.pangu.application.owner.OwnerQueryService;
 import com.pangu.domain.common.Page;
+import com.pangu.domain.context.UserContext;
+import com.pangu.domain.context.UserContextHolder;
 import com.pangu.domain.gateway.dto.OwnerQuery;
 import com.pangu.domain.model.asset.OwnerPropertyDetail;
+import com.pangu.domain.model.user.DataScopeType;
 import com.pangu.interfaces.security.SecurityUtils;
 import com.pangu.interfaces.web.controller.dto.PageResponse;
 import com.pangu.interfaces.web.controller.dto.owner.MyOwnerPropertyResponse;
@@ -32,8 +35,9 @@ import java.util.List;
  *   <li>{@code GET /api/v1/owners/{uid}} —— {@code owner:detail}（业主聚合 + 房产明细）</li>
  * </ul>
  *
- * <p>租户由 {@link SecurityUtils#getTenantId()} 取得（缺失即 403），行级数据范围由
- * mapper {@code @DataScope(buildingAlias="op")} 注入；service 不做重复 ABAC 校验。
+ * <p>普通管理身份由 {@link SecurityUtils#getTenantId()} 收口到当前租户；OWNER_GROUP
+ * 身份按 mapper {@code @DataScope(tenantAlias="op", buildingAlias="op")} 注入
+ * tenant/building 行级范围。
  *
  * <p>姓名走「服务层容错解密」（{@code NameDecryptor.safeDecrypt}）：开发期 MOCK_ 明文回退原值，
  * 生产 hex 密文正常解密——避免 SM4 TypeHandler 硬解密在 mock 数据上抛 500。
@@ -50,6 +54,7 @@ public class OwnerController extends BaseController {
     private static final int MAX_PAGE_SIZE = 100;
 
     private final OwnerQueryService ownerQueryService;
+    private final UserContextHolder userContextHolder;
 
     @GetMapping("/owners")
     @PreAuthorize("hasAuthority('owner:list')")
@@ -62,7 +67,7 @@ public class OwnerController extends BaseController {
         int safePage = Math.max(page, 1);
         int safeSize = Math.min(Math.max(size, 1), MAX_PAGE_SIZE);
         OwnerQuery query = new OwnerQuery(
-                requireTenantId(),
+                tenantFilterForCurrentScope(),
                 normalizePhonePrefix(phone),
                 buildingId,
                 roomId,
@@ -75,7 +80,7 @@ public class OwnerController extends BaseController {
     @GetMapping("/owners/{uid}")
     @PreAuthorize("hasAuthority('owner:detail')")
     public Result<OwnerDetailResponse> detail(@PathVariable("uid") Long uid) {
-        OwnerDetailView view = ownerQueryService.getOwnerDetail(uid, requireTenantId())
+        OwnerDetailView view = ownerQueryService.getOwnerDetail(uid, tenantFilterForCurrentScope())
                 .orElseThrow(() -> new AppException(CommonErrorCode.NOT_FOUND, "业主不存在或不在本小区"));
         return success(OwnerDetailResponse.from(view));
     }
@@ -111,5 +116,15 @@ public class OwnerController extends BaseController {
             throw new AppException(CommonErrorCode.FORBIDDEN, "未识别到租户上下文，禁止访问该操作");
         }
         return tenantId;
+    }
+
+    private Long tenantFilterForCurrentScope() {
+        UserContext ctx = userContextHolder.current();
+        if (ctx != null && ctx.dataScopeType() == DataScopeType.OWNER_GROUP
+                && ctx.authorizedBuildingScopes() != null
+                && !ctx.authorizedBuildingScopes().isEmpty()) {
+            return null;
+        }
+        return requireTenantId();
     }
 }

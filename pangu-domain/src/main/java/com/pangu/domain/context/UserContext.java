@@ -2,8 +2,10 @@ package com.pangu.domain.context;
 
 import com.pangu.domain.model.user.AuthenticationLevel;
 import com.pangu.domain.model.user.DataScopeType;
+import com.pangu.domain.model.user.WorkIdentityBuildingScope;
 
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * 跨层用户上下文（不可变值对象）。
@@ -25,7 +27,8 @@ import java.util.Set;
  * @param authLevel            认证等级（C 端 L1/L3 实名状态；管理端通常 L1）
  * @param roleKey              角色 key；C 端为 null
  * @param permissions          能力点 key 集合；@PreAuthorize 取此集合
- * @param authorizedBuildingIds OWNER_GROUP 时由用户责任田或网格节点范围反查得到的楼栋集合；其它 scope 为 emptySet
+ * @param authorizedBuildingIds OWNER_GROUP 时由用户责任田或网格节点范围反查得到的楼栋 ID 集合；兼容旧调用
+ * @param authorizedBuildingScopes OWNER_GROUP 时由用户责任田或网格节点范围反查得到的 tenant/building 范围
  */
 public record UserContext(
         Long accountId,
@@ -39,11 +42,39 @@ public record UserContext(
         AuthenticationLevel authLevel,
         String roleKey,
         Set<String> permissions,
-        Set<Long> authorizedBuildingIds
+        Set<Long> authorizedBuildingIds,
+        Set<WorkIdentityBuildingScope> authorizedBuildingScopes
 ) {
     public UserContext {
         permissions = permissions == null ? Set.of() : Set.copyOf(permissions);
         authorizedBuildingIds = authorizedBuildingIds == null ? Set.of() : Set.copyOf(authorizedBuildingIds);
+        authorizedBuildingScopes = authorizedBuildingScopes == null ? Set.of() : Set.copyOf(authorizedBuildingScopes);
+    }
+
+    public UserContext(Long accountId,
+                       IdentityType identityType,
+                       Long activeIdentityId,
+                       Long tenantId,
+                       Long deptId,
+                       DeptCategory deptCategory,
+                       Integer deptType,
+                       DataScopeType dataScopeType,
+                       AuthenticationLevel authLevel,
+                       String roleKey,
+                       Set<String> permissions,
+                       Set<Long> authorizedBuildingIds) {
+        this(accountId, identityType, activeIdentityId, tenantId, deptId, deptCategory, deptType,
+                dataScopeType, authLevel, roleKey, permissions, authorizedBuildingIds,
+                toScopes(tenantId, authorizedBuildingIds));
+    }
+
+    private static Set<WorkIdentityBuildingScope> toScopes(Long tenantId, Set<Long> buildingIds) {
+        if (tenantId == null || buildingIds == null || buildingIds.isEmpty()) {
+            return Set.of();
+        }
+        return buildingIds.stream()
+                .map(buildingId -> new WorkIdentityBuildingScope(tenantId, buildingId))
+                .collect(Collectors.toUnmodifiableSet());
     }
 
     /** 身份类型（SYS_USER 管理端工作账号 / C_USER 业主自然人）。 */

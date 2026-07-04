@@ -3,6 +3,7 @@ package com.pangu.infrastructure.persistence.handler;
 import com.pangu.domain.context.UserContext;
 import com.pangu.domain.context.UserContextHolder;
 import com.pangu.domain.model.user.DataScopeType;
+import com.pangu.domain.model.user.WorkIdentityBuildingScope;
 import com.pangu.infrastructure.persistence.annotation.DataScope;
 import lombok.extern.slf4j.Slf4j;
 import net.sf.jsqlparser.expression.Expression;
@@ -34,9 +35,9 @@ import java.util.stream.Collectors;
  * {@link UserContext#dataScopeType()} 重写 SQL 注入行级 WHERE 条件：
  * <ul>
  *   <li>{@link DataScopeType#ALL_COMMUNITY}：社区全量视野，直接放行；</li>
- *   <li>{@link DataScopeType#OWNER_GROUP}：业主集合，通过
- *       {@link UserContext#authorizedBuildingIds()} 拼接 {@code building_id IN (...)}；
- *       无授权楼栋时拼接 {@code IN (-1)} 截流；</li>
+ *   <li>{@link DataScopeType#OWNER_GROUP}：业主集合，优先通过
+ *       {@link UserContext#authorizedBuildingScopes()} 拼接 {@code tenant_id + building_id} 组合；
+ *       兼容旧 mapper 时退回 {@link UserContext#authorizedBuildingIds()}；无授权楼栋时截流；</li>
  *   <li>{@link DataScopeType#ORG_ONLY}：仅本部门，通过 {@code deptId} 拼接 {@code dept_id = ?}。</li>
  * </ul>
  *
@@ -123,15 +124,24 @@ public class DataScopeInterceptor implements Interceptor {
         DataScopeType scope = ctx.dataScopeType();
         if (scope == DataScopeType.OWNER_GROUP) {
             String buildingAlias = dataScopeAnno.buildingAlias();
-            String prefix = buildingAlias.isEmpty() ? "" : buildingAlias + ".";
+            String buildingPrefix = buildingAlias.isEmpty() ? "" : buildingAlias + ".";
+            String tenantAlias = dataScopeAnno.tenantAlias();
+            String tenantPrefix = tenantAlias.isEmpty() ? "" : tenantAlias + ".";
+            Set<WorkIdentityBuildingScope> scopes = ctx.authorizedBuildingScopes();
+            if (!tenantAlias.isEmpty() && scopes != null && !scopes.isEmpty()) {
+                return scopes.stream()
+                        .map(scopeItem -> "(" + tenantPrefix + "tenant_id = " + scopeItem.tenantId()
+                                + " AND " + buildingPrefix + "building_id = " + scopeItem.buildingId() + ")")
+                        .collect(Collectors.joining(" OR ", " (", ") "));
+            }
             Set<Long> buildingIds = ctx.authorizedBuildingIds();
             if (buildingIds == null || buildingIds.isEmpty()) {
-                return " " + prefix + "building_id IN (-1) ";
+                return " " + buildingPrefix + "building_id IN (-1) ";
             }
             String idListStr = buildingIds.stream()
                     .map(String::valueOf)
                     .collect(Collectors.joining(","));
-            return " " + prefix + "building_id IN (" + idListStr + ") ";
+            return " " + buildingPrefix + "building_id IN (" + idListStr + ") ";
         }
         if (scope == DataScopeType.ORG_ONLY) {
             String deptAlias = dataScopeAnno.deptAlias();

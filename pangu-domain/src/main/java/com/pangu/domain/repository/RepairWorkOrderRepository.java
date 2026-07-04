@@ -5,6 +5,7 @@ import com.pangu.domain.model.repair.RepairSpaceScope;
 import com.pangu.domain.model.repair.RepairWorkOrder;
 import com.pangu.domain.model.repair.RepairWorkOrderEvent;
 import com.pangu.domain.model.repair.RepairWorkOrderStatus;
+import com.pangu.domain.model.user.WorkIdentityBuildingScope;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -35,7 +36,7 @@ public interface RepairWorkOrderRepository {
     List<RepairWorkOrder> listForAdmin(Long tenantId,
                                        String roleKey,
                                        Long userId,
-                                       List<Long> authorizedBuildingIds,
+                                       List<WorkIdentityBuildingScope> authorizedBuildingScopes,
                                        RepairWorkOrderStatus status,
                                        RepairSpaceScope scope,
                                        String keyword,
@@ -45,7 +46,7 @@ public interface RepairWorkOrderRepository {
     long countForAdmin(Long tenantId,
                        String roleKey,
                        Long userId,
-                       List<Long> authorizedBuildingIds,
+                       List<WorkIdentityBuildingScope> authorizedBuildingScopes,
                        RepairWorkOrderStatus status,
                        RepairSpaceScope scope,
                        String keyword);

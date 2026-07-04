@@ -29,4 +29,12 @@ public @interface DataScope {
      * 物理楼栋表/字段的别名 (如 "b" 或 "")，对应 SQL 中的 building_id 过滤
      */
     String buildingAlias() default "";
+
+    /**
+     * 租户表/字段的别名 (如 "op" 或 "")，对应 SQL 中的 tenant_id 过滤。
+     *
+     * <p>OWNER_GROUP 跨小区范围需要 tenant_id + building_id 组合过滤；
+     * 未配置时保留旧的 building_id-only 行为。
+     */
+    String tenantAlias() default "";
 }

@@ -41,7 +41,7 @@ public interface BuildingAssignmentMapper {
                                                         @Param("tenantId") Long tenantId);
 
     /** distinct building_id（@DataScope 行级兜底 + 显式 tenant_id 过滤）。 */
-    @DataScope(buildingAlias = "op")
+    @DataScope(tenantAlias = "op", buildingAlias = "op")
     List<Long> selectDistinctBuildings(@Param("tenantId") Long tenantId);
 
     /** 某用户已生效楼栋分配（status=1），按 building_id 排序。 */

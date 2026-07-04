@@ -4,6 +4,7 @@ import com.pangu.domain.context.UserContext;
 import com.pangu.domain.context.UserContextLoader;
 import com.pangu.domain.model.user.AuthenticationLevel;
 import com.pangu.domain.model.user.DataScopeType;
+import com.pangu.domain.model.user.WorkIdentityBuildingScope;
 import com.pangu.infrastructure.persistence.mapper.UserContextMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -60,10 +61,21 @@ public class DefaultUserContextLoader implements UserContextLoader {
         }
 
         Set<Long> authorizedBuildingIds = Set.of();
+        Set<WorkIdentityBuildingScope> authorizedBuildingScopes = Set.of();
         if (scope == DataScopeType.OWNER_GROUP) {
-            List<Long> buildings = userContextMapper.selectAuthorizedBuildingIds(userId);
-            if (buildings != null && !buildings.isEmpty()) {
-                authorizedBuildingIds = new HashSet<>(buildings);
+            List<UserContextMapper.AuthorizedBuildingScopeRow> scopes =
+                    userContextMapper.selectAuthorizedBuildingScopes(userId);
+            if (scopes != null && !scopes.isEmpty()) {
+                Set<WorkIdentityBuildingScope> scopeSet = new HashSet<>();
+                Set<Long> buildingSet = new HashSet<>();
+                for (UserContextMapper.AuthorizedBuildingScopeRow item : scopes) {
+                    if (item.getTenantId() != null && item.getBuildingId() != null) {
+                        scopeSet.add(new WorkIdentityBuildingScope(item.getTenantId(), item.getBuildingId()));
+                        buildingSet.add(item.getBuildingId());
+                    }
+                }
+                authorizedBuildingScopes = scopeSet;
+                authorizedBuildingIds = buildingSet;
             }
         }
 
@@ -84,7 +96,8 @@ public class DefaultUserContextLoader implements UserContextLoader {
                 authLevel,
                 row.getRoleKey(),
                 permissions,
-                authorizedBuildingIds
+                authorizedBuildingIds,
+                authorizedBuildingScopes
         );
     }
 
@@ -114,6 +127,7 @@ public class DefaultUserContextLoader implements UserContextLoader {
                 null,
                 authLevel,
                 null,
+                Set.of(),
                 Set.of(),
                 Set.of()
         );

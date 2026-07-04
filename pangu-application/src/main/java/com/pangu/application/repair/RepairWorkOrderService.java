@@ -17,6 +17,7 @@ import com.pangu.domain.model.repair.RepairSpaceScope;
 import com.pangu.domain.model.repair.RepairWorkOrder;
 import com.pangu.domain.model.repair.RepairWorkOrderEvent;
 import com.pangu.domain.model.repair.RepairWorkOrderStatus;
+import com.pangu.domain.model.user.WorkIdentityBuildingScope;
 import com.pangu.domain.repository.RepairWorkOrderRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -157,13 +158,14 @@ public class RepairWorkOrderService {
                                            int page,
                                            int size) {
         UserContext ctx = requireSysContext();
-        Long tenantId = requireTenant(ctx);
+        Long tenantId = ctx.tenantId();
         int safePage = Math.max(page, 1);
         int safeSize = Math.min(Math.max(size, 1), MAX_PAGE_SIZE);
-        List<Long> buildings = ctx.authorizedBuildingIds().stream().toList();
-        long total = repository.countForAdmin(tenantId, ctx.roleKey(), ctx.userId(), buildings, status, scope, trim(keyword));
+        List<WorkIdentityBuildingScope> buildingScopes = ctx.authorizedBuildingScopes().stream().toList();
+        long total = repository.countForAdmin(
+                tenantId, ctx.roleKey(), ctx.userId(), buildingScopes, status, scope, trim(keyword));
         List<RepairWorkOrder> items = repository.listForAdmin(
-                tenantId, ctx.roleKey(), ctx.userId(), buildings, status, scope, trim(keyword), safePage, safeSize);
+                tenantId, ctx.roleKey(), ctx.userId(), buildingScopes, status, scope, trim(keyword), safePage, safeSize);
         return new Page<>(items, total, safePage, safeSize);
     }
 
@@ -412,13 +414,15 @@ public class RepairWorkOrderService {
     }
 
     private void assertVisible(UserContext ctx, RepairWorkOrder order) {
-        Long tenantId = requireTenant(ctx);
-        if (!tenantId.equals(order.tenantId())) {
+        boolean ownerGroup = "OWNER_GROUP".equals(ctx.dataScopeType() == null ? null : ctx.dataScopeType().getValue());
+        if (!ownerGroup && ctx.tenantId() != null && !ctx.tenantId().equals(order.tenantId())) {
             throw new RepairWorkOrderApplicationException(NOT_FOUND, "工单不在当前租户范围内");
         }
-        if ("OWNER_GROUP".equals(ctx.dataScopeType() == null ? null : ctx.dataScopeType().getValue())) {
+        if (ownerGroup) {
             boolean assigned = ctx.userId() != null && ctx.userId().equals(order.assignedUserId());
-            boolean buildingAllowed = order.buildingId() != null && ctx.authorizedBuildingIds().contains(order.buildingId());
+            boolean buildingAllowed = order.buildingId() != null
+                    && ctx.authorizedBuildingScopes().contains(
+                            new WorkIdentityBuildingScope(order.tenantId(), order.buildingId()));
             if (!assigned && !buildingAllowed) {
                 throw new RepairWorkOrderApplicationException(NOT_FOUND, "工单不在当前责任田范围内");
             }

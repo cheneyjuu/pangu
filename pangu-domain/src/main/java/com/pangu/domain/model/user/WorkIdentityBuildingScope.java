@@ -9,4 +9,12 @@ package com.pangu.domain.model.user;
 public record WorkIdentityBuildingScope(
         Long tenantId,
         Long buildingId) {
+
+    public Long getTenantId() {
+        return tenantId;
+    }
+
+    public Long getBuildingId() {
+        return buildingId;
+    }
 }

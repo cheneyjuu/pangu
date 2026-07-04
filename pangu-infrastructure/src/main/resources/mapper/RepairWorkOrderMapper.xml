@@ -176,7 +176,17 @@
     </select>
 
     <sql id="AdminFilter">
-        wo.tenant_id = #{tenantId}
+        <choose>
+            <when test="roleKey == 'GRID_MEMBER' or roleKey == 'VOLUNTEER' or roleKey == 'OWNER_REPRESENTATIVE'">
+                1 = 1
+            </when>
+            <otherwise>
+                <choose>
+                    <when test="tenantId != null">wo.tenant_id = #{tenantId}</when>
+                    <otherwise>1 = 1</otherwise>
+                </choose>
+            </otherwise>
+        </choose>
         <if test="status != null">AND wo.status = #{status}</if>
         <if test="scope != null">AND wo.space_scope = #{scope}</if>
         <if test="keyword != null">
@@ -189,10 +199,10 @@
         <if test="roleKey == 'GRID_MEMBER' or roleKey == 'VOLUNTEER' or roleKey == 'OWNER_REPRESENTATIVE'">
             AND (
                 wo.assigned_user_id = #{userId}
-                <if test="buildingIds != null and buildingIds.size() > 0">
-                    OR wo.building_id IN
-                    <foreach collection="buildingIds" item="bid" open="(" separator="," close=")">
-                        #{bid}
+                <if test="buildingScopes != null and buildingScopes.size() > 0">
+                    OR
+                    <foreach collection="buildingScopes" item="bs" open="(" separator=" OR " close=")">
+                        (wo.tenant_id = #{bs.tenantId} AND wo.building_id = #{bs.buildingId})
                     </foreach>
                 </if>
             )

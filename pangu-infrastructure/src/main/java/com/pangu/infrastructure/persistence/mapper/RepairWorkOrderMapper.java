@@ -3,6 +3,7 @@ package com.pangu.infrastructure.persistence.mapper;
 import com.pangu.infrastructure.persistence.entity.OwnerPropertyDetailRow;
 import com.pangu.infrastructure.persistence.entity.RepairWorkOrderEventRow;
 import com.pangu.infrastructure.persistence.entity.RepairWorkOrderRow;
+import com.pangu.domain.model.user.WorkIdentityBuildingScope;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
@@ -43,7 +44,7 @@ public interface RepairWorkOrderMapper {
     List<RepairWorkOrderRow> listForAdmin(@Param("tenantId") Long tenantId,
                                           @Param("roleKey") String roleKey,
                                           @Param("userId") Long userId,
-                                          @Param("buildingIds") List<Long> buildingIds,
+                                          @Param("buildingScopes") List<WorkIdentityBuildingScope> buildingScopes,
                                           @Param("status") String status,
                                           @Param("scope") String scope,
                                           @Param("keyword") String keyword,
@@ -53,7 +54,7 @@ public interface RepairWorkOrderMapper {
     long countForAdmin(@Param("tenantId") Long tenantId,
                        @Param("roleKey") String roleKey,
                        @Param("userId") Long userId,
-                       @Param("buildingIds") List<Long> buildingIds,
+                       @Param("buildingScopes") List<WorkIdentityBuildingScope> buildingScopes,
                        @Param("status") String status,
                        @Param("scope") String scope,
                        @Param("keyword") String keyword);

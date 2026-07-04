@@ -50,7 +50,10 @@
             op.is_voting_delegate,
             op.account_status
         FROM c_owner_property op
-        WHERE op.tenant_id = #{tenantId}
+        WHERE 1 = 1
+        <if test="tenantId != null">
+            AND op.tenant_id = #{tenantId}
+        </if>
     </select>
 
     <!-- ===================== M3-2 投票提交 / "我的议题" ===================== -->
@@ -155,7 +158,10 @@
                cu.create_time AS create_time
         FROM t_account a
         JOIN c_user cu ON cu.account_id = a.account_id
-        JOIN c_owner_property op ON op.uid = cu.uid AND op.tenant_id = #{q.tenantId}
+        JOIN c_owner_property op ON op.uid = cu.uid
+            <if test="q.tenantId != null">
+                AND op.tenant_id = #{q.tenantId}
+            </if>
         <where>
             <include refid="OwnerListFilter"/>
         </where>
@@ -169,7 +175,10 @@
         SELECT COUNT(DISTINCT cu.uid)
         FROM t_account a
         JOIN c_user cu ON cu.account_id = a.account_id
-        JOIN c_owner_property op ON op.uid = cu.uid AND op.tenant_id = #{q.tenantId}
+        JOIN c_owner_property op ON op.uid = cu.uid
+            <if test="q.tenantId != null">
+                AND op.tenant_id = #{q.tenantId}
+            </if>
         <where>
             <include refid="OwnerListFilter"/>
         </where>
@@ -188,8 +197,11 @@
                cu.create_time AS create_time
         FROM t_account a
         JOIN c_user cu ON cu.account_id = a.account_id
-        JOIN c_owner_property op ON op.uid = cu.uid AND op.tenant_id = #{tenantId}
+        JOIN c_owner_property op ON op.uid = cu.uid
         WHERE cu.uid = #{uid}
+        <if test="tenantId != null">
+            AND op.tenant_id = #{tenantId}
+        </if>
         GROUP BY cu.uid, cu.account_id, a.phone, a.real_name, a.real_name_verified,
                  cu.auth_level, a.status, cu.create_time
     </select>
@@ -212,7 +224,10 @@
                op.is_voting_delegate AS is_voting_delegate,
                op.account_status AS account_status
         FROM c_owner_property op
-        WHERE op.uid = #{uid} AND op.tenant_id = #{tenantId}
+        WHERE op.uid = #{uid}
+        <if test="tenantId != null">
+            AND op.tenant_id = #{tenantId}
+        </if>
         ORDER BY op.building_id, op.room_id
     </select>
 

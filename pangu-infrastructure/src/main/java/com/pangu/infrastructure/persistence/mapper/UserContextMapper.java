@@ -75,6 +75,21 @@ public interface UserContextMapper {
     List<Long> selectAuthorizedBuildingIds(@Param("userId") Long userId);
 
     /**
+     * 给定 sys_user.user_id 反查其授权的 tenant/building 范围（仅 status=1 的活跃记录）。
+     */
+    List<AuthorizedBuildingScopeRow> selectAuthorizedBuildingScopes(@Param("userId") Long userId);
+
+    class AuthorizedBuildingScopeRow {
+        private Long tenantId;
+        private Long buildingId;
+
+        public Long getTenantId() { return tenantId; }
+        public void setTenantId(Long tenantId) { this.tenantId = tenantId; }
+        public Long getBuildingId() { return buildingId; }
+        public void setBuildingId(Long buildingId) { this.buildingId = buildingId; }
+    }
+
+    /**
      * 管理端身份装配后的扁平 row。
      */
     class SysUserContextRow {

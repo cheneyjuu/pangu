@@ -6,6 +6,7 @@ import com.pangu.domain.model.repair.RepairSpaceScope;
 import com.pangu.domain.model.repair.RepairWorkOrder;
 import com.pangu.domain.model.repair.RepairWorkOrderEvent;
 import com.pangu.domain.model.repair.RepairWorkOrderStatus;
+import com.pangu.domain.model.user.WorkIdentityBuildingScope;
 import com.pangu.domain.repository.RepairWorkOrderRepository;
 import com.pangu.infrastructure.persistence.entity.OwnerPropertyDetailRow;
 import com.pangu.infrastructure.persistence.entity.RepairWorkOrderEventRow;
@@ -72,14 +73,14 @@ public class RepairWorkOrderRepositoryImpl implements RepairWorkOrderRepository 
     public List<RepairWorkOrder> listForAdmin(Long tenantId,
                                               String roleKey,
                                               Long userId,
-                                              List<Long> authorizedBuildingIds,
+                                              List<WorkIdentityBuildingScope> authorizedBuildingScopes,
                                               RepairWorkOrderStatus status,
                                               RepairSpaceScope scope,
                                               String keyword,
                                               int page,
                                               int size) {
         int offset = (Math.max(page, 1) - 1) * size;
-        return mapper.listForAdmin(tenantId, roleKey, userId, authorizedBuildingIds,
+        return mapper.listForAdmin(tenantId, roleKey, userId, authorizedBuildingScopes,
                 status == null ? null : status.name(),
                 scope == null ? null : scope.name(),
                 keyword, size, offset).stream().map(this::toDomain).toList();
@@ -89,11 +90,11 @@ public class RepairWorkOrderRepositoryImpl implements RepairWorkOrderRepository 
     public long countForAdmin(Long tenantId,
                               String roleKey,
                               Long userId,
-                              List<Long> authorizedBuildingIds,
+                              List<WorkIdentityBuildingScope> authorizedBuildingScopes,
                               RepairWorkOrderStatus status,
                               RepairSpaceScope scope,
                               String keyword) {
-        return mapper.countForAdmin(tenantId, roleKey, userId, authorizedBuildingIds,
+        return mapper.countForAdmin(tenantId, roleKey, userId, authorizedBuildingScopes,
                 status == null ? null : status.name(),
                 scope == null ? null : scope.name(),
                 keyword);

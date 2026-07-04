@@ -121,6 +121,27 @@
         ORDER BY building_id ASC
     </select>
 
+    <select id="selectAuthorizedBuildingScopes"
+            resultType="com.pangu.infrastructure.persistence.mapper.UserContextMapper$AuthorizedBuildingScopeRow">
+        SELECT DISTINCT tenant_id AS tenantId, building_id AS buildingId
+        FROM (
+            SELECT ub.tenant_id, ub.building_id
+            FROM sys_user_building ub
+            WHERE ub.user_id = #{userId}
+              AND ub.status = 1
+            UNION
+            SELECT dbs.tenant_id, dbs.building_id
+            FROM sys_dept_building_scope dbs
+            JOIN sys_user u ON u.dept_id = dbs.dept_id
+            JOIN sys_user_role ur ON ur.user_id = u.user_id
+            JOIN sys_role r ON r.role_id = ur.role_id
+            WHERE u.user_id = #{userId}
+              AND r.role_key = 'GRID_MEMBER'
+              AND dbs.status = 1
+        ) scoped
+        ORDER BY tenant_id ASC, building_id ASC
+    </select>
+
     <!-- C_USER 登录默认 tenant：从业主名下房产中任选一条（按 opid 升序取第一个稳定）。 -->
     <select id="selectDefaultTenantByUid" resultType="java.lang.Long">
         SELECT tenant_id

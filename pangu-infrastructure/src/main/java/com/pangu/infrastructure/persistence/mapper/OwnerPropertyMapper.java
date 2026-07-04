@@ -37,7 +37,7 @@ public interface OwnerPropertyMapper {
     /**
      * 管理端网格员根据楼栋管辖范围查询房产关系列表 (行级数据范围过滤)
      */
-    @DataScope(buildingAlias = "op")
+    @DataScope(tenantAlias = "op", buildingAlias = "op")
     List<PropertyOwnership> selectOwnershipsByBuilding(@Param("tenantId") Long tenantId);
 
     /**
@@ -70,25 +70,25 @@ public interface OwnerPropertyMapper {
      * {@code propertyCount} 与 {@code totalBuildArea}；行级数据范围由 {@code @DataScope} 注入
      * （{@code op.building_id IN (...)}）。
      */
-    @DataScope(buildingAlias = "op")
+    @DataScope(tenantAlias = "op", buildingAlias = "op")
     List<OwnerProfileRow> pageOwners(@Param("q") OwnerQuery q);
 
     /**
      * 业主名册分页总数（与 {@link #pageOwners(OwnerQuery)} 同款过滤）。
      */
-    @DataScope(buildingAlias = "op")
+    @DataScope(tenantAlias = "op", buildingAlias = "op")
     long countOwners(@Param("q") OwnerQuery q);
 
     /**
      * 业主名册详情（按 uid + tenant 聚合）。
      */
-    @DataScope(buildingAlias = "op")
+    @DataScope(tenantAlias = "op", buildingAlias = "op")
     OwnerProfileRow selectOwnerProfile(@Param("uid") Long uid, @Param("tenantId") Long tenantId);
 
     /**
      * 业主在指定租户下的房产明细（详情页用）。
      */
-    @DataScope(buildingAlias = "op")
+    @DataScope(tenantAlias = "op", buildingAlias = "op")
     List<OwnerPropertyDetailRow> selectPropertiesByUid(@Param("uid") Long uid,
                                                       @Param("tenantId") Long tenantId);
 }

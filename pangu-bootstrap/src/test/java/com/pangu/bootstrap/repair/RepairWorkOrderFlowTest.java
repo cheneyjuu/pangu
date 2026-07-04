@@ -35,6 +35,13 @@ public class RepairWorkOrderFlowTest {
     private static final long USR_PROPERTY_STAFF = 800202L;
     private static final long ACC_DIRECTOR = 999811L;
     private static final long USR_DIRECTOR = 800101L;
+    private static final long ACC_GRID = 999804L;
+    private static final long USR_GRID = 800004L;
+    private static final long ACC_STREET = 999801L;
+    private static final long USR_STREET = 800001L;
+    private static final long DEPT_GRID = 104L;
+    private static final long TENANT_CROSS = 10002L;
+    private static final long CROSS_ROOM = 10002300101L;
 
     @Autowired private MockMvc mockMvc;
     @Autowired private ObjectMapper objectMapper;
@@ -44,6 +51,14 @@ public class RepairWorkOrderFlowTest {
     @AfterEach
     public void clean() {
         jdbcTemplate.update("DELETE FROM t_repair_work_order WHERE title LIKE 'IT-报修-%'");
+        jdbcTemplate.update("""
+                DELETE FROM sys_dept_building_scope
+                WHERE dept_id = ? AND tenant_id = ? AND building_id = 30001
+                """, DEPT_GRID, TENANT_CROSS);
+        jdbcTemplate.update("""
+                DELETE FROM c_owner_property
+                WHERE uid = 70001 AND tenant_id = ? AND room_id = ?
+                """, TENANT_CROSS, CROSS_ROOM);
     }
 
     @Test
@@ -132,6 +147,66 @@ public class RepairWorkOrderFlowTest {
                 .andExpect(jsonPath("$.data.locationLocked", is(true)));
     }
 
+    @Test
+    public void gridMemberAdminList_canSeeCrossTenantBuildingScope() throws Exception {
+        jdbcTemplate.update("""
+                INSERT INTO c_owner_property
+                    (uid, tenant_id, building_id, room_id, build_area, is_voting_delegate, account_status)
+                VALUES (70001, ?, 30001, ?, 88.00, 0, 1)
+                ON CONFLICT DO NOTHING
+                """, TENANT_CROSS, CROSS_ROOM);
+        jdbcTemplate.update("""
+                INSERT INTO sys_dept_building_scope (dept_id, tenant_id, building_id, assigned_by, status)
+                VALUES (?, ?, 30001, 800003, 1)
+                ON CONFLICT (dept_id, tenant_id, building_id)
+                DO UPDATE SET status = 1, assigned_by = EXCLUDED.assigned_by, updated_at = now()
+                """, DEPT_GRID, TENANT_CROSS);
+        String title = "IT-报修-跨小区网格-" + System.nanoTime();
+        jdbcTemplate.update("""
+                INSERT INTO t_repair_work_order
+                    (tenant_id, title, description, source, space_scope, status,
+                     reporter_account_id, reporter_uid, building_id, location_text, category)
+                VALUES (?, ?, '跨小区网格可见性测试', 'C_OWNER_APP', 'PUBLIC', 'SUBMITTED',
+                        999812, 70001, 30001, '跨小区 1 号楼公共区域', 'PUBLIC_FACILITY')
+                """, TENANT_CROSS, title);
+        String gridToken = token(ACC_GRID, "SYS_USER", USR_GRID);
+
+        mockMvc.perform(get("/api/v1/admin/repair-work-orders")
+                        .param("keyword", title)
+                        .header("Authorization", "Bearer " + gridToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total", is(1)))
+                .andExpect(jsonPath("$.data.items[0].tenantId", is((int) TENANT_CROSS)))
+                .andExpect(jsonPath("$.data.items[0].buildingId", is(30001)));
+    }
+
+    @Test
+    public void streetAdminWithoutTenantHint_canSeeAllDistrictRepairOrders() throws Exception {
+        String title = "IT-报修-街道跨租户视野-" + System.nanoTime();
+        jdbcTemplate.update("""
+                INSERT INTO t_repair_work_order
+                    (tenant_id, title, description, source, space_scope, status,
+                     reporter_account_id, reporter_uid, building_id, location_text, category)
+                VALUES (?, ?, '街道全辖区工单可见性测试', 'C_OWNER_APP', 'PUBLIC', 'SUBMITTED',
+                        999812, 70001, 30001, '跨小区公共区域', 'PUBLIC_FACILITY')
+                """, TENANT_CROSS, title);
+        String streetToken = token(ACC_STREET, "SYS_USER", USR_STREET, null);
+
+        String response = mockMvc.perform(get("/api/v1/admin/repair-work-orders")
+                        .param("keyword", title)
+                        .header("Authorization", "Bearer " + streetToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total", is(1)))
+                .andExpect(jsonPath("$.data.items[0].tenantId", is((int) TENANT_CROSS)))
+                .andReturn().getResponse().getContentAsString();
+        long id = objectMapper.readTree(response).path("data").path("items").get(0).path("workOrderId").asLong();
+
+        mockMvc.perform(get("/api/v1/admin/repair-work-orders/" + id)
+                        .header("Authorization", "Bearer " + streetToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.tenantId", is((int) TENANT_CROSS)));
+    }
+
     private long createPrivate(String token, long opid, String title) throws Exception {
         String body = json(Map.of(
                 "opid", opid,
@@ -185,6 +260,10 @@ public class RepairWorkOrderFlowTest {
 
     private String token(long accountId, String identityType, long activeIdentityId) {
         return jwtTokenProvider.generateToken(accountId, identityType, activeIdentityId, TENANT);
+    }
+
+    private String token(long accountId, String identityType, long activeIdentityId, Long tenantId) {
+        return jwtTokenProvider.generateToken(accountId, identityType, activeIdentityId, tenantId);
     }
 
     private String json(Object value) throws Exception {

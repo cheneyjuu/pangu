@@ -5,11 +5,13 @@ import com.pangu.domain.context.UserContextHolder;
 import com.pangu.domain.model.asset.PropertyOwnership;
 import com.pangu.domain.model.user.AuthenticationLevel;
 import com.pangu.domain.model.user.DataScopeType;
+import com.pangu.domain.model.user.WorkIdentityBuildingScope;
 import com.pangu.infrastructure.persistence.mapper.OwnerPropertyMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.util.List;
 import java.util.Set;
@@ -39,9 +41,16 @@ public class DataScopeTest {
     @Autowired
     private UserContextHolder userContextHolder;
 
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
     @AfterEach
     public void tearDown() {
         userContextHolder.clear();
+        jdbcTemplate.update("""
+                DELETE FROM c_owner_property
+                WHERE uid = 70001 AND tenant_id = 10002 AND room_id = 10002300101
+                """);
     }
 
     /**
@@ -93,6 +102,37 @@ public class DataScopeTest {
 
         assertNotNull(list);
         assertEquals(0, list.size(), "OWNER_GROUP 无授权楼栋应被 IN (-1) 截流");
+    }
+
+    @Test
+    public void ownerGroupScope_filtersByTenantAndBuildingPair() {
+        jdbcTemplate.update("""
+                INSERT INTO c_owner_property
+                    (uid, tenant_id, building_id, room_id, build_area, is_voting_delegate, account_status)
+                VALUES (70001, 10002, 30001, 10002300101, 88.00, 0, 1)
+                ON CONFLICT DO NOTHING
+                """);
+        userContextHolder.set(new UserContext(
+                999803L,
+                UserContext.IdentityType.SYS_USER,
+                800003L,
+                10001L,
+                101L,
+                UserContext.DeptCategory.G,
+                2,
+                DataScopeType.OWNER_GROUP,
+                AuthenticationLevel.L1,
+                "TEST_ROLE",
+                Set.of(),
+                Set.of(30001L, 30002L),
+                Set.of(
+                        new WorkIdentityBuildingScope(10001L, 30002L),
+                        new WorkIdentityBuildingScope(10002L, 30001L))));
+
+        List<PropertyOwnership> list = ownerPropertyMapper.selectOwnershipsByBuilding(null);
+
+        assertNotNull(list);
+        assertEquals(2, list.size(), "OWNER_GROUP 应按 tenant/building 组合过滤，而不是裸 building_id");
     }
 
     private UserContext buildSysUserCtx(DataScopeType scope, Set<Long> authorizedBuildingIds) {
