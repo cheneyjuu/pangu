@@ -1,6 +1,7 @@
 package com.pangu.domain.repository;
 
 import com.pangu.domain.model.user.WorkIdentityDeptOption;
+import com.pangu.domain.model.user.WorkIdentityBuildingScope;
 import com.pangu.domain.model.user.WorkIdentityShadow;
 
 import java.util.List;
@@ -26,19 +27,19 @@ public interface WorkIdentityRepository {
 
     List<Long> listActiveBuildingIds(Long userId);
 
-    List<Long> listDeptBuildingScopeIds(Long deptId);
+    List<WorkIdentityBuildingScope> listDeptBuildingScopes(Long deptId);
 
     List<WorkIdentityDeptOption> listDeptOptions(String deptCategory, Long tenantId);
 
     List<WorkIdentityDeptOption> listGridChildren(Long communityDeptId);
 
-    List<Long> listBuildingOptions(Long tenantId);
+    List<WorkIdentityBuildingScope> listBuildingOptions(Long tenantId);
 
     Optional<WorkIdentityDeptOption> findDept(Long deptId);
 
     boolean accountHasDept(Long accountId, Long deptId);
 
-    void replaceDeptBuildingScope(Long deptId, List<Long> buildingIds, Long assignedBy);
+    void replaceDeptBuildingScope(Long deptId, List<WorkIdentityBuildingScope> scopes, Long assignedBy);
 
     Long insertSysUser(Long accountId, Long deptId, String userName, String nickName);
 

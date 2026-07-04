@@ -17,6 +17,7 @@ import java.time.Instant;
 public record OwnerSubjectResponse(
         Long subjectId,
         String title,
+        String content,
         SubjectType subjectType,
         SubjectStatus status,
         VotingScope scope,
@@ -30,6 +31,7 @@ public record OwnerSubjectResponse(
         return new OwnerSubjectResponse(
                 s.getSubjectId(),
                 s.getTitle(),
+                s.getContent(),
                 s.getSubjectType(),
                 s.getStatus(),
                 s.getScope(),

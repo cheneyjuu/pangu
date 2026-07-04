@@ -99,6 +99,7 @@ public class SubjectAdminController extends BaseController {
                 request.scope(),
                 request.scopeReferenceId(),
                 request.title(),
+                request.content(),
                 request.voteStartAt(),
                 request.voteEndAt(),
                 requireUserId(),

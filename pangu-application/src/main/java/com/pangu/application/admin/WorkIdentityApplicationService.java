@@ -5,6 +5,7 @@ import com.pangu.domain.context.UserContext;
 import com.pangu.domain.context.UserContextHolder;
 import com.pangu.domain.model.role.SysRole;
 import com.pangu.domain.model.user.WorkIdentityAccount;
+import com.pangu.domain.model.user.WorkIdentityBuildingScope;
 import com.pangu.domain.model.user.WorkIdentityDeptOption;
 import com.pangu.domain.model.user.WorkIdentityShadow;
 import com.pangu.domain.repository.WorkIdentityRepository;
@@ -119,7 +120,7 @@ public class WorkIdentityApplicationService {
     }
 
     @Transactional
-    public List<Long> replaceGridDeptBuildingScope(Long deptId, List<Long> buildingIds) {
+    public List<WorkIdentityBuildingScope> replaceGridDeptBuildingScopeLegacy(Long deptId, List<Long> buildingIds) {
         if (deptId == null) {
             throw new WorkIdentityApplicationException(
                     WorkIdentityApplicationException.Reason.PARAM_INVALID,
@@ -143,8 +144,39 @@ public class WorkIdentityApplicationService {
                         WorkIdentityApplicationException.Reason.DEPT_NOT_FOUND,
                         "部门不存在或已停用：deptId=" + deptId));
         requireCommunityGridScopeOperator(ctx, dept);
+        replaceDeptBuildingScopeWithLegacyIds(dept.deptId(), normalized, ctx.userId());
+        return repository.listDeptBuildingScopes(dept.deptId());
+    }
+
+    @Transactional
+    public List<WorkIdentityBuildingScope> replaceGridDeptBuildingScope(
+            Long deptId,
+            List<WorkIdentityBuildingScope> requestedScopes) {
+        if (deptId == null) {
+            throw new WorkIdentityApplicationException(
+                    WorkIdentityApplicationException.Reason.PARAM_INVALID,
+                    "deptId 必填");
+        }
+        List<WorkIdentityBuildingScope> normalized = normalizeBuildingScopes(requestedScopes);
+        if (normalized.isEmpty()) {
+            throw new WorkIdentityApplicationException(
+                    WorkIdentityApplicationException.Reason.BUILDING_REQUIRED,
+                    "网格节点必须至少绑定一个楼栋");
+        }
+        if (normalized.size() > BuildingAssignmentApplicationService.MAX_BUILDINGS_PER_USER) {
+            throw new WorkIdentityApplicationException(
+                    WorkIdentityApplicationException.Reason.PARAM_INVALID,
+                    "单个网格节点最多绑定 "
+                            + BuildingAssignmentApplicationService.MAX_BUILDINGS_PER_USER + " 个楼栋");
+        }
+        UserContext ctx = requireOperator();
+        WorkIdentityDeptOption dept = repository.findDept(deptId)
+                .orElseThrow(() -> new WorkIdentityApplicationException(
+                        WorkIdentityApplicationException.Reason.DEPT_NOT_FOUND,
+                        "部门不存在或已停用：deptId=" + deptId));
+        requireCommunityGridScopeOperator(ctx, dept);
         replaceDeptBuildingScope(dept.deptId(), normalized, ctx.userId());
-        return repository.listDeptBuildingScopeIds(dept.deptId());
+        return repository.listDeptBuildingScopes(dept.deptId());
     }
 
     @Transactional
@@ -204,10 +236,10 @@ public class WorkIdentityApplicationService {
                                              List<Long> requestedBuildingIds) {
         if (!requestedBuildingIds.isEmpty()) {
             requireCommunityGridScopeOperator(ctx, dept);
-            replaceDeptBuildingScope(dept.deptId(), requestedBuildingIds, ctx.userId());
+            replaceDeptBuildingScopeWithLegacyIds(dept.deptId(), requestedBuildingIds, ctx.userId());
             return;
         }
-        if (repository.listDeptBuildingScopeIds(dept.deptId()).isEmpty()) {
+        if (repository.listDeptBuildingScopes(dept.deptId()).isEmpty()) {
             throw new WorkIdentityApplicationException(
                     WorkIdentityApplicationException.Reason.BUILDING_REQUIRED,
                     "GRID_MEMBER 网格节点必须先配置至少一个楼栋范围");
@@ -253,9 +285,24 @@ public class WorkIdentityApplicationService {
         }
     }
 
-    private void replaceDeptBuildingScope(Long deptId, List<Long> buildingIds, Long assignedBy) {
+    private void replaceDeptBuildingScope(Long deptId, List<WorkIdentityBuildingScope> scopes, Long assignedBy) {
         try {
-            repository.replaceDeptBuildingScope(deptId, buildingIds, assignedBy);
+            repository.replaceDeptBuildingScope(deptId, scopes, assignedBy);
+        } catch (IllegalArgumentException e) {
+            throw new WorkIdentityApplicationException(
+                    WorkIdentityApplicationException.Reason.PARAM_INVALID,
+                    e.getMessage(), e);
+        }
+    }
+
+    private void replaceDeptBuildingScopeWithLegacyIds(Long deptId, List<Long> buildingIds, Long assignedBy) {
+        try {
+            WorkIdentityDeptOption dept = repository.findDept(deptId)
+                    .orElseThrow(() -> new WorkIdentityApplicationException(
+                            WorkIdentityApplicationException.Reason.DEPT_NOT_FOUND,
+                            "部门不存在或已停用：deptId=" + deptId));
+            List<WorkIdentityBuildingScope> scopes = normalizeLegacyBuildingScopes(buildingIds, dept.tenantId());
+            repository.replaceDeptBuildingScope(deptId, scopes, assignedBy);
         } catch (IllegalArgumentException e) {
             throw new WorkIdentityApplicationException(
                     WorkIdentityApplicationException.Reason.PARAM_INVALID,
@@ -290,6 +337,36 @@ public class WorkIdentityApplicationService {
                         "buildingIds 不允许包含 null");
             }
             normalized.add(id);
+        }
+        return List.copyOf(normalized);
+    }
+
+    private List<WorkIdentityBuildingScope> normalizeLegacyBuildingScopes(List<Long> buildingIds, Long fallbackTenantId) {
+        if (buildingIds == null || buildingIds.isEmpty()) {
+            return List.of();
+        }
+        if (fallbackTenantId == null) {
+            throw new WorkIdentityApplicationException(
+                    WorkIdentityApplicationException.Reason.PARAM_INVALID,
+                    "旧 buildingIds 请求缺少 tenantId，不能用于跨小区网格");
+        }
+        return normalizeBuildingIds(buildingIds).stream()
+                .map(buildingId -> new WorkIdentityBuildingScope(fallbackTenantId, buildingId))
+                .toList();
+    }
+
+    private List<WorkIdentityBuildingScope> normalizeBuildingScopes(List<WorkIdentityBuildingScope> scopes) {
+        if (scopes == null || scopes.isEmpty()) {
+            return List.of();
+        }
+        LinkedHashSet<WorkIdentityBuildingScope> normalized = new LinkedHashSet<>();
+        for (WorkIdentityBuildingScope scope : scopes) {
+            if (scope == null || scope.tenantId() == null || scope.buildingId() == null) {
+                throw new WorkIdentityApplicationException(
+                        WorkIdentityApplicationException.Reason.PARAM_INVALID,
+                        "网格楼栋范围必须同时包含 tenantId 与 buildingId");
+            }
+            normalized.add(scope);
         }
         return List.copyOf(normalized);
     }

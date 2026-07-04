@@ -135,6 +135,7 @@ public class ElectionProposeAndRouterTest {
                 VotingScope.BUILDING,
                 TEST_BUILDING,
                 "业委会换届选举-立项",
+                "<p>业委会换届选举立项正文</p>",
                 Instant.parse("2026-06-01T00:00:00Z"),
                 Instant.parse("2026-07-15T00:00:00Z"),
                 PROPOSER_ID,

@@ -40,6 +40,12 @@
         <result property="tenantId" column="tenant_id"/>
     </resultMap>
 
+    <resultMap id="BuildingScopeMap"
+               type="com.pangu.infrastructure.persistence.mapper.WorkIdentityMapper$BuildingScopeRow">
+        <id property="tenantId" column="tenant_id"/>
+        <id property="buildingId" column="building_id"/>
+    </resultMap>
+
     <sql id="AccountColumns">
         a.account_id,
         a.phone,
@@ -142,12 +148,12 @@
         ORDER BY building_id ASC
     </select>
 
-    <select id="selectDeptBuildingScopeIds" resultType="long">
-        SELECT DISTINCT building_id
+    <select id="selectDeptBuildingScopes" resultMap="BuildingScopeMap">
+        SELECT DISTINCT tenant_id, building_id
         FROM sys_dept_building_scope
         WHERE dept_id = #{deptId}
           AND status = 1
-        ORDER BY building_id ASC
+        ORDER BY tenant_id ASC, building_id ASC
     </select>
 
     <select id="selectDeptOptions" resultMap="DeptOptionMap">
@@ -171,11 +177,14 @@
         ORDER BY order_num ASC, dept_id ASC
     </select>
 
-    <select id="selectDistinctBuildings" resultType="long">
-        SELECT DISTINCT building_id
+    <select id="selectDistinctBuildings" resultMap="BuildingScopeMap">
+        SELECT DISTINCT tenant_id, building_id
         FROM c_owner_property
-        WHERE tenant_id = #{tenantId}
-        ORDER BY building_id ASC
+        WHERE 1 = 1
+        <if test="tenantId != null">
+            AND tenant_id = #{tenantId}
+        </if>
+        ORDER BY tenant_id ASC, building_id ASC
     </select>
 
     <select id="selectDept" resultMap="DeptOptionMap">
@@ -205,9 +214,10 @@
 
     <insert id="upsertDeptBuildingScope">
         INSERT INTO sys_dept_building_scope (dept_id, tenant_id, building_id, assigned_by, status)
-        SELECT DISTINCT #{deptId}, op.tenant_id, #{buildingId}, #{assignedBy}, 1
+        SELECT DISTINCT #{deptId}, #{tenantId}, #{buildingId}, #{assignedBy}, 1
         FROM c_owner_property op
-        WHERE op.building_id = #{buildingId}
+        WHERE op.tenant_id = #{tenantId}
+          AND op.building_id = #{buildingId}
         ON CONFLICT (dept_id, tenant_id, building_id)
         DO UPDATE SET
             assigned_by = EXCLUDED.assigned_by,

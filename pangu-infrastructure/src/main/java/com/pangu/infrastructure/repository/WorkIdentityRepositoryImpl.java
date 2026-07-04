@@ -1,5 +1,6 @@
 package com.pangu.infrastructure.repository;
 
+import com.pangu.domain.model.user.WorkIdentityBuildingScope;
 import com.pangu.domain.model.user.WorkIdentityDeptOption;
 import com.pangu.domain.model.user.WorkIdentityShadow;
 import com.pangu.domain.repository.WorkIdentityRepository;
@@ -58,8 +59,10 @@ public class WorkIdentityRepositoryImpl implements WorkIdentityRepository {
     }
 
     @Override
-    public List<Long> listDeptBuildingScopeIds(Long deptId) {
-        return mapper.selectDeptBuildingScopeIds(deptId);
+    public List<WorkIdentityBuildingScope> listDeptBuildingScopes(Long deptId) {
+        return mapper.selectDeptBuildingScopes(deptId).stream()
+                .map(this::toBuildingScope)
+                .toList();
     }
 
     @Override
@@ -77,8 +80,10 @@ public class WorkIdentityRepositoryImpl implements WorkIdentityRepository {
     }
 
     @Override
-    public List<Long> listBuildingOptions(Long tenantId) {
-        return mapper.selectDistinctBuildings(tenantId);
+    public List<WorkIdentityBuildingScope> listBuildingOptions(Long tenantId) {
+        return mapper.selectDistinctBuildings(tenantId).stream()
+                .map(this::toBuildingScope)
+                .toList();
     }
 
     @Override
@@ -92,12 +97,17 @@ public class WorkIdentityRepositoryImpl implements WorkIdentityRepository {
     }
 
     @Override
-    public void replaceDeptBuildingScope(Long deptId, List<Long> buildingIds, Long assignedBy) {
+    public void replaceDeptBuildingScope(Long deptId, List<WorkIdentityBuildingScope> scopes, Long assignedBy) {
         mapper.deactivateDeptBuildingScope(deptId);
-        for (Long buildingId : buildingIds) {
-            int affected = mapper.upsertDeptBuildingScope(deptId, buildingId, assignedBy);
+        for (WorkIdentityBuildingScope scope : scopes) {
+            int affected = mapper.upsertDeptBuildingScope(
+                    deptId,
+                    scope.tenantId(),
+                    scope.buildingId(),
+                    assignedBy);
             if (affected == 0) {
-                throw new IllegalArgumentException("楼栋不存在，无法写入网格范围：buildingId=" + buildingId);
+                throw new IllegalArgumentException("楼栋不存在，无法写入网格范围：tenantId="
+                        + scope.tenantId() + ", buildingId=" + scope.buildingId());
             }
         }
     }
@@ -175,5 +185,9 @@ public class WorkIdentityRepositoryImpl implements WorkIdentityRepository {
                 row.getDeptType(),
                 row.getDeptCategory(),
                 row.getTenantId());
+    }
+
+    private WorkIdentityBuildingScope toBuildingScope(WorkIdentityMapper.BuildingScopeRow row) {
+        return new WorkIdentityBuildingScope(row.getTenantId(), row.getBuildingId());
     }
 }

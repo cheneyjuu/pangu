@@ -130,6 +130,7 @@ public class VotingSubjectRepositoryImpl implements VotingSubjectRepository {
         row.setSubjectId(s.getSubjectId());
         row.setTenantId(s.getTenantId());
         row.setTitle(s.getTitle());
+        row.setContent(s.getContent());
         row.setSubjectType(s.getSubjectType() == null ? null : s.getSubjectType().getDbValue());
         row.setScope(s.getScope() == null ? null : s.getScope().getDbValue());
         row.setScopeReferenceId(s.getScopeReferenceId());
@@ -152,6 +153,7 @@ public class VotingSubjectRepositoryImpl implements VotingSubjectRepository {
                     .subjectId(r.getSubjectId())
                     .tenantId(r.getTenantId())
                     .title(r.getTitle())
+                    .content(r.getContent())
                     .subjectType(type)
                     .status(r.getStatus() == null ? null : SubjectStatus.fromDbValue(r.getStatus()))
                     .scope(r.getScope() == null ? VotingScope.COMMUNITY : VotingScope.fromDbValue(r.getScope()))
@@ -174,6 +176,7 @@ public class VotingSubjectRepositoryImpl implements VotingSubjectRepository {
                 .subjectId(r.getSubjectId())
                 .tenantId(r.getTenantId())
                 .title(r.getTitle())
+                .content(r.getContent())
                 .subjectType(type)
                 .status(r.getStatus() == null ? null : SubjectStatus.fromDbValue(r.getStatus()))
                 .scope(r.getScope() == null ? VotingScope.COMMUNITY : VotingScope.fromDbValue(r.getScope()))

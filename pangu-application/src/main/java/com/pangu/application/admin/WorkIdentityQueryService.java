@@ -3,6 +3,7 @@ package com.pangu.application.admin;
 import com.pangu.domain.context.UserContext;
 import com.pangu.domain.context.UserContextHolder;
 import com.pangu.domain.model.role.SysRole;
+import com.pangu.domain.model.user.WorkIdentityBuildingScope;
 import com.pangu.domain.model.user.WorkIdentityAccount;
 import com.pangu.domain.model.user.WorkIdentityDeptOption;
 import com.pangu.domain.model.user.WorkIdentityShadow;
@@ -92,7 +93,7 @@ public class WorkIdentityQueryService {
     }
 
     @Transactional(readOnly = true)
-    public List<Long> listBuildingOptions(Long deptId) {
+    public List<WorkIdentityBuildingScope> listBuildingOptions(Long deptId) {
         if (deptId == null) {
             throw new WorkIdentityApplicationException(
                     WorkIdentityApplicationException.Reason.PARAM_INVALID,
@@ -102,7 +103,8 @@ public class WorkIdentityQueryService {
                 .orElseThrow(() -> new WorkIdentityApplicationException(
                         WorkIdentityApplicationException.Reason.DEPT_NOT_FOUND,
                         "部门不存在或已停用：deptId=" + deptId));
-        if (dept.tenantId() == null) {
+        boolean gridNode = dept.deptType() != null && dept.deptType() == 5 && "G".equals(dept.deptCategory());
+        if (dept.tenantId() == null && !gridNode) {
             throw new WorkIdentityApplicationException(
                     WorkIdentityApplicationException.Reason.PARAM_INVALID,
                     "该部门未归属具体小区，不能选择楼栋：deptId=" + deptId);
@@ -113,11 +115,11 @@ public class WorkIdentityQueryService {
                     WorkIdentityApplicationException.Reason.FORBIDDEN,
                     "目标部门不在当前数据范围内：deptId=" + deptId);
         }
-        return repository.listBuildingOptions(dept.tenantId());
+        return repository.listBuildingOptions(gridNode ? null : dept.tenantId());
     }
 
     @Transactional(readOnly = true)
-    public List<Long> listGridDeptBuildingScope(Long deptId) {
+    public List<WorkIdentityBuildingScope> listGridDeptBuildingScope(Long deptId) {
         if (deptId == null) {
             throw new WorkIdentityApplicationException(
                     WorkIdentityApplicationException.Reason.PARAM_INVALID,
@@ -139,7 +141,7 @@ public class WorkIdentityQueryService {
                     WorkIdentityApplicationException.Reason.FORBIDDEN,
                     "目标部门不在当前数据范围内：deptId=" + deptId);
         }
-        return repository.listDeptBuildingScopeIds(deptId);
+        return repository.listDeptBuildingScopes(deptId);
     }
 
     SysRole roleByKey(String roleKey) {

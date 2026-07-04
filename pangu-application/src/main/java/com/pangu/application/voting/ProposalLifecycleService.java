@@ -94,6 +94,7 @@ public class ProposalLifecycleService {
                     cmd.voteEndAt(),
                     cmd.proposedByUserId(),
                     cmd.partyRatioFloor());
+            draft.setContent(normalizeContent(cmd.content(), cmd.subjectType()));
         } catch (IllegalArgumentException e) {
             throw new VotingApplicationException(
                     VotingApplicationException.Reason.PROPOSE_FORBIDDEN_FOR_TYPE,
@@ -125,6 +126,27 @@ public class ProposalLifecycleService {
                 persisted.getSubjectId(), persisted.getSubjectType(),
                 persisted.getScope(), persisted.getMaxWinners(), persisted.getProposedByUserId());
         return persisted;
+    }
+
+    private String normalizeContent(String content, SubjectType subjectType) {
+        String normalized = content == null ? null : content.trim();
+        if (subjectType != SubjectType.ELECTION && (normalized == null || normalized.isBlank())) {
+            throw new VotingApplicationException(
+                    VotingApplicationException.Reason.PROPOSE_FORBIDDEN_FOR_TYPE,
+                    "GENERAL/MAJOR 议题立项必须填写正文");
+        }
+        if (normalized == null || normalized.isBlank()) {
+            return null;
+        }
+        String lower = normalized.toLowerCase(java.util.Locale.ROOT);
+        if (lower.contains("<script")
+                || lower.contains("javascript:")
+                || lower.matches("(?s).*\\son[a-z]+\\s*=.*")) {
+            throw new VotingApplicationException(
+                    VotingApplicationException.Reason.PROPOSE_FORBIDDEN_FOR_TYPE,
+                    "议题正文包含不允许的富文本内容");
+        }
+        return normalized;
     }
 
     /**

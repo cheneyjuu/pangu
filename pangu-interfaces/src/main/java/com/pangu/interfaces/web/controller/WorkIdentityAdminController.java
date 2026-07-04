@@ -4,6 +4,7 @@ import com.pangu.application.admin.WorkIdentityApplicationService;
 import com.pangu.application.admin.WorkIdentityQueryService;
 import com.pangu.application.admin.command.CreateWorkIdentityCommand;
 import com.pangu.domain.model.user.WorkIdentityAccount;
+import com.pangu.domain.model.user.WorkIdentityBuildingScope;
 import com.pangu.domain.model.user.WorkIdentityDeptOption;
 import com.pangu.domain.model.user.WorkIdentityShadow;
 import com.pangu.interfaces.web.controller.dto.admin.CreateWorkIdentityRequest;
@@ -63,8 +64,8 @@ public class WorkIdentityAdminController extends BaseController {
     @GetMapping("/building-options")
     @PreAuthorize("hasAuthority('admin:user:assign-role')")
     public Result<List<BuildingResponse>> listBuildingOptions(@RequestParam("deptId") Long deptId) {
-        List<Long> ids = queryService.listBuildingOptions(deptId);
-        return success(ids.stream().map(BuildingResponse::of).toList());
+        List<WorkIdentityBuildingScope> scopes = queryService.listBuildingOptions(deptId);
+        return success(scopes.stream().map(BuildingResponse::from).toList());
     }
 
     @PostMapping("/depts/{communityDeptId}/grid-nodes")
@@ -78,8 +79,8 @@ public class WorkIdentityAdminController extends BaseController {
     @GetMapping("/depts/{deptId}/building-scope")
     @PreAuthorize("hasAuthority('admin:user:assign-role')")
     public Result<List<BuildingResponse>> listGridBuildingScope(@PathVariable("deptId") Long deptId) {
-        List<Long> ids = queryService.listGridDeptBuildingScope(deptId);
-        return success(ids.stream().map(BuildingResponse::of).toList());
+        List<WorkIdentityBuildingScope> scopes = queryService.listGridDeptBuildingScope(deptId);
+        return success(scopes.stream().map(BuildingResponse::from).toList());
     }
 
     @PutMapping("/depts/{deptId}/building-scope")
@@ -87,8 +88,10 @@ public class WorkIdentityAdminController extends BaseController {
     public Result<List<BuildingResponse>> updateGridBuildingScope(
             @PathVariable("deptId") Long deptId,
             @Valid @RequestBody UpdateGridBuildingScopeRequest request) {
-        List<Long> ids = applicationService.replaceGridDeptBuildingScope(deptId, request.buildingIds());
-        return success("网格楼栋范围已更新", ids.stream().map(BuildingResponse::of).toList());
+        List<WorkIdentityBuildingScope> scopes = request.buildingScopes() != null && !request.buildingScopes().isEmpty()
+                ? applicationService.replaceGridDeptBuildingScope(deptId, request.toDomainScopes(null))
+                : applicationService.replaceGridDeptBuildingScopeLegacy(deptId, request.buildingIds());
+        return success("网格楼栋范围已更新", scopes.stream().map(BuildingResponse::from).toList());
     }
 
     @PostMapping("/accounts/{accountId}/shadows")

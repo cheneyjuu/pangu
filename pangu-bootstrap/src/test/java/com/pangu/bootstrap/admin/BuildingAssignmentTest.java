@@ -32,7 +32,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *
  * <p>覆盖：
  * <ol>
- *   <li>分配者白名单：居委会主任分配网格员楼栋 / 业委会主任分配志愿者楼栋（B 端核心用例）→ 200；</li>
+ *   <li>分配者白名单：业委会主任分配志愿者楼栋（B 端核心用例）→ 200；</li>
  *   <li>非白名单角色（业委会委员）→ 403/42402 FORBIDDEN；</li>
  *   <li>跨租户楼栋 → 403/42404 BUILDING_NOT_IN_SCOPE；</li>
  *   <li>给非可分配角色用户（如物业经理）分配 → 404/42403 USER_NOT_FOUND；</li>
@@ -71,35 +71,18 @@ public class BuildingAssignmentTest {
     private static final long USR_VOLUNTEER = 800104L;  // 志愿者
     private static final long USR_PROPERTY_MGR = 800201L; // 物业经理（非可分配角色）
 
-    // ===== 1. happy path：居委会主任分配网格员楼栋 → 200 + 回读 =====
+    // ===== 1. 网格员范围不再走楼栋责任田 =====
 
     @Test
-    public void communityAdmin_assignGridOperator_happyPath() throws Exception {
+    public void communityAdmin_assignGridMember_rejectedAsGridManagementOnly() throws Exception {
         String token = jwtTokenProvider.generateToken(ACC_COMMUNITY_ADMIN, "SYS_USER", USR_COMMUNITY_ADMIN, TENANT_RUSHI);
-        // 选一个种子里未授予该网格员的楼栋（800004 已有 30001/30002/30003，用 30005）
-        long bid = 30005L;
-
-        // 先清场：若已存在则撤销
-        mockMvc.perform(delete("/api/v1/admin/building-assignments/users/" + USR_GRID + "/buildings/" + bid)
-                .header("Authorization", "Bearer " + token));
 
         mockMvc.perform(post("/api/v1/admin/building-assignments/users/" + USR_GRID + "/buildings")
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(assignBody(bid, "GRID_MEMBER")))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code", is(200)));
-
-        // 回读包含 30005
-        mockMvc.perform(get("/api/v1/admin/building-assignments/users/" + USR_GRID + "/buildings")
-                        .header("Authorization", "Bearer " + token))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data[?(@.buildingId==" + bid + ")]").exists());
-
-        // 清理
-        mockMvc.perform(delete("/api/v1/admin/building-assignments/users/" + USR_GRID + "/buildings/" + bid)
-                        .header("Authorization", "Bearer " + token))
-                .andExpect(status().isOk());
+                        .content(assignBody(30005L, "GRID_MEMBER")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code", is(400)));
     }
 
     // ===== 2. 业委会主任分配志愿者（B 端核心）=====
@@ -133,8 +116,8 @@ public class BuildingAssignmentTest {
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(assignBody(30005L, "GRID_MEMBER")))
-                .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.code", is(42402)));
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code", is(400)));
     }
 
     // ===== 3. 非白名单角色 业委会委员 → 403/42402 =====
@@ -142,10 +125,10 @@ public class BuildingAssignmentTest {
     @Test
     public void committeeMember_assign_403_42402() throws Exception {
         String token = jwtTokenProvider.generateToken(ACC_MEMBER, "SYS_USER", USR_MEMBER, TENANT_RUSHI);
-        mockMvc.perform(post("/api/v1/admin/building-assignments/users/" + USR_GRID + "/buildings")
+        mockMvc.perform(post("/api/v1/admin/building-assignments/users/" + USR_VOLUNTEER + "/buildings")
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(assignBody(30001L, "GRID_MEMBER")))
+                        .content(assignBody(30001L, "VOLUNTEER")))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code", is(42402)));
     }
@@ -156,10 +139,10 @@ public class BuildingAssignmentTest {
     public void communityAdmin_assignBuildingNotInTenant_403_42404() throws Exception {
         String token = jwtTokenProvider.generateToken(ACC_COMMUNITY_ADMIN, "SYS_USER", USR_COMMUNITY_ADMIN, TENANT_RUSHI);
         // 99999 不存在于本租户 c_owner_property
-        mockMvc.perform(post("/api/v1/admin/building-assignments/users/" + USR_GRID + "/buildings")
+        mockMvc.perform(post("/api/v1/admin/building-assignments/users/" + USR_VOLUNTEER + "/buildings")
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(assignBody(99999L, "GRID_MEMBER")))
+                        .content(assignBody(99999L, "VOLUNTEER")))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code", is(42404)));
     }
@@ -169,11 +152,11 @@ public class BuildingAssignmentTest {
     @Test
     public void communityAdmin_assignNonAssignableUser_404_42403() throws Exception {
         String token = jwtTokenProvider.generateToken(ACC_COMMUNITY_ADMIN, "SYS_USER", USR_COMMUNITY_ADMIN, TENANT_RUSHI);
-        // 给物业经理(800201) 分配 GRID_MEMBER 楼栋 → 该用户角色不是 GRID_MEMBER
+        // 给物业经理(800201) 分配 VOLUNTEER 楼栋 → 该用户角色不是 VOLUNTEER
         mockMvc.perform(post("/api/v1/admin/building-assignments/users/" + USR_PROPERTY_MGR + "/buildings")
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(assignBody(30001L, "GRID_MEMBER")))
+                        .content(assignBody(30001L, "VOLUNTEER")))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code", is(42403)));
     }
@@ -183,11 +166,11 @@ public class BuildingAssignmentTest {
     @Test
     public void communityAdmin_assignIdempotent_200() throws Exception {
         String token = jwtTokenProvider.generateToken(ACC_COMMUNITY_ADMIN, "SYS_USER", USR_COMMUNITY_ADMIN, TENANT_RUSHI);
-        // 800004 已生效 30001（V1.1 seed）—— 再 assign 一次应幂等成功
-        mockMvc.perform(post("/api/v1/admin/building-assignments/users/" + USR_GRID + "/buildings")
+        // 800104 已生效 30005（V1.2 seed）—— 再 assign 一次应幂等成功
+        mockMvc.perform(post("/api/v1/admin/building-assignments/users/" + USR_VOLUNTEER + "/buildings")
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(assignBody(30001L, "GRID_MEMBER")))
+                        .content(assignBody(30005L, "VOLUNTEER")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code", is(200)));
     }
@@ -219,14 +202,14 @@ public class BuildingAssignmentTest {
     // ===== 9. listUsers / listBuildings 通路 =====
 
     @Test
-    public void communityAdmin_listGridOperators_200() throws Exception {
+    public void communityAdmin_listVolunteers_200() throws Exception {
         String token = jwtTokenProvider.generateToken(ACC_COMMUNITY_ADMIN, "SYS_USER", USR_COMMUNITY_ADMIN, TENANT_RUSHI);
         mockMvc.perform(get("/api/v1/admin/building-assignments/users")
-                        .param("roleKey", "GRID_MEMBER")
+                        .param("roleKey", "VOLUNTEER")
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code", is(200)))
-                .andExpect(jsonPath("$.data[0].roleKey", is("GRID_MEMBER")));
+                .andExpect(jsonPath("$.data[0].roleKey", is("VOLUNTEER")));
     }
 
     @Test
@@ -244,35 +227,35 @@ public class BuildingAssignmentTest {
     @Test
     public void search_byNickName_returnsMatching() throws Exception {
         String token = jwtTokenProvider.generateToken(ACC_COMMUNITY_ADMIN, "SYS_USER", USR_COMMUNITY_ADMIN, TENANT_RUSHI);
-        // seed: 陈网格员 nick_name 中文，搜「网格」命中
+        // seed: 孙志愿者 nick_name 中文，搜「志愿」命中
         mockMvc.perform(get("/api/v1/admin/building-assignments/search")
-                        .param("keyword", "网格")
+                        .param("keyword", "志愿")
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code", is(200)))
-                .andExpect(jsonPath("$.data[?(@.userId==" + USR_GRID + ")]").exists())
-                .andExpect(jsonPath("$.data[?(@.userId==" + USR_GRID + ")].roleKey", hasItem("GRID_MEMBER")));
+                .andExpect(jsonPath("$.data[?(@.userId==" + USR_VOLUNTEER + ")]").exists())
+                .andExpect(jsonPath("$.data[?(@.userId==" + USR_VOLUNTEER + ")].roleKey", hasItem("VOLUNTEER")));
     }
 
     @Test
     public void search_byPhoneTail_returnsMatching() throws Exception {
         String token = jwtTokenProvider.generateToken(ACC_COMMUNITY_ADMIN, "SYS_USER", USR_COMMUNITY_ADMIN, TENANT_RUSHI);
-        // 陈网格员 phone=13800000004，尾号 0004
+        // 孙志愿者 phone=13800000014，尾号 0014
         mockMvc.perform(get("/api/v1/admin/building-assignments/search")
-                        .param("keyword", "0004")
+                        .param("keyword", "0014")
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data[?(@.userId==" + USR_GRID + ")]").exists());
+                .andExpect(jsonPath("$.data[?(@.userId==" + USR_VOLUNTEER + ")]").exists());
     }
 
     @Test
     public void search_byFullPhone_returnsMatching() throws Exception {
         String token = jwtTokenProvider.generateToken(ACC_COMMUNITY_ADMIN, "SYS_USER", USR_COMMUNITY_ADMIN, TENANT_RUSHI);
         mockMvc.perform(get("/api/v1/admin/building-assignments/search")
-                        .param("keyword", "13800000004")
+                        .param("keyword", "13800000014")
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data[?(@.userId==" + USR_GRID + ")]").exists());
+                .andExpect(jsonPath("$.data[?(@.userId==" + USR_VOLUNTEER + ")]").exists());
     }
 
     @Test
@@ -302,16 +285,14 @@ public class BuildingAssignmentTest {
     }
 
     @Test
-    public void assign_buildingOccupiedBySameRole_409_42407() throws Exception {
-        // D-mini seed 增加了第二个 GRID_MEMBER 分身 800006。
-        // 30001 已被 800004 GRID_MEMBER 占；试图给 800006 分 30001 → 同角色互斥，应拒。
+    public void assignGridMemberViaPersonalResponsibilityRejected_400() throws Exception {
         String token = jwtTokenProvider.generateToken(ACC_COMMUNITY_ADMIN, "SYS_USER", USR_COMMUNITY_ADMIN, TENANT_RUSHI);
         mockMvc.perform(post("/api/v1/admin/building-assignments/users/" + USR_LIU_GRID_SHADOW + "/buildings")
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(assignBody(30001L, "GRID_MEMBER")))
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code", is(42407)));
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code", is(400)));
     }
 
     @Test
@@ -339,7 +320,7 @@ public class BuildingAssignmentTest {
     public void search_resultHasPhoneAndVerifiedFields() throws Exception {
         String token = jwtTokenProvider.generateToken(ACC_COMMUNITY_ADMIN, "SYS_USER", USR_COMMUNITY_ADMIN, TENANT_RUSHI);
         mockMvc.perform(get("/api/v1/admin/building-assignments/search")
-                        .param("keyword", "0004")
+                        .param("keyword", "0014")
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data[0].phone").exists())

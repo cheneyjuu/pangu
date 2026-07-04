@@ -159,6 +159,7 @@ public class ElectionWorkflowEndToEndTest {
     private String proposeBody() throws Exception {
         Map<String, Object> body = new HashMap<>();
         body.put("title", TITLE_PREFIX + "业委会换届选举");
+        body.put("content", "<p>业委会换届选举正文</p>");
         body.put("subjectType", "ELECTION");
         body.put("scope", "BUILDING");
         body.put("scopeReferenceId", TEST_BUILDING);

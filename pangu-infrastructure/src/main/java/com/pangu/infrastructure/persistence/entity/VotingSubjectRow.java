@@ -17,6 +17,7 @@ public class VotingSubjectRow {
     private Long subjectId;
     private Long tenantId;
     private String title;
+    private String content;
 
     /** 1-ELECTION, 2-MAJOR, 3-GENERAL；当前 application 流程不消费但保留映射。 */
     private Integer subjectType;

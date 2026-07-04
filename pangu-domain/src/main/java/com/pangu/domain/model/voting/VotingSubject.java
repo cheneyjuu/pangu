@@ -35,6 +35,9 @@ public class VotingSubject {
     /** 议题名称/表决标题。 */
     private String title;
 
+    /** 议题正文，使用小程序 RichText 友好的受限 HTML 子集。 */
+    private String content;
+
     /** 议题类型（决定结算引擎）。 */
     private SubjectType subjectType;
 

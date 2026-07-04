@@ -26,14 +26,14 @@ public interface WorkIdentityMapper {
 
     List<Long> selectActiveBuildingIds(@Param("userId") Long userId);
 
-    List<Long> selectDeptBuildingScopeIds(@Param("deptId") Long deptId);
+    List<BuildingScopeRow> selectDeptBuildingScopes(@Param("deptId") Long deptId);
 
     List<DeptOptionRow> selectDeptOptions(@Param("deptCategory") String deptCategory,
                                           @Param("tenantId") Long tenantId);
 
     List<DeptOptionRow> selectGridChildren(@Param("communityDeptId") Long communityDeptId);
 
-    List<Long> selectDistinctBuildings(@Param("tenantId") Long tenantId);
+    List<BuildingScopeRow> selectDistinctBuildings(@Param("tenantId") Long tenantId);
 
     DeptOptionRow selectDept(@Param("deptId") Long deptId);
 
@@ -43,6 +43,7 @@ public interface WorkIdentityMapper {
     int deactivateDeptBuildingScope(@Param("deptId") Long deptId);
 
     int upsertDeptBuildingScope(@Param("deptId") Long deptId,
+                                @Param("tenantId") Long tenantId,
                                 @Param("buildingId") Long buildingId,
                                 @Param("assignedBy") Long assignedBy);
 
@@ -90,6 +91,12 @@ public interface WorkIdentityMapper {
         private Integer deptType;
         private String deptCategory;
         private Long tenantId;
+    }
+
+    @Data
+    class BuildingScopeRow {
+        private Long tenantId;
+        private Long buildingId;
     }
 
     @Data

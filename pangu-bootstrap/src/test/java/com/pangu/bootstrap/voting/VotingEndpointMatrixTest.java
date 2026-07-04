@@ -67,6 +67,7 @@ public class VotingEndpointMatrixTest {
     private String proposeBody(String subjectType) throws Exception {
         Map<String, Object> body = new HashMap<>();
         body.put("title", "矩阵测试议案");
+        body.put("content", "<p>矩阵测试议案正文</p>");
         body.put("subjectType", subjectType);
         body.put("scope", "COMMUNITY");
         body.put("voteStartAt", "2026-07-01T00:00:00Z");

@@ -58,12 +58,19 @@ public class WorkIdentityAdminTest {
     private static final long DEPT_COMMUNITY = 101L;
     private static final long DEPT_GRID = 104L;
     private static final long BUILDING_30005 = 30005L;
+    private static final long TENANT_CROSS = 10002L;
+    private static final long CROSS_ROOM = 10002300101L;
+    private static final long CROSS_OWNER_UID = 70001L;
 
     @BeforeEach
     @AfterEach
     public void cleanupGeneratedGridShadow() {
         jdbcTemplate.update("DELETE FROM sys_user WHERE account_id = ? AND dept_id = ?",
                 ACC_WU, DEPT_GRID);
+        jdbcTemplate.update("""
+                DELETE FROM c_owner_property
+                WHERE uid = ? AND tenant_id = ? AND room_id = ?
+                """, CROSS_OWNER_UID, TENANT_CROSS, CROSS_ROOM);
         cleanupGeneratedGridNodes();
         resetGridDeptScope();
         jdbcTemplate.update("""
@@ -176,6 +183,40 @@ public class WorkIdentityAdminTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.user_info.role_key", is("GRID_MEMBER")))
                 .andExpect(jsonPath("$.data.user_info.active_identity_id", is((int) gridUserId)));
+    }
+
+    @Test
+    public void communityAdminCanConfigureGridScopeAcrossTenantBuildingPairs() throws Exception {
+        jdbcTemplate.update("""
+                INSERT INTO c_owner_property
+                    (uid, tenant_id, building_id, room_id, build_area, is_voting_delegate, account_status)
+                VALUES (?, ?, 30001, ?, 88.00, 0, 1)
+                ON CONFLICT DO NOTHING
+                """, CROSS_OWNER_UID, TENANT_CROSS, CROSS_ROOM);
+        String communityToken = token(ACC_COMMUNITY, USR_COMMUNITY);
+
+        mockMvc.perform(put("/api/v1/admin/work-identities/depts/" + DEPT_GRID + "/building-scope")
+                        .header("Authorization", "Bearer " + communityToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "buildingScopes", List.of(
+                                        Map.of("tenantId", TENANT_RUSHI, "buildingId", 30001L),
+                                        Map.of("tenantId", TENANT_CROSS, "buildingId", 30001L))))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[?(@.tenantId==" + TENANT_RUSHI
+                        + " && @.buildingId==30001)]").exists())
+                .andExpect(jsonPath("$.data[?(@.tenantId==" + TENANT_CROSS
+                        + " && @.buildingId==30001)]").exists());
+
+        Integer scopedRows = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM sys_dept_building_scope
+                WHERE dept_id = ?
+                  AND building_id = 30001
+                  AND tenant_id IN (?, ?)
+                  AND status = 1
+                """, Integer.class, DEPT_GRID, TENANT_RUSHI, TENANT_CROSS);
+        assertEquals(2, scopedRows);
     }
 
     @Test

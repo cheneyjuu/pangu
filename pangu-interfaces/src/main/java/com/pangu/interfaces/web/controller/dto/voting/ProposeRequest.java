@@ -22,6 +22,7 @@ import java.time.Instant;
  */
 public record ProposeRequest(
         @NotBlank @Size(max = 200) String title,
+        @Size(max = 20000) String content,
         @NotNull SubjectType subjectType,
         @NotNull VotingScope scope,
         Long scopeReferenceId,

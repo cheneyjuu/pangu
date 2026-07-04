@@ -27,13 +27,13 @@ public interface BuildingAssignmentRepository {
     /**
      * 同租户内某角色的可分配用户列表（附已生效楼栋数）。
      *
-     * @param roleKey  可分配角色（GRID_MEMBER / VOLUNTEER / OWNER_REPRESENTATIVE）
+     * @param roleKey  可分配个人责任田角色（VOLUNTEER / OWNER_REPRESENTATIVE）
      * @param tenantId 租户；街道超管为 {@code null} 时跨租户
      */
     List<AssignableUser> listUsersByRole(String roleKey, Long tenantId);
 
     /**
-     * 模糊搜索可分配角色（GRID_MEMBER / VOLUNTEER / OWNER_REPRESENTATIVE）下的用户。
+     * 模糊搜索可分配个人责任田角色（VOLUNTEER / OWNER_REPRESENTATIVE）下的用户。
      *
      * <p>三字段 OR 匹配：{@code nick_name ILIKE %keyword%} / {@code phone = keyword}
      * (完整手机号) / {@code phone LIKE %keyword} (手机尾号)。结果按用户 id 排序，

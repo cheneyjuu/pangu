@@ -126,7 +126,8 @@ public class ProposalLifecycleServiceTest {
 
     private ProposeSubjectCommand proposeCmd(SubjectType type, Instant start, Instant end, Integer maxWinners) {
         return new ProposeSubjectCommand(TENANT, type, VotingScope.COMMUNITY, null,
-                "维修资金动用议案", start, end, PROPOSER, new BigDecimal("0.50"), maxWinners);
+                "维修资金动用议案", "<p>维修资金动用议案正文</p>",
+                start, end, PROPOSER, new BigDecimal("0.50"), maxWinners);
     }
 
     private VotingSubject draft() {

@@ -14,6 +14,7 @@ import java.time.Instant;
  * @param scope            分母范围
  * @param scopeReferenceId 范围引用 ID（COMMUNITY 时可空）
  * @param title            议题标题
+ * @param content          议题正文，小程序 RichText 友好的受限 HTML
  * @param voteStartAt      投票开放时间（scheduler 触发 PUBLISHED→VOTING 的依据）
  * @param voteEndAt        投票截止时间
  * @param proposedByUserId 发起人 sys_user.user_id（service 校验 = 当前登录 user）
@@ -26,10 +27,26 @@ public record ProposeSubjectCommand(
         VotingScope scope,
         Long scopeReferenceId,
         String title,
+        String content,
         Instant voteStartAt,
         Instant voteEndAt,
         Long proposedByUserId,
         BigDecimal partyRatioFloor,
         Integer maxWinners
 ) {
+    public ProposeSubjectCommand(
+            Long tenantId,
+            SubjectType subjectType,
+            VotingScope scope,
+            Long scopeReferenceId,
+            String title,
+            Instant voteStartAt,
+            Instant voteEndAt,
+            Long proposedByUserId,
+            BigDecimal partyRatioFloor,
+            Integer maxWinners
+    ) {
+        this(tenantId, subjectType, scope, scopeReferenceId, title, null,
+                voteStartAt, voteEndAt, proposedByUserId, partyRatioFloor, maxWinners);
+    }
 }

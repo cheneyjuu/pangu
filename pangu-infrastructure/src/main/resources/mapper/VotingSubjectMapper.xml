@@ -8,6 +8,7 @@
         <id property="subjectId" column="subject_id"/>
         <result property="tenantId" column="tenant_id"/>
         <result property="title" column="title"/>
+        <result property="content" column="content_html"/>
         <result property="subjectType" column="subject_type"/>
         <result property="scope" column="scope"/>
         <result property="scopeReferenceId" column="scope_reference_id"/>
@@ -29,7 +30,7 @@
     </resultMap>
 
     <sql id="all_columns">
-        subject_id, tenant_id, title, subject_type, scope, scope_reference_id,
+        subject_id, tenant_id, title, content_html, subject_type, scope, scope_reference_id,
         status, publish_at, vote_start_at, vote_end_at,
         clock_suspended_at, clock_suspended_by_subject_id, settled_at,
         party_ratio_floor, max_winners, version, create_time,
@@ -93,11 +94,11 @@
     <!-- M3-2: 立项写入。version=0 由 DB DEFAULT 兜底；显式留空让 DB DEFAULT 生效。 -->
     <insert id="insert" useGeneratedKeys="true" keyProperty="subjectId" keyColumn="subject_id">
         INSERT INTO t_voting_subject (
-            tenant_id, title, subject_type, scope, scope_reference_id,
+            tenant_id, title, content_html, subject_type, scope, scope_reference_id,
             status, vote_start_at, vote_end_at,
             party_ratio_floor, max_winners, proposed_by_user_id
         ) VALUES (
-            #{tenantId}, #{title}, #{subjectType}, #{scope}, #{scopeReferenceId},
+            #{tenantId}, #{title}, #{content}, #{subjectType}, #{scope}, #{scopeReferenceId},
             #{status}, #{voteStartAt}, #{voteEndAt},
             <choose>
                 <when test="partyRatioFloor != null">#{partyRatioFloor}</when>

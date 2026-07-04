@@ -23,7 +23,7 @@ import java.util.Set;
  * 改为 service 层校验：
  * <ol>
  *   <li>{@link #requireAssigner()} 校验调用者 roleKey ∈ {@link #ASSIGNER_ROLES}
- *       （超管/居委会管理员/党组书记/业委会主任）；网格员范围额外收紧为居委会管理员；</li>
+ *       （超管/居委会管理员/党组书记/业委会主任）；</li>
  *   <li>{@code assign} 进一步校验目标用户角色 ∈
  *       {@link BuildingAssignmentQueryService#ASSIGNABLE_ROLES} 且同租户；</li>
  *   <li>合规检查：账号状态（SQL 已过滤 u.status='0'）/ 实名 / 楼栋上限；</li>
@@ -79,15 +79,10 @@ public class BuildingAssignmentApplicationService {
         if (!BuildingAssignmentQueryService.ASSIGNABLE_ROLES.contains(targetRoleKey)) {
             throw new BuildingAssignmentApplicationException(
                     BuildingAssignmentApplicationException.Reason.PARAM_INVALID,
-                    "targetRoleKey 必须为 GRID_MEMBER/VOLUNTEER/OWNER_REPRESENTATIVE 之一，实际："
+                    "targetRoleKey 必须为 VOLUNTEER/OWNER_REPRESENTATIVE 之一，GRID_MEMBER 请在网格管理配置，实际："
                             + targetRoleKey);
         }
         UserContext ctx = requireAssigner();
-        if (WorkIdentityRoleRules.isGridMember(targetRoleKey) && !isCommunityAdmin(ctx)) {
-            throw new BuildingAssignmentApplicationException(
-                    BuildingAssignmentApplicationException.Reason.FORBIDDEN,
-                    "网格员楼栋范围只能由居委会管理身份分配，当前角色=" + ctx.roleKey());
-        }
         Long tenantId = resolveTenant(ctx, targetTenantId);
 
         // 目标用户须持指定可分配角色（同租户；街道超管 tenantId=null 跨租户）
@@ -216,10 +211,4 @@ public class BuildingAssignmentApplicationService {
         return ctx;
     }
 
-    private boolean isCommunityAdmin(UserContext ctx) {
-        return WorkIdentityRoleRules.COMMUNITY_ADMIN.equals(ctx.roleKey())
-                && ctx.deptCategory() == UserContext.DeptCategory.G
-                && ctx.deptType() != null
-                && ctx.deptType() == 2;
-    }
 }

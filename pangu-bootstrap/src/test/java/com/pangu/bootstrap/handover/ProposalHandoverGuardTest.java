@@ -62,7 +62,7 @@ public class ProposalHandoverGuardTest {
 
     private ProposeSubjectCommand cmd(SubjectType type, Integer maxWinners) {
         return new ProposeSubjectCommand(
-                TENANT, type, VotingScope.COMMUNITY, null, "换届熔断立项测试",
+                TENANT, type, VotingScope.COMMUNITY, null, "换届熔断立项测试", "<p>换届熔断立项测试正文</p>",
                 Instant.parse("2026-07-01T00:00:00Z"), Instant.parse("2026-07-15T00:00:00Z"),
                 PROPOSER, new BigDecimal("0.50"), maxWinners);
     }
