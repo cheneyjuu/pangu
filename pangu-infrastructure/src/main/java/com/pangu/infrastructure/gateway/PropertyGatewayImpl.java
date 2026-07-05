@@ -99,13 +99,22 @@ public class PropertyGatewayImpl implements PropertyGateway {
     }
 
     private OwnerPropertyDetail toDetail(OwnerPropertyDetailRow row) {
+        boolean joint = row.getJointOwnership() != null && row.getJointOwnership() == 1;
         boolean delegate = row.getVotingDelegate() != null && row.getVotingDelegate() == 1;
         return new OwnerPropertyDetail(
                 row.getOpid(),
+                row.getTenantId(),
+                row.getCommunityName(),
                 row.getBuildingId(),
+                row.getBuildingName(),
+                row.getUnitName(),
                 row.getRoomId(),
+                row.getRoomName(),
                 row.getBuildArea(),
+                joint,
                 delegate,
-                row.getAccountStatus());
+                row.getAccountStatus(),
+                row.getVerifyType(),
+                row.getVerifyStatus());
     }
 }

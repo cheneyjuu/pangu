@@ -10,10 +10,27 @@ import java.math.BigDecimal;
  */
 public record OwnerPropertyDetail(
         Long opid,
+        Long tenantId,
+        String communityName,
         Long buildingId,
+        String buildingName,
+        String unitName,
         Long roomId,
+        String roomName,
         BigDecimal buildArea,
+        boolean jointOwnership,
         boolean votingDelegate,
-        Integer accountStatus
+        Integer accountStatus,
+        String verifyType,
+        String verifyStatus
 ) {
+    public OwnerPropertyDetail(Long opid,
+                               Long buildingId,
+                               Long roomId,
+                               BigDecimal buildArea,
+                               boolean votingDelegate,
+                               Integer accountStatus) {
+        this(opid, null, null, buildingId, null, null, roomId, null, buildArea,
+                false, votingDelegate, accountStatus, null, null);
+    }
 }

@@ -89,13 +89,13 @@ public class OwnerController extends BaseController {
     @PreAuthorize("isAuthenticated()")
     public Result<List<MyOwnerPropertyResponse>> myProperties() {
         Long uid = SecurityUtils.getUid();
-        Long tenantId = requireTenantId();
         if (uid == null) {
             throw new AppException(CommonErrorCode.FORBIDDEN, "未识别到业主身份，禁止访问名下房产");
         }
+        Long tenantId = SecurityUtils.getTenantId();
         List<OwnerPropertyDetail> properties = ownerQueryService.listOwnerProperties(uid, tenantId);
         return success(properties.stream()
-                .map(p -> MyOwnerPropertyResponse.from(p, uid, tenantId))
+                .map(p -> MyOwnerPropertyResponse.from(p, uid))
                 .toList());
     }
 

@@ -8,23 +8,35 @@ public record MyOwnerPropertyResponse(
         Long opid,
         Long uid,
         Long tenantId,
+        String communityName,
         Long buildingId,
+        String buildingName,
+        String unitName,
         Long roomId,
+        String roomName,
         BigDecimal buildAreaSqm,
         int isJointOwnership,
         int isVotingDelegate,
-        Integer accountStatus
+        Integer accountStatus,
+        String verifyType,
+        String verifyStatus
 ) {
-    public static MyOwnerPropertyResponse from(OwnerPropertyDetail d, Long uid, Long tenantId) {
+    public static MyOwnerPropertyResponse from(OwnerPropertyDetail d, Long uid) {
         return new MyOwnerPropertyResponse(
                 d.opid(),
                 uid,
-                tenantId,
+                d.tenantId(),
+                d.communityName(),
                 d.buildingId(),
+                d.buildingName(),
+                d.unitName(),
                 d.roomId(),
+                d.roomName(),
                 d.buildArea(),
-                0,
+                d.jointOwnership() ? 1 : 0,
                 d.votingDelegate() ? 1 : 0,
-                d.accountStatus());
+                d.accountStatus(),
+                d.verifyType(),
+                d.verifyStatus());
     }
 }

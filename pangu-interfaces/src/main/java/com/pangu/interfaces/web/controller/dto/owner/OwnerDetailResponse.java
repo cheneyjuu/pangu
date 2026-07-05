@@ -51,20 +51,36 @@ public record OwnerDetailResponse(
     /** 房产逐条明细。 */
     public record OwnerPropertyItem(
             Long opid,
+            Long tenantId,
+            String communityName,
             Long buildingId,
+            String buildingName,
+            String unitName,
             Long roomId,
+            String roomName,
             BigDecimal buildArea,
+            boolean jointOwnership,
             boolean votingDelegate,
-            Integer accountStatus
+            Integer accountStatus,
+            String verifyType,
+            String verifyStatus
     ) {
         public static OwnerPropertyItem from(OwnerPropertyDetail d) {
             return new OwnerPropertyItem(
                     d.opid(),
+                    d.tenantId(),
+                    d.communityName(),
                     d.buildingId(),
+                    d.buildingName(),
+                    d.unitName(),
                     d.roomId(),
+                    d.roomName(),
                     d.buildArea(),
+                    d.jointOwnership(),
                     d.votingDelegate(),
-                    d.accountStatus());
+                    d.accountStatus(),
+                    d.verifyType(),
+                    d.verifyStatus());
         }
     }
 }

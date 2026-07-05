@@ -11,6 +11,14 @@
         <result property="lastActiveIdentityType" column="last_active_identity_type"/>
     </resultMap>
 
+    <resultMap id="AccountIdentityRowMap" type="com.pangu.infrastructure.persistence.mapper.AccountMapper$AccountIdentityRow">
+        <id property="accountId" column="account_id"/>
+        <result property="phone" column="phone"/>
+        <result property="realNameCipher" column="real_name_cipher"/>
+        <result property="realNameVerified" column="real_name_verified"/>
+        <result property="status" column="status"/>
+    </resultMap>
+
     <select id="selectByPhone" resultMap="AccountRowMap">
         SELECT account_id, phone, status, last_active_identity_id, last_active_identity_type
         FROM t_account
@@ -24,12 +32,69 @@
         WHERE account_id = #{accountId}
     </select>
 
+    <insert id="insertAccount"
+            parameterType="com.pangu.infrastructure.persistence.mapper.AccountMapper$AccountInsertRow"
+            useGeneratedKeys="true"
+            keyProperty="accountId"
+            keyColumn="account_id">
+        INSERT INTO t_account (phone, real_name, real_name_verified, status)
+        VALUES (
+            #{phone},
+            #{realName,typeHandler=com.pangu.infrastructure.persistence.handler.Sm4EncryptTypeHandler},
+            #{realNameVerified},
+            1
+        )
+    </insert>
+
+    <insert id="insertCUser"
+            parameterType="com.pangu.infrastructure.persistence.mapper.AccountMapper$CUserInsertRow"
+            useGeneratedKeys="true"
+            keyProperty="uid"
+            keyColumn="uid">
+        INSERT INTO c_user (account_id, auth_level)
+        VALUES (#{accountId}, #{authLevel})
+    </insert>
+
+    <select id="selectCUserUidByAccountId" resultType="java.lang.Long">
+        SELECT uid
+        FROM c_user
+        WHERE account_id = #{accountId}
+        LIMIT 1
+    </select>
+
+    <select id="selectIdentityByAccountId" resultMap="AccountIdentityRowMap">
+        SELECT account_id,
+               phone,
+               real_name AS real_name_cipher,
+               real_name_verified,
+               status
+        FROM t_account
+        WHERE account_id = #{accountId}
+        LIMIT 1
+    </select>
+
+    <update id="updateIdentity">
+        UPDATE t_account
+        SET real_name = #{realName,typeHandler=com.pangu.infrastructure.persistence.handler.Sm4EncryptTypeHandler},
+            id_card_encrypted = #{idCardNumber,typeHandler=com.pangu.infrastructure.persistence.handler.Sm4EncryptTypeHandler},
+            real_name_verified = 1,
+            update_time = CURRENT_TIMESTAMP
+        WHERE account_id = #{accountId}
+    </update>
+
     <update id="updateLastActiveIdentity">
         UPDATE t_account
         SET last_active_identity_id = #{identityId},
             last_active_identity_type = #{identityType},
             update_time = CURRENT_TIMESTAMP
         WHERE account_id = #{accountId}
+    </update>
+
+    <update id="updateCUserLastActiveTenant">
+        UPDATE c_user
+        SET last_active_tenant_id = #{tenantId},
+            update_time = CURRENT_TIMESTAMP
+        WHERE uid = #{uid}
     </update>
 
 </mapper>

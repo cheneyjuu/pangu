@@ -209,25 +209,48 @@
     <resultMap id="OwnerPropertyDetailResultMap"
                type="com.pangu.infrastructure.persistence.entity.OwnerPropertyDetailRow">
         <id property="opid" column="opid"/>
+        <result property="tenantId" column="tenant_id"/>
+        <result property="communityName" column="community_name"/>
         <result property="buildingId" column="building_id"/>
+        <result property="buildingName" column="building_name"/>
+        <result property="unitName" column="unit_name"/>
         <result property="roomId" column="room_id"/>
+        <result property="roomName" column="room_name"/>
         <result property="buildArea" column="build_area"/>
+        <result property="jointOwnership" column="is_joint_ownership"/>
         <result property="votingDelegate" column="is_voting_delegate"/>
         <result property="accountStatus" column="account_status"/>
+        <result property="verifyType" column="verify_type"/>
+        <result property="verifyStatus" column="verify_status"/>
     </resultMap>
 
     <select id="selectPropertiesByUid" resultMap="OwnerPropertyDetailResultMap">
         SELECT op.opid AS opid,
+               op.tenant_id AS tenant_id,
+               COALESCE(pr.community_name, tc.tenant_name, '小区 ' || op.tenant_id::TEXT) AS community_name,
                op.building_id AS building_id,
+               COALESCE(pr.building_name, op.building_id::TEXT || ' 号楼') AS building_name,
+               COALESCE(pr.unit_name, '默认单元') AS unit_name,
                op.room_id AS room_id,
+               COALESCE(pr.room_name, op.room_id::TEXT || ' 室') AS room_name,
                op.build_area AS build_area,
+               op.is_joint_ownership AS is_joint_ownership,
                op.is_voting_delegate AS is_voting_delegate,
-               op.account_status AS account_status
+               op.account_status AS account_status,
+               op.verify_type AS verify_type,
+               op.verify_status AS verify_status
         FROM c_owner_property op
+        LEFT JOIN c_property_roster pr
+               ON pr.tenant_id = op.tenant_id
+              AND pr.room_id = op.room_id
+              AND pr.status = 'ACTIVE'
+        LEFT JOIN t_tenant_community tc
+               ON tc.tenant_id = op.tenant_id
         WHERE op.uid = #{uid}
         <if test="tenantId != null">
             AND op.tenant_id = #{tenantId}
         </if>
+          AND op.account_status = 1
         ORDER BY op.building_id, op.room_id
     </select>
 

@@ -7,6 +7,7 @@ import com.pangu.domain.model.asset.PropertyOwnership;
 import com.pangu.infrastructure.persistence.mapper.AccountMapper;
 import com.pangu.infrastructure.persistence.mapper.IdentityShadowMapper;
 import com.pangu.infrastructure.persistence.mapper.SysMenuMapper;
+import com.pangu.infrastructure.persistence.mapper.UserContextMapper;
 import com.pangu.interfaces.security.JwtTokenProvider;
 import com.pangu.interfaces.web.controller.dto.LoginRequest;
 import com.pangu.interfaces.web.controller.dto.NavMenuResponse;
@@ -17,6 +18,7 @@ import com.pangu.interfaces.web.exception.AppException;
 import com.pangu.interfaces.web.exception.CommonErrorCode;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -28,8 +30,8 @@ import java.util.stream.Collectors;
  *
  * <p>登录流程：
  * <ol>
- *   <li>{@link #login} —— 手机号 + 短信验证码 → 校验 {@code t_account} 存在 + 状态正常；
- *       使用 {@code last_active_identity_*} 作为默认身份签发 JWT；
+     *   <li>{@link #login} —— 手机号 + 短信验证码 → 校验 {@code t_account} 状态；
+     *       C 端冷启动新手机号自动落自然人账号与 {@code c_user}；使用默认身份签发 JWT；
  *       前端可在拿到 token 后调用 {@code switch-identity} 切换其他身份（M2 引入）。</li>
  *   <li>{@link #switchTenant} —— 仅 C 端业主（identityType=C_USER）可用；校验 {@code uid}
  *       在目标小区是否拥有房产绑定关系，重新签发 token。</li>
@@ -62,34 +64,50 @@ public class AuthService {
     @Autowired
     private SmsVerificationStrategy smsVerificationStrategy;
 
+    @Autowired
+    private UserContextMapper userContextMapper;
+
     /**
      * 双端统一登录：手机号 + 短信验证码 → 默认身份 → JWT。
      *
      * <p>失败语义：
      * <ul>
-     *   <li>账号未注册（前置短信发送时其实已经过滤；这里再次兜底） → {@code USER_NOT_REGISTERED}；</li>
+     *   <li>管理端账号未注册 → {@code USER_NOT_REGISTERED}；C 端冷启动新手机号自动注册；</li>
      *   <li>账号被禁用 / 注销 → {@code UNAUTHORIZED}；</li>
      *   <li>没有任何已绑定身份（既无 sys_user 也无 c_user） → {@code USER_NOT_REGISTERED}。</li>
      * </ul>
      */
+    @Transactional
     public Map<String, Object> login(LoginRequest request) {
-        AccountMapper.AccountRow account = accountMapper.selectByPhone(request.getUsername());
+        String phone = normalizePhone(request.getUsername());
+        if (phone == null) {
+            throw new AppException(CommonErrorCode.PARAM_ERROR, "手机号不能为空");
+        }
+        // 短信验证码校验（生产由 RealSmsStrategy；本地由 MockSmsStrategy 放行 123456）
+        smsVerificationStrategy.validate(phone, request.getSmsCode());
+
+        AccountMapper.AccountRow account = accountMapper.selectByPhone(phone);
         if (account == null) {
-            throw new AppException(CommonErrorCode.USER_NOT_REGISTERED);
+            if (!isColdStartOwnerPortal(request.getClientPortal())) {
+                throw new AppException(CommonErrorCode.USER_NOT_REGISTERED);
+            }
+            account = createColdStartOwnerAccount(phone);
         }
         if (account.getStatus() == null || account.getStatus() != 1) {
             throw new AppException(CommonErrorCode.UNAUTHORIZED, "账号已被禁用或注销，请联系管理员");
         }
 
-        // 短信验证码校验（生产由 RealSmsStrategy；本地由 MockSmsStrategy 放行 666666）
-        smsVerificationStrategy.validate(request.getUsername(), request.getSmsCode());
-
-        // 选择默认身份：last_active_identity_* 优先；为空时不允许登录（应由 OnboardingService 实名落卡后回填，M1 不实现）
+        // 选择默认身份：last_active_identity_* 优先；为空时允许 C 端已有 c_user 身份兜底。
         UserContext.IdentityType defaultType = resolveDefaultIdentityType(account);
         Long defaultIdentityId = account.getLastActiveIdentityId();
         if (defaultIdentityId == null) {
-            throw new AppException(CommonErrorCode.USER_NOT_REGISTERED,
-                    "账号尚未绑定可用身份，请前往居委会完成实名登记");
+            Long uid = accountMapper.selectCUserUidByAccountId(account.getAccountId());
+            if (uid == null) {
+                throw new AppException(CommonErrorCode.USER_NOT_REGISTERED,
+                        "账号尚未绑定可用身份，请前往居委会完成实名登记");
+            }
+            defaultType = UserContext.IdentityType.C_USER;
+            defaultIdentityId = uid;
         }
 
         // 用 UserContextLoader 加载默认身份；这一步同时校验该身份在 DB 中确实存在并启用
@@ -109,6 +127,31 @@ public class AuthService {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("access_token", token);
         result.put("expires_in", 7200);
+        result.put("user_info", buildUserInfo(ctx));
+        return result;
+    }
+
+    @Transactional
+    public Map<String, Object> verifyRealName(Long accountId, Long uid, String realName, String idCardNumber) {
+        String normalizedName = trimToNull(realName);
+        String normalizedId = trimToNull(idCardNumber);
+        if (accountId == null || uid == null) {
+            throw new AppException(CommonErrorCode.FORBIDDEN, "未识别到业主身份，禁止实名认证");
+        }
+        if (normalizedName == null || normalizedName.length() < 2) {
+            throw new AppException(CommonErrorCode.PARAM_ERROR, "真实姓名不能为空且至少 2 个字");
+        }
+        if (normalizedId == null || normalizedId.length() < 15 || normalizedId.length() > 18) {
+            throw new AppException(CommonErrorCode.PARAM_ERROR, "身份证号格式不正确");
+        }
+        accountMapper.updateIdentity(accountId, normalizedName, normalizedId);
+        userContextMapper.upgradeCUserAuthLevel(uid, accountId, 2);
+        accountMapper.updateLastActiveIdentity(accountId, uid, UserContext.IdentityType.C_USER.name());
+        UserContext ctx = userContextLoader.load(accountId, UserContext.IdentityType.C_USER, uid, null);
+        if (ctx == null) {
+            throw new AppException(CommonErrorCode.FORBIDDEN, "业主身份不可用");
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
         result.put("user_info", buildUserInfo(ctx));
         return result;
     }
@@ -325,5 +368,38 @@ public class AuthService {
         info.put("effective_data_scope", row.getEffectiveDataScope());
         info.put("active", active);
         return info;
+    }
+
+    private AccountMapper.AccountRow createColdStartOwnerAccount(String phone) {
+        AccountMapper.AccountInsertRow accountRow = new AccountMapper.AccountInsertRow();
+        accountRow.setPhone(phone);
+        accountRow.setRealName("");
+        accountRow.setRealNameVerified(0);
+        accountMapper.insertAccount(accountRow);
+
+        AccountMapper.CUserInsertRow cUserRow = new AccountMapper.CUserInsertRow();
+        cUserRow.setAccountId(accountRow.getAccountId());
+        cUserRow.setAuthLevel(1);
+        accountMapper.insertCUser(cUserRow);
+
+        accountMapper.updateLastActiveIdentity(
+                accountRow.getAccountId(), cUserRow.getUid(), UserContext.IdentityType.C_USER.name());
+        return accountMapper.selectById(accountRow.getAccountId());
+    }
+
+    private boolean isColdStartOwnerPortal(String clientPortal) {
+        String portal = clientPortal == null ? "" : clientPortal.trim().toUpperCase();
+        return "AUTO".equals(portal) || "C".equals(portal) || "OWNER".equals(portal);
+    }
+
+    private String normalizePhone(String phone) {
+        String value = trimToNull(phone);
+        return value == null ? null : value.replaceAll("\\s+", "");
+    }
+
+    private String trimToNull(String value) {
+        if (value == null) return null;
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
     }
 }

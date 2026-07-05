@@ -1,0 +1,298 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pangu.infrastructure.persistence.mapper.PropertyBindingMapper">
+
+    <resultMap id="RosterOptionRowMap" type="com.pangu.infrastructure.persistence.mapper.PropertyBindingMapper$RosterOptionRow">
+        <id property="rosterId" column="roster_id"/>
+        <result property="tenantId" column="tenant_id"/>
+        <result property="communityName" column="community_name"/>
+        <result property="buildingId" column="building_id"/>
+        <result property="buildingName" column="building_name"/>
+        <result property="unitName" column="unit_name"/>
+        <result property="roomId" column="room_id"/>
+        <result property="roomName" column="room_name"/>
+        <result property="buildArea" column="build_area"/>
+    </resultMap>
+
+    <resultMap id="RosterRowMap" type="com.pangu.infrastructure.persistence.mapper.PropertyBindingMapper$RosterRow" extends="RosterOptionRowMap">
+        <result property="registeredOwnerName" column="registered_owner_name"/>
+        <result property="registeredOwnerPhone" column="registered_owner_phone"/>
+        <result property="status" column="status"/>
+    </resultMap>
+
+    <resultMap id="ClaimRowMap" type="com.pangu.infrastructure.persistence.mapper.PropertyBindingMapper$ClaimRow">
+        <id property="claimId" column="claim_id"/>
+        <result property="accountId" column="account_id"/>
+        <result property="uid" column="uid"/>
+        <result property="tenantId" column="tenant_id"/>
+        <result property="rosterId" column="roster_id"/>
+        <result property="buildingId" column="building_id"/>
+        <result property="buildingName" column="building_name"/>
+        <result property="unitName" column="unit_name"/>
+        <result property="roomId" column="room_id"/>
+        <result property="roomName" column="room_name"/>
+        <result property="applicantRealName" column="applicant_real_name"/>
+        <result property="applicantPhone" column="applicant_phone"/>
+        <result property="rosterOwnerName" column="roster_owner_name"/>
+        <result property="rosterOwnerPhone" column="roster_owner_phone"/>
+        <result property="matchResult" column="match_result"/>
+        <result property="claimStatus" column="claim_status"/>
+        <result property="jointOwnership" column="is_joint_ownership"/>
+        <result property="votingDelegate" column="is_voting_delegate"/>
+        <result property="proofType" column="proof_type"/>
+        <result property="proofMaterialJson" column="proof_material_json"/>
+        <result property="rejectReasonCode" column="reject_reason_code"/>
+        <result property="rejectReason" column="reject_reason"/>
+        <result property="reviewedBy" column="reviewed_by"/>
+        <result property="reviewedAt" column="reviewed_at"/>
+        <result property="boundOpid" column="bound_opid"/>
+        <result property="createTime" column="create_time"/>
+    </resultMap>
+
+    <select id="selectRosterOptions" resultMap="RosterOptionRowMap">
+        SELECT roster_id, tenant_id, community_name, building_id, building_name,
+               unit_name, room_id, room_name, build_area
+        FROM c_property_roster
+        WHERE status = 'ACTIVE'
+        <if test="tenantId != null">
+            AND tenant_id = #{tenantId}
+        </if>
+        ORDER BY community_name, building_id, unit_name, room_name
+    </select>
+
+    <select id="selectTenantName" resultType="java.lang.String">
+        SELECT tenant_name
+        FROM t_tenant_community
+        WHERE tenant_id = #{tenantId}
+        LIMIT 1
+    </select>
+
+    <select id="selectRosterById" resultMap="RosterRowMap">
+        SELECT roster_id, tenant_id, community_name, building_id, building_name,
+               unit_name, room_id, room_name, build_area,
+               registered_owner_name, registered_owner_phone, status
+        FROM c_property_roster
+        WHERE roster_id = #{rosterId}
+        LIMIT 1
+    </select>
+
+    <select id="selectBuildingIdByName" resultType="java.lang.Long">
+        SELECT building_id
+        FROM c_property_roster
+        WHERE tenant_id = #{tenantId}
+          AND building_name = #{buildingName}
+        ORDER BY roster_id ASC
+        LIMIT 1
+    </select>
+
+    <select id="selectNextBuildingId" resultType="java.lang.Long">
+        SELECT GREATEST(
+            COALESCE((SELECT MAX(building_id) FROM c_property_roster WHERE tenant_id = #{tenantId}), #{tenantId} * 1000),
+            COALESCE((SELECT MAX(building_id) FROM c_owner_property WHERE tenant_id = #{tenantId}), #{tenantId} * 1000)
+        ) + 1
+    </select>
+
+    <select id="selectRoomIdByPath" resultType="java.lang.Long">
+        SELECT room_id
+        FROM c_property_roster
+        WHERE tenant_id = #{tenantId}
+          AND building_name = #{buildingName}
+          AND unit_name = #{unitName}
+          AND room_name = #{roomName}
+        LIMIT 1
+    </select>
+
+    <select id="selectNextRoomId" resultType="java.lang.Long">
+        SELECT GREATEST(
+            COALESCE((SELECT MAX(room_id) FROM c_property_roster WHERE building_id = #{buildingId}), #{buildingId} * 1000),
+            COALESCE((SELECT MAX(room_id) FROM c_owner_property WHERE building_id = #{buildingId}), #{buildingId} * 1000)
+        ) + 1
+    </select>
+
+    <insert id="upsertRoster"
+            parameterType="com.pangu.infrastructure.persistence.mapper.PropertyBindingMapper$RosterImportRow"
+            useGeneratedKeys="true"
+            keyProperty="rosterId"
+            keyColumn="roster_id">
+        INSERT INTO c_property_roster (
+            tenant_id, community_name, building_id, building_name, unit_name, room_id, room_name,
+            build_area, registered_owner_name, registered_owner_phone, import_batch_no, imported_by, status
+        )
+        VALUES (
+            #{tenantId}, #{communityName}, #{buildingId}, #{buildingName}, #{unitName}, #{roomId}, #{roomName},
+            #{buildArea}, #{registeredOwnerName}, #{registeredOwnerPhone}, #{importBatchNo}, #{importedBy}, 'ACTIVE'
+        )
+        ON CONFLICT (tenant_id, building_name, unit_name, room_name)
+        DO UPDATE SET
+            community_name = EXCLUDED.community_name,
+            building_id = EXCLUDED.building_id,
+            room_id = EXCLUDED.room_id,
+            build_area = EXCLUDED.build_area,
+            registered_owner_name = EXCLUDED.registered_owner_name,
+            registered_owner_phone = EXCLUDED.registered_owner_phone,
+            import_batch_no = EXCLUDED.import_batch_no,
+            imported_by = EXCLUDED.imported_by,
+            status = 'ACTIVE',
+            update_time = CURRENT_TIMESTAMP
+    </insert>
+
+    <insert id="insertClaim"
+            parameterType="com.pangu.infrastructure.persistence.mapper.PropertyBindingMapper$ClaimInsertRow"
+            useGeneratedKeys="true"
+            keyProperty="claimId"
+            keyColumn="claim_id">
+        INSERT INTO c_owner_property_claim (
+            account_id, uid, tenant_id, roster_id, building_id, building_name, unit_name,
+            room_id, room_name, applicant_real_name, applicant_phone, roster_owner_name,
+            roster_owner_phone, match_result, claim_status, is_joint_ownership,
+            is_voting_delegate, proof_type, proof_material_json, bound_opid
+        )
+        VALUES (
+            #{accountId}, #{uid}, #{tenantId}, #{rosterId}, #{buildingId}, #{buildingName}, #{unitName},
+            #{roomId}, #{roomName}, #{applicantRealName}, #{applicantPhone}, #{rosterOwnerName},
+            #{rosterOwnerPhone}, #{matchResult}, #{claimStatus}, #{jointOwnership},
+            #{votingDelegate}, #{proofType}, CAST(#{proofMaterialJson} AS jsonb), #{boundOpid}
+        )
+    </insert>
+
+    <select id="selectClaimById" resultMap="ClaimRowMap">
+        SELECT claim_id, account_id, uid, tenant_id, roster_id, building_id, building_name,
+               unit_name, room_id, room_name, applicant_real_name, applicant_phone,
+               roster_owner_name, roster_owner_phone, match_result, claim_status,
+               is_joint_ownership, is_voting_delegate, proof_type,
+               proof_material_json::text AS proof_material_json,
+               reject_reason_code, reject_reason, reviewed_by, reviewed_at, bound_opid, create_time
+        FROM c_owner_property_claim
+        WHERE claim_id = #{claimId}
+        LIMIT 1
+    </select>
+
+    <select id="selectClaimsForUid" resultMap="ClaimRowMap">
+        SELECT claim_id, account_id, uid, tenant_id, roster_id, building_id, building_name,
+               unit_name, room_id, room_name, applicant_real_name, applicant_phone,
+               roster_owner_name, roster_owner_phone, match_result, claim_status,
+               is_joint_ownership, is_voting_delegate, proof_type,
+               proof_material_json::text AS proof_material_json,
+               reject_reason_code, reject_reason, reviewed_by, reviewed_at, bound_opid, create_time
+        FROM c_owner_property_claim
+        WHERE uid = #{uid}
+        ORDER BY create_time DESC
+    </select>
+
+    <select id="selectAdminClaims" resultMap="ClaimRowMap">
+        SELECT claim_id, account_id, uid, tenant_id, roster_id, building_id, building_name,
+               unit_name, room_id, room_name, applicant_real_name, applicant_phone,
+               roster_owner_name, roster_owner_phone, match_result, claim_status,
+               is_joint_ownership, is_voting_delegate, proof_type,
+               proof_material_json::text AS proof_material_json,
+               reject_reason_code, reject_reason, reviewed_by, reviewed_at, bound_opid, create_time
+        FROM c_owner_property_claim
+        WHERE 1 = 1
+        <if test="tenantId != null">
+            AND tenant_id = #{tenantId}
+        </if>
+        <if test="status != null and status != ''">
+            AND claim_status = #{status}
+        </if>
+        ORDER BY create_time DESC
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <select id="countAdminClaims" resultType="long">
+        SELECT COUNT(1)
+        FROM c_owner_property_claim
+        WHERE 1 = 1
+        <if test="tenantId != null">
+            AND tenant_id = #{tenantId}
+        </if>
+        <if test="status != null and status != ''">
+            AND claim_status = #{status}
+        </if>
+    </select>
+
+    <update id="supersedeOtherOwnerships">
+        UPDATE c_owner_property
+        SET account_status = 3,
+            is_voting_delegate = 0,
+            verify_status = 'SUPERSEDED',
+            superseded_at = CURRENT_TIMESTAMP,
+            superseded_reason = #{reason},
+            update_time = CURRENT_TIMESTAMP
+        WHERE tenant_id = #{tenantId}
+          AND room_id = #{roomId}
+          AND uid != #{uid}
+          AND account_status = 1
+    </update>
+
+    <update id="clearOtherVotingDelegates">
+        UPDATE c_owner_property
+        SET is_voting_delegate = 0,
+            update_time = CURRENT_TIMESTAMP
+        WHERE tenant_id = #{tenantId}
+          AND room_id = #{roomId}
+          AND uid != #{uid}
+          AND account_status = 1
+    </update>
+
+    <insert id="upsertOwnership"
+            parameterType="com.pangu.infrastructure.persistence.mapper.PropertyBindingMapper$OwnershipUpsertRow">
+        INSERT INTO c_owner_property (
+            uid, tenant_id, building_id, room_id, build_area,
+            is_joint_ownership, is_voting_delegate, account_status,
+            verify_type, verify_status, verify_source, verified_by, verified_at, update_time
+        )
+        VALUES (
+            #{uid}, #{tenantId}, #{buildingId}, #{roomId}, #{buildArea},
+            #{jointOwnership}, #{votingDelegate}, 1,
+            #{verifyType}, 'VERIFIED', #{verifySource}, #{verifiedBy}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+        )
+        ON CONFLICT (tenant_id, room_id, uid)
+        DO UPDATE SET
+            building_id = EXCLUDED.building_id,
+            build_area = EXCLUDED.build_area,
+            is_joint_ownership = EXCLUDED.is_joint_ownership,
+            is_voting_delegate = EXCLUDED.is_voting_delegate,
+            account_status = 1,
+            verify_type = EXCLUDED.verify_type,
+            verify_status = 'VERIFIED',
+            verify_source = EXCLUDED.verify_source,
+            verified_by = EXCLUDED.verified_by,
+            verified_at = CURRENT_TIMESTAMP,
+            superseded_at = NULL,
+            superseded_reason = NULL,
+            update_time = CURRENT_TIMESTAMP
+    </insert>
+
+    <select id="selectOwnershipOpid" resultType="java.lang.Long">
+        SELECT opid
+        FROM c_owner_property
+        WHERE uid = #{uid}
+          AND tenant_id = #{tenantId}
+          AND room_id = #{roomId}
+        LIMIT 1
+    </select>
+
+    <update id="updateClaimApproved">
+        UPDATE c_owner_property_claim
+        SET claim_status = #{status},
+            bound_opid = #{opid},
+            reviewed_by = #{reviewedBy},
+            reviewed_at = CURRENT_TIMESTAMP,
+            update_time = CURRENT_TIMESTAMP
+        WHERE claim_id = #{claimId}
+    </update>
+
+    <update id="updateClaimRejected">
+        UPDATE c_owner_property_claim
+        SET claim_status = 'REJECTED',
+            reject_reason_code = #{rejectReasonCode},
+            reject_reason = #{rejectReason},
+            reviewed_by = #{reviewedBy},
+            reviewed_at = CURRENT_TIMESTAMP,
+            update_time = CURRENT_TIMESTAMP
+        WHERE claim_id = #{claimId}
+          AND claim_status = 'PENDING_VERIFY'
+    </update>
+
+</mapper>
