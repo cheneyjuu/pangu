@@ -69,6 +69,19 @@ platform:
     public-bucket-name: pangu-residents-public
     access-key-id: DUMMY_KEY_ID_FOR_DEV
     access-key-secret: DUMMY_KEY_SECRET_FOR_DEV
+  identity:
+    tencent:
+      region: ap-guangzhou
+      secret-id:
+      secret-key:
+      timeout-millis: 3000
+    id-card-ocr:
+      provider-mode: mock              # mock=本地测试识别；tencent=腾讯云身份证 OCR
+    face-auth:
+      provider-mode: mock              # mock=本地测试核身；tencent=腾讯云实名核身
+      tencent:
+        rule-id:
+        min-similarity: 70
   voting:
     deadline-cron: "0 * * * * *"   # 每分钟整扫一次到期议题
     deadline-batch-size: 100

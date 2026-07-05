@@ -9,7 +9,7 @@ public record RealNameAuthRequest(
         String realName,
 
         @NotBlank(message = "idCardNumber must not be blank")
-        @Size(min = 15, max = 18, message = "idCardNumber length must be between 15 and 18")
+        @Size(min = 18, max = 18, message = "idCardNumber length must be 18")
         String idCardNumber
 ) {
 }

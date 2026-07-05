@@ -258,10 +258,14 @@ public class ControllerIntegrationTest {
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code", is(200)))
                     .andExpect(jsonPath("$.data.eligible", is(true)))
-                    .andExpect(jsonPath("$.data.realName", is("李四")))
-                    .andExpect(jsonPath("$.data.idCardNumber", is("110101199003070011")))
+                    .andExpect(jsonPath("$.data.realName", nullValue()))
+                    .andExpect(jsonPath("$.data.idCardNumber", nullValue()))
                     .andExpect(jsonPath("$.data.maskedRealName", is("李*")))
                     .andExpect(jsonPath("$.data.maskedIdCardNumber", is("110***********0011")))
+                    .andExpect(jsonPath("$.data.provider", is("TENCENT_FACEID")))
+                    .andExpect(jsonPath("$.data.bizToken", startsWith("mock-face-biz-token-")))
+                    .andExpect(jsonPath("$.data.providerUrl", startsWith("weixin://mock-face-auth/")))
+                    .andExpect(jsonPath("$.data.expiresInSeconds", is(7200)))
                     .andExpect(jsonPath("$.data.reason", nullValue()));
         } finally {
             jdbcTemplate.update("""
@@ -284,17 +288,21 @@ public class ControllerIntegrationTest {
 
     @Test
     public void testOwnerFaceAuthUpgradesCurrentCUserToL3() throws Exception {
-        String providerRequestId = "wx-face-controller-test-70002";
+        String providerRequestId = "mock-face-biz-token-controller-test-70002";
         jdbcTemplate.update("DELETE FROM t_owner_face_auth_attestation WHERE provider = ? AND provider_request_id = ?",
-                "WECHAT", providerRequestId);
+                "TENCENT_FACEID", providerRequestId);
         jdbcTemplate.update("UPDATE c_user SET auth_level = 2 WHERE uid = 70002");
+        jdbcTemplate.update("""
+                UPDATE t_account
+                SET real_name = ?, id_card_encrypted = ?
+                WHERE account_id = 999913
+                """, "李四", "110101199003070011");
 
         try {
             String token = jwtTokenProvider.generateToken(999913L, "C_USER", 70002L, 10001L);
             Map<String, Object> request = Map.of(
-                    "provider", "wechat",
-                    "providerRequestId", providerRequestId,
-                    "providerResult", "verifyResult=0"
+                    "provider", "TENCENT_FACEID",
+                    "bizToken", providerRequestId
             );
 
             mockMvc.perform(post("/api/v1/me/auth/face")
@@ -304,7 +312,7 @@ public class ControllerIntegrationTest {
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code", is(200)))
                     .andExpect(jsonPath("$.data.verified", is(true)))
-                    .andExpect(jsonPath("$.data.attestationId", is("WECHAT:" + providerRequestId)))
+                    .andExpect(jsonPath("$.data.attestationId", is("TENCENT_FACEID:" + providerRequestId)))
                     .andExpect(jsonPath("$.data.newAuthLevel", is(3)));
 
             Integer authLevel = jdbcTemplate.queryForObject(
@@ -313,7 +321,7 @@ public class ControllerIntegrationTest {
                     SELECT COUNT(*)
                     FROM t_owner_face_auth_attestation
                     WHERE uid = 70002
-                      AND provider = 'WECHAT'
+                      AND provider = 'TENCENT_FACEID'
                       AND provider_request_id = ?
                       AND verified = 1
                       AND auth_level_after = 3
@@ -323,7 +331,12 @@ public class ControllerIntegrationTest {
         } finally {
             jdbcTemplate.update("UPDATE c_user SET auth_level = 2 WHERE uid = 70002");
             jdbcTemplate.update("DELETE FROM t_owner_face_auth_attestation WHERE provider = ? AND provider_request_id = ?",
-                    "WECHAT", providerRequestId);
+                    "TENCENT_FACEID", providerRequestId);
+            jdbcTemplate.update("""
+                    UPDATE t_account
+                    SET real_name = ?, id_card_encrypted = ?
+                    WHERE account_id = 999913
+                    """, "MOCK_李四", "MOCK_ID_999913");
         }
     }
 
@@ -332,8 +345,7 @@ public class ControllerIntegrationTest {
         String token = jwtTokenProvider.generateToken(999804L, "SYS_USER", 800004L, 10001L);
         Map<String, Object> request = Map.of(
                 "provider", "wechat",
-                "providerRequestId", "wx-face-sys-user-forbidden",
-                "providerResult", "verifyResult=0"
+                "bizToken", "mock-face-biz-token-sys-user-forbidden"
         );
 
         mockMvc.perform(post("/api/v1/me/auth/face")
@@ -348,9 +360,8 @@ public class ControllerIntegrationTest {
     public void testOwnerFaceAuthRejectsUnsupportedProvider() throws Exception {
         String token = jwtTokenProvider.generateToken(999913L, "C_USER", 70002L, 10001L);
         Map<String, Object> request = Map.of(
-                "provider", "tencent",
-                "providerRequestId", "tencent-face-not-enabled",
-                "providerResult", "verifyResult=0"
+                "provider", "aliyun",
+                "bizToken", "mock-face-biz-token-not-enabled"
         );
 
         mockMvc.perform(post("/api/v1/me/auth/face")
@@ -359,7 +370,45 @@ public class ControllerIntegrationTest {
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code", is(400)))
-                .andExpect(jsonPath("$.msg", containsString("WECHAT")));
+                .andExpect(jsonPath("$.msg", containsString("TENCENT_FACEID")));
+    }
+
+    @Test
+    public void testOwnerIdCardOcrRecognizesFrontSide() throws Exception {
+        String token = jwtTokenProvider.generateToken(999913L, "C_USER", 70002L, 10001L);
+        Map<String, Object> request = Map.of(
+                "imageBase64", "MOCK:李四:110101199003070011",
+                "cardSide", "FRONT"
+        );
+
+        mockMvc.perform(post("/api/v1/me/auth/l2/ocr")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code", is(200)))
+                .andExpect(jsonPath("$.data.recognized", is(true)))
+                .andExpect(jsonPath("$.data.provider", is("MOCK")))
+                .andExpect(jsonPath("$.data.realName", is("李四")))
+                .andExpect(jsonPath("$.data.idCardNumber", is("110101199003070011")))
+                .andExpect(jsonPath("$.data.maskedIdCardNumber", is("110***********0011")));
+    }
+
+    @Test
+    public void testOwnerRealNameRejectsInvalidIdChecksum() throws Exception {
+        String token = jwtTokenProvider.generateToken(999913L, "C_USER", 70002L, 10001L);
+        Map<String, Object> request = Map.of(
+                "realName", "李四",
+                "idCardNumber", "110101199003070012"
+        );
+
+        mockMvc.perform(post("/api/v1/me/auth/l2")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code", is(400)))
+                .andExpect(jsonPath("$.msg", containsString("校验码")));
     }
 
     @Test

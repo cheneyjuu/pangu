@@ -6,6 +6,10 @@ public record FaceAuthContextResponse(
         String idCardNumber,
         String maskedRealName,
         String maskedIdCardNumber,
-        String reason
+        String reason,
+        String provider,
+        String bizToken,
+        String providerUrl,
+        Long expiresInSeconds
 ) {
 }

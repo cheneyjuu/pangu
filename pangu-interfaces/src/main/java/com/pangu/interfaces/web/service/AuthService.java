@@ -3,6 +3,8 @@ package com.pangu.interfaces.web.service;
 import com.pangu.domain.context.UserContext;
 import com.pangu.domain.context.UserContextLoader;
 import com.pangu.domain.gateway.PropertyGateway;
+import com.pangu.domain.gateway.identity.IdCardOcrGateway;
+import com.pangu.domain.model.identity.ChineseResidentId;
 import com.pangu.domain.model.asset.PropertyOwnership;
 import com.pangu.domain.model.user.WorkIdentityShadow;
 import com.pangu.domain.repository.AuthAccountRepository;
@@ -15,6 +17,8 @@ import com.pangu.interfaces.web.controller.dto.NavMenuResponse;
 import com.pangu.interfaces.web.controller.dto.NavPageResponse;
 import com.pangu.interfaces.web.controller.dto.SwitchShadowRequest;
 import com.pangu.interfaces.web.controller.dto.SwitchTenantRequest;
+import com.pangu.interfaces.web.controller.dto.owner.IdCardOcrRequest;
+import com.pangu.interfaces.web.controller.dto.owner.IdCardOcrResponse;
 import com.pangu.interfaces.web.exception.AppException;
 import com.pangu.interfaces.web.exception.CommonErrorCode;
 import lombok.RequiredArgsConstructor;
@@ -53,6 +57,7 @@ public class AuthService {
     private final PropertyGateway propertyGateway;
     private final SmsVerificationStrategy smsVerificationStrategy;
     private final OwnerIdentityVerificationRepository ownerIdentityVerificationRepository;
+    private final IdCardOcrGateway idCardOcrGateway;
 
     /**
      * 双端统一登录：手机号 + 短信验证码 → 默认身份 → JWT。
@@ -118,18 +123,68 @@ public class AuthService {
         return result;
     }
 
+    public IdCardOcrResponse recognizeIdCard(Long accountId, Long uid, IdCardOcrRequest request) {
+        if (accountId == null || uid == null) {
+            throw new AppException(CommonErrorCode.FORBIDDEN, "未识别到业主身份，禁止身份证 OCR");
+        }
+        if (request == null) {
+            throw new AppException(CommonErrorCode.PARAM_ERROR, "身份证图片不能为空");
+        }
+        String imageBase64 = stripDataUrlPrefix(trimToNull(request.imageBase64()));
+        String imageUrl = trimToNull(request.imageUrl());
+        if (imageBase64 == null && imageUrl == null) {
+            throw new AppException(CommonErrorCode.PARAM_ERROR, "请上传身份证人像面图片");
+        }
+        if (imageBase64 != null && imageUrl != null) {
+            throw new AppException(CommonErrorCode.PARAM_ERROR, "imageBase64 与 imageUrl 不能同时提交");
+        }
+        String cardSide = trimToNull(request.cardSide());
+        if (cardSide != null && !IdCardOcrGateway.CARD_SIDE_FRONT.equalsIgnoreCase(cardSide)) {
+            throw new AppException(CommonErrorCode.PARAM_ERROR, "L2 认证仅支持识别身份证人像面");
+        }
+
+        IdCardOcrGateway.OcrResult result;
+        try {
+            result = idCardOcrGateway.recognize(new IdCardOcrGateway.OcrRequest(
+                    imageBase64, imageUrl, IdCardOcrGateway.CARD_SIDE_FRONT));
+        } catch (IllegalArgumentException e) {
+            throw new AppException(CommonErrorCode.PARAM_ERROR, e.getMessage(), e);
+        } catch (RuntimeException e) {
+            throw new AppException(CommonErrorCode.SYSTEM_ERROR, "身份证 OCR 服务暂不可用", e);
+        }
+
+        String normalizedId = ChineseResidentId.normalize(result.idCardNumber());
+        boolean recognized = result.recognized()
+                && trimToNull(result.realName()) != null
+                && ChineseResidentId.isValid(normalizedId);
+        String reason = recognized ? result.reason() : firstText(result.reason(), "身份证 OCR 未识别出有效姓名或证件号码");
+        return new IdCardOcrResponse(
+                recognized,
+                result.provider(),
+                recognized ? trimToNull(result.realName()) : null,
+                recognized ? normalizedId : null,
+                recognized ? ChineseResidentId.mask(normalizedId) : null,
+                result.requestId(),
+                result.qualityScore(),
+                result.warnings(),
+                reason);
+    }
+
     @Transactional
     public Map<String, Object> verifyRealName(Long accountId, Long uid, String realName, String idCardNumber) {
         String normalizedName = trimToNull(realName);
-        String normalizedId = trimToNull(idCardNumber);
+        String normalizedId = ChineseResidentId.normalize(idCardNumber);
         if (accountId == null || uid == null) {
             throw new AppException(CommonErrorCode.FORBIDDEN, "未识别到业主身份，禁止实名认证");
         }
         if (normalizedName == null || normalizedName.length() < 2) {
             throw new AppException(CommonErrorCode.PARAM_ERROR, "真实姓名不能为空且至少 2 个字");
         }
-        if (normalizedId == null || normalizedId.length() < 15 || normalizedId.length() > 18) {
-            throw new AppException(CommonErrorCode.PARAM_ERROR, "身份证号格式不正确");
+        if (ChineseResidentId.isPlaceholder(normalizedName, normalizedId)) {
+            throw new AppException(CommonErrorCode.PARAM_ERROR, "测试或占位身份不能通过实名认证");
+        }
+        if (!ChineseResidentId.isValid(normalizedId)) {
+            throw new AppException(CommonErrorCode.PARAM_ERROR, "身份证号格式或校验码不正确");
         }
         authAccountRepository.updateIdentity(accountId, normalizedName, normalizedId);
         ownerIdentityVerificationRepository.upgradeCUserAuthLevel(uid, accountId, 2);
@@ -365,6 +420,21 @@ public class AuthService {
     private boolean isColdStartOwnerPortal(String clientPortal) {
         String portal = clientPortal == null ? "" : clientPortal.trim().toUpperCase();
         return "AUTO".equals(portal) || "C".equals(portal) || "OWNER".equals(portal);
+    }
+
+    private String stripDataUrlPrefix(String imageBase64) {
+        if (imageBase64 == null) {
+            return null;
+        }
+        int commaIndex = imageBase64.indexOf(',');
+        if (imageBase64.startsWith("data:") && commaIndex > 0) {
+            return trimToNull(imageBase64.substring(commaIndex + 1));
+        }
+        return imageBase64;
+    }
+
+    private String firstText(String first, String fallback) {
+        return trimToNull(first) != null ? trimToNull(first) : fallback;
     }
 
     private String normalizePhone(String phone) {

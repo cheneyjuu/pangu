@@ -34,6 +34,13 @@ public class ProductionSafetyGuard {
         requireValue("platform.voting.sms-provider-mode", "http",
                 "生产环境必须使用真实短信 provider mode=http");
         requireText("platform.voting.sms-provider.endpoint", "生产环境必须配置真实短信 provider endpoint");
+        requireValue("platform.identity.id-card-ocr.provider-mode", "tencent",
+                "生产环境必须使用真实身份证 OCR provider mode=tencent");
+        requireValue("platform.identity.face-auth.provider-mode", "tencent",
+                "生产环境必须使用真实人脸核身 provider mode=tencent");
+        requireText("platform.identity.tencent.secret-id", "生产环境必须配置腾讯云身份核验 secret-id");
+        requireText("platform.identity.tencent.secret-key", "生产环境必须配置腾讯云身份核验 secret-key");
+        requireText("platform.identity.face-auth.tencent.rule-id", "生产环境必须配置腾讯云实名核身 rule-id");
         rejectValue("platform.security.jwt-secret", DEV_JWT_SECRET,
                 "生产环境禁止使用默认 JWT secret");
         rejectValue("platform.security.sm4-key-hex", DEV_SM4_KEY,

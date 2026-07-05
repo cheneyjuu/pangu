@@ -40,6 +40,14 @@ class ProductionSafetyGuardTest {
     }
 
     @Test
+    void prodProfile_rejectsMockIdentityProviders() {
+        MockEnvironment environment = validProdEnvironment()
+                .withProperty("platform.identity.id-card-ocr.provider-mode", "mock");
+
+        assertThrows(IllegalStateException.class, () -> new ProductionSafetyGuard(environment).validate());
+    }
+
+    @Test
     void prodProfile_rejectsDefaultSecrets() {
         MockEnvironment environment = validProdEnvironment()
                 .withProperty("platform.security.jwt-secret", "pangu-secure-jwt-token-secret-key-32-chars-minimum");
@@ -54,6 +62,11 @@ class ProductionSafetyGuardTest {
                 .withProperty("platform.committee-key-revocation.provider", "certificate-authority")
                 .withProperty("platform.voting.sms-provider-mode", "http")
                 .withProperty("platform.voting.sms-provider.endpoint", "https://sms.example.invalid/send")
+                .withProperty("platform.identity.id-card-ocr.provider-mode", "tencent")
+                .withProperty("platform.identity.face-auth.provider-mode", "tencent")
+                .withProperty("platform.identity.tencent.secret-id", "PROD_TENCENT_SECRET_ID")
+                .withProperty("platform.identity.tencent.secret-key", "PROD_TENCENT_SECRET_KEY")
+                .withProperty("platform.identity.face-auth.tencent.rule-id", "prod-face-rule-id")
                 .withProperty("platform.security.jwt-secret", "prod-jwt-secret-with-enough-length")
                 .withProperty("platform.security.sm4-key-hex", "fedcba98765432100123456789abcdef")
                 .withProperty("platform.ali-oss.access-key-id", "PROD_KEY_ID")

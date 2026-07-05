@@ -1,6 +1,8 @@
 package com.pangu.interfaces.web.controller;
 
 import com.pangu.interfaces.security.SecurityUtils;
+import com.pangu.interfaces.web.controller.dto.owner.IdCardOcrRequest;
+import com.pangu.interfaces.web.controller.dto.owner.IdCardOcrResponse;
 import com.pangu.interfaces.web.controller.dto.owner.RealNameAuthRequest;
 import com.pangu.interfaces.web.exception.AppException;
 import com.pangu.interfaces.web.exception.CommonErrorCode;
@@ -32,5 +34,16 @@ public class OwnerIdentityController extends BaseController {
         }
         return success("实名认证已通过", authService.verifyRealName(
                 accountId, uid, request.realName(), request.idCardNumber()));
+    }
+
+    @PostMapping("/l2/ocr")
+    @PreAuthorize("isAuthenticated()")
+    public Result<IdCardOcrResponse> recognizeIdCard(@Valid @RequestBody IdCardOcrRequest request) {
+        Long accountId = SecurityUtils.getAccountId();
+        Long uid = SecurityUtils.getUid();
+        if (uid == null) {
+            throw new AppException(CommonErrorCode.FORBIDDEN, "仅 C 端业主身份可提交身份证 OCR");
+        }
+        return success("身份证识别完成", authService.recognizeIdCard(accountId, uid, request));
     }
 }

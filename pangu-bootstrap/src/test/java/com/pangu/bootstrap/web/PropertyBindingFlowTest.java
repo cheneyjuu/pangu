@@ -104,7 +104,7 @@ class PropertyBindingFlowTest {
     void coldStartMismatchClaim_canBeManuallyApprovedWithManualProvenance() throws Exception {
         String adminToken = login(ADMIN_PHONE, "B");
         String ownerToken = login(MANUAL_PHONE, "AUTO");
-        verifyL2(ownerToken, "申报业主", "310101199001011235");
+        verifyL2(ownerToken, "申报业主", "31010119900102123X");
         importRoster(adminToken, "冷启楼", "一单元", "冷启1102", "名册父母", "13900009998");
 
         mockMvc.perform(post("/api/v1/me/property-bindings/claims")
@@ -160,7 +160,7 @@ class PropertyBindingFlowTest {
     void coldStartMismatchClaim_rejectRequiresConcreteReasonAndDoesNotBind() throws Exception {
         String adminToken = login(ADMIN_PHONE, "B");
         String ownerToken = login(REJECT_PHONE, "AUTO");
-        verifyL2(ownerToken, "驳回业主", "310101199001011236");
+        verifyL2(ownerToken, "驳回业主", "310101199001031235");
         importRoster(adminToken, "冷启楼", "一单元", "冷启1103", "旧业主", "13900009999");
 
         String pendingJson = mockMvc.perform(post("/api/v1/me/property-bindings/claims")
