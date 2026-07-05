@@ -7,6 +7,7 @@ import com.pangu.application.community.CommunitySettingsApplicationException;
 import com.pangu.application.disclosure.FinanceDisclosureApplicationException;
 import com.pangu.application.dispute.DisputeApplicationException;
 import com.pangu.application.lock.GovernanceLockApplicationException;
+import com.pangu.application.owner.PropertyBindingApplicationException;
 import com.pangu.application.repair.RepairWorkOrderApplicationException;
 import com.pangu.application.voting.VotingApplicationException;
 import com.pangu.application.waiver.WaiverApplicationException;
@@ -223,6 +224,28 @@ public class GlobalExceptionHandler {
         response.setStatus(errorCode.getHttpStatus());
         log.info("RepairWorkOrder business exception reason={} code={} msg={}",
                 ex.reason(), errorCode.getCode(), ex.getMessage());
+        return Result.fail(
+                errorCode.getCode(),
+                ex.getMessage() != null ? ex.getMessage() : errorCode.getMessage(),
+                null,
+                errorCode.getErrorType(),
+                errorCode.isNeedRetry());
+    }
+
+    @ExceptionHandler(PropertyBindingApplicationException.class)
+    public Result<Object> handlePropertyBindingApplicationException(
+            PropertyBindingApplicationException ex, HttpServletResponse response) {
+        CommonErrorCode errorCode = switch (ex.getReason()) {
+            case PARAM_INVALID -> CommonErrorCode.PARAM_ERROR;
+            case FORBIDDEN -> CommonErrorCode.FORBIDDEN;
+            case UNAUTHORIZED -> CommonErrorCode.UNAUTHORIZED;
+            case NOT_FOUND -> CommonErrorCode.NOT_FOUND;
+            case BAD_REQUEST -> CommonErrorCode.BAD_REQUEST;
+            case SYSTEM_ERROR -> CommonErrorCode.SYSTEM_ERROR;
+        };
+        response.setStatus(errorCode.getHttpStatus());
+        log.info("PropertyBinding business exception reason={} code={} msg={}",
+                ex.getReason(), errorCode.getCode(), ex.getMessage());
         return Result.fail(
                 errorCode.getCode(),
                 ex.getMessage() != null ? ex.getMessage() : errorCode.getMessage(),

@@ -1,8 +1,8 @@
 package com.pangu.interfaces.web.service;
 
 import com.pangu.domain.context.UserContext;
+import com.pangu.domain.repository.OwnerIdentityVerificationRepository;
 import com.pangu.domain.security.NameDecryptor;
-import com.pangu.infrastructure.persistence.mapper.UserContextMapper;
 import com.pangu.interfaces.security.SecurityUtils;
 import com.pangu.interfaces.web.controller.dto.owner.FaceAuthContextResponse;
 import com.pangu.interfaces.web.controller.dto.owner.FaceAuthRequest;
@@ -21,18 +21,19 @@ public class OwnerFaceAuthService {
 
     private static final int FACE_AUTH_LEVEL = 3;
 
-    private final UserContextMapper userContextMapper;
+    private final OwnerIdentityVerificationRepository ownerIdentityVerificationRepository;
     private final NameDecryptor nameDecryptor;
 
     public FaceAuthContextResponse prepareContext() {
         UserContext ctx = requireCUserContext();
-        UserContextMapper.FaceAuthIdentityRow identity = userContextMapper.loadFaceAuthIdentity(ctx.accountId());
+        OwnerIdentityVerificationRepository.FaceAuthIdentitySnapshot identity =
+                ownerIdentityVerificationRepository.findFaceAuthIdentity(ctx.accountId());
         if (identity == null) {
             return ineligible("当前账号未登记实名身份，请联系居委会补录后再刷脸");
         }
 
-        String realName = trimToNull(nameDecryptor.safeDecrypt(identity.getRealNameCipher()));
-        String idCardNumber = trimToNull(nameDecryptor.safeDecrypt(identity.getIdCardCipher()));
+        String realName = trimToNull(nameDecryptor.safeDecrypt(identity.realNameCipher()));
+        String idCardNumber = trimToNull(nameDecryptor.safeDecrypt(identity.idCardCipher()));
         if (realName == null || idCardNumber == null) {
             return ineligible("当前账号缺少已登记姓名或身份证号，请联系居委会补录后再刷脸");
         }
@@ -57,7 +58,7 @@ public class OwnerFaceAuthService {
         String providerRequestId = request.providerRequestId().trim();
         String providerResult = trimToNull(request.providerResult());
 
-        userContextMapper.insertFaceAuthAttestation(
+        ownerIdentityVerificationRepository.insertFaceAuthAttestation(
                 ctx.uid(),
                 ctx.accountId(),
                 provider,
@@ -65,11 +66,12 @@ public class OwnerFaceAuthService {
                 providerResult,
                 1,
                 FACE_AUTH_LEVEL);
-        int updated = userContextMapper.upgradeCUserAuthLevel(ctx.uid(), ctx.accountId(), FACE_AUTH_LEVEL);
+        int updated = ownerIdentityVerificationRepository.upgradeCUserAuthLevel(
+                ctx.uid(), ctx.accountId(), FACE_AUTH_LEVEL);
         if (updated != 1) {
             throw new AppException(CommonErrorCode.USER_NOT_REGISTERED, "当前业主身份不存在或已失效");
         }
-        userContextMapper.markAccountRealNameVerified(ctx.accountId());
+        ownerIdentityVerificationRepository.markAccountRealNameVerified(ctx.accountId());
 
         return new FaceAuthResponse(true, provider + ":" + providerRequestId, FACE_AUTH_LEVEL);
     }

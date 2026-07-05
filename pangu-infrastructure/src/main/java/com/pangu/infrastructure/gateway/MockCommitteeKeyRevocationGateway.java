@@ -2,6 +2,7 @@ package com.pangu.infrastructure.gateway;
 
 import com.pangu.domain.gateway.CommitteeKeyRevocationGateway;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 /**
@@ -9,6 +10,7 @@ import org.springframework.stereotype.Component;
  */
 @Slf4j
 @Component
+@ConditionalOnProperty(name = "platform.committee-key-revocation.provider", havingValue = "mock")
 public class MockCommitteeKeyRevocationGateway implements CommitteeKeyRevocationGateway {
 
     @Override

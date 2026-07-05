@@ -1,21 +1,21 @@
 package com.pangu.interfaces.web.service;
 
+import com.pangu.domain.repository.SmsVerificationCodeRepository;
 import com.pangu.interfaces.web.exception.AppException;
 import com.pangu.interfaces.web.exception.CommonErrorCode;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Profile;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
+import lombok.RequiredArgsConstructor;
 
 /**
  * 针对生产环境的真实短信验证码校验策略 (基于 Redis 缓存服务)
  */
 @Component
 @Profile("prod")
+@RequiredArgsConstructor
 public class ProdSmsVerificationStrategy implements SmsVerificationStrategy {
 
-    @Autowired(required = false)
-    private StringRedisTemplate redisTemplate;
+    private final SmsVerificationCodeRepository smsVerificationCodeRepository;
 
     @Override
     public void validate(String phone, String smsCode) {
@@ -23,17 +23,12 @@ public class ProdSmsVerificationStrategy implements SmsVerificationStrategy {
             throw new AppException(CommonErrorCode.SMS_CODE_EMPTY);
         }
 
-        if (redisTemplate == null) {
+        try {
+            if (!smsVerificationCodeRepository.consumeIfMatches(phone, smsCode)) {
+                throw new AppException(CommonErrorCode.SMS_CODE_INVALID);
+            }
+        } catch (IllegalStateException ex) {
             throw new AppException(CommonErrorCode.SYSTEM_CONFIG_ERROR, "系统配置错误：未配置 Redis 缓存服务，无法进行生产环境短信校验");
         }
-
-        // 从 Redis 中获取特定手机号绑定的短信验证码
-        String cachedCode = redisTemplate.opsForValue().get("sms:code:" + phone);
-        if (cachedCode == null || !cachedCode.equals(smsCode)) {
-            throw new AppException(CommonErrorCode.SMS_CODE_INVALID);
-        }
-
-        // 校验成功后将验证码作废，防止二次使用攻击
-        redisTemplate.delete("sms:code:" + phone);
     }
 }

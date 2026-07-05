@@ -20,12 +20,6 @@
             <artifactId>pangu-application</artifactId>
         </dependency>
 
-        <!-- 依赖基础设施层 -->
-        <dependency>
-            <groupId>com.pangu</groupId>
-            <artifactId>pangu-infrastructure</artifactId>
-        </dependency>
-
         <!-- Spring Boot Web Starter -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

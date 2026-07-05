@@ -47,10 +47,16 @@ mybatis:
   configuration:
     map-underscore-to-camel-case: true
     cache-enabled: true
-    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
 
 # 平台业务与安全策略参数
 platform:
+  attestation:
+    # outbox-pending 仅用于开发/测试：落 outbox 并返回 STUB-*，不具备司法链法律效力。
+    provider: outbox-pending
+  committee-key-revocation:
+    # mock 仅用于开发/测试：不真实吊销证书或密钥。
+    provider: mock
   security:
     # JWT 秘钥（SM2 或 HMAC-SHA256 秘钥占位，开发环境使用默认，生产通过环境变量替换）
     jwt-secret: pangu-secure-jwt-token-secret-key-32-chars-minimum

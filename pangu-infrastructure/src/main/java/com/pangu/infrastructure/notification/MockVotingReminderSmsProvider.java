@@ -9,7 +9,7 @@ import org.springframework.stereotype.Component;
 
 @Slf4j
 @Component
-@ConditionalOnProperty(name = "platform.voting.sms-provider-mode", havingValue = "mock", matchIfMissing = true)
+@ConditionalOnProperty(name = "platform.voting.sms-provider-mode", havingValue = "mock")
 public class MockVotingReminderSmsProvider implements VotingReminderSmsProvider {
 
     @Override

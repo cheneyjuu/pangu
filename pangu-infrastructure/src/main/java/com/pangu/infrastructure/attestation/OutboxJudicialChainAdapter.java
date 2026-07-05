@@ -10,6 +10,7 @@ import com.pangu.infrastructure.persistence.entity.OutboxEventRow;
 import com.pangu.infrastructure.persistence.mapper.OutboxEventMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -33,6 +34,7 @@ import java.util.Map;
 @Slf4j
 @Component
 @RequiredArgsConstructor
+@ConditionalOnProperty(name = "platform.attestation.provider", havingValue = "outbox-pending", matchIfMissing = true)
 public class OutboxJudicialChainAdapter implements JudicialChainPort {
 
     private static final int EVENT_TYPE_VOTING_RESULT_ATTEST = 1;

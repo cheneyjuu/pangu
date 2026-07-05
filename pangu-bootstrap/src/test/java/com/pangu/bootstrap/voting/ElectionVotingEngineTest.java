@@ -113,11 +113,5 @@ public class ElectionVotingEngineTest {
         assertTrue(winnerIds.contains(2L), "C2 应该当选");
         assertFalse(winnerIds.contains(4L), "C4 应该在多阶党员控制中被挤掉");
         assertFalse(winnerIds.contains(5L), "C5 因未双过半不应该当选");
-
-        System.out.println("====== 差额选举计票与多阶党员比例调配引擎测试通过！ ======");
-        for (int i = 0; i < winners.size(); i++) {
-            System.out.printf("当选委员第 [%d] 席: %s (党员: %b)%n", 
-                    i + 1, winners.get(i).getName(), winners.get(i).isPartyMember());
-        }
     }
 }

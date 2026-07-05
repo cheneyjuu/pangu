@@ -8,6 +8,7 @@ import com.pangu.domain.model.user.DataScopeType;
 import com.pangu.domain.model.user.WorkIdentityBuildingScope;
 import com.pangu.infrastructure.persistence.mapper.OwnerPropertyMapper;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -25,15 +26,20 @@ import static org.junit.jupiter.api.Assertions.*;
  * {@code DataScopeInterceptor.UserSecurityContext}（旧契约已剥离），
  * 改为直接操作 {@link UserContextHolder} ThreadLocal Bean，模拟 JWT 过滤器装配后的请求线程态。
  *
- * <p>所依赖的 V1.1 seed 数据（{@code c_owner_property}，tenant_id=10001）：
+ * <p>测试使用独立 tenant/building 区间，避免依赖可演进的演示 seed 数据：
  * <pre>
- *   uid=70001 / building=30001 / room=30001101 / area=100
- *   uid=70002 / building=30002 / room=30002502 / area=85
- *   uid=70002 / building=30005 / room=30005201 / area=90
+ *   tenant=19001 / building=91001, 91002, 91005
+ *   tenant=19002 / building=91001, 91002
  * </pre>
  */
 @SpringBootTest
 public class DataScopeTest {
+
+    private static final long TENANT_PRIMARY = 19001L;
+    private static final long TENANT_CROSS = 19002L;
+    private static final long BUILDING_A = 91001L;
+    private static final long BUILDING_B = 91002L;
+    private static final long BUILDING_C = 91005L;
 
     @Autowired
     private OwnerPropertyMapper ownerPropertyMapper;
@@ -44,13 +50,37 @@ public class DataScopeTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    @BeforeEach
+    public void setUp() {
+        cleanTestRows();
+        jdbcTemplate.update("""
+                INSERT INTO c_owner_property
+                    (uid, tenant_id, building_id, room_id, build_area, is_voting_delegate, account_status)
+                VALUES
+                    (70001, ?, ?, 190019100101, 100.00, 1, 1),
+                    (70002, ?, ?, 190019100201,  85.00, 1, 1),
+                    (70002, ?, ?, 190019100501,  90.00, 1, 1),
+                    (70001, ?, ?, 190029100101,  88.00, 0, 1),
+                    (70002, ?, ?, 190029100201,  77.00, 0, 1)
+                """,
+                TENANT_PRIMARY, BUILDING_A,
+                TENANT_PRIMARY, BUILDING_B,
+                TENANT_PRIMARY, BUILDING_C,
+                TENANT_CROSS, BUILDING_A,
+                TENANT_CROSS, BUILDING_B);
+    }
+
     @AfterEach
     public void tearDown() {
         userContextHolder.clear();
+        cleanTestRows();
+    }
+
+    private void cleanTestRows() {
         jdbcTemplate.update("""
                 DELETE FROM c_owner_property
-                WHERE uid = 70001 AND tenant_id = 10002 AND room_id = 10002300101
-                """);
+                WHERE tenant_id IN (?, ?)
+                """, TENANT_PRIMARY, TENANT_CROSS);
     }
 
     /**
@@ -64,7 +94,7 @@ public class DataScopeTest {
                 Set.of()
         ));
 
-        List<PropertyOwnership> list = ownerPropertyMapper.selectOwnershipsByBuilding(10001L);
+        List<PropertyOwnership> list = ownerPropertyMapper.selectOwnershipsByBuilding(TENANT_PRIMARY);
 
         assertNotNull(list);
         assertEquals(3, list.size(), "ALL_COMMUNITY 应返回 tenant 全量房产关系");
@@ -78,10 +108,10 @@ public class DataScopeTest {
     public void ownerGroupScope_filtersByAuthorizedBuildings() {
         userContextHolder.set(buildSysUserCtx(
                 DataScopeType.OWNER_GROUP,
-                Set.of(30001L, 30002L)
+                Set.of(BUILDING_A, BUILDING_B)
         ));
 
-        List<PropertyOwnership> list = ownerPropertyMapper.selectOwnershipsByBuilding(10001L);
+        List<PropertyOwnership> list = ownerPropertyMapper.selectOwnershipsByBuilding(TENANT_PRIMARY);
 
         assertNotNull(list);
         assertEquals(2, list.size(), "OWNER_GROUP 应仅返回授权楼栋内的 2 条记录");
@@ -106,17 +136,11 @@ public class DataScopeTest {
 
     @Test
     public void ownerGroupScope_filtersByTenantAndBuildingPair() {
-        jdbcTemplate.update("""
-                INSERT INTO c_owner_property
-                    (uid, tenant_id, building_id, room_id, build_area, is_voting_delegate, account_status)
-                VALUES (70001, 10002, 30001, 10002300101, 88.00, 0, 1)
-                ON CONFLICT DO NOTHING
-                """);
         userContextHolder.set(new UserContext(
                 999803L,
                 UserContext.IdentityType.SYS_USER,
                 800003L,
-                10001L,
+                TENANT_PRIMARY,
                 101L,
                 UserContext.DeptCategory.G,
                 2,
@@ -124,10 +148,10 @@ public class DataScopeTest {
                 AuthenticationLevel.L1,
                 "TEST_ROLE",
                 Set.of(),
-                Set.of(30001L, 30002L),
+                Set.of(BUILDING_A, BUILDING_B),
                 Set.of(
-                        new WorkIdentityBuildingScope(10001L, 30002L),
-                        new WorkIdentityBuildingScope(10002L, 30001L))));
+                        new WorkIdentityBuildingScope(TENANT_PRIMARY, BUILDING_B),
+                        new WorkIdentityBuildingScope(TENANT_CROSS, BUILDING_A))));
 
         List<PropertyOwnership> list = ownerPropertyMapper.selectOwnershipsByBuilding(null);
 
@@ -140,7 +164,7 @@ public class DataScopeTest {
                 999803L,                                  // accountId（V1.1 刘主任）
                 UserContext.IdentityType.SYS_USER,
                 800003L,                                  // sys_user.user_id
-                10001L,                                   // tenantId
+                TENANT_PRIMARY,                           // tenantId
                 101L,                                     // deptId（求是居委会）
                 UserContext.DeptCategory.G,
                 2,
