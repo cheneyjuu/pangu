@@ -3,6 +3,7 @@ package com.pangu.interfaces.web.exception;
 import com.pangu.application.admin.BuildingAssignmentApplicationException;
 import com.pangu.application.admin.RoleAdminApplicationException;
 import com.pangu.application.admin.WorkIdentityApplicationException;
+import com.pangu.application.community.CommunitySettingsApplicationException;
 import com.pangu.application.disclosure.FinanceDisclosureApplicationException;
 import com.pangu.application.dispute.DisputeApplicationException;
 import com.pangu.application.lock.GovernanceLockApplicationException;
@@ -188,6 +189,21 @@ public class GlobalExceptionHandler {
         WorkIdentityErrorCode errorCode = WorkIdentityExceptionTranslator.translate(ex);
         response.setStatus(errorCode.getHttpStatus());
         log.info("WorkIdentity business exception reason={} code={} msg={}",
+                ex.getReason(), errorCode.getCode(), ex.getMessage());
+        return Result.fail(
+                errorCode.getCode(),
+                ex.getMessage() != null ? ex.getMessage() : errorCode.getMessage(),
+                null,
+                errorCode.getErrorType(),
+                errorCode.isNeedRetry());
+    }
+
+    @ExceptionHandler(CommunitySettingsApplicationException.class)
+    public Result<Object> handleCommunitySettingsApplicationException(
+            CommunitySettingsApplicationException ex, HttpServletResponse response) {
+        CommunitySettingsErrorCode errorCode = CommunitySettingsExceptionTranslator.translate(ex);
+        response.setStatus(errorCode.getHttpStatus());
+        log.info("CommunitySettings business exception reason={} code={} msg={}",
                 ex.getReason(), errorCode.getCode(), ex.getMessage());
         return Result.fail(
                 errorCode.getCode(),

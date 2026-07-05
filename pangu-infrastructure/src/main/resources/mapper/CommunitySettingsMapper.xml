@@ -1,0 +1,256 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pangu.infrastructure.persistence.mapper.CommunitySettingsMapper">
+
+    <select id="selectCommunity" resultType="com.pangu.infrastructure.persistence.entity.TenantCommunityRow">
+        SELECT *
+        FROM t_tenant_community
+        WHERE tenant_id = #{tenantId}
+          AND status = 'ACTIVE'
+    </select>
+
+    <select id="selectFirstTenantId" resultType="long">
+        SELECT tenant_id
+        FROM t_tenant_community
+        WHERE status = 'ACTIVE'
+        ORDER BY tenant_id ASC
+        LIMIT 1
+    </select>
+
+    <select id="existsTenantInDeptScope" resultType="boolean">
+        SELECT EXISTS (
+            SELECT 1
+            FROM sys_dept_tenant_scope
+            WHERE dept_id = #{deptId}
+              AND tenant_id = #{tenantId}
+              AND status = 1
+        )
+    </select>
+
+    <select id="selectPolicy" resultType="com.pangu.infrastructure.persistence.entity.GovernancePolicyRow">
+        SELECT policy_id, policy_code, policy_name, policy_version, abstention_strategy,
+               shared_ownership_strategy, owner_representative_strategy, unvoted_owner_strategy,
+               summary_json::TEXT AS summary_json, status, effective_at
+        FROM t_governance_policy
+        WHERE policy_id = #{policyId}
+    </select>
+
+    <select id="selectActivePolicies" resultType="com.pangu.infrastructure.persistence.entity.GovernancePolicyRow">
+        SELECT policy_id, policy_code, policy_name, policy_version, abstention_strategy,
+               shared_ownership_strategy, owner_representative_strategy, unvoted_owner_strategy,
+               summary_json::TEXT AS summary_json, status, effective_at
+        FROM t_governance_policy
+        WHERE status = 1
+        ORDER BY effective_at DESC, policy_id DESC
+    </select>
+
+    <select id="selectLiveLedgerStats" resultType="com.pangu.infrastructure.persistence.entity.CommunityLedgerStatsRow">
+        WITH scoped AS (
+            SELECT op.*,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY op.tenant_id, op.room_id
+                       ORDER BY op.is_voting_delegate DESC, op.opid ASC
+                   ) AS room_rn
+            FROM c_owner_property op
+            WHERE op.tenant_id = #{tenantId}
+              AND op.account_status = 1
+        )
+        SELECT COALESCE(SUM(build_area) FILTER (WHERE room_rn = 1), 0)::NUMERIC(14, 2) AS total_area,
+               COUNT(DISTINCT uid) FILTER (WHERE room_rn = 1) AS owner_count,
+               COUNT(*) FILTER (WHERE room_rn = 1) AS unit_count,
+               COUNT(DISTINCT building_id) AS building_count
+        FROM scoped
+    </select>
+
+    <select id="selectDenominatorBreakdown" resultType="com.pangu.infrastructure.persistence.entity.DenominatorBreakdownRow">
+        WITH scoped AS (
+            SELECT op.*,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY op.tenant_id, op.room_id
+                       ORDER BY op.is_voting_delegate DESC, op.opid ASC
+                   ) AS room_rn
+            FROM c_owner_property op
+            WHERE op.tenant_id = #{tenantId}
+              AND op.account_status = 1
+        ),
+        residential AS (
+            SELECT COUNT(*) FILTER (WHERE room_rn = 1) AS unit_count,
+                   COUNT(DISTINCT uid) FILTER (WHERE room_rn = 1) AS owner_count,
+                   COALESCE(SUM(build_area) FILTER (WHERE room_rn = 1), 0)::NUMERIC(14, 2) AS building_area
+            FROM scoped
+        ),
+        community AS (
+            SELECT excluded_parking_area, public_area
+            FROM t_tenant_community
+            WHERE tenant_id = #{tenantId}
+        )
+        SELECT '住宅' AS asset_type,
+               unit_count AS registered_unit_count,
+               owner_count AS voting_owner_count,
+               building_area AS building_area,
+               CASE WHEN building_area > 0 THEN 100.00 ELSE 0.00 END::NUMERIC(8, 2) AS base_ratio,
+               '正常纳入' AS operation_status
+        FROM residential
+        UNION ALL
+        SELECT '地下车位' AS asset_type,
+               0::BIGINT AS registered_unit_count,
+               0::BIGINT AS voting_owner_count,
+               excluded_parking_area AS building_area,
+               0.00::NUMERIC(8, 2) AS base_ratio,
+               '不予计票' AS operation_status
+        FROM community
+        WHERE excluded_parking_area > 0
+        UNION ALL
+        SELECT '公共服务空间' AS asset_type,
+               0::BIGINT AS registered_unit_count,
+               0::BIGINT AS voting_owner_count,
+               public_area AS building_area,
+               0.00::NUMERIC(8, 2) AS base_ratio,
+               '不予计票' AS operation_status
+        FROM community
+        WHERE public_area > 0
+    </select>
+
+    <select id="selectPendingDenominatorRequests"
+            resultType="com.pangu.infrastructure.persistence.entity.DenominatorReviewRequestRow">
+        SELECT request_id, tenant_id, requested_total_area, requested_owner_count, requested_unit_count,
+               reason, status, requested_by, reviewed_by, review_comment, create_time, review_time
+        FROM t_tenant_denominator_review_request
+        WHERE tenant_id = #{tenantId}
+          AND status = 'PENDING'
+        ORDER BY create_time DESC, request_id DESC
+    </select>
+
+    <select id="selectDenominatorReviewRequest"
+            resultType="com.pangu.infrastructure.persistence.entity.DenominatorReviewRequestRow">
+        SELECT request_id, tenant_id, requested_total_area, requested_owner_count, requested_unit_count,
+               reason, status, requested_by, reviewed_by, review_comment, create_time, review_time
+        FROM t_tenant_denominator_review_request
+        WHERE request_id = #{requestId}
+    </select>
+
+    <select id="selectAuditLogs" resultType="com.pangu.infrastructure.persistence.entity.CommunitySettingsAuditRow">
+        SELECT audit_id, tenant_id, operation_type, operator_user_id, create_time
+        FROM t_tenant_community_settings_audit
+        WHERE tenant_id = #{tenantId}
+        ORDER BY create_time DESC, audit_id DESC
+        LIMIT #{limit}
+    </select>
+
+    <update id="updateOrganization" parameterType="com.pangu.infrastructure.persistence.entity.TenantCommunityRow">
+        UPDATE t_tenant_community
+        SET tenant_name = #{tenantName},
+            province_code = #{provinceCode},
+            province_name = #{provinceName},
+            city_code = #{cityCode},
+            city_name = #{cityName},
+            district_code = #{districtCode},
+            district_name = #{districtName},
+            street_code = #{streetCode},
+            street_name = #{streetName},
+            community_code = #{communityCode},
+            community_name = #{communityName},
+            address = #{address},
+            owners_assembly_established = #{ownersAssemblyEstablished},
+            committee_established = #{committeeEstablished},
+            current_committee_term_name = #{currentCommitteeTermName},
+            transition_org_type = #{transitionOrgType},
+            transition_org_status = #{transitionOrgStatus},
+            update_time = CURRENT_TIMESTAMP
+        WHERE tenant_id = #{tenantId}
+          AND status = 'ACTIVE'
+    </update>
+
+    <update id="updateAssetLedger" parameterType="com.pangu.infrastructure.persistence.entity.TenantCommunityRow">
+        UPDATE t_tenant_community
+        SET property_area_name = #{propertyAreaName},
+            property_area_code = #{propertyAreaCode},
+            developer_name = #{developerName},
+            developer_account_id = #{developerAccountId},
+            planned_household_count = #{plannedHouseholdCount},
+            delivered_household_count = #{deliveredHouseholdCount},
+            registered_property_unit_count = #{registeredPropertyUnitCount},
+            total_planned_building_area = #{totalPlannedBuildingArea},
+            total_exclusive_area = #{totalExclusiveArea},
+            registered_voting_total_area = #{registeredVotingTotalArea},
+            excluded_parking_area = #{excludedParkingArea},
+            public_area = #{publicArea},
+            building_count = #{buildingCount},
+            unit_count = #{unitCount},
+            parking_space_count = #{parkingSpaceCount},
+            plot_ratio = #{plotRatio},
+            update_time = CURRENT_TIMESTAMP
+        WHERE tenant_id = #{tenantId}
+          AND status = 'ACTIVE'
+    </update>
+
+    <update id="updateRules" parameterType="com.pangu.infrastructure.persistence.entity.TenantCommunityRow">
+        UPDATE t_tenant_community
+        SET rule_config_id = #{ruleConfigId},
+            shared_ownership_strategy = #{sharedOwnershipStrategy},
+            fund_managed_enabled = #{fundManagedEnabled},
+            financial_control_config_id = #{financialControlConfigId},
+            quarterly_disclosure_deadline_day = #{quarterlyDisclosureDeadlineDay},
+            update_time = CURRENT_TIMESTAMP
+        WHERE tenant_id = #{tenantId}
+          AND status = 'ACTIVE'
+    </update>
+
+    <select id="updateStatistics" resultType="long">
+        UPDATE t_tenant_community
+        SET registered_voting_total_area = #{totalArea},
+            total_exclusive_area = #{totalArea},
+            registered_voting_owner_count = #{ownerCount},
+            registered_property_unit_count = #{unitCount},
+            statistics_version = statistics_version + 1,
+            statistics_updated_at = CURRENT_TIMESTAMP,
+            update_time = CURRENT_TIMESTAMP
+        WHERE tenant_id = #{tenantId}
+          AND status = 'ACTIVE'
+        RETURNING statistics_version
+    </select>
+
+    <select id="insertStatisticsSnapshot" resultType="long">
+        INSERT INTO t_tenant_statistics_snapshot (
+            tenant_id, statistics_version, total_area, total_owner_count, item_count,
+            source_type, source_ref_id, audit_hash, created_by
+        )
+        VALUES (
+            #{tenantId}, #{statisticsVersion}, #{totalArea}, #{ownerCount}, #{itemCount},
+            #{sourceType}, #{sourceRefId}, #{auditHash}, #{operatorUserId}
+        )
+        RETURNING snapshot_id
+    </select>
+
+    <select id="insertDenominatorReviewRequest" resultType="long">
+        INSERT INTO t_tenant_denominator_review_request (
+            tenant_id, requested_total_area, requested_owner_count, requested_unit_count,
+            reason, requested_by
+        )
+        VALUES (
+            #{tenantId}, #{requestedTotalArea}, #{requestedOwnerCount}, #{requestedUnitCount},
+            #{reason}, #{requestedBy}
+        )
+        RETURNING request_id
+    </select>
+
+    <update id="reviewDenominatorRequest">
+        UPDATE t_tenant_denominator_review_request
+        SET status = #{status},
+            reviewed_by = #{reviewedBy},
+            review_comment = #{reviewComment},
+            review_time = CURRENT_TIMESTAMP
+        WHERE request_id = #{requestId}
+          AND status = 'PENDING'
+    </update>
+
+    <insert id="insertAudit">
+        INSERT INTO t_tenant_community_settings_audit (
+            tenant_id, operation_type, payload_json, operator_user_id
+        )
+        VALUES (
+            #{tenantId}, #{operationType}, CAST(#{payloadJson} AS JSONB), #{operatorUserId}
+        )
+    </insert>
+</mapper>

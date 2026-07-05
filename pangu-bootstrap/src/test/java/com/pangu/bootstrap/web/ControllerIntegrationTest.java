@@ -11,10 +11,13 @@ import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 
 import static org.hamcrest.Matchers.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultHandlers.print;
@@ -75,6 +78,120 @@ public class ControllerIntegrationTest {
         // V3.20 起 ELECTION 候选人提名只授 GOV_OPERATOR；网格员仅保留催票/责任田相关能力。
         assert !permissions.contains("candidate:nominate");
         assert permissions.contains("waiver:read");
+    }
+
+    @Test
+    public void govOperatorCanSeeSubjectProposalMenuFromDynamicPermissionRules() throws Exception {
+        Integer existed = jdbcTemplate.queryForObject(
+                "SELECT COUNT(1) FROM sys_role_menu WHERE role_id = 14 AND menu_id = 5010",
+                Integer.class);
+        jdbcTemplate.update("DELETE FROM sys_role_menu WHERE role_id = 14 AND menu_id = 5010");
+
+        try {
+            Map<String, Object> request = Map.of(
+                    "username", "13800000005",
+                    "smsCode", "123456"
+            );
+
+            String responseJson = mockMvc.perform(post("/api/v1/auth/login")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(request)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.user_info.role_key", is("GOV_OPERATOR")))
+                    .andExpect(jsonPath("$.data.user_info.dept_type", is(2)))
+                    .andExpect(jsonPath("$.data.user_info.permissions", hasItem("voting:subject:create:election")))
+                    .andExpect(jsonPath("$.data.user_info.menu_permissions", hasItem("subject-proposal")))
+                    .andReturn().getResponse().getContentAsString();
+
+            Map<String, Object> responseMap = objectMapper.readValue(responseJson, Map.class);
+            Map<String, Object> data = (Map<String, Object>) responseMap.get("data");
+            String token = (String) data.get("access_token");
+
+            String menusJson = mockMvc.perform(get("/api/v1/auth/menus")
+                            .header("Authorization", "Bearer " + token))
+                    .andExpect(status().isOk())
+                    .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+            Map<String, Object> menusResponse = objectMapper.readValue(menusJson, Map.class);
+            List<Map<String, Object>> modules = (List<Map<String, Object>>) menusResponse.get("data");
+            Map<String, Object> votingModule = modules.stream()
+                    .filter(module -> "governance".equals(module.get("id")))
+                    .findFirst()
+                    .orElseThrow();
+            assertEquals("投票管理", votingModule.get("label"));
+            List<Map<String, Object>> votingPages = (List<Map<String, Object>>) votingModule.get("pages");
+            Map<String, Object> votingPage = votingPages.stream()
+                    .filter(page -> "voting".equals(page.get("id")))
+                    .findFirst()
+                    .orElseThrow();
+            assertEquals("议题投票看板", votingPage.get("label"));
+            boolean hasSubjectProposal = modules.stream()
+                    .flatMap(module -> ((List<Map<String, Object>>) module.get("pages")).stream())
+                    .anyMatch(page -> "subject-proposal".equals(page.get("id")));
+            assertTrue(hasSubjectProposal, "GOV_OPERATOR should see subject-proposal via dynamic permission rules");
+        } finally {
+            if (existed != null && existed > 0) {
+                jdbcTemplate.update("""
+                        INSERT INTO sys_role_menu(role_id, menu_id)
+                        VALUES (14, 5010)
+                        ON CONFLICT (role_id, menu_id) DO NOTHING
+                        """);
+            } else {
+                jdbcTemplate.update("DELETE FROM sys_role_menu WHERE role_id = 14 AND menu_id = 5010");
+            }
+        }
+    }
+
+    @Test
+    public void propertyManagerNavigationGroupsRepairsUnderPropertyAndRevenueUnderFinance() throws Exception {
+        Map<String, Object> request = Map.of(
+                "username", "13800000021",
+                "smsCode", "123456"
+        );
+
+        String responseJson = mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.user_info.role_key", is("PROPERTY_MANAGER")))
+                .andExpect(jsonPath("$.data.user_info.permissions", hasItem("repair:workorder:read")))
+                .andExpect(jsonPath("$.data.user_info.permissions", hasItem("fund:account:read")))
+                .andReturn().getResponse().getContentAsString();
+
+        Map<String, Object> responseMap = objectMapper.readValue(responseJson, Map.class);
+        Map<String, Object> data = (Map<String, Object>) responseMap.get("data");
+        String token = (String) data.get("access_token");
+
+        String menusJson = mockMvc.perform(get("/api/v1/auth/menus")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+        Map<String, Object> menusResponse = objectMapper.readValue(menusJson, Map.class);
+        List<Map<String, Object>> modules = (List<Map<String, Object>>) menusResponse.get("data");
+
+        assertTrue(modules.stream().noneMatch(module -> "assets".equals(module.get("id"))),
+                "旧资产与维修一级菜单不应继续下发");
+
+        Map<String, Object> propertyModule = modules.stream()
+                .filter(module -> "property".equals(module.get("id")))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("物业管理", propertyModule.get("label"));
+        List<Map<String, Object>> propertyPages = (List<Map<String, Object>>) propertyModule.get("pages");
+        assertTrue(propertyPages.stream().anyMatch(page -> "assets".equals(page.get("id"))));
+        assertTrue(propertyPages.stream().anyMatch(page -> "work-orders".equals(page.get("id"))));
+        assertTrue(propertyPages.stream().anyMatch(page -> "engineering".equals(page.get("id"))));
+        assertTrue(propertyPages.stream().noneMatch(page -> "property-mgmt".equals(page.get("id"))));
+
+        Map<String, Object> financeModule = modules.stream()
+                .filter(module -> "finance".equals(module.get("id")))
+                .findFirst()
+                .orElseThrow();
+        List<Map<String, Object>> financePages = (List<Map<String, Object>>) financeModule.get("pages");
+        Map<String, Object> revenueEntry = financePages.stream()
+                .filter(page -> "property-mgmt".equals(page.get("id")))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("收益与开支录入", revenueEntry.get("label"));
     }
 
     @Test

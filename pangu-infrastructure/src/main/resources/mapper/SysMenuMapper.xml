@@ -23,24 +23,85 @@
 
     <select id="selectGrantedMenusByUserId"
             resultType="com.pangu.infrastructure.persistence.mapper.SysMenuMapper$SysMenuRow">
+        WITH user_roles AS (
+            SELECT DISTINCT r.role_id, r.role_key
+            FROM sys_user_role ur
+            JOIN sys_role r ON r.role_id = ur.role_id
+            WHERE ur.user_id = #{userId}
+              AND r.status = '0'
+        ),
+        user_permissions AS (
+            SELECT DISTINCT rp.permission_key
+            FROM user_roles ur
+            JOIN sys_role_permission rp ON rp.role_id = ur.role_id
+        ),
+        child_menus AS (
+            SELECT DISTINCT m.*
+            FROM sys_menu m
+            WHERE m.parent_id != 0
+              AND m.visible = 1
+              AND m.status = '0'
+              AND m.route_id IS NOT NULL
+              AND (
+                EXISTS (
+                    SELECT 1
+                    FROM user_roles ur
+                    JOIN sys_role_menu rm ON rm.role_id = ur.role_id
+                    WHERE rm.menu_id = m.menu_id
+                )
+                OR (
+                    m.required_permission IS NULL
+                    AND m.required_any_permissions IS NULL
+                    AND m.required_role_keys IS NULL
+                )
+                OR (
+                    m.required_permission IS NOT NULL
+                    AND EXISTS (
+                        SELECT 1
+                        FROM user_permissions up
+                        WHERE up.permission_key = m.required_permission
+                    )
+                )
+                OR (
+                    m.required_any_permissions IS NOT NULL
+                    AND EXISTS (
+                        SELECT 1
+                        FROM user_permissions up
+                        WHERE up.permission_key = ANY(regexp_split_to_array(m.required_any_permissions, '\s*,\s*'))
+                    )
+                )
+                OR (
+                    m.required_role_keys IS NOT NULL
+                    AND EXISTS (
+                        SELECT 1
+                        FROM user_roles ur
+                        WHERE ur.role_key = ANY(regexp_split_to_array(m.required_role_keys, '\s*,\s*'))
+                    )
+                )
+              )
+        ),
+        granted_menus AS (
+            SELECT * FROM child_menus
+            UNION
+            SELECT parent.*
+            FROM sys_menu parent
+            JOIN child_menus child ON child.parent_id = parent.menu_id
+            WHERE parent.visible = 1
+              AND parent.status = '0'
+              AND parent.route_id IS NOT NULL
+        )
         SELECT DISTINCT
-               m.menu_id AS menuId,
-               m.parent_id AS parentId,
-               m.route_id AS routeId,
-               m.menu_name AS menuName,
-               m.icon,
-               m.order_num AS orderNum,
-               m.required_permission AS requiredPermission,
-               m.required_any_permissions AS requiredAnyPermissions,
-               m.required_role_keys AS requiredRoleKeys
-        FROM sys_user_role ur
-        JOIN sys_role_menu rm ON rm.role_id = ur.role_id
-        JOIN sys_menu m ON m.menu_id = rm.menu_id
-        WHERE ur.user_id = #{userId}
-          AND m.visible = 1
-          AND m.status = '0'
-          AND m.route_id IS NOT NULL
-        ORDER BY m.parent_id ASC, m.order_num ASC, m.menu_id ASC
+               menu_id AS menuId,
+               parent_id AS parentId,
+               route_id AS routeId,
+               menu_name AS menuName,
+               icon,
+               order_num AS orderNum,
+               required_permission AS requiredPermission,
+               required_any_permissions AS requiredAnyPermissions,
+               required_role_keys AS requiredRoleKeys
+        FROM granted_menus
+        ORDER BY parent_id ASC, order_num ASC, menu_id ASC
     </select>
 
 </mapper>
