@@ -30,6 +30,7 @@ public class RepairWorkOrderRow {
     private String riskLevel;
     private String surveySummary;
     private BigDecimal planBudget;
+    private BigDecimal publicCeilingPrice;
     private String fundSource;
     private Integer fundGateBlocked;
     private Integer satisfactionScore;

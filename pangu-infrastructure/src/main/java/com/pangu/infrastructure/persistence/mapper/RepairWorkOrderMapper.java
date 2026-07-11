@@ -10,6 +10,7 @@ import com.pangu.infrastructure.persistence.entity.RepairDecisionRoomRow;
 import com.pangu.infrastructure.persistence.entity.RepairFrameworkRelationRow;
 import com.pangu.infrastructure.persistence.entity.RepairAcceptanceSummaryRow;
 import com.pangu.infrastructure.persistence.entity.RepairLocationOptionRow;
+import com.pangu.infrastructure.persistence.entity.RepairQuoteInvitationRow;
 import com.pangu.infrastructure.persistence.entity.RepairLocalDecisionRow;
 import com.pangu.infrastructure.persistence.entity.RepairSupplierQuoteRow;
 import com.pangu.infrastructure.persistence.entity.RepairSupplierOrganizationRow;
@@ -98,6 +99,9 @@ public interface RepairWorkOrderMapper {
     int countQuoteInvitations(@Param("workOrderId") Long workOrderId,
                               @Param("tenantId") Long tenantId);
 
+    List<RepairQuoteInvitationRow> listQuoteInvitations(@Param("workOrderId") Long workOrderId,
+                                                        @Param("tenantId") Long tenantId);
+
     String findSupplierLegalName(@Param("supplierDeptId") Long supplierDeptId);
 
     List<RepairSupplierOrganizationRow> listSupplierOrganizations(@Param("tenantId") Long tenantId);
@@ -110,6 +114,9 @@ public interface RepairWorkOrderMapper {
 
     Long findSupplierDeptIdByUscc(@Param("unifiedSocialCreditCode") String unifiedSocialCreditCode);
 
+    Long findProvisionalSupplierDeptId(@Param("tenantId") Long tenantId,
+                                       @Param("legalName") String legalName);
+
     Long nextDeptId();
 
     int insertSupplierDept(@Param("deptId") Long deptId,
@@ -120,6 +127,11 @@ public interface RepairWorkOrderMapper {
                               @Param("legalName") String legalName,
                               @Param("contactName") String contactName,
                               @Param("contactPhone") String contactPhone);
+
+    int completeSupplierProfile(@Param("supplierDeptId") Long supplierDeptId,
+                                @Param("unifiedSocialCreditCode") String unifiedSocialCreditCode,
+                                @Param("contactName") String contactName,
+                                @Param("contactPhone") String contactPhone);
 
     int insertSupplierTenantRelation(@Param("tenantId") Long tenantId,
                                      @Param("supplierDeptId") Long supplierDeptId,

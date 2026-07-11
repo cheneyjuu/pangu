@@ -139,6 +139,7 @@ public record CommunitySettingsResponse(
             Policy currentPolicy,
             List<Policy> policyOptions,
             String sharedOwnershipStrategy,
+            boolean repairEstimateRequired,
             boolean fundManagedEnabled,
             String financialControlConfigId,
             int quarterlyDisclosureDeadlineDay,
@@ -149,7 +150,7 @@ public record CommunitySettingsResponse(
                                   List<GovernancePolicy> options,
                                   int daysUntilDisclosureDeadline) {
             return new Rules(Policy.from(current), options.stream().map(Policy::from).toList(),
-                    c.sharedOwnershipStrategy(), c.fundManagedEnabled(), c.financialControlConfigId(),
+                    c.sharedOwnershipStrategy(), c.repairEstimateRequired(), c.fundManagedEnabled(), c.financialControlConfigId(),
                     c.quarterlyDisclosureDeadlineDay(), daysUntilDisclosureDeadline);
         }
     }

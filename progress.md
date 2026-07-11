@@ -1,3 +1,117 @@
+# Progress: 发出邀价后的按钮状态
+
+- `doAction` 现在返回布尔成功结果；邀价成功后清空供应商选择，失败时保留选择。
+- 首次待邀价阶段显示“发出邀价”；进入询价中且无新选择时显示禁用的“邀价已发出”；重新选择供应商后显示“补充发出邀价”。
+- Yaochi `npm run build` 与 `git diff --check` 通过；Chrome 已确认当前询价中工单的按钮为禁用完成态。
+
+## Historical Progress
+
+# Progress: 报修业务文案校正
+
+- 已将“已定供应商”改为“物业已推荐供应商”，进度节点改为“推荐供应商”“接龙/业主大会”“主任/副主任”“盖章”。
+- 风险等级、资金来源和审计动作已使用中文业务名称；资金名称统一为“楼栋维修资金”“小区公共维修资金”“小区公共收益”。
+- 资金说明按来源动态展示真实流程，楼栋维修明确接龙截图随正式报审文件送审，主任或副主任任一人确认后再由业委会盖章。
+- Yaochi `npm run build` 与 `git diff --check` 通过；Chrome 已确认进度节点、方案与资金、楼栋资金流程说明和审计流水均显示校正后的业务文案。
+
+## Historical Progress
+
+# Progress: 供应商激活后待报价为空
+
+- 已核对真实数据库：93 号邀请为 `ACTIVATED`，但供应商组织 `4684` 的维修邀价记录为 0，214 号工单仍停留在 `PLAN_SUBMITTED`。
+- 保持账号激活与维修邀价两个业务事实独立，不增加错误的自动授权或工单兜底展示。
+- Yaochi 供应商工作台空状态改为“尚未收到维修邀价”，并明确账号已经开通；物业端账号激活邀请增加“不发送维修邀价”的悬浮提示。
+- Yaochi `npm run build` 与相关文件 `git diff --check` 通过；Chrome 已验证供应商工作台正确显示新的空状态且无布局问题。
+
+## Historical Progress
+
+# Progress: 供应商企业与账号状态优化
+
+## Session: 2026-07-11
+
+### Phase 1: 状态与真实账号核验 — complete
+- 已确认“待核验”是企业主体状态，不是账号或报价状态。
+- 已查询本地数据库确认三家供应商当前联系人、登录身份和激活邀请状态。
+- 决定新增独立账号状态及邀请信息，不开放物业自行核验企业主体。
+- 后端供应商组织查询已聚合账号与有效邀请，返回 `CONTACT_MISSING / NOT_INVITED / PENDING_ACTIVATION / ACTIVATED`、账号数、登录手机号、邀请编号和有效期。
+- Yaochi 已拆分“企业核验”和“账号激活”双状态；待激活显示邀请编号与登录手机号，已激活显示实际登录手机号，已激活账号不再展示重复邀请按钮。
+- 发出邀价后页面随工单刷新重新查询供应商状态，可直接回显后端自动创建的激活邀请。
+- 聚焦后端流程测试通过；全量 `mvn test` 通过（585 tests，0 failures，0 errors，1 skipped）；Yaochi `npm run build` 与两仓 `git diff --check` 通过。
+- Chrome 本地页面验收通过：三家供应商分别正确显示“账号未邀请”“联系人待补充”“账号已激活”，已激活企业回显登录手机号 `13800000031`，双状态和操作按钮无重叠。
+- 最新 Pangu 后端已重新打包并运行于 `http://localhost:8080/pangu`。
+
+### Errors Encountered
+- 首次查询供应商账号时把 `sys_user.status` 当作整数比较，数据库实际为字符状态；删除错误类型条件后查询成功。
+
+## Historical Progress
+
+# Progress: 供应商最小登记
+
+## Session: 2026-07-11
+
+### Phase 1: 当前约束核验 — complete
+- 已确认前端按钮、DTO Bean Validation、应用服务和数据库四层都要求三个字段必填。
+- 已确认自动账号邀请依赖联系人姓名与手机号，若直接放宽登记会让邀价事务失败。
+- 决定缺少联系人时只跳过账号激活邀请，保留维修邀价与物业代录报价路径。
+
+### Phase 2: 后端与数据模型 — complete
+- 新增 `V3.60`，供应商统一社会信用代码、联系人和手机号允许为空；已填写社会信用代码仍受原唯一约束。
+- 登记接口仅强制企业名称；可选字段有值时仍执行格式与长度校验。
+- 同一租户按企业名称重复登记未补社会信用代码的供应商时复用原组织，并允许补齐缺失资料。
+- 邀价遇到无联系人供应商时跳过账号激活邀请，不回滚维修邀价事务。
+
+### Phase 3: Yaochi — complete
+- 三个字段已明确标注“选填”，登记按钮只依赖企业名称。
+- 请求不会提交空字符串；登记成功后清空表单并自动选中供应商。
+- 供应商列表对缺失联系人显示“联系人未补充”，且只在联系人姓名和手机号齐全时显示账号激活按钮。
+
+### Phase 4: 验证与文档 — complete
+- 报修聚焦测试：10 tests，0 failures，0 errors；覆盖仅企业名称登记、临时记录复用、无联系人邀价和物业代录报价。
+- Pangu 全量测试：585 tests，0 failures，0 errors，1 skipped；Flyway 已升级到 `V3.60`。
+- Yaochi `npm run build` 通过，仅保留既有 chunk-size warning。
+- Chrome 实测三个字段均显示“选填”，只填写企业名称时登记按钮可用，控制台无业务错误。
+- 业务方案已补充最小登记、账号邀请和签约核验边界。
+- 最新后端可执行 jar 已重新打包并启动，Tomcat 正常监听 `8080`，数据库版本为 `V3.60`。
+
+### Errors Encountered
+- 浏览器验证后清理临时输入时，旧 locator 在页面重渲染后超时；重新加载页面清除了未提交内容，没有产生供应商登记或其他业务副作用。
+
+## Historical Progress
+
+# Progress: 报修治理路径自动分流
+
+## Session: 2026-07-11
+
+### Phase 1: 当前状态核验 — complete
+- 已确认“发出邀价”和“治理路径判定”同时出现是前端按同一 `PLAN_SUBMITTED` 状态分别渲染造成。
+- 已确认后端 `routePlan` 只按 5 万阈值和 `PROPERTY_INTERNAL` 资金来源判断，能让楼栋/公共维修绕过供应商与正式治理流程。
+
+### Phase 2: 后端自动分流 — complete
+- 物业包干维修在提交维修范围后由后端直接进入 `APPROVED`，不再经过人工路径按钮。
+- 楼栋维修资金、公共维修资金和公共收益维修保留在供应商选择路径，必须经过邀价/报价/定商。
+- 已删除 `route-plan` 应用服务与管理端接口，关闭绕过供应商和表决流程的后门。
+- 楼栋接龙和业主大会关联增加资金来源守卫，避免定商后选择错误治理分支。
+
+### Phase 3: Yaochi 当前动作 — complete
+- 已移除“治理路径判定”按钮；`PLAN_SUBMITTED` 显示为“待邀价”。
+- 物业包干维修不再展示供应商公开限价，确认后直接进入开工路径。
+- 定商后根据资金来源只显示楼栋接龙或业主大会入口，不再同时显示两个互斥动作。
+
+### Phase 4: 验证与文档 — complete
+- 报修聚焦测试：10 tests，0 failures，0 errors。
+- Pangu 全量测试：585 tests，0 failures，0 errors，1 skipped。
+- Yaochi `npm run build` 通过，仅保留既有 chunk-size warning。
+- Chrome 实测“治理路径判定”按钮数量为 0，“发出邀价”按钮数量为 1；新分流说明可见，控制台无业务错误。
+- 业务方案已补充方案提交后的自动分流规则和人工路径接口删除说明。
+- 最新后端可执行 jar 已重新打包并启动，Tomcat 正常监听 `8080`，上下文为 `/pangu`。
+
+### Errors Encountered
+- Chrome 扩展初始化时 Statsig 遥测请求超时，但本地页面连接、DOM 检查和后续操作均正常；该错误与业务页面无关，未重试遥测请求。
+- 首次在沙箱内停止旧后端进程时被系统拒绝；确认是进程权限边界后改用已授权的提升权限命令，旧进程已正常停止。
+- 按仓库指南从聚合根执行 `spring-boot:run` 时 Maven 无法解析仅声明在 bootstrap 子模块中的插件前缀；改为先完成 reactor package，再直接运行可执行 jar，避免重复同一失败命令。
+- 沙箱内首次访问本机健康检查被网络隔离拒绝；提升权限后服务可达，`/actuator/health` 返回 403 是现有安全策略保护该端点，启动日志已确认 Tomcat 正常启动。
+
+## Historical Progress
+
 # Progress: 供应商账号激活闭环
 
 ## Session: 2026-07-11
@@ -1766,11 +1880,26 @@
   - shennong-app `npm run type-check` 通过；
 - Chrome 本地真实页面验证 `VERIFIED` 仅显示“派单”，`ASSIGNED` 仅显示“开始初勘”，`SURVEYING` 显示初勘结论、风险等级、现场照片和“提交初勘”。
 
-### 报修现场附件接入私有 OSS — code complete / credential blocked
+### 报修现场附件接入私有 OSS — complete
 - pangu 新增 V3.58 `t_repair_attachment`、附件领域模型、仓储和阿里云 OSS Java SDK 适配器；小程序通过 pangu multipart 接口上传，后端以 `PutObject` 写入私有 Bucket，不向客户端暴露 OSS 上传地址。
 - 后端强制校验工单可见范围、现场角色、业务阶段、媒体类型和文件大小，并按实际字节计算 `Content-MD5`；OSS 返回 ETag 后直接创建 `READY` 记录。
 - 提交位置纠偏或初勘时只能绑定同工单 `READY` 附件，并转为不可删除的 `BOUND`；OSS 写入失败时不会创建附件记录。
 - shennong-app 已改为 `Taro.uploadFile` 上传到 pangu；照片/视频不再以 Base64 放进业务 JSON，也不再直接请求 OSS Endpoint。
 - 配置已改为环境变量；真实凭证仅写入被 Git 忽略且权限为 600 的 `.env.local`，仓库未保存凭证明文。
 - 验证：`mvn test` 584 tests，0 failures，0 errors，1 skipped；shennong-app `npm run type-check` 与 `npm run build:weapp:dev` 通过。
-- 真实联调：已通过 pangu multipart 接口进入 Java SDK `PutObject`，OSS 返回 `SignatureDoesNotMatch`，当前凭证无法完成上传；需更换有效 RAM AccessKey 后重跑上传/下载/删除冒烟测试。
+- 真实联调：已使用新 RAM AccessKey 完成 pangu multipart 上传、签名下载和删除，返回均为 `200`；测试对象和数据库记录已清理。
+
+### 报修询价价格边界 — complete
+- 物业内部估算改为默认选填，并由社区规则 `repair_estimate_required` 配置是否必填。
+- 工单新增可选 `public_ceiling_price`；只有物业显式公开最高限价时，受邀供应商才能看到该金额。
+- 供应商列表与报价提交响应改用独立 DTO，不再返回 `planBudget`、`fundSource`、报修人和内部经办字段。
+# Progress: 报价附件与追加邀价
+
+- 已完成现状核验，开始扩展报价原件 OSS 附件和报价绑定模型。
+- 新增 `QUOTE_DOCUMENT` 附件类型和 `V3.61`，物业与供应商均通过 pangu Java OSS SDK 上传报价原件；报价接口只接收附件 ID，后端校验并绑定后从 ETag 生成兼容哈希。
+- 首次邀价与追加邀价已拆分；追加动作只列出未受邀企业、强制填写原因，后端拒绝重复邀价。
+- 物业代录报价已改为弹窗，包含供应商、含税总价、来源、说明、原件上传及签章确认；供应商工作台也已移除人工文件标识输入。
+- Pangu 全量测试通过（585 tests，0 failures，0 errors，1 skipped）；Yaochi 生产构建通过。
+- Chrome 已确认询价中页面显示“邀价已发出”、独立“追加邀价供应商”和“代录供应商报价”，弹窗布局、字段和禁用状态正常。
+
+## Historical Progress

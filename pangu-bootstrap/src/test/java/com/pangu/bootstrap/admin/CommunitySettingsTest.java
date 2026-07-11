@@ -56,6 +56,7 @@ public class CommunitySettingsTest {
     @BeforeEach
     @AfterEach
     public void cleanup() {
+        jdbcTemplate.update("UPDATE t_tenant_community SET repair_estimate_required = 0 WHERE tenant_id = ?", TENANT_RUSHI);
         jdbcTemplate.update("""
                 DELETE FROM t_tenant_community_settings_audit
                 WHERE tenant_id = ?
@@ -124,6 +125,19 @@ public class CommunitySettingsTest {
                                 "totalExclusiveArea", "999.00"))))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code", is(42602)));
+    }
+
+    @Test
+    public void govCanRequireInternalRepairEstimateBeforeInvitation() throws Exception {
+        String token = token(ACC_SUPER, USR_SUPER, null);
+
+        mockMvc.perform(patch("/api/v1/admin/community-settings/rules")
+                        .param("tenantId", String.valueOf(TENANT_RUSHI))
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("repairEstimateRequired", true))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.rules.repairEstimateRequired", is(true)));
     }
 
     @Test

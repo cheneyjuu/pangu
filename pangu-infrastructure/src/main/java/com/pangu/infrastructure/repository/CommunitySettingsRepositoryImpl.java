@@ -166,7 +166,8 @@ public class CommunitySettingsRepositoryImpl implements CommunitySettingsReposit
                 intVal(r.getBuildingCount()), intVal(r.getUnitCount()), intVal(r.getParkingSpaceCount()),
                 r.getPlotRatio(), flag(r.getOwnersAssemblyEstablished()), flag(r.getCommitteeEstablished()),
                 r.getCurrentCommitteeTermName(), r.getTransitionOrgType(), r.getTransitionOrgStatus(),
-                r.getRuleConfigId(), r.getSharedOwnershipStrategy(), flag(r.getFundManagedEnabled()),
+                r.getRuleConfigId(), r.getSharedOwnershipStrategy(), flag(r.getRepairEstimateRequired()),
+                flag(r.getFundManagedEnabled()),
                 r.getFinancialControlConfigId(), intVal(r.getQuarterlyDisclosureDeadlineDay()),
                 r.getStatisticsVersion() == null ? 1 : r.getStatisticsVersion(), r.getStatisticsUpdatedAt(),
                 r.getGovernanceStatus(), r.getStatus(), r.getUpdateTime());
@@ -210,6 +211,7 @@ public class CommunitySettingsRepositoryImpl implements CommunitySettingsReposit
         r.setTransitionOrgStatus(c.transitionOrgStatus());
         r.setRuleConfigId(c.ruleConfigId());
         r.setSharedOwnershipStrategy(c.sharedOwnershipStrategy());
+        r.setRepairEstimateRequired(c.repairEstimateRequired() ? 1 : 0);
         r.setFundManagedEnabled(c.fundManagedEnabled() ? 1 : 0);
         r.setFinancialControlConfigId(c.financialControlConfigId());
         r.setQuarterlyDisclosureDeadlineDay(c.quarterlyDisclosureDeadlineDay());

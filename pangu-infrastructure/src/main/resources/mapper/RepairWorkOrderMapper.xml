@@ -28,6 +28,7 @@
         <result property="riskLevel" column="risk_level"/>
         <result property="surveySummary" column="survey_summary"/>
         <result property="planBudget" column="plan_budget"/>
+        <result property="publicCeilingPrice" column="public_ceiling_price"/>
         <result property="fundSource" column="fund_source"/>
         <result property="fundGateBlocked" column="fund_gate_blocked"/>
         <result property="satisfactionScore" column="satisfaction_score"/>
@@ -82,6 +83,7 @@
         <result property="supplierName" column="supplier_name"/>
         <result property="quoteAmount" column="quote_amount"/>
         <result property="quoteSummary" column="quote_summary"/>
+        <result property="attachmentId" column="attachment_id"/>
         <result property="attachmentHash" column="attachment_hash"/>
         <result property="submittedByUserId" column="submitted_by_user_id"/>
         <result property="submittedByRoleKey" column="submitted_by_role_key"/>
@@ -96,6 +98,17 @@
         <result property="createTime" column="create_time"/>
     </resultMap>
 
+    <resultMap id="RepairQuoteInvitationResultMap"
+               type="com.pangu.infrastructure.persistence.entity.RepairQuoteInvitationRow">
+        <id property="quoteInvitationId" column="quote_invitation_id"/>
+        <result property="workOrderId" column="work_order_id"/>
+        <result property="supplierDeptId" column="supplier_dept_id"/>
+        <result property="supplierName" column="supplier_name"/>
+        <result property="status" column="status"/>
+        <result property="deadline" column="deadline"/>
+        <result property="sentAt" column="sent_at"/>
+    </resultMap>
+
     <resultMap id="RepairSupplierOrganizationResultMap"
                type="com.pangu.infrastructure.persistence.entity.RepairSupplierOrganizationRow">
         <id property="supplierDeptId" column="supplier_dept_id"/>
@@ -104,6 +117,11 @@
         <result property="contactName" column="contact_name"/>
         <result property="contactPhone" column="contact_phone"/>
         <result property="verificationStatus" column="verification_status"/>
+        <result property="accountStatus" column="account_status"/>
+        <result property="activeAccountCount" column="active_account_count"/>
+        <result property="loginPhone" column="login_phone"/>
+        <result property="activationInvitationId" column="activation_invitation_id"/>
+        <result property="activationInvitationExpiresAt" column="activation_invitation_expires_at"/>
     </resultMap>
 
     <resultMap id="SupplierActivationInvitationResultMap"
@@ -173,7 +191,7 @@
         work_order_id, order_no, tenant_id, title, description, source, space_scope, status,
         reporter_account_id, reporter_uid, reporter_user_id, room_id, building_id, location_text,
         need_manual_location, location_locked, assigned_user_id, assignee_role_key, assignee_dept_id,
-        category, risk_level, survey_summary, plan_budget, fund_source, fund_gate_blocked,
+        category, risk_level, survey_summary, plan_budget, public_ceiling_price, fund_source, fund_gate_blocked,
         satisfaction_score, satisfaction_comment, version, create_time, update_time
     </sql>
 
@@ -296,13 +314,13 @@
             tenant_id, title, description, source, space_scope, status,
             reporter_account_id, reporter_uid, reporter_user_id, room_id, building_id, location_text,
             need_manual_location, location_locked, assigned_user_id, assignee_role_key, assignee_dept_id,
-            category, risk_level, survey_summary, plan_budget, fund_source, fund_gate_blocked,
+            category, risk_level, survey_summary, plan_budget, public_ceiling_price, fund_source, fund_gate_blocked,
             satisfaction_score, satisfaction_comment, version
         ) VALUES (
             #{tenantId}, #{title}, #{description}, #{source}, #{spaceScope}, #{status},
             #{reporterAccountId}, #{reporterUid}, #{reporterUserId}, #{roomId}, #{buildingId}, #{locationText},
             #{needManualLocation}, #{locationLocked}, #{assignedUserId}, #{assigneeRoleKey}, #{assigneeDeptId},
-            #{category}, #{riskLevel}, #{surveySummary}, #{planBudget}, #{fundSource}, #{fundGateBlocked},
+            #{category}, #{riskLevel}, #{surveySummary}, #{planBudget}, #{publicCeilingPrice}, #{fundSource}, #{fundGateBlocked},
             #{satisfactionScore}, #{satisfactionComment}, #{version}
         )
     </insert>
@@ -430,6 +448,7 @@
             risk_level = #{riskLevel},
             survey_summary = #{surveySummary},
             plan_budget = #{planBudget},
+            public_ceiling_price = #{publicCeilingPrice},
             fund_source = #{fundSource},
             fund_gate_blocked = #{fundGateBlocked},
             satisfaction_score = #{satisfactionScore},
@@ -447,12 +466,12 @@
             keyColumn="quote_id">
         INSERT INTO t_repair_supplier_quote (
             work_order_id, tenant_id, supplier_name, quote_amount, quote_summary,
-            attachment_hash, submitted_by_user_id, submitted_by_role_key,
+            attachment_id, attachment_hash, submitted_by_user_id, submitted_by_role_key,
             submitted_by_supplier, supplier_confirmed, supplier_dept_id, quote_invitation_id,
             submission_source, confirmation_status, original_source, original_attachment_hash
         ) VALUES (
             #{workOrderId}, #{tenantId}, #{supplierName}, #{quoteAmount}, #{quoteSummary},
-            #{attachmentHash}, #{submittedByUserId}, #{submittedByRoleKey},
+            #{attachmentId}, #{attachmentHash}, #{submittedByUserId}, #{submittedByRoleKey},
             #{submittedBySupplier}, #{supplierConfirmed}, #{supplierDeptId}, #{quoteInvitationId},
             #{submissionSource}, #{confirmationStatus}, #{originalSource}, #{originalAttachmentHash}
         )
@@ -460,7 +479,7 @@
 
     <select id="findQuote" resultMap="RepairSupplierQuoteResultMap">
         SELECT quote_id, work_order_id, tenant_id, supplier_name, quote_amount, quote_summary,
-               attachment_hash, submitted_by_user_id, submitted_by_role_key,
+               attachment_id, attachment_hash, submitted_by_user_id, submitted_by_role_key,
                submitted_by_supplier, supplier_confirmed, supplier_dept_id, quote_invitation_id,
                submission_source, confirmation_status, original_source, original_attachment_hash,
                create_time
@@ -472,7 +491,7 @@
 
     <select id="listSupplierQuotes" resultMap="RepairSupplierQuoteResultMap">
         SELECT quote_id, work_order_id, tenant_id, supplier_name, quote_amount, quote_summary,
-               attachment_hash, submitted_by_user_id, submitted_by_role_key,
+               attachment_id, attachment_hash, submitted_by_user_id, submitted_by_role_key,
                submitted_by_supplier, supplier_confirmed, supplier_dept_id, quote_invitation_id,
                submission_source, confirmation_status, original_source, original_attachment_hash,
                create_time
@@ -508,6 +527,23 @@
           AND status &lt;&gt; 'CANCELLED'
     </select>
 
+    <select id="listQuoteInvitations" resultMap="RepairQuoteInvitationResultMap">
+        SELECT invitation.quote_invitation_id,
+               invitation.work_order_id,
+               invitation.supplier_dept_id,
+               supplier.legal_name AS supplier_name,
+               invitation.status,
+               invitation.deadline,
+               invitation.sent_at
+        FROM t_repair_quote_invitation invitation
+        JOIN t_supplier_org_profile supplier
+          ON supplier.supplier_dept_id = invitation.supplier_dept_id
+        WHERE invitation.work_order_id = #{workOrderId}
+          AND invitation.tenant_id = #{tenantId}
+          AND invitation.status &lt;&gt; 'CANCELLED'
+        ORDER BY invitation.sent_at, invitation.quote_invitation_id
+    </select>
+
     <select id="findSupplierLegalName" resultType="string">
         SELECT legal_name
         FROM t_supplier_org_profile
@@ -515,15 +551,56 @@
           AND verification_status IN ('PENDING_VERIFICATION', 'VERIFIED')
     </select>
 
+    <sql id="RepairSupplierOrganizationColumns">
+        p.supplier_dept_id,
+        p.unified_social_credit_code,
+        p.legal_name,
+        p.contact_name,
+        p.contact_phone,
+        p.verification_status,
+        CASE
+            WHEN account.active_account_count &gt; 0 THEN 'ACTIVATED'
+            WHEN invitation.invitation_id IS NOT NULL THEN 'PENDING_ACTIVATION'
+            WHEN NULLIF(BTRIM(p.contact_name), '') IS NULL
+              OR NULLIF(BTRIM(p.contact_phone), '') IS NULL THEN 'CONTACT_MISSING'
+            ELSE 'NOT_INVITED'
+        END AS account_status,
+        COALESCE(account.active_account_count, 0) AS active_account_count,
+        account.login_phone,
+        invitation.invitation_id AS activation_invitation_id,
+        invitation.expires_at AS activation_invitation_expires_at
+    </sql>
+
+    <sql id="RepairSupplierOrganizationAccountJoins">
+        LEFT JOIN LATERAL (
+            SELECT COUNT(DISTINCT u.user_id)::INT AS active_account_count,
+                   (ARRAY_AGG(a.phone ORDER BY (a.phone = p.contact_phone) DESC, u.user_id))[1] AS login_phone
+            FROM sys_user u
+            JOIN t_account a ON a.account_id = u.account_id
+            JOIN sys_user_role ur ON ur.user_id = u.user_id
+            JOIN sys_role role ON role.role_id = ur.role_id
+            WHERE u.dept_id = p.supplier_dept_id
+              AND u.status = '0'
+              AND a.status = 1
+              AND role.status = '0'
+              AND role.role_key IN ('SERVICE_PROVIDER_MANAGER', 'SERVICE_PROVIDER_STAFF')
+        ) account ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT i.invitation_id, i.expires_at
+            FROM t_supplier_activation_invitation i
+            WHERE i.supplier_dept_id = p.supplier_dept_id
+              AND i.status = 'PENDING'
+              AND i.expires_at &gt; CURRENT_TIMESTAMP
+            ORDER BY i.create_time DESC, i.invitation_id DESC
+            LIMIT 1
+        ) invitation ON TRUE
+    </sql>
+
     <select id="listSupplierOrganizations" resultMap="RepairSupplierOrganizationResultMap">
-        SELECT p.supplier_dept_id,
-               p.unified_social_credit_code,
-               p.legal_name,
-               p.contact_name,
-               p.contact_phone,
-               p.verification_status
+        SELECT <include refid="RepairSupplierOrganizationColumns"/>
         FROM t_supplier_org_profile p
         JOIN t_supplier_tenant_relation r ON r.supplier_dept_id = p.supplier_dept_id
+        <include refid="RepairSupplierOrganizationAccountJoins"/>
         WHERE r.tenant_id = #{tenantId}
           AND r.status &lt;&gt; 'DISABLED'
           AND p.verification_status &lt;&gt; 'DISABLED'
@@ -555,6 +632,18 @@
         WHERE unified_social_credit_code = #{unifiedSocialCreditCode}
     </select>
 
+    <select id="findProvisionalSupplierDeptId" resultType="long">
+        SELECT p.supplier_dept_id
+        FROM t_supplier_org_profile p
+        JOIN t_supplier_tenant_relation r ON r.supplier_dept_id = p.supplier_dept_id
+        WHERE r.tenant_id = #{tenantId}
+          AND r.status &lt;&gt; 'DISABLED'
+          AND p.unified_social_credit_code IS NULL
+          AND LOWER(BTRIM(p.legal_name)) = LOWER(BTRIM(#{legalName}))
+        ORDER BY p.supplier_dept_id
+        LIMIT 1
+    </select>
+
     <select id="nextDeptId" resultType="long">
         SELECT nextval(pg_get_serial_sequence('sys_dept', 'dept_id'))
     </select>
@@ -575,6 +664,15 @@
         )
     </insert>
 
+    <update id="completeSupplierProfile">
+        UPDATE t_supplier_org_profile
+        SET unified_social_credit_code = COALESCE(unified_social_credit_code, #{unifiedSocialCreditCode}),
+            contact_name = COALESCE(contact_name, #{contactName}),
+            contact_phone = COALESCE(contact_phone, #{contactPhone}),
+            update_time = CURRENT_TIMESTAMP
+        WHERE supplier_dept_id = #{supplierDeptId}
+    </update>
+
     <insert id="insertSupplierTenantRelation">
         INSERT INTO t_supplier_tenant_relation (
             tenant_id, supplier_dept_id, relation_type, status, requested_by_user_id
@@ -585,14 +683,10 @@
     </insert>
 
     <select id="findSupplierOrganization" resultMap="RepairSupplierOrganizationResultMap">
-        SELECT p.supplier_dept_id,
-               p.unified_social_credit_code,
-               p.legal_name,
-               p.contact_name,
-               p.contact_phone,
-               p.verification_status
+        SELECT <include refid="RepairSupplierOrganizationColumns"/>
         FROM t_supplier_org_profile p
         JOIN t_supplier_tenant_relation r ON r.supplier_dept_id = p.supplier_dept_id
+        <include refid="RepairSupplierOrganizationAccountJoins"/>
         WHERE r.tenant_id = #{tenantId}
           AND p.supplier_dept_id = #{supplierDeptId}
           AND r.status &lt;&gt; 'DISABLED'

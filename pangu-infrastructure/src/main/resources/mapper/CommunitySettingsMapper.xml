@@ -189,6 +189,7 @@
         UPDATE t_tenant_community
         SET rule_config_id = #{ruleConfigId},
             shared_ownership_strategy = #{sharedOwnershipStrategy},
+            repair_estimate_required = #{repairEstimateRequired},
             fund_managed_enabled = #{fundManagedEnabled},
             financial_control_config_id = #{financialControlConfigId},
             quarterly_disclosure_deadline_day = #{quarterlyDisclosureDeadlineDay},

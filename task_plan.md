@@ -1,3 +1,136 @@
+# Task Plan: 发出邀价后的按钮状态
+
+## Current Goal (2026-07-11)
+发出维修邀价成功后立即清空供应商选择并将按钮切换为不可操作的完成态；询价过程中重新选择供应商时，按钮只用于补充发出邀价。
+
+## Current Phases
+| # | 内容 | Status |
+|---|---|---|
+| 1 | 核对邀价动作与页面本地选择状态 | complete |
+| 2 | 让动作结果返回成功标识并清空选择 | complete |
+| 3 | 区分首次邀价、已发出和补充邀价按钮文案 | complete |
+| 4 | 执行前端构建和浏览器验收 | complete |
+
+## Current Completion Criteria
+- 首次邀价成功后，按钮立即变为禁用的“邀价已发出”。
+- 失败时保留供应商选择，方便修正后重试。
+- 询价中重新选择供应商后显示“补充发出邀价”。
+- 不因重复点击产生含义不明的再次邀价。
+
+## Historical Plan
+
+# Task Plan: 报修业务文案校正
+
+## Current Goal (2026-07-11)
+把维修工单页面中的技术枚举、模糊状态和不准确流程说明改为真实业务用语，明确物业只推荐供应商、楼栋接龙与业主大会分流、主任或副主任任一人确认以及业委会另行盖章。
+
+## Current Phases
+| # | 内容 | Status |
+|---|---|---|
+| 1 | 核对页面文案与已确认维修流程 | complete |
+| 2 | 校正状态、资金来源、流程节点和审计动作 | complete |
+| 3 | 按资金来源展示对应流程说明 | complete |
+| 4 | 执行前端构建和浏览器验收 | complete |
+
+## Current Completion Criteria
+- 页面不直接显示 `LOW`、`BUILDING_MAINTENANCE_FUND` 等技术枚举。
+- 物业动作表述为“推荐供应商”，不写成物业已经最终定商。
+- 楼栋维修显示楼栋接龙，小区公共维修显示业主大会表决。
+- 主任或副主任任一人确认与业委会盖章是两个独立节点。
+- 审计流水显示中文业务动作。
+
+## Historical Plan
+
+# Task Plan: 供应商激活后待报价为空
+
+## Current Goal (2026-07-11)
+确认供应商账号激活后工作台为空的真实原因，保持“账号激活”和“维修邀价”两个业务事实独立，并优化空状态与物业端提示，避免把开通账号误认为已经收到工单。
+
+## Current Phases
+| # | 内容 | Status |
+|---|---|---|
+| 1 | 核对激活邀请、供应商组织、维修邀价与工单状态 | complete |
+| 2 | 验证供应商工作台查询边界 | complete |
+| 3 | 优化供应商空状态和物业端账号邀请提示 | complete |
+| 4 | 执行前端构建和浏览器验收 | complete |
+
+## Current Completion Criteria
+- 不把账号激活错误地转换成维修邀价。
+- 未收到邀价时明确显示“账号已开通，但物业尚未发出维修邀价”。
+- 物业端账号邀请动作明确说明不会发出维修邀价。
+- 物业真正发出邀价后，供应商工作台仍按企业组织显示待报价工单。
+
+## Historical Plan
+
+# Task Plan: 供应商企业与账号状态优化
+
+## Current Goal (2026-07-11)
+把“企业主体核验”和“个人账号激活”拆成两个清晰状态；发出邀价后让物业能直接看到供应商登录手机号、激活状态和邀请编号，避免把“企业待核验”误解为账号不可用。
+
+## Current Phases
+| # | 内容 | Status |
+|---|---|---|
+| 1 | 核验企业核验、账号身份和激活邀请真实数据 | complete |
+| 2 | 扩展供应商查询模型，返回账号与邀请状态 | complete |
+| 3 | 优化 Yaochi 双状态展示和邀请反馈 | complete |
+| 4 | 补测试并执行后端、前端、浏览器验证 | complete |
+| 5 | 更新业务文档和运行进度 | complete |
+
+## Current Completion Criteria
+- 企业状态明确显示为“企业待核验/企业已核验”，不再使用含义模糊的“待核验”。
+- 账号状态独立显示：联系人未补充、未发送邀请、待激活、账号已激活。
+- 待激活状态展示邀请编号和登录手机号；发出邀价自动生成邀请后页面可见。
+- 已激活供应商显示实际登录手机号，不再重复发送邀请。
+- 无联系人供应商继续支持物业代录报价，签约前企业核验守卫不变。
+
+## Historical Plan
+
+# Task Plan: 供应商最小登记
+
+## Current Goal (2026-07-11)
+允许物业只填写企业名称完成供应商临时登记；统一社会信用代码、企业联系人和联系人手机号均为可选信息，缺失资料不得阻塞邀价和物业代录报价，但账号激活与签约前核验仍须在资料补齐后进行。
+
+## Current Phases
+| # | 内容 | Status |
+|---|---|---|
+| 1 | 核验供应商登记、数据库约束和激活邀请依赖 | complete |
+| 2 | 放宽后端与数据库约束并保护无联系人邀价 | complete |
+| 3 | 调整 Yaochi 可选字段、列表空值和激活动作 | complete |
+| 4 | 补回归测试并执行全量验证 | complete |
+| 5 | 更新业务文档和运行进度 | complete |
+
+## Current Completion Criteria
+- 仅填写企业名称可以成功登记并加入待邀价供应商列表。
+- 可选字段为空时数据库、响应和管理端均正确处理，不出现空值字符串或页面异常。
+- 无联系人供应商仍可收到维修邀价并由物业代录报价，但系统不自动生成账号激活邀请。
+- 后续用同一企业名称补充资料时复用临时供应商记录，不重复创建组织。
+- 签约前企业核验规则保持不变。
+
+## Historical Plan
+
+# Task Plan: 报修治理路径自动分流
+
+## Current Goal (2026-07-11)
+移除方案提交阶段由物业手工触发的“治理路径判定”，改为后端依据维修范围、资金来源和流程配置自动进入正确的邀价或简化路径，避免楼栋/公共维修跳过邀价、定商、民意表决和报审。
+
+## Current Phases
+| # | 内容 | Status |
+|---|---|---|
+| 1 | 核验现有 route-plan、邀价、定商和治理状态机 | complete |
+| 2 | 收口后端自动分流规则并补状态机回归测试 | complete |
+| 3 | 移除 Yaochi 手工按钮并校正当前动作 | complete |
+| 4 | 执行后端、前端和浏览器验收 | complete |
+| 5 | 更新业务文档和进度记录 | complete |
+
+## Current Completion Criteria
+- `PLAN_SUBMITTED` 页面不再出现“治理路径判定”按钮。
+- 楼栋维修和公共维修不能从方案提交直接跳到 `GOVERNANCE_PENDING` 或 `APPROVED`。
+- 需要供应商的维修自动进入邀价；是否比价仍服从既有可配置策略，不在本次倒退为固定三家。
+- 私有/物业包干维修保留无需供应商的简化路径，但由后端自动决定。
+- 自动分流具备后端测试，Yaochi 构建与真实页面验收通过。
+
+## Historical Plan
+
 # Task Plan: 供应商账号激活闭环
 
 ## Current Goal (2026-07-11)
@@ -320,9 +453,18 @@
 | 2 | 实现 pangu multipart 接收与 Java OSS SDK `PutObject`、下载和删除 | complete |
 | 3 | shennong-app 接入 `Taro.uploadFile` 与业务动作绑定 | complete |
 | 4 | 聚焦测试、全量测试、小程序类型检查和构建 | complete |
-| 5 | 使用真实 AccessKey 完成 PUT/GET/DELETE 冒烟测试 | pending |
+| 5 | 使用真实 AccessKey 完成 PUT/GET/DELETE 冒烟测试 | complete |
 
 ### Verification Result
 - `mvn test`：584 tests，0 failures，0 errors，1 skipped。
 - shennong-app `npm run type-check`、`npm run build:weapp:dev` 通过。
-- 客户端直传已移除；真实 multipart 请求已进入 Java SDK `PutObject`，当前 AccessKey 返回 `SignatureDoesNotMatch`。更换有效 RAM AccessKey 后再完成 PUT/GET/DELETE 冒烟测试。
+- 客户端直传已移除；新 RAM AccessKey 已通过 Java SDK `PutObject` 上传、签名下载和删除真实冒烟测试，测试数据已清理。
+# Task Plan: 报价附件与追加邀价
+
+- [completed] 后端支持报价原件通过 Java OSS 上传并与报价记录绑定
+- [completed] 管理端拆分首次邀价与追加邀价，并将物业代录报价改为弹窗
+- [completed] 供应商工作台改为直接上传报价附件
+- [completed] 完成后端测试、前端构建和浏览器验收
+- [completed] 提交 pangu 与 yaochi 代码
+
+## Historical Plans

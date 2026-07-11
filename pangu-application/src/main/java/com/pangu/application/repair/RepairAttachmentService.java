@@ -40,11 +40,17 @@ public class RepairAttachmentService {
     private static final Duration DOWNLOAD_URL_VALIDITY = Duration.ofMinutes(10);
     private static final long MAX_IMAGE_SIZE = 8L * 1024 * 1024;
     private static final long MAX_VIDEO_SIZE = 20L * 1024 * 1024;
+    private static final long MAX_DOCUMENT_SIZE = 20L * 1024 * 1024;
     private static final Set<String> IMAGE_CONTENT_TYPES = Set.of(
             "image/jpeg", "image/png", "image/webp", "image/heic", "image/heif");
     private static final Set<String> VIDEO_CONTENT_TYPES = Set.of("video/mp4", "video/quicktime");
+    private static final Set<String> DOCUMENT_CONTENT_TYPES = Set.of(
+            "application/pdf", "image/jpeg", "image/png", "image/webp",
+            "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "application/vnd.ms-excel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     private static final Set<String> FIELD_ROLES = Set.of(
             "PROPERTY_STAFF", "PROPERTY_MANAGER", "GRID_MEMBER", "VOLUNTEER", "OWNER_REPRESENTATIVE");
+    private static final Set<String> SUPPLIER_ROLES = Set.of("SERVICE_PROVIDER_ADMIN", "SERVICE_PROVIDER_STAFF");
 
     private final RepairAttachmentRepository attachmentRepository;
     private final RepairWorkOrderRepository workOrderRepository;
@@ -53,9 +59,9 @@ public class RepairAttachmentService {
 
     @Transactional
     public RepairAttachment upload(Long workOrderId, UploadRepairAttachmentCommand command) {
-        UserContext ctx = requireFieldContext();
-        RepairWorkOrder order = loadVisible(ctx, workOrderId);
         RepairAttachmentKind kind = parseKind(command.attachmentKind());
+        UserContext ctx = requireAttachmentContext(kind);
+        RepairWorkOrder order = loadVisible(ctx, workOrderId);
         assertUploadStatus(order, kind);
         String contentType = normalizeContentType(command.contentType());
         byte[] content = command.content() == null ? new byte[0] : command.content();
@@ -101,9 +107,10 @@ public class RepairAttachmentService {
 
     @Transactional(readOnly = true)
     public RepairAttachmentDownloadTicket createDownloadTicket(Long workOrderId, Long attachmentId) {
-        UserContext ctx = requireFieldContext();
+        UserContext ctx = requireAttachmentContext(null);
         RepairWorkOrder order = loadVisible(ctx, workOrderId);
         RepairAttachment attachment = loadAttachment(order, attachmentId);
+        assertSupplierAttachmentAccess(ctx, attachment);
         if (attachment.status() == RepairAttachmentStatus.PENDING) {
             throw new RepairWorkOrderApplicationException(INVALID_STATUS, "附件尚未完成上传确认");
         }
@@ -119,9 +126,10 @@ public class RepairAttachmentService {
 
     @Transactional
     public void deleteUnbound(Long workOrderId, Long attachmentId) {
-        UserContext ctx = requireFieldContext();
+        UserContext ctx = requireAttachmentContext(null);
         RepairWorkOrder order = loadVisible(ctx, workOrderId);
         RepairAttachment attachment = loadAttachment(order, attachmentId);
+        assertSupplierAttachmentAccess(ctx, attachment);
         if (attachment.status() == RepairAttachmentStatus.BOUND) {
             throw new RepairWorkOrderApplicationException(INVALID_STATUS, "已绑定审计流水的附件不可删除");
         }
@@ -136,14 +144,32 @@ public class RepairAttachmentService {
     }
 
     private void assertUploadCount(RepairWorkOrder order, RepairAttachmentKind kind) {
-        int limit = kind == RepairAttachmentKind.SURVEY_VIDEO ? 1 : 3;
+        int limit = switch (kind) {
+            case SURVEY_VIDEO -> 1;
+            case QUOTE_DOCUMENT -> 20;
+            default -> 3;
+        };
         if (attachmentRepository.countActive(order.workOrderId(), order.tenantId(), kind) >= limit) {
             throw new RepairWorkOrderApplicationException(PARAM_INVALID,
-                    kind == RepairAttachmentKind.SURVEY_VIDEO ? "现场初勘最多上传 1 段视频" : "现场证据图片最多上传 3 张");
+                    switch (kind) {
+                        case SURVEY_VIDEO -> "现场初勘最多上传 1 段视频";
+                        case QUOTE_DOCUMENT -> "单个工单最多保留 20 份待提交报价原件";
+                        default -> "现场证据图片最多上传 3 张";
+                    });
         }
     }
 
     private void validateMedia(RepairAttachmentKind kind, String contentType, long fileSize) {
+        if (kind == RepairAttachmentKind.QUOTE_DOCUMENT) {
+            if (!DOCUMENT_CONTENT_TYPES.contains(contentType)) {
+                throw new RepairWorkOrderApplicationException(PARAM_INVALID,
+                        "报价原件仅支持 PDF、图片、Word 或 Excel 文件");
+            }
+            if (fileSize <= 0 || fileSize > MAX_DOCUMENT_SIZE) {
+                throw new RepairWorkOrderApplicationException(PARAM_INVALID, "报价原件大小必须在 20MB 以内");
+            }
+            return;
+        }
         boolean video = kind == RepairAttachmentKind.SURVEY_VIDEO;
         Set<String> allowed = video ? VIDEO_CONTENT_TYPES : IMAGE_CONTENT_TYPES;
         long limit = video ? MAX_VIDEO_SIZE : MAX_IMAGE_SIZE;
@@ -164,6 +190,9 @@ public class RepairAttachmentService {
                     RepairWorkOrderStatus.NEED_MANUAL_LOCATION,
                     RepairWorkOrderStatus.PENDING_VERIFY).contains(order.status());
             case SURVEY_IMAGE, SURVEY_VIDEO -> order.status() == RepairWorkOrderStatus.SURVEYING;
+            case QUOTE_DOCUMENT -> Set.of(
+                    RepairWorkOrderStatus.QUOTE_COLLECTING,
+                    RepairWorkOrderStatus.QUOTE_SUBMITTED).contains(order.status());
         };
         if (!allowed) {
             throw new RepairWorkOrderApplicationException(INVALID_STATUS,
@@ -203,10 +232,10 @@ public class RepairAttachmentService {
     }
 
     private String normalizeFileName(String value) {
-        String normalized = value == null ? "现场证据" : value.trim();
+        String normalized = value == null ? "维修附件" : value.trim();
         normalized = normalized.replaceAll("[\\r\\n\\t/\\\\]", "_");
         if (normalized.isBlank()) {
-            normalized = "现场证据";
+            normalized = "维修附件";
         }
         return normalized.length() > 255 ? normalized.substring(0, 255) : normalized;
     }
@@ -226,7 +255,13 @@ public class RepairAttachmentService {
             case "image/heic" -> "heic";
             case "image/heif" -> "heif";
             case "video/quicktime" -> "mov";
-            default -> "mp4";
+            case "video/mp4" -> "mp4";
+            case "application/pdf" -> "pdf";
+            case "application/msword" -> "doc";
+            case "application/vnd.openxmlformats-officedocument.wordprocessingml.document" -> "docx";
+            case "application/vnd.ms-excel" -> "xls";
+            case "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" -> "xlsx";
+            default -> "bin";
         };
     }
 
@@ -235,9 +270,24 @@ public class RepairAttachmentService {
                 .orElseThrow(() -> new RepairWorkOrderApplicationException(NOT_FOUND, "附件不存在或不属于当前工单"));
     }
 
+    private void assertSupplierAttachmentAccess(UserContext ctx, RepairAttachment attachment) {
+        if (SUPPLIER_ROLES.contains(ctx.roleKey())
+                && (attachment.kind() != RepairAttachmentKind.QUOTE_DOCUMENT
+                || !ctx.accountId().equals(attachment.uploadedByAccountId()))) {
+            throw new RepairWorkOrderApplicationException(NOT_FOUND, "附件不存在或不属于当前供应商");
+        }
+    }
+
     private RepairWorkOrder loadVisible(UserContext ctx, Long workOrderId) {
         RepairWorkOrder order = workOrderRepository.findById(workOrderId)
                 .orElseThrow(() -> new RepairWorkOrderApplicationException(NOT_FOUND, "工单不存在"));
+        if (SUPPLIER_ROLES.contains(ctx.roleKey())) {
+            if (ctx.deptId() == null
+                    || !workOrderRepository.supplierCanAccess(workOrderId, order.tenantId(), ctx.deptId())) {
+                throw new RepairWorkOrderApplicationException(NOT_FOUND, "工单不在当前供应商邀价范围内");
+            }
+            return order;
+        }
         boolean ownerGroup = "OWNER_GROUP".equals(
                 ctx.dataScopeType() == null ? null : ctx.dataScopeType().getValue());
         if (!ownerGroup && ctx.tenantId() != null && !ctx.tenantId().equals(order.tenantId())) {
@@ -255,10 +305,15 @@ public class RepairAttachmentService {
         return order;
     }
 
-    private UserContext requireFieldContext() {
+    private UserContext requireAttachmentContext(RepairAttachmentKind kind) {
         UserContext ctx = userContextHolder.current();
-        if (ctx == null || !ctx.isSysUser() || ctx.roleKey() == null || !FIELD_ROLES.contains(ctx.roleKey())) {
+        boolean fieldUser = ctx != null && ctx.isSysUser() && FIELD_ROLES.contains(ctx.roleKey());
+        boolean supplierUser = ctx != null && ctx.isSysUser() && SUPPLIER_ROLES.contains(ctx.roleKey());
+        if (!fieldUser && !supplierUser) {
             throw new RepairWorkOrderApplicationException(FORBIDDEN, "当前身份无权处理维修现场附件");
+        }
+        if (supplierUser && kind != null && kind != RepairAttachmentKind.QUOTE_DOCUMENT) {
+            throw new RepairWorkOrderApplicationException(FORBIDDEN, "供应商只能上传报价原件");
         }
         return ctx;
     }

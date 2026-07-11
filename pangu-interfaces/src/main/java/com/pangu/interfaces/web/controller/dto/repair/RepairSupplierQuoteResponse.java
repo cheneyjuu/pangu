@@ -11,6 +11,7 @@ public record RepairSupplierQuoteResponse(
         String supplierName,
         BigDecimal quoteAmount,
         String quoteSummary,
+        Long attachmentId,
         String submissionSource,
         String confirmationStatus,
         LocalDateTime createTime
@@ -22,6 +23,7 @@ public record RepairSupplierQuoteResponse(
                 quote.supplierName(),
                 quote.quoteAmount(),
                 quote.quoteSummary(),
+                quote.attachmentId(),
                 quote.submissionSource() == null ? null : quote.submissionSource().name(),
                 quote.confirmationStatus() == null ? null : quote.confirmationStatus().name(),
                 quote.createTime());

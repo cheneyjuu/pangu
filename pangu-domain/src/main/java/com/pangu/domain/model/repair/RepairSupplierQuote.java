@@ -11,6 +11,7 @@ public record RepairSupplierQuote(
         String supplierName,
         BigDecimal quoteAmount,
         String quoteSummary,
+        Long attachmentId,
         String attachmentHash,
         Long submittedByUserId,
         String submittedByRoleKey,

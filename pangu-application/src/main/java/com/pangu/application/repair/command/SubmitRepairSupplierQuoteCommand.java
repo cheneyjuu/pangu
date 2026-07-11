@@ -8,9 +8,8 @@ public record SubmitRepairSupplierQuoteCommand(
         String supplierName,
         BigDecimal quoteAmount,
         String quoteSummary,
-        String attachmentHash,
+        Long attachmentId,
         String originalSource,
-        String originalAttachmentHash,
         String confirmationStatus,
         String remark
 ) {

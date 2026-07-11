@@ -76,6 +76,9 @@ public class SupplierActivationService {
     public SupplierActivationInvitation ensureContactInvitation(
             Long tenantId, Long supplierDeptId, Long workOrderId, Long invitedByUserId) {
         RepairSupplierOrganization supplier = requireSupplier(tenantId, supplierDeptId);
+        if (!hasText(supplier.contactName()) || !hasText(supplier.contactPhone())) {
+            return null;
+        }
         validateContact(supplier.contactName(), supplier.contactPhone());
         if (repairRepository.supplierHasActiveIdentity(supplierDeptId, supplier.contactPhone())) {
             return null;
@@ -228,6 +231,10 @@ public class SupplierActivationService {
 
     private static String optionalText(String value, String fallback) {
         return value == null || value.isBlank() ? fallback : value.trim();
+    }
+
+    private static boolean hasText(String value) {
+        return value != null && !value.isBlank();
     }
 
     private static String effectiveScope(SysRole role) {

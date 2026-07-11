@@ -12,6 +12,7 @@ import com.pangu.domain.model.repair.RepairLocationOption;
 import com.pangu.domain.model.repair.RepairLocalDecision;
 import com.pangu.domain.model.repair.RepairLocalDecisionScopeType;
 import com.pangu.domain.model.repair.RepairQuoteConfirmationStatus;
+import com.pangu.domain.model.repair.RepairQuoteInvitation;
 import com.pangu.domain.model.repair.RepairQuoteSubmissionSource;
 import com.pangu.domain.model.repair.RepairSource;
 import com.pangu.domain.model.repair.RepairSpaceScope;
@@ -174,6 +175,15 @@ public class RepairWorkOrderRepositoryImpl implements RepairWorkOrderRepository 
     }
 
     @Override
+    public List<RepairQuoteInvitation> listQuoteInvitations(Long workOrderId, Long tenantId) {
+        return mapper.listQuoteInvitations(workOrderId, tenantId).stream()
+                .map(row -> new RepairQuoteInvitation(
+                        row.getQuoteInvitationId(), row.getWorkOrderId(), row.getSupplierDeptId(),
+                        row.getSupplierName(), row.getStatus(), row.getDeadline(), row.getSentAt()))
+                .toList();
+    }
+
+    @Override
     public Optional<String> findSupplierLegalName(Long supplierDeptId) {
         return Optional.ofNullable(mapper.findSupplierLegalName(supplierDeptId));
     }
@@ -206,11 +216,18 @@ public class RepairWorkOrderRepositoryImpl implements RepairWorkOrderRepository 
                                              String contactName,
                                              String contactPhone,
                                              Long requestedByUserId) {
-        Long supplierDeptId = mapper.findSupplierDeptIdByUscc(unifiedSocialCreditCode);
+        Long supplierDeptId = unifiedSocialCreditCode == null
+                ? null
+                : mapper.findSupplierDeptIdByUscc(unifiedSocialCreditCode);
+        if (supplierDeptId == null) {
+            supplierDeptId = mapper.findProvisionalSupplierDeptId(tenantId, legalName);
+        }
         if (supplierDeptId == null) {
             supplierDeptId = mapper.nextDeptId();
             mapper.insertSupplierDept(supplierDeptId, legalName);
             mapper.insertSupplierProfile(supplierDeptId, unifiedSocialCreditCode, legalName, contactName, contactPhone);
+        } else {
+            mapper.completeSupplierProfile(supplierDeptId, unifiedSocialCreditCode, contactName, contactPhone);
         }
         mapper.insertSupplierTenantRelation(tenantId, supplierDeptId, requestedByUserId);
         return supplierDeptId;
@@ -635,6 +652,7 @@ public class RepairWorkOrderRepositoryImpl implements RepairWorkOrderRepository 
                 row.getRiskLevel(),
                 row.getSurveySummary(),
                 row.getPlanBudget(),
+                row.getPublicCeilingPrice(),
                 row.getFundSource(),
                 flag(row.getFundGateBlocked()),
                 row.getSatisfactionScore(),
@@ -669,6 +687,7 @@ public class RepairWorkOrderRepositoryImpl implements RepairWorkOrderRepository 
         row.setRiskLevel(domain.riskLevel());
         row.setSurveySummary(domain.surveySummary());
         row.setPlanBudget(domain.planBudget());
+        row.setPublicCeilingPrice(domain.publicCeilingPrice());
         row.setFundSource(domain.fundSource());
         row.setFundGateBlocked(flag(domain.fundGateBlocked()));
         row.setSatisfactionScore(domain.satisfactionScore());
@@ -701,6 +720,7 @@ public class RepairWorkOrderRepositoryImpl implements RepairWorkOrderRepository 
                 row.getSupplierName(),
                 row.getQuoteAmount(),
                 row.getQuoteSummary(),
+                row.getAttachmentId(),
                 row.getAttachmentHash(),
                 row.getSubmittedByUserId(),
                 row.getSubmittedByRoleKey(),
@@ -722,7 +742,12 @@ public class RepairWorkOrderRepositoryImpl implements RepairWorkOrderRepository 
                 row.getLegalName(),
                 row.getContactName(),
                 row.getContactPhone(),
-                row.getVerificationStatus());
+                row.getVerificationStatus(),
+                row.getAccountStatus(),
+                row.getActiveAccountCount(),
+                row.getLoginPhone(),
+                row.getActivationInvitationId(),
+                row.getActivationInvitationExpiresAt());
     }
 
     private SupplierActivationInvitation toDomain(SupplierActivationInvitationRow row) {
@@ -762,6 +787,7 @@ public class RepairWorkOrderRepositoryImpl implements RepairWorkOrderRepository 
         row.setSupplierName(domain.supplierName());
         row.setQuoteAmount(domain.quoteAmount());
         row.setQuoteSummary(domain.quoteSummary());
+        row.setAttachmentId(domain.attachmentId());
         row.setAttachmentHash(domain.attachmentHash());
         row.setSubmittedByUserId(domain.submittedByUserId());
         row.setSubmittedByRoleKey(domain.submittedByRoleKey());

@@ -54,6 +54,7 @@ public final class CommunitySettingsCommands {
     public record Rules(
             Long ruleConfigId,
             String sharedOwnershipStrategy,
+            Boolean repairEstimateRequired,
             Boolean fundManagedEnabled,
             String financialControlConfigId,
             Integer quarterlyDisclosureDeadlineDay

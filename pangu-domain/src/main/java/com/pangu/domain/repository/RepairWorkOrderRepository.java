@@ -10,6 +10,7 @@ import com.pangu.domain.model.repair.RepairDecisionRoom;
 import com.pangu.domain.model.repair.RepairFrameworkRelation;
 import com.pangu.domain.model.repair.RepairLocationOption;
 import com.pangu.domain.model.repair.RepairLocalDecision;
+import com.pangu.domain.model.repair.RepairQuoteInvitation;
 import com.pangu.domain.model.repair.RepairSpaceScope;
 import com.pangu.domain.model.repair.RepairSupplierQuote;
 import com.pangu.domain.model.repair.RepairSupplierOrganization;
@@ -83,6 +84,8 @@ public interface RepairWorkOrderRepository {
     int countQuotes(Long workOrderId, Long tenantId);
 
     int countQuoteInvitations(Long workOrderId, Long tenantId);
+
+    List<RepairQuoteInvitation> listQuoteInvitations(Long workOrderId, Long tenantId);
 
     Optional<String> findSupplierLegalName(Long supplierDeptId);
 

@@ -13,6 +13,7 @@ public class RepairSupplierQuoteRow {
     private String supplierName;
     private BigDecimal quoteAmount;
     private String quoteSummary;
+    private Long attachmentId;
     private String attachmentHash;
     private Long submittedByUserId;
     private String submittedByRoleKey;

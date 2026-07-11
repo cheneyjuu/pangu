@@ -46,6 +46,7 @@ public class TenantCommunityRow {
     private String transitionOrgStatus;
     private Long ruleConfigId;
     private String sharedOwnershipStrategy;
+    private Integer repairEstimateRequired;
     private Integer fundManagedEnabled;
     private String financialControlConfigId;
     private Integer quarterlyDisclosureDeadlineDay;

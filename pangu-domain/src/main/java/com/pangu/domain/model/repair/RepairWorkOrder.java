@@ -28,6 +28,7 @@ public record RepairWorkOrder(
         String riskLevel,
         String surveySummary,
         BigDecimal planBudget,
+        BigDecimal publicCeilingPrice,
         String fundSource,
         boolean fundGateBlocked,
         Integer satisfactionScore,
@@ -45,7 +46,7 @@ public record RepairWorkOrder(
                 spaceScope, nextStatus, reporterAccountId, reporterUid, reporterUserId,
                 roomId, buildingId, locationText, nextNeedManualLocation, nextLocationLocked,
                 assignedUserId, assigneeRoleKey, assigneeDeptId, category, riskLevel,
-                surveySummary, planBudget, fundSource, nextFundGateBlocked,
+                surveySummary, planBudget, publicCeilingPrice, fundSource, nextFundGateBlocked,
                 satisfactionScore, satisfactionComment, version, createTime, updateTime);
     }
 
@@ -60,7 +61,7 @@ public record RepairWorkOrder(
                 spaceScope, nextStatus, reporterAccountId, reporterUid, reporterUserId,
                 nextRoomId, nextBuildingId, nextLocationText, nextNeedManualLocation,
                 nextLocationLocked, assignedUserId, assigneeRoleKey, assigneeDeptId,
-                category, riskLevel, surveySummary, planBudget, fundSource, nextFundGateBlocked,
+                category, riskLevel, surveySummary, planBudget, publicCeilingPrice, fundSource, nextFundGateBlocked,
                 satisfactionScore, satisfactionComment, version, createTime, updateTime);
     }
 
@@ -72,7 +73,7 @@ public record RepairWorkOrder(
                 spaceScope, nextStatus, reporterAccountId, reporterUid, reporterUserId,
                 roomId, buildingId, locationText, needManualLocation, locationLocked,
                 nextAssignedUserId, nextAssigneeRoleKey, nextAssigneeDeptId, category,
-                riskLevel, surveySummary, planBudget, fundSource, fundGateBlocked,
+                riskLevel, surveySummary, planBudget, publicCeilingPrice, fundSource, fundGateBlocked,
                 satisfactionScore, satisfactionComment, version, createTime, updateTime);
     }
 
@@ -83,18 +84,19 @@ public record RepairWorkOrder(
                 spaceScope, nextStatus, reporterAccountId, reporterUid, reporterUserId,
                 roomId, buildingId, locationText, needManualLocation, locationLocked,
                 assignedUserId, assigneeRoleKey, assigneeDeptId, category, nextRiskLevel,
-                nextSurveySummary, planBudget, fundSource, fundGateBlocked,
+                nextSurveySummary, planBudget, publicCeilingPrice, fundSource, fundGateBlocked,
                 satisfactionScore, satisfactionComment, version, createTime, updateTime);
     }
 
     public RepairWorkOrder withPlan(BigDecimal nextPlanBudget,
+                                    BigDecimal nextPublicCeilingPrice,
                                     String nextFundSource,
                                     RepairWorkOrderStatus nextStatus) {
         return new RepairWorkOrder(workOrderId, orderNo, tenantId, title, description, source,
                 spaceScope, nextStatus, reporterAccountId, reporterUid, reporterUserId,
                 roomId, buildingId, locationText, needManualLocation, locationLocked,
                 assignedUserId, assigneeRoleKey, assigneeDeptId, category, riskLevel,
-                surveySummary, nextPlanBudget, nextFundSource, fundGateBlocked,
+                surveySummary, nextPlanBudget, nextPublicCeilingPrice, nextFundSource, fundGateBlocked,
                 satisfactionScore, satisfactionComment, version, createTime, updateTime);
     }
 
@@ -105,7 +107,7 @@ public record RepairWorkOrder(
                 spaceScope, nextStatus, reporterAccountId, reporterUid, reporterUserId,
                 roomId, buildingId, locationText, needManualLocation, locationLocked,
                 assignedUserId, assigneeRoleKey, assigneeDeptId, category, riskLevel,
-                surveySummary, planBudget, fundSource, fundGateBlocked,
+                surveySummary, planBudget, publicCeilingPrice, fundSource, fundGateBlocked,
                 nextSatisfactionScore, nextSatisfactionComment, version, createTime, updateTime);
     }
 }

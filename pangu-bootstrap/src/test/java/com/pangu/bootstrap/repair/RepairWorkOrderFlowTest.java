@@ -76,6 +76,7 @@ public class RepairWorkOrderFlowTest {
 
     @AfterEach
     public void clean() {
+        jdbcTemplate.update("UPDATE t_tenant_community SET repair_estimate_required = 0 WHERE tenant_id = ?", TENANT);
         jdbcTemplate.update("DELETE FROM t_repair_work_order WHERE title LIKE 'IT-报修-%'");
         jdbcTemplate.update("DELETE FROM t_supplier_activation_invitation WHERE supplier_dept_id IN (SELECT dept_id FROM sys_dept WHERE dept_name LIKE 'IT-供应商-%')");
         jdbcTemplate.update("DELETE FROM sys_user_role WHERE user_id IN (SELECT user_id FROM sys_user WHERE dept_id IN (SELECT dept_id FROM sys_dept WHERE dept_name LIKE 'IT-供应商-%'))");
@@ -99,7 +100,7 @@ public class RepairWorkOrderFlowTest {
     }
 
     @Test
-    public void ownerPrivateRepair_propertyAndCommittee_completeAndEvaluate() throws Exception {
+    public void ownerPrivateRepair_propertyPackage_routesDirectlyAndCompletes() throws Exception {
         long opid = jdbcTemplate.queryForObject("""
                 SELECT opid FROM c_owner_property
                 WHERE uid = ? AND tenant_id = ?
@@ -148,13 +149,17 @@ public class RepairWorkOrderFlowTest {
                 .andExpect(jsonPath("$.data.status", is("SURVEY_COMPLETED")))
                 .andExpect(jsonPath("$.data.surveySummary", is("厨房立管接头老化，需更换阀门并恢复墙面")))
                 .andExpect(jsonPath("$.data.riskLevel", is("LOW")));
-        action(staffToken, id, "submit-plan", Map.of(
-                "planBudget", new BigDecimal("600.00"),
+        actionRaw(staffToken, id, "submit-plan", Map.of(
+                "publicCeilingPrice", new BigDecimal("500.00"),
                 "fundSource", "PROPERTY_INTERNAL",
-                "remark", "小修小补"))
-                .andExpect(jsonPath("$.data.status", is("PLAN_SUBMITTED")));
-        action(managerToken, id, "route-plan", Map.of("remark", "包干内维修"))
-                .andExpect(jsonPath("$.data.status", is("APPROVED")));
+                "remark", "错误设置供应商限价"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.msg", is("物业包干维修不进入供应商邀价，不能设置公开最高限价")));
+        action(staffToken, id, "submit-plan", Map.of(
+                "fundSource", "PROPERTY_INTERNAL",
+                "remark", "不要求内部估算的小修小补"))
+                .andExpect(jsonPath("$.data.status", is("APPROVED")))
+                .andExpect(jsonPath("$.data.planBudget").doesNotExist());
         action(staffToken, id, "start-work", Map.of("remark", "开始维修"))
                 .andExpect(jsonPath("$.data.status", is("IN_PROGRESS")));
         action(staffToken, id, "submit-acceptance", Map.of("remark", "完工提交验收"))
@@ -372,16 +377,32 @@ public class RepairWorkOrderFlowTest {
                 "evidenceImageAttachmentIds", List.of(publicSurveyImageId),
                 "remark", "勘验完成"))
                 .andExpect(jsonPath("$.data.status", is("SURVEY_COMPLETED")));
+        jdbcTemplate.update("UPDATE t_tenant_community SET repair_estimate_required = 1 WHERE tenant_id = ?", TENANT);
+        mockMvc.perform(get("/api/v1/admin/repair-work-orders/planning-policy")
+                        .header("Authorization", "Bearer " + staffToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.internalEstimateRequired", is(true)));
+        actionRaw(staffToken, id, "submit-plan", Map.of(
+                "fundSource", "BUILDING_MAINTENANCE_FUND",
+                "remark", "缺少内部估算"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.msg", is("当前社区要求填写物业内部估算金额")));
+        jdbcTemplate.update("UPDATE t_tenant_community SET repair_estimate_required = 0 WHERE tenant_id = ?", TENANT);
         action(staffToken, id, "submit-plan", Map.of(
                 "planBudget", new BigDecimal("9000.00"),
-                "fundSource", "MAINTENANCE_FUND",
-                "remark", "维修范围及估算已确认"))
-                .andExpect(jsonPath("$.data.status", is("PLAN_SUBMITTED")));
+                "publicCeilingPrice", new BigDecimal("8500.00"),
+                "fundSource", "BUILDING_MAINTENANCE_FUND",
+                "remark", "维修范围及询价口径已确认"))
+                .andExpect(jsonPath("$.data.status", is("PLAN_SUBMITTED")))
+                .andExpect(jsonPath("$.data.planBudget", is(9000.0)))
+                .andExpect(jsonPath("$.data.publicCeilingPrice", is(8500.0)));
         long supplierA = registerSupplier(managerToken, "IT-供应商-甲-" + System.nanoTime(), "91310000A000000001");
         long supplierB = registerSupplier(managerToken, "IT-供应商-乙-" + System.nanoTime(), "91310000A000000002");
-        long supplierC = registerSupplier(managerToken, "IT-供应商-丙-" + System.nanoTime(), "91310000A000000003");
-        jdbcTemplate.update("UPDATE t_supplier_org_profile SET verification_status = 'VERIFIED' WHERE supplier_dept_id IN (?, ?, ?)",
-                supplierA, supplierB, supplierC);
+        String provisionalSupplierName = "IT-供应商-丙-" + System.nanoTime();
+        long supplierC = registerMinimalSupplier(managerToken, provisionalSupplierName);
+        assertEquals(supplierC, registerMinimalSupplier(managerToken, provisionalSupplierName));
+        jdbcTemplate.update("UPDATE t_supplier_org_profile SET verification_status = 'VERIFIED' WHERE supplier_dept_id IN (?, ?)",
+                supplierA, supplierB);
         jdbcTemplate.update("""
                 UPDATE t_supplier_tenant_relation
                 SET relation_type = 'FRAMEWORK', service_category = 'PUBLIC_FACILITY',
@@ -402,12 +423,45 @@ public class RepairWorkOrderFlowTest {
                 "deadline", LocalDateTime.now().plusDays(3).toString(),
                 "remark", "向三家供应商发出邀价"))
                 .andExpect(jsonPath("$.data.status", is("QUOTE_COLLECTING")));
+        mockMvc.perform(get("/api/v1/admin/repair-work-orders/" + id + "/quote-invitations")
+                        .header("Authorization", "Bearer " + managerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()", is(3)))
+                .andExpect(jsonPath("$.data[*].supplierDeptId", hasItem((int) supplierA)));
+        actionRaw(managerToken, id, "quote-invitations", Map.of(
+                "supplierDeptIds", List.of(supplierA),
+                "remark", "重复邀请"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code", is(42501)));
+        long supplierD = registerMinimalSupplier(managerToken, "IT-供应商-追加-" + System.nanoTime());
+        actionRaw(managerToken, id, "quote-invitations", Map.of(
+                "supplierDeptIds", List.of(supplierD)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code", is(42501)));
+        action(managerToken, id, "quote-invitations", Map.of(
+                "supplierDeptIds", List.of(supplierD),
+                "remark", "原受邀供应商响应不足，追加询价"))
+                .andExpect(jsonPath("$.data.status", is("QUOTE_COLLECTING")));
+        mockMvc.perform(get("/api/v1/admin/repair-work-orders/" + id + "/quote-invitations")
+                        .header("Authorization", "Bearer " + managerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()", is(4)));
+        assertEquals(0, jdbcTemplate.queryForObject("""
+                SELECT COUNT(1) FROM t_supplier_activation_invitation
+                WHERE supplier_dept_id = ?
+                """, Integer.class, supplierC));
 
         Long supplierInvitationId = jdbcTemplate.queryForObject("""
                 SELECT invitation_id
                 FROM t_supplier_activation_invitation
                 WHERE supplier_dept_id = ? AND contact_phone = '13800000931' AND status = 'PENDING'
                 """, Long.class, supplierA);
+        JsonNode pendingAccount = supplierOrganization(managerToken, supplierA);
+        assertEquals("PENDING_ACTIVATION", pendingAccount.path("accountStatus").asText());
+        assertEquals(0, pendingAccount.path("activeAccountCount").asInt());
+        assertEquals(supplierInvitationId.longValue(), pendingAccount.path("activationInvitationId").asLong());
+        assertEquals("CONTACT_MISSING", supplierOrganization(managerToken, supplierC)
+                .path("accountStatus").asText());
         mockMvc.perform(post("/api/v1/supplier-activation/activate")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(Map.of(
@@ -418,6 +472,10 @@ public class RepairWorkOrderFlowTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.supplierDeptId", is((int) supplierA)))
                 .andExpect(jsonPath("$.data.roleKey", is("SERVICE_PROVIDER_STAFF")));
+        JsonNode activatedAccount = supplierOrganization(managerToken, supplierA);
+        assertEquals("ACTIVATED", activatedAccount.path("accountStatus").asText());
+        assertEquals(1, activatedAccount.path("activeAccountCount").asInt());
+        assertEquals("13800000931", activatedAccount.path("loginPhone").asText());
         mockMvc.perform(post("/api/v1/supplier-activation/activate")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(Map.of(
@@ -438,20 +496,40 @@ public class RepairWorkOrderFlowTest {
         mockMvc.perform(get("/api/v1/supplier/repair-work-orders")
                         .header("Authorization", "Bearer " + supplierToken))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data[*].workOrderId", hasItem((int) id)));
+                .andExpect(jsonPath("$.data[*].workOrderId", hasItem((int) id)))
+                .andExpect(jsonPath("$.data[0].planBudget").doesNotExist())
+                .andExpect(jsonPath("$.data[0].fundSource").doesNotExist())
+                .andExpect(jsonPath("$.data[0].publicCeilingPrice", is(8500.0)));
+        MockMultipartFile supplierQuoteFile = new MockMultipartFile(
+                "file", "供应商报价.pdf", "application/pdf", new byte[2048]);
+        String supplierQuoteUpload = mockMvc.perform(multipart(
+                        "/api/v1/supplier/repair-work-orders/" + id + "/quote-attachments")
+                        .file(supplierQuoteFile)
+                        .header("Authorization", "Bearer " + supplierToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.attachmentKind", is("QUOTE_DOCUMENT")))
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+        long supplierQuoteAttachmentId = objectMapper.readTree(supplierQuoteUpload)
+                .path("data").path("attachmentId").asLong();
         mockMvc.perform(post("/api/v1/supplier/repair-work-orders/" + id + "/quote")
                         .header("Authorization", "Bearer " + supplierToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(Map.of(
                                 "quoteAmount", new BigDecimal("8000.00"),
                                 "quoteSummary", "供应商在线结构化报价",
-                                "attachmentHash", "supplier-online-quote-hash",
+                                "attachmentId", supplierQuoteAttachmentId,
                                 "remark", "供应商本人提交"))))
-                .andExpect(status().isOk());
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.planBudget").doesNotExist())
+                .andExpect(jsonPath("$.data.fundSource").doesNotExist())
+                .andExpect(jsonPath("$.data.publicCeilingPrice", is(8500.0)));
         assertEquals("SUPPLIER_ONLINE", jdbcTemplate.queryForObject("""
                 SELECT submission_source FROM t_repair_supplier_quote
                 WHERE work_order_id = ? AND supplier_dept_id = ?
                 """, String.class, id, supplierA));
+        assertEquals("BOUND", jdbcTemplate.queryForObject(
+                "SELECT status FROM t_repair_attachment WHERE attachment_id = ?",
+                String.class, supplierQuoteAttachmentId));
 
         String secondInvitationResponse = mockMvc.perform(post(
                         "/api/v1/admin/supplier-organizations/" + supplierA + "/activation-invitations")
@@ -526,6 +604,12 @@ public class RepairWorkOrderFlowTest {
                 "recommendationReason", "三家比价后，甲公司报价最低且材料齐全",
                 "remark", "物业推荐甲公司"))
                 .andExpect(jsonPath("$.data.status", is("SUPPLIER_RECOMMENDED")));
+
+        actionRaw(managerToken, id, "start-assembly-decision", Map.of(
+                "packageId", 1,
+                "remark", "错误尝试关联业主大会"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.msg", is("仅小区公共维修资金或公共收益维修可以关联业主大会表决")));
 
         action(ownerRepToken, id, "start-local-decision", Map.of(
                 "scopeType", "BUILDING",
@@ -776,13 +860,13 @@ public class RepairWorkOrderFlowTest {
                                                                            long id,
                                                                            long supplierDeptId,
                                                                            String amount) throws Exception {
+        long quoteAttachmentId = readyAttachment(id, "QUOTE_DOCUMENT", "application/pdf", 2048L);
         return action(token, id, "supplier-quotes", Map.of(
                 "supplierDeptId", supplierDeptId,
                 "quoteAmount", new BigDecimal(amount),
                 "quoteSummary", "维修报价",
-                "attachmentHash", "supplier-" + supplierDeptId + "-quote-hash",
+                "attachmentId", quoteAttachmentId,
                 "originalSource", "PAPER",
-                "originalAttachmentHash", "supplier-" + supplierDeptId + "-original-hash",
                 "confirmationStatus", "OFFLINE_EVIDENCE_VERIFIED",
                 "remark", "物业代录报价"));
     }
@@ -799,6 +883,29 @@ public class RepairWorkOrderFlowTest {
                 .andExpect(status().isCreated())
                 .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
         return objectMapper.readTree(response).path("data").asLong();
+    }
+
+    private long registerMinimalSupplier(String token, String legalName) throws Exception {
+        String response = mockMvc.perform(post("/api/v1/admin/supplier-organizations")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("legalName", legalName))))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+        return objectMapper.readTree(response).path("data").asLong();
+    }
+
+    private JsonNode supplierOrganization(String token, long supplierDeptId) throws Exception {
+        String response = mockMvc.perform(get("/api/v1/admin/supplier-organizations")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+        for (JsonNode supplier : objectMapper.readTree(response).path("data")) {
+            if (supplier.path("supplierDeptId").asLong() == supplierDeptId) {
+                return supplier;
+            }
+        }
+        throw new AssertionError("未找到供应商 supplierDeptId=" + supplierDeptId);
     }
 
     private Map<String, Object> signature(String partyType, String signerName) {

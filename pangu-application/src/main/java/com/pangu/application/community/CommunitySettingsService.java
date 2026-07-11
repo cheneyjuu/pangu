@@ -342,7 +342,7 @@ public class CommunitySettingsService {
                 str(cmd.currentCommitteeTermName(), c.currentCommitteeTermName()),
                 str(cmd.transitionOrgType(), c.transitionOrgType()),
                 str(cmd.transitionOrgStatus(), c.transitionOrgStatus()),
-                c.ruleConfigId(), c.sharedOwnershipStrategy(), c.fundManagedEnabled(),
+                c.ruleConfigId(), c.sharedOwnershipStrategy(), c.repairEstimateRequired(), c.fundManagedEnabled(),
                 c.financialControlConfigId(), c.quarterlyDisclosureDeadlineDay(),
                 c.statisticsVersion(), c.statisticsUpdatedAt(), c.governanceStatus(), c.status(), c.updateTime());
     }
@@ -369,7 +369,8 @@ public class CommunitySettingsService {
                 nonNegative(cmd.plotRatio(), c.plotRatio(), "plotRatio"),
                 c.ownersAssemblyEstablished(), c.committeeEstablished(), c.currentCommitteeTermName(),
                 c.transitionOrgType(), c.transitionOrgStatus(), c.ruleConfigId(), c.sharedOwnershipStrategy(),
-                c.fundManagedEnabled(), c.financialControlConfigId(), c.quarterlyDisclosureDeadlineDay(),
+                c.repairEstimateRequired(), c.fundManagedEnabled(), c.financialControlConfigId(),
+                c.quarterlyDisclosureDeadlineDay(),
                 c.statisticsVersion(), c.statisticsUpdatedAt(), c.governanceStatus(), c.status(), c.updateTime());
     }
 
@@ -390,7 +391,8 @@ public class CommunitySettingsService {
                 c.excludedParkingArea(), c.publicArea(), c.buildingCount(), c.unitCount(), c.parkingSpaceCount(),
                 c.plotRatio(), c.ownersAssemblyEstablished(), c.committeeEstablished(), c.currentCommitteeTermName(),
                 c.transitionOrgType(), c.transitionOrgStatus(), val(cmd.ruleConfigId(), c.ruleConfigId()),
-                sharedStrategy, bool(cmd.fundManagedEnabled(), c.fundManagedEnabled()),
+                sharedStrategy, bool(cmd.repairEstimateRequired(), c.repairEstimateRequired()),
+                bool(cmd.fundManagedEnabled(), c.fundManagedEnabled()),
                 str(cmd.financialControlConfigId(), c.financialControlConfigId()),
                 nonNegative(cmd.quarterlyDisclosureDeadlineDay(), c.quarterlyDisclosureDeadlineDay(),
                         "quarterlyDisclosureDeadlineDay"),

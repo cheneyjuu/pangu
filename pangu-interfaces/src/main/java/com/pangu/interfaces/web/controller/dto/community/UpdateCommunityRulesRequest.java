@@ -9,13 +9,14 @@ import jakarta.validation.constraints.Size;
 public record UpdateCommunityRulesRequest(
         Long ruleConfigId,
         @Pattern(regexp = "REPRESENTATIVE_ONLY|PROPORTIONAL_SPLIT") String sharedOwnershipStrategy,
+        Boolean repairEstimateRequired,
         Boolean fundManagedEnabled,
         @Size(max = 64) String financialControlConfigId,
         @Min(1) @Max(31) Integer quarterlyDisclosureDeadlineDay
 ) {
     public CommunitySettingsCommands.Rules toCommand() {
         return new CommunitySettingsCommands.Rules(
-                ruleConfigId, sharedOwnershipStrategy, fundManagedEnabled,
+                ruleConfigId, sharedOwnershipStrategy, repairEstimateRequired, fundManagedEnabled,
                 financialControlConfigId, quarterlyDisclosureDeadlineDay);
     }
 }

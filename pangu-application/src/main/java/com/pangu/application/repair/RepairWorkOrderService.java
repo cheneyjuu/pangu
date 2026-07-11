@@ -45,6 +45,7 @@ import com.pangu.domain.model.repair.RepairLocationOption;
 import com.pangu.domain.model.repair.RepairLocalDecision;
 import com.pangu.domain.model.repair.RepairLocalDecisionScopeType;
 import com.pangu.domain.model.repair.RepairQuoteConfirmationStatus;
+import com.pangu.domain.model.repair.RepairQuoteInvitation;
 import com.pangu.domain.model.repair.RepairQuoteSubmissionSource;
 import com.pangu.domain.model.repair.RepairSource;
 import com.pangu.domain.model.repair.RepairSpaceScope;
@@ -59,6 +60,7 @@ import com.pangu.domain.model.repair.RepairWorkOrderEvent;
 import com.pangu.domain.model.repair.RepairWorkOrderStatus;
 import com.pangu.domain.model.user.WorkIdentityBuildingScope;
 import com.pangu.domain.repository.OwnersAssemblyRepository;
+import com.pangu.domain.repository.CommunitySettingsRepository;
 import com.pangu.domain.repository.RepairAttachmentRepository;
 import com.pangu.domain.repository.RepairWorkOrderRepository;
 import lombok.RequiredArgsConstructor;
@@ -95,8 +97,18 @@ public class RepairWorkOrderService {
     private static final int MAX_PAGE_SIZE = 100;
     private static final int MAX_EVIDENCE_IMAGE_COUNT = 3;
     private static final int MAX_EVIDENCE_IMAGE_BASE64_LENGTH = 2_800_000;
-    private static final BigDecimal GOVERNANCE_BUDGET_THRESHOLD = new BigDecimal("50000.00");
     private static final String FUND_PROPERTY_INTERNAL = "PROPERTY_INTERNAL";
+    private static final String FUND_PUBLIC_REVENUE = "PUBLIC_REVENUE";
+    private static final String FUND_BUILDING_MAINTENANCE = "BUILDING_MAINTENANCE_FUND";
+    private static final String FUND_COMMUNITY_MAINTENANCE = "COMMUNITY_MAINTENANCE_FUND";
+    private static final Set<String> REPAIR_FUND_SOURCES = Set.of(
+            FUND_PROPERTY_INTERNAL,
+            FUND_PUBLIC_REVENUE,
+            FUND_BUILDING_MAINTENANCE,
+            FUND_COMMUNITY_MAINTENANCE);
+    private static final Set<String> ASSEMBLY_FUND_SOURCES = Set.of(
+            FUND_PUBLIC_REVENUE,
+            FUND_COMMUNITY_MAINTENANCE);
     private static final BigDecimal TWO = new BigDecimal("2");
     private static final BigDecimal THREE = new BigDecimal("3");
 
@@ -121,6 +133,7 @@ public class RepairWorkOrderService {
     private final RepairWorkOrderRepository repository;
     private final RepairAttachmentRepository attachmentRepository;
     private final OwnersAssemblyRepository ownersAssemblyRepository;
+    private final CommunitySettingsRepository communitySettingsRepository;
     private final UserContextHolder userContextHolder;
     private final TenantTermLockGuard tenantTermLockGuard;
     private final ObjectMapper objectMapper;
@@ -146,7 +159,7 @@ public class RepairWorkOrderService {
                 RepairSpaceScope.PRIVATE, RepairWorkOrderStatus.SUBMITTED, ctx.accountId(),
                 ctx.uid(), null, property.roomId(), property.buildingId(), null,
                 false, false, null, null, null, trim(command.category()), null,
-                trim(command.evidenceText()), null, null, true, null, null, 0L, null, null));
+                trim(command.evidenceText()), null, null, null, true, null, null, 0L, null, null));
         event(inserted, "OWNER_SUBMIT_PRIVATE", null, inserted.status(), "业主提交私有空间报修");
         return inserted;
     }
@@ -173,7 +186,7 @@ public class RepairWorkOrderService {
                 RepairSpaceScope.PUBLIC, status, ctx.accountId(), ctx.uid(), null,
                 null, buildingId, trim(command.locationText()), needManualLocation, false,
                 null, null, null, trim(command.category()), null, trim(command.evidenceText()),
-                null, null, true, null, null, 0L, null, null));
+                null, null, null, true, null, null, 0L, null, null));
         event(inserted, "OWNER_SUBMIT_PUBLIC", null, inserted.status(),
                 needManualLocation ? "公共报修信息不足，进入现场补充" : "业主提交公共区域报修");
         return inserted;
@@ -198,7 +211,7 @@ public class RepairWorkOrderService {
                 RepairSpaceScope.PUBLIC, status, ctx.accountId(), null, ctx.userId(),
                 null, buildingId, trim(command.locationText()), needManualLocation, false,
                 null, null, null, trim(command.category()), null, trim(command.evidenceText()),
-                null, null, true, null, null, 0L, null, null));
+                null, null, null, true, null, null, 0L, null, null));
         event(inserted, "ADMIN_REGISTER_PUBLIC", null, inserted.status(),
                 needManualLocation ? "物业登记公共报修，待现场定位" : "物业登记公共报修");
         return inserted;
@@ -257,6 +270,12 @@ public class RepairWorkOrderService {
     }
 
     @Transactional(readOnly = true)
+    public RepairPlanningPolicy getPlanningPolicy() {
+        UserContext ctx = requireRole(FIELD_ROLES, "当前角色无权读取维修方案配置");
+        return planningPolicy(requireTenant(ctx));
+    }
+
+    @Transactional(readOnly = true)
     public List<RepairSupplierOrganization> listSupplierOrganizations() {
         UserContext ctx = requireSysContext();
         return repository.listSupplierOrganizations(requireTenant(ctx));
@@ -266,6 +285,12 @@ public class RepairWorkOrderService {
     public List<RepairSupplierQuote> listSupplierQuotes(Long workOrderId) {
         RepairWorkOrder order = findAdmin(workOrderId);
         return repository.listSupplierQuotes(order.workOrderId(), order.tenantId());
+    }
+
+    @Transactional(readOnly = true)
+    public List<RepairQuoteInvitation> listQuoteInvitations(Long workOrderId) {
+        RepairWorkOrder order = findAdmin(workOrderId);
+        return repository.listQuoteInvitations(order.workOrderId(), order.tenantId());
     }
 
     @Transactional(readOnly = true)
@@ -413,12 +438,31 @@ public class RepairWorkOrderService {
                     "未完成现场核验，禁止提交方案预算");
         }
         requireStatus(order, RepairWorkOrderStatus.SURVEY_COMPLETED, RepairWorkOrderStatus.PLAN_SUBMITTED);
-        if (command.planBudget() == null || command.planBudget().compareTo(BigDecimal.ZERO) < 0) {
-            throw new RepairWorkOrderApplicationException(PARAM_INVALID, "planBudget 必须为非负数");
+        RepairPlanningPolicy policy = planningPolicy(order.tenantId());
+        if (policy.internalEstimateRequired() && command.planBudget() == null) {
+            throw new RepairWorkOrderApplicationException(PARAM_INVALID, "当前社区要求填写物业内部估算金额");
         }
-        RepairWorkOrder next = order.withPlan(command.planBudget(), trim(command.fundSource()),
-                RepairWorkOrderStatus.PLAN_SUBMITTED);
-        return transition(order, next, "SUBMIT_PLAN", command.remark());
+        if (command.planBudget() != null && command.planBudget().compareTo(BigDecimal.ZERO) <= 0) {
+            throw new RepairWorkOrderApplicationException(PARAM_INVALID, "物业内部估算金额必须大于 0");
+        }
+        if (command.publicCeilingPrice() != null
+                && command.publicCeilingPrice().compareTo(BigDecimal.ZERO) <= 0) {
+            throw new RepairWorkOrderApplicationException(PARAM_INVALID, "公开最高限价必须大于 0");
+        }
+        String fundSource = requireAllowed(command.fundSource(), "fundSource", REPAIR_FUND_SOURCES);
+        if (FUND_PROPERTY_INTERNAL.equals(fundSource) && command.publicCeilingPrice() != null) {
+            throw new RepairWorkOrderApplicationException(PARAM_INVALID,
+                    "物业包干维修不进入供应商邀价，不能设置公开最高限价");
+        }
+        boolean directPropertyExecution = FUND_PROPERTY_INTERNAL.equals(fundSource);
+        RepairWorkOrderStatus nextStatus = directPropertyExecution
+                ? RepairWorkOrderStatus.APPROVED
+                : RepairWorkOrderStatus.PLAN_SUBMITTED;
+        RepairWorkOrder next = order.withPlan(command.planBudget(), command.publicCeilingPrice(),
+                fundSource, nextStatus);
+        return transition(order, next, "SUBMIT_PLAN", command.remark(), jsonPayload(Map.of(
+                "route", directPropertyExecution ? "DIRECT_PROPERTY_EXECUTION" : "SUPPLIER_SELECTION",
+                "fundSource", fundSource)));
     }
 
     @Transactional
@@ -437,17 +481,23 @@ public class RepairWorkOrderService {
         if (legalName.length() > 50) {
             throw new RepairWorkOrderApplicationException(PARAM_INVALID, "供应商名称不能超过 50 个字符");
         }
-        String uscc = requireText(command.unifiedSocialCreditCode(), "unifiedSocialCreditCode")
-                .toUpperCase();
-        if (!uscc.matches("[0-9A-Z]{18}")) {
+        String uscc = trim(command.unifiedSocialCreditCode());
+        if (uscc != null) {
+            uscc = uscc.toUpperCase();
+        }
+        if (uscc != null && !uscc.matches("[0-9A-Z]{18}")) {
             throw new RepairWorkOrderApplicationException(PARAM_INVALID, "统一社会信用代码必须为 18 位");
         }
-        String contactPhone = requireText(command.contactPhone(), "contactPhone");
-        if (!contactPhone.matches("1[3-9][0-9]{9}")) {
+        String contactName = trim(command.contactName());
+        if (contactName != null && contactName.length() > 80) {
+            throw new RepairWorkOrderApplicationException(PARAM_INVALID, "企业联系人不能超过 80 个字符");
+        }
+        String contactPhone = trim(command.contactPhone());
+        if (contactPhone != null && !contactPhone.matches("1[3-9][0-9]{9}")) {
             throw new RepairWorkOrderApplicationException(PARAM_INVALID, "联系人手机号格式不正确");
         }
         return repository.registerSupplierOrganization(requireTenant(ctx), legalName, uscc,
-                requireText(command.contactName(), "contactName"), contactPhone, ctx.userId());
+                contactName, contactPhone, ctx.userId());
     }
 
     @Transactional
@@ -460,6 +510,15 @@ public class RepairWorkOrderService {
                 : command.supplierDeptIds().stream().filter(java.util.Objects::nonNull).distinct().toList();
         if (supplierDeptIds.isEmpty() || supplierDeptIds.size() > 20) {
             throw new RepairWorkOrderApplicationException(PARAM_INVALID, "每次必须邀请 1 至 20 家供应商");
+        }
+        boolean appendInvitation = order.status() == RepairWorkOrderStatus.QUOTE_COLLECTING;
+        if (appendInvitation && trim(command.remark()) == null) {
+            throw new RepairWorkOrderApplicationException(PARAM_INVALID, "追加邀价必须填写原因");
+        }
+        Set<Long> existingSupplierDeptIds = repository.listQuoteInvitations(order.workOrderId(), order.tenantId())
+                .stream().map(RepairQuoteInvitation::supplierDeptId).collect(java.util.stream.Collectors.toSet());
+        if (supplierDeptIds.stream().anyMatch(existingSupplierDeptIds::contains)) {
+            throw new RepairWorkOrderApplicationException(PARAM_INVALID, "所选供应商中包含已发出邀价的企业");
         }
         for (Long supplierDeptId : supplierDeptIds) {
             repository.findSupplierLegalName(supplierDeptId)
@@ -474,7 +533,8 @@ public class RepairWorkOrderService {
         supplierDeptIds.forEach(supplierDeptId -> supplierActivationService.ensureContactInvitation(
                 order.tenantId(), supplierDeptId, order.workOrderId(), ctx.userId()));
         RepairWorkOrder next = order.withStatus(RepairWorkOrderStatus.QUOTE_COLLECTING, false, true, false);
-        return transition(order, next, "INVITE_REPAIR_SUPPLIERS", command.remark(), jsonPayload(Map.of(
+        return transition(order, next, appendInvitation ? "APPEND_REPAIR_SUPPLIERS" : "INVITE_REPAIR_SUPPLIERS",
+                command.remark(), jsonPayload(Map.of(
                 "supplierDeptIds", supplierDeptIds,
                 "invitationCount", supplierDeptIds.size())));
     }
@@ -511,10 +571,16 @@ public class RepairWorkOrderService {
         if (!supplierSubmission && confirmationStatus == RepairQuoteConfirmationStatus.ONLINE_CONFIRMED) {
             throw new RepairWorkOrderApplicationException(PARAM_INVALID, "物业代录不能标记为供应商在线确认");
         }
-        String attachmentHash = requireText(command.attachmentHash(), "attachmentHash");
-        String originalAttachmentHash = requireText(
-                command.originalAttachmentHash() == null ? command.attachmentHash() : command.originalAttachmentHash(),
-                "originalAttachmentHash");
+        if (command.attachmentId() == null) {
+            throw new RepairWorkOrderApplicationException(PARAM_INVALID, "报价原件附件必填");
+        }
+        List<RepairAttachment> quoteAttachments = readyAttachments(order, List.of(command.attachmentId()),
+                RepairAttachmentKind.QUOTE_DOCUMENT, 1, 1);
+        RepairAttachment quoteAttachment = quoteAttachments.getFirst();
+        if (supplierSubmission && !ctx.accountId().equals(quoteAttachment.uploadedByAccountId())) {
+            throw new RepairWorkOrderApplicationException(FORBIDDEN, "供应商只能提交本人上传的报价原件");
+        }
+        String attachmentHash = requireText(quoteAttachment.etag(), "报价原件 ETag");
         if (!supplierSubmission && trim(command.originalSource()) == null) {
             throw new RepairWorkOrderApplicationException(PARAM_INVALID, "物业代录必须记录原始报价来源");
         }
@@ -525,6 +591,7 @@ public class RepairWorkOrderService {
                 supplierName,
                 command.quoteAmount(),
                 trim(command.quoteSummary()),
+                quoteAttachment.attachmentId(),
                 attachmentHash,
                 ctx.userId(),
                 ctx.roleKey(),
@@ -535,8 +602,9 @@ public class RepairWorkOrderService {
                 submissionSource,
                 confirmationStatus,
                 trim(command.originalSource()),
-                originalAttachmentHash,
+                attachmentHash,
                 null));
+        bindAttachments(order, quoteAttachments, "SUBMIT_SUPPLIER_QUOTE");
         RepairWorkOrder next = order.withStatus(RepairWorkOrderStatus.QUOTE_SUBMITTED, false, true, false);
         return transition(order, next, "SUBMIT_SUPPLIER_QUOTE", command.remark(), jsonPayload(Map.of(
                 "quoteId", quote.quoteId(),
@@ -610,6 +678,10 @@ public class RepairWorkOrderService {
         UserContext ctx = requireRole(LOCAL_DECISION_ROLES, "当前角色无权发起楼栋维修接龙");
         RepairWorkOrder order = loadVisible(ctx, workOrderId);
         requireStatus(order, RepairWorkOrderStatus.SUPPLIER_RECOMMENDED);
+        if (!FUND_BUILDING_MAINTENANCE.equals(order.fundSource())) {
+            throw new RepairWorkOrderApplicationException(PARAM_INVALID,
+                    "仅使用楼栋专项维修资金的维修可以发起楼栋接龙");
+        }
         if (order.buildingId() == null) {
             throw new RepairWorkOrderApplicationException(LOCATION_NOT_VERIFIED, "接龙维修必须先绑定楼栋");
         }
@@ -739,6 +811,10 @@ public class RepairWorkOrderService {
         UserContext ctx = requireRole(SUPPLIER_RECOMMEND_ROLES, "当前角色无权关联业主大会表决包");
         RepairWorkOrder order = loadVisible(ctx, workOrderId);
         requireStatus(order, RepairWorkOrderStatus.SUPPLIER_RECOMMENDED);
+        if (!ASSEMBLY_FUND_SOURCES.contains(order.fundSource())) {
+            throw new RepairWorkOrderApplicationException(PARAM_INVALID,
+                    "仅小区公共维修资金或公共收益维修可以关联业主大会表决");
+        }
         if (command.packageId() == null) {
             throw new RepairWorkOrderApplicationException(PARAM_INVALID, "packageId 必填");
         }
@@ -853,19 +929,6 @@ public class RepairWorkOrderService {
                         "reviewMode", reviewMode,
                         "reviewedAmount", command.reviewedAmount(),
                         "conclusion", conclusion)));
-    }
-
-    @Transactional
-    public RepairWorkOrder routePlan(Long workOrderId, RepairActionCommand command) {
-        UserContext ctx = requireRole(MANAGER_ROLES, "当前角色无权进行方案路径判定");
-        RepairWorkOrder order = loadVisible(ctx, workOrderId);
-        requireStatus(order, RepairWorkOrderStatus.PLAN_SUBMITTED, RepairWorkOrderStatus.GOVERNANCE_PENDING);
-        assertHandoverUnlocked(order);
-        RepairWorkOrderStatus nextStatus = requiresGovernance(order)
-                ? RepairWorkOrderStatus.GOVERNANCE_PENDING
-                : RepairWorkOrderStatus.APPROVED;
-        return transition(order, order.withStatus(nextStatus, false, true, false),
-                "ROUTE_PLAN", command.remark());
     }
 
     @Transactional
@@ -1549,11 +1612,11 @@ public class RepairWorkOrderService {
                 });
     }
 
-    private boolean requiresGovernance(RepairWorkOrder order) {
-        BigDecimal budget = order.planBudget() == null ? BigDecimal.ZERO : order.planBudget();
-        String fundSource = order.fundSource() == null ? "" : order.fundSource();
-        return budget.compareTo(GOVERNANCE_BUDGET_THRESHOLD) >= 0
-                || !FUND_PROPERTY_INTERNAL.equals(fundSource);
+    private RepairPlanningPolicy planningPolicy(Long tenantId) {
+        boolean estimateRequired = communitySettingsRepository.findCommunity(tenantId)
+                .map(community -> community.repairEstimateRequired())
+                .orElse(false);
+        return new RepairPlanningPolicy(estimateRequired);
     }
 
     private RepairWorkOrder loadVisible(UserContext ctx, Long workOrderId) {
