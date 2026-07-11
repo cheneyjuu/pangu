@@ -11,6 +11,7 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
+import java.util.Optional;
 
 /**
  * {@link VoteItemRepository} 默认实现。
@@ -48,6 +49,17 @@ public class VoteItemRepositoryImpl implements VoteItemRepository {
                             + " targetId=" + item.getTargetId(), e);
         }
         return row.getVoteId();
+    }
+
+    @Override
+    public Optional<StoredVote> findActiveVote(Long subjectId, Long opid, Long targetId) {
+        return Optional.ofNullable(mapper.selectActiveVote(subjectId, opid, targetId))
+                .map(row -> new StoredVote(row.getVoteId(), VoteChannel.fromDbValue(row.getVoteChannel())));
+    }
+
+    @Override
+    public int invalidateVote(Long voteId, String invalidReason) {
+        return mapper.invalidateVote(voteId, invalidReason);
     }
 
     private VoteItem toDomain(VoteItemRow r) {

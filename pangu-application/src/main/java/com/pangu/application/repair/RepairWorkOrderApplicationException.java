@@ -10,13 +10,19 @@ public class RepairWorkOrderApplicationException extends RuntimeException {
         BUILDING_NOT_IN_SCOPE,
         INVALID_STATUS,
         LOCATION_NOT_VERIFIED,
-        HANDOVER_LOCKED
+        HANDOVER_LOCKED,
+        STORAGE_UNAVAILABLE
     }
 
     private final Reason reason;
 
     public RepairWorkOrderApplicationException(Reason reason, String message) {
         super(message);
+        this.reason = reason;
+    }
+
+    public RepairWorkOrderApplicationException(Reason reason, String message, Throwable cause) {
+        super(message, cause);
         this.reason = reason;
     }
 

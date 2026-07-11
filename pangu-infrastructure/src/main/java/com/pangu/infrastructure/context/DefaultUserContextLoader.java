@@ -79,8 +79,7 @@ public class DefaultUserContextLoader implements UserContextLoader {
             }
         }
 
-        // 街道办用户跨租户俯瞰：dept.tenant_id = NULL（V1 设计 §4.2）
-        Long effectiveTenantId = row.getDeptTenantId() != null ? row.getDeptTenantId() : tenantIdHint;
+        Long effectiveTenantId = resolveSysUserTenant(row, tenantIdHint);
         // 管理端 authLevel 默认 L1（实名等级与认证等级语义不同，避免混用）
         AuthenticationLevel authLevel = AuthenticationLevel.L1;
 
@@ -99,6 +98,19 @@ public class DefaultUserContextLoader implements UserContextLoader {
                 authorizedBuildingIds,
                 authorizedBuildingScopes
         );
+    }
+
+    private Long resolveSysUserTenant(UserContextMapper.SysUserContextRow row, Long tenantIdHint) {
+        if (row.getDeptTenantId() != null) {
+            return row.getDeptTenantId();
+        }
+        if (tenantIdHint != null) {
+            return tenantIdHint;
+        }
+        if (row.getDeptCategory() == null || !"G".equals(row.getDeptCategory()) || row.getDeptId() == null) {
+            return null;
+        }
+        return userContextMapper.selectDefaultTenantByGovernmentDept(row.getDeptId());
     }
 
     private UserContext loadCUser(Long accountId, Long uid, Long tenantIdHint) {

@@ -1,8 +1,10 @@
 package com.pangu.domain.repository;
 
 import com.pangu.domain.model.voting.VoteItem;
+import com.pangu.domain.model.voting.VoteChannel;
 
 import java.util.List;
+import java.util.Optional;
 
 /**
  * 投票明细仓储端口（领域定义；实现在 infrastructure）。
@@ -33,6 +35,13 @@ public interface VoteItemRepository {
      */
     long insert(Long subjectId, VoteItem item, String signatureHash);
 
+    Optional<StoredVote> findActiveVote(Long subjectId, Long opid, Long targetId);
+
+    int invalidateVote(Long voteId, String invalidReason);
+
+    record StoredVote(Long voteId, VoteChannel voteChannel) {
+    }
+
     /** 业主对同一议题同一房产同一目标重复投票时抛出。 */
     class DuplicateVoteException extends RuntimeException {
         public DuplicateVoteException(String message, Throwable cause) {
@@ -40,4 +49,3 @@ public interface VoteItemRepository {
         }
     }
 }
-

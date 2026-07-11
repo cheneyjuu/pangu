@@ -1,7 +1,9 @@
 package com.pangu.infrastructure.persistence.mapper;
 
+import com.pangu.domain.model.user.WorkIdentityBuildingScope;
 import com.pangu.infrastructure.persistence.annotation.DataScope;
 import com.pangu.infrastructure.persistence.entity.AssignableUserRow;
+import com.pangu.infrastructure.persistence.entity.AssignedBuildingSummaryRow;
 import com.pangu.infrastructure.persistence.entity.BuildingAssignmentRow;
 import com.pangu.infrastructure.persistence.entity.BuildingOccupantRow;
 import org.apache.ibatis.annotations.Mapper;
@@ -46,6 +48,10 @@ public interface BuildingAssignmentMapper {
 
     /** 某用户已生效楼栋分配（status=1），按 building_id 排序。 */
     List<BuildingAssignmentRow> selectAssignmentsByUser(@Param("userId") Long userId);
+
+    /** 按授权 tenant/building 范围汇总楼栋户数。 */
+    List<AssignedBuildingSummaryRow> selectBuildingSummariesByScopes(
+            @Param("scopes") List<WorkIdentityBuildingScope> scopes);
 
     /** 查 (user_id, building_id) 已有记录（含已撤销），用于幂等 assign。 */
     BuildingAssignmentRow selectExisting(@Param("userId") Long userId,

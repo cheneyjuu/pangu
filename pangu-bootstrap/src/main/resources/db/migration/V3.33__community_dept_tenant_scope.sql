@@ -87,6 +87,10 @@ DECLARE
     v_operator_dept_cat CHAR(1);
     v_operator_dept_type SMALLINT;
 BEGIN
+    IF NEW.status <> 1 THEN
+        RETURN NEW;
+    END IF;
+
     SELECT dept_category, dept_type, parent_id
       INTO v_dept_cat, v_dept_type, v_parent_dept_id
       FROM sys_dept

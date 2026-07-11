@@ -33,7 +33,7 @@ public class SecurityConfig {
             // 请求授权配置
             .authorizeHttpRequests(authorize -> authorize
                 // 允许匿名公开登录接口
-                .requestMatchers("/api/v1/auth/login").permitAll()
+                .requestMatchers("/api/v1/auth/login", "/api/v1/supplier-activation/activate").permitAll()
                 // 其他接口均需要经过 JWT 身份认证
                 .anyRequest().authenticated()
             )

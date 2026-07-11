@@ -76,16 +76,25 @@ public record RepairWorkOrder(
                 satisfactionScore, satisfactionComment, version, createTime, updateTime);
     }
 
-    public RepairWorkOrder withPlan(String nextSurveySummary,
-                                    String nextRiskLevel,
-                                    BigDecimal nextPlanBudget,
+    public RepairWorkOrder withSurvey(String nextSurveySummary,
+                                      String nextRiskLevel,
+                                      RepairWorkOrderStatus nextStatus) {
+        return new RepairWorkOrder(workOrderId, orderNo, tenantId, title, description, source,
+                spaceScope, nextStatus, reporterAccountId, reporterUid, reporterUserId,
+                roomId, buildingId, locationText, needManualLocation, locationLocked,
+                assignedUserId, assigneeRoleKey, assigneeDeptId, category, nextRiskLevel,
+                nextSurveySummary, planBudget, fundSource, fundGateBlocked,
+                satisfactionScore, satisfactionComment, version, createTime, updateTime);
+    }
+
+    public RepairWorkOrder withPlan(BigDecimal nextPlanBudget,
                                     String nextFundSource,
                                     RepairWorkOrderStatus nextStatus) {
         return new RepairWorkOrder(workOrderId, orderNo, tenantId, title, description, source,
                 spaceScope, nextStatus, reporterAccountId, reporterUid, reporterUserId,
                 roomId, buildingId, locationText, needManualLocation, locationLocked,
-                assignedUserId, assigneeRoleKey, assigneeDeptId, category, nextRiskLevel,
-                nextSurveySummary, nextPlanBudget, nextFundSource, fundGateBlocked,
+                assignedUserId, assigneeRoleKey, assigneeDeptId, category, riskLevel,
+                surveySummary, nextPlanBudget, nextFundSource, fundGateBlocked,
                 satisfactionScore, satisfactionComment, version, createTime, updateTime);
     }
 

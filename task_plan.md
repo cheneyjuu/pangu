@@ -1,3 +1,28 @@
+# Task Plan: 供应商账号激活闭环
+
+## Current Goal (2026-07-11)
+补齐维修供应商“组织登记 -> 激活邀请 -> 个人账号激活 -> 绑定供应商组织 -> 独立登录供应商工作台 -> 在线报价”的真实闭环，并提供可验收的供应商账号。
+
+## Current Phases
+| # | 内容 | Status |
+|---|---|---|
+| 1 | 核验现有账号、身份、供应商组织与邀请模型 | complete |
+| 2 | 设计并实现后端激活契约、账号绑定和审计 | complete |
+| 3 | 准备供应商验收账号并贯通 Yaochi 登录/工作台 | complete |
+| 4 | 补测试并执行后端全量、前端构建和浏览器验收 | complete |
+| 5 | 完成缺口审计并更新业务文档 | complete |
+
+## Current Completion Criteria
+- 供应商组织与个人账号分离，不生成共享默认密码。
+- 激活邀请只存内部随机凭据哈希，公开激活校验邀请编号、受邀手机号、短信验证码、有效期、一次性使用和组织归属。
+- 激活后创建或复用自然人账号，绑定 `SERVICE_PROVIDER_STAFF` 与供应商组织。
+- 同一企业可有多个独立经办人账号；报价记录具体 `user_id`。
+- 未注册/未激活供应商不阻断物业代录报价路径。
+- 有一个明确的本地验收供应商账号可以登录 Yaochi 供应商工作台并看到邀价。
+- 后端测试、Yaochi 构建与浏览器流程均通过。
+
+## Historical Plan
+
 # Task Plan: 选举闭环对齐推进
 
 ## Goal
@@ -270,3 +295,34 @@
 ### Verification Result
 - `mvn -pl pangu-bootstrap -am -Dtest=WorkIdentityAdminTest,BuildingAssignmentTest,SwitchShadowMatrixTest,SysUserRoleTriggerTest -Dsurefire.failIfNoSpecifiedTests=false test`：35 tests，0 failures，0 errors。
 - `mvn test`：536 tests，0 failures，0 errors，1 skipped。
+
+## Current Goal: 报修初勘独立状态与现场证据
+
+### Phases
+| # | 内容 | Status |
+|---|---|---|
+| 1 | 对照原型和方案核验派单、初勘、方案估算状态 | complete |
+| 2 | 新增 `SURVEY_COMPLETED`、`submit-survey` 与现场照片/短视频校验 | complete |
+| 3 | 拆分 yaochi / shennong-app 各阶段动作 | complete |
+| 4 | 聚焦测试、全量测试、构建和 Chrome 页面回归 | complete |
+
+### Verification Result
+- `RepairWorkOrderFlowTest`：9 tests，0 failures，0 errors。
+- `mvn clean test`（沙箱外）：583 tests，0 failures，0 errors，1 skipped。
+- yaochi build、shennong-app type-check 和 Chrome 页面状态回归通过。
+
+## Current Goal: 报修现场附件接入私有 OSS
+
+### Phases
+| # | 内容 | Status |
+|---|---|---|
+| 1 | 核验现有附件字段、角色权限、状态机和 OSS 配置边界 | complete |
+| 2 | 实现 pangu multipart 接收与 Java OSS SDK `PutObject`、下载和删除 | complete |
+| 3 | shennong-app 接入 `Taro.uploadFile` 与业务动作绑定 | complete |
+| 4 | 聚焦测试、全量测试、小程序类型检查和构建 | complete |
+| 5 | 使用真实 AccessKey 完成 PUT/GET/DELETE 冒烟测试 | pending |
+
+### Verification Result
+- `mvn test`：584 tests，0 failures，0 errors，1 skipped。
+- shennong-app `npm run type-check`、`npm run build:weapp:dev` 通过。
+- 客户端直传已移除；真实 multipart 请求已进入 Java SDK `PutObject`，当前 AccessKey 返回 `SignatureDoesNotMatch`。更换有效 RAM AccessKey 后再完成 PUT/GET/DELETE 冒烟测试。

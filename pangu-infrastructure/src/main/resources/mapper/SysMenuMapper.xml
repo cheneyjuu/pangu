@@ -35,6 +35,11 @@
             FROM user_roles ur
             JOIN sys_role_permission rp ON rp.role_id = ur.role_id
         ),
+        navigation_policy AS (
+            SELECT COALESCE(MAX(r.navigation_isolated), 0) = 1 AS isolated
+            FROM user_roles ur
+            JOIN sys_role r ON r.role_id = ur.role_id
+        ),
         child_menus AS (
             SELECT DISTINCT m.*
             FROM sys_menu m
@@ -43,6 +48,18 @@
               AND m.status = '0'
               AND m.route_id IS NOT NULL
               AND (
+                (
+                    (SELECT isolated FROM navigation_policy)
+                    AND EXISTS (
+                        SELECT 1
+                        FROM user_roles ur
+                        JOIN sys_role_menu rm ON rm.role_id = ur.role_id
+                        WHERE rm.menu_id = m.menu_id
+                    )
+                )
+                OR (
+                    NOT (SELECT isolated FROM navigation_policy)
+                    AND (
                 EXISTS (
                     SELECT 1
                     FROM user_roles ur
@@ -76,6 +93,8 @@
                         SELECT 1
                         FROM user_roles ur
                         WHERE ur.role_key = ANY(regexp_split_to_array(m.required_role_keys, '\s*,\s*'))
+                    )
+                )
                     )
                 )
               )

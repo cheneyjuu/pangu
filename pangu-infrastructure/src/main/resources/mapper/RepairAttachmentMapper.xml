@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pangu.infrastructure.persistence.mapper.RepairAttachmentMapper">
+
+    <resultMap id="AttachmentMap" type="com.pangu.infrastructure.persistence.entity.RepairAttachmentRow">
+        <id property="attachmentId" column="attachment_id"/>
+        <result property="workOrderId" column="work_order_id"/>
+        <result property="tenantId" column="tenant_id"/>
+        <result property="attachmentKind" column="attachment_kind"/>
+        <result property="objectKey" column="object_key"/>
+        <result property="originalFileName" column="original_file_name"/>
+        <result property="contentType" column="content_type"/>
+        <result property="declaredSize" column="declared_size"/>
+        <result property="actualSize" column="actual_size"/>
+        <result property="etag" column="etag"/>
+        <result property="status" column="status"/>
+        <result property="uploadedByAccountId" column="uploaded_by_account_id"/>
+        <result property="boundAction" column="bound_action"/>
+        <result property="createTime" column="create_time"/>
+        <result property="confirmedAt" column="confirmed_at"/>
+    </resultMap>
+
+    <sql id="columns">
+        attachment_id, work_order_id, tenant_id, attachment_kind, object_key,
+        original_file_name, content_type, declared_size, actual_size, etag,
+        status, uploaded_by_account_id, bound_action, create_time, confirmed_at
+    </sql>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="attachmentId" keyColumn="attachment_id">
+        INSERT INTO t_repair_attachment (
+            work_order_id, tenant_id, attachment_kind, object_key, original_file_name,
+            content_type, declared_size, actual_size, etag, status,
+            uploaded_by_account_id, confirmed_at
+        ) VALUES (
+            #{workOrderId}, #{tenantId}, #{attachmentKind}, #{objectKey}, #{originalFileName},
+            #{contentType}, #{declaredSize}, #{actualSize}, #{etag}, #{status},
+            #{uploadedByAccountId}, #{confirmedAt}
+        )
+    </insert>
+
+    <select id="findById" resultMap="AttachmentMap">
+        SELECT <include refid="columns"/>
+        FROM t_repair_attachment
+        WHERE attachment_id = #{attachmentId}
+          AND work_order_id = #{workOrderId}
+          AND tenant_id = #{tenantId}
+    </select>
+
+    <select id="findByIds" resultMap="AttachmentMap">
+        SELECT <include refid="columns"/>
+        FROM t_repair_attachment
+        WHERE work_order_id = #{workOrderId}
+          AND tenant_id = #{tenantId}
+          AND attachment_id IN
+          <foreach collection="attachmentIds" item="id" open="(" separator="," close=")">
+              #{id}
+          </foreach>
+        ORDER BY attachment_id
+    </select>
+
+    <select id="countActive" resultType="int">
+        SELECT COUNT(*)
+        FROM t_repair_attachment
+        WHERE work_order_id = #{workOrderId}
+          AND tenant_id = #{tenantId}
+          AND attachment_kind = #{attachmentKind}
+          AND status = 'READY'
+    </select>
+
+    <update id="markBound">
+        UPDATE t_repair_attachment
+        SET status = 'BOUND', bound_action = #{boundAction}
+        WHERE work_order_id = #{workOrderId}
+          AND tenant_id = #{tenantId}
+          AND status = 'READY'
+          AND attachment_id IN
+          <foreach collection="attachmentIds" item="id" open="(" separator="," close=")">
+              #{id}
+          </foreach>
+    </update>
+
+    <delete id="deleteUnbound">
+        DELETE FROM t_repair_attachment
+        WHERE attachment_id = #{attachmentId}
+          AND work_order_id = #{workOrderId}
+          AND tenant_id = #{tenantId}
+          AND status IN ('PENDING', 'READY')
+    </delete>
+</mapper>

@@ -11,10 +11,14 @@ target/
 .project
 .settings/
 .factorypath
+docs/sample/
 
 # Log files
 *.log
 logs/
+
+# Local secrets
+.env.local
 
 # OS temporary files
 .DS_Store

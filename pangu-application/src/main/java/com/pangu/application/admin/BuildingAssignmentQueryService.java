@@ -3,6 +3,7 @@ package com.pangu.application.admin;
 import com.pangu.domain.context.UserContext;
 import com.pangu.domain.context.UserContextHolder;
 import com.pangu.domain.model.user.AssignableUser;
+import com.pangu.domain.model.user.AssignedBuildingSummary;
 import com.pangu.domain.model.user.BuildingAssignment;
 import com.pangu.domain.model.user.BuildingOccupancy;
 import com.pangu.domain.repository.BuildingAssignmentRepository;
@@ -105,6 +106,17 @@ public class BuildingAssignmentQueryService {
                     "userId 必填");
         }
         return repository.listAssignmentsByUser(userId);
+    }
+
+    @Transactional(readOnly = true)
+    public List<AssignedBuildingSummary> listCurrentUserBuildings() {
+        UserContext ctx = userContextHolder.current();
+        if (ctx == null || !ctx.isSysUser() || ctx.userId() == null) {
+            throw new BuildingAssignmentApplicationException(
+                    BuildingAssignmentApplicationException.Reason.FORBIDDEN,
+                    "未识别到管理端用户上下文，禁止查询我的责任田");
+        }
+        return repository.listBuildingSummaries(ctx.authorizedBuildingScopes());
     }
 
     /**

@@ -17,6 +17,7 @@ public final class RepairWorkOrderExceptionTranslator {
             case INVALID_STATUS -> RepairWorkOrderErrorCode.INVALID_STATUS;
             case LOCATION_NOT_VERIFIED -> RepairWorkOrderErrorCode.LOCATION_NOT_VERIFIED;
             case HANDOVER_LOCKED -> RepairWorkOrderErrorCode.HANDOVER_LOCKED;
+            case STORAGE_UNAVAILABLE -> RepairWorkOrderErrorCode.STORAGE_UNAVAILABLE;
         };
     }
 }

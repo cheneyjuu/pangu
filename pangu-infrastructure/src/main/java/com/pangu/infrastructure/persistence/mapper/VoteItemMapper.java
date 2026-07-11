@@ -24,6 +24,13 @@ public interface VoteItemMapper {
      */
     int insert(VoteItemRow row);
 
+    VoteItemRow selectActiveVote(@Param("subjectId") Long subjectId,
+                                 @Param("opid") Long opid,
+                                 @Param("targetId") Long targetId);
+
+    int invalidateVote(@Param("voteId") Long voteId,
+                       @Param("invalidReason") String invalidReason);
+
     /**
      * M4-2 逐户投票明细分页：以分母范围内应投房产为左表全量铺开，左连接投票表，
      * 未投房产以 {@code voteId/choice/votedAt = null} 出现。每户（opid）一行
@@ -50,4 +57,3 @@ public interface VoteItemMapper {
                              @Param("scope") int scope,
                              @Param("scopeReferenceId") Long scopeReferenceId);
 }
-

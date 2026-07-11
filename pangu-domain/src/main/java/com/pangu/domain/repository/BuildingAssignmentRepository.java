@@ -1,10 +1,13 @@
 package com.pangu.domain.repository;
 
 import com.pangu.domain.model.user.AssignableUser;
+import com.pangu.domain.model.user.AssignedBuildingSummary;
 import com.pangu.domain.model.user.BuildingAssignment;
 import com.pangu.domain.model.user.BuildingOccupant;
+import com.pangu.domain.model.user.WorkIdentityBuildingScope;
 
 import java.util.List;
+import java.util.Set;
 
 /**
  * 楼栋责任田分配仓储端口（Hexagonal Port）— 维护 {@code sys_user_building}。
@@ -64,6 +67,9 @@ public interface BuildingAssignmentRepository {
 
     /** 某用户已生效的楼栋分配列表（status=1）。 */
     List<BuildingAssignment> listAssignmentsByUser(Long userId);
+
+    /** 按当前身份授权楼栋范围汇总移动工作台需要的楼栋摘要。 */
+    List<AssignedBuildingSummary> listBuildingSummaries(Set<WorkIdentityBuildingScope> scopes);
 
     /**
      * 幂等分配楼栋：已生效→noop 返回 1；已撤销→复活返回 1；否则插入返回 1。

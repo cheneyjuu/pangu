@@ -3,6 +3,7 @@ package com.pangu.interfaces.web.controller;
 import com.pangu.application.admin.BuildingAssignmentApplicationService;
 import com.pangu.application.admin.BuildingAssignmentQueryService;
 import com.pangu.domain.model.user.AssignableUser;
+import com.pangu.domain.model.user.AssignedBuildingSummary;
 import com.pangu.domain.model.user.BuildingAssignment;
 import com.pangu.domain.model.user.BuildingOccupancy;
 import com.pangu.interfaces.web.controller.dto.admin.AssignBuildingRequest;
@@ -10,6 +11,7 @@ import com.pangu.interfaces.web.controller.dto.admin.AssignableUserResponse;
 import com.pangu.interfaces.web.controller.dto.admin.BuildingAssignmentResponse;
 import com.pangu.interfaces.web.controller.dto.admin.BuildingOccupancyResponse;
 import com.pangu.interfaces.web.controller.dto.admin.BuildingResponse;
+import com.pangu.interfaces.web.controller.dto.admin.MyBuildingResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -33,6 +35,7 @@ import java.util.List;
  *   <li>{@code GET    /api/v1/admin/building-assignments/search?keyword=...}      —— 模糊搜索（姓名/手机号/手机尾号 OR）；</li>
  *   <li>{@code GET    /api/v1/admin/building-assignments/buildings}               —— 可分配楼栋列表；</li>
  *   <li>{@code GET    /api/v1/admin/building-assignments/buildings/{id}/occupants}—— 楼栋当前占用快照；</li>
+ *   <li>{@code GET    /api/v1/admin/building-assignments/users/me/buildings}      —— 当前登录工作身份已分配楼栋；</li>
  *   <li>{@code GET    /api/v1/admin/building-assignments/users/{userId}/buildings}—— 某用户已分配楼栋；</li>
  *   <li>{@code POST   /api/v1/admin/building-assignments/users/{userId}/buildings}—— 分配楼栋（body 含 force=true 时转移）；</li>
  *   <li>{@code DELETE /api/v1/admin/building-assignments/users/{userId}/buildings/{buildingId}} —— 撤销分配。</li>
@@ -77,6 +80,13 @@ public class BuildingAssignmentController extends BaseController {
     public Result<BuildingOccupancyResponse> listBuildingOccupants(@PathVariable("buildingId") Long buildingId) {
         BuildingOccupancy occupancy = queryService.listBuildingOccupants(buildingId);
         return success(BuildingOccupancyResponse.from(occupancy));
+    }
+
+    @GetMapping("/users/me/buildings")
+    @PreAuthorize("isAuthenticated()")
+    public Result<List<MyBuildingResponse>> listMyBuildings() {
+        List<AssignedBuildingSummary> buildings = queryService.listCurrentUserBuildings();
+        return success(buildings.stream().map(MyBuildingResponse::from).toList());
     }
 
     @GetMapping("/users/{userId}/buildings")

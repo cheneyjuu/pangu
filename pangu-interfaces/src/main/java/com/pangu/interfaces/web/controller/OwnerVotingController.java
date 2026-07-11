@@ -13,6 +13,7 @@ import com.pangu.domain.model.voting.VotingProgress;
 import com.pangu.domain.model.voting.VotingScope;
 import com.pangu.domain.model.voting.VotingSubject;
 import com.pangu.domain.repository.OwnerPropertyVotingRepository;
+import com.pangu.domain.repository.OwnersAssemblyRepository;
 import com.pangu.domain.repository.VoteItemRepository;
 import com.pangu.domain.repository.VotingSubjectRepository;
 import com.pangu.interfaces.security.SecurityUtils;
@@ -57,6 +58,7 @@ public class OwnerVotingController extends BaseController {
     private final VotingSubjectRepository votingSubjectRepository;
     private final VoteItemRepository voteItemRepository;
     private final OwnerPropertyVotingRepository ownerPropertyVotingRepository;
+    private final OwnersAssemblyRepository ownersAssemblyRepository;
     private final ElectionCandidateService electionCandidateService;
     private final VotingProgressQueryService votingProgressQueryService;
 
@@ -69,7 +71,7 @@ public class OwnerVotingController extends BaseController {
         Long uid = requireUid();
         Long tenantId = requireTenantId();
         List<VotingSubject> subjects = proposalLifecycleService.findVisibleForOwner(uid, tenantId, page, size);
-        return success(subjects.stream().map(OwnerSubjectResponse::from).toList());
+        return success(subjects.stream().map(this::toOwnerSubjectResponse).toList());
     }
 
     /**
@@ -89,7 +91,7 @@ public class OwnerVotingController extends BaseController {
                 .map(VoteItem::getUid)
                 .anyMatch(uid::equals);
         return success(Map.of(
-                "subject", OwnerSubjectResponse.from(subject),
+                "subject", toOwnerSubjectResponse(subject),
                 "voted", voted));
     }
 
@@ -177,6 +179,12 @@ public class OwnerVotingController extends BaseController {
             }
         }
         return subject;
+    }
+
+    private OwnerSubjectResponse toOwnerSubjectResponse(VotingSubject subject) {
+        return OwnerSubjectResponse.from(subject, ownersAssemblyRepository.findPackageBySubjectId(subject.getSubjectId())
+                .filter(p -> p.tenantId().equals(subject.getTenantId()))
+                .orElse(null));
     }
 
     private Long requireUid() {

@@ -26,4 +26,9 @@ public class VoteItemRow {
 
     /** 1-ONLINE, 2-PAPER, 3-OFFLINE_PROXY。 */
     private Integer voteChannel;
+
+    /** 1=有效计票，0=已作废但保留审计。 */
+    private Integer validFlag;
+    private String invalidReason;
+    private Instant invalidatedAt;
 }

@@ -142,6 +142,44 @@ public class ControllerIntegrationTest {
     }
 
     @Test
+    public void streetAdminLoginCarriesDefaultTenantForTenantBoundMenus() throws Exception {
+        Map<String, Object> request = Map.of(
+                "username", "13800000001",
+                "smsCode", "123456"
+        );
+
+        String responseJson = mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.user_info.role_key", is("GOV_SUPER_ADMIN")))
+                .andExpect(jsonPath("$.data.user_info.tenant_id", is(10001)))
+                .andExpect(jsonPath("$.data.user_info.permissions", not(hasItem("repair:workorder:field"))))
+                .andReturn().getResponse().getContentAsString();
+
+        Map<String, Object> responseMap = objectMapper.readValue(responseJson, Map.class);
+        Map<String, Object> data = (Map<String, Object>) responseMap.get("data");
+        String token = (String) data.get("access_token");
+
+        Claims claims = jwtTokenProvider.parseToken(token);
+        assertEquals(10001L, claims.get("tenantId", Number.class).longValue());
+
+        mockMvc.perform(get("/api/v1/voting-subjects")
+                        .param("page", "1")
+                        .param("size", "1")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code", is(200)));
+
+        mockMvc.perform(get("/api/v1/gov/disputes")
+                        .param("limit", "1")
+                        .param("offset", "0")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code", is(200)));
+    }
+
+    @Test
     public void propertyManagerNavigationGroupsRepairsUnderPropertyAndRevenueUnderFinance() throws Exception {
         Map<String, Object> request = Map.of(
                 "username", "13800000021",

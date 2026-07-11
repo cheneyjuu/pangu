@@ -1,5 +1,6 @@
 package com.pangu.interfaces.web.controller.dto.voting;
 
+import com.pangu.domain.model.assembly.OwnersAssemblyPackage;
 import com.pangu.domain.model.voting.SubjectStatus;
 import com.pangu.domain.model.voting.SubjectType;
 import com.pangu.domain.model.voting.VotingScope;
@@ -25,9 +26,14 @@ public record OwnerSubjectResponse(
         Instant voteStartAt,
         Instant voteEndAt,
         Instant clockSuspendedAt,
-        Long clockSuspendedBySubjectId
+        Long clockSuspendedBySubjectId,
+        OwnersAssemblyPackageInfo assemblyPackage
 ) {
     public static OwnerSubjectResponse from(VotingSubject s) {
+        return from(s, null);
+    }
+
+    public static OwnerSubjectResponse from(VotingSubject s, OwnersAssemblyPackage assemblyPackage) {
         return new OwnerSubjectResponse(
                 s.getSubjectId(),
                 s.getTitle(),
@@ -39,6 +45,41 @@ public record OwnerSubjectResponse(
                 s.getVoteStartAt(),
                 s.getVoteEndAt(),
                 s.getClockSuspendedAt(),
-                s.getClockSuspendedBySubjectId());
+                s.getClockSuspendedBySubjectId(),
+                OwnersAssemblyPackageInfo.from(assemblyPackage));
+    }
+
+    public record OwnersAssemblyPackageInfo(
+            Long packageId,
+            String status,
+            String votingChannelPolicy,
+            boolean paperAllowed,
+            boolean onlineAllowed,
+            String ballotTemplateHash,
+            String electronicSealHash,
+            String packageHash,
+            Instant publicNoticeStartAt,
+            Instant publicNoticeEndAt,
+            Instant voteStartAt,
+            Instant voteEndAt
+    ) {
+        public static OwnersAssemblyPackageInfo from(OwnersAssemblyPackage p) {
+            if (p == null) {
+                return null;
+            }
+            return new OwnersAssemblyPackageInfo(
+                    p.packageId(),
+                    p.status(),
+                    p.votingChannelPolicy(),
+                    p.paperAllowed(),
+                    p.onlineAllowed(),
+                    p.ballotTemplateHash(),
+                    p.electronicSealHash(),
+                    p.packageHash(),
+                    p.publicNoticeStartAt(),
+                    p.publicNoticeEndAt(),
+                    p.voteStartAt(),
+                    p.voteEndAt());
+        }
     }
 }

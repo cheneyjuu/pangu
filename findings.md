@@ -1,3 +1,28 @@
+# Findings: 当前供应商账号激活闭环
+
+## 2026-07-11 Current Findings
+- `V3.53` 已建 `t_supplier_activation_invitation`，但当前 Java/MyBatis/Controller 无创建或激活逻辑。
+- 本地数据库没有 `SERVICE_PROVIDER_MANAGER` 或 `SERVICE_PROVIDER_STAFF` 用户，供应商工作台无法真实登录验收。
+- 已实现供应商组织登记、邀价、在线报价端点和独立供应商菜单，但组织登记只创建 `sys_dept + t_supplier_org_profile + t_supplier_tenant_relation`。
+- 需要复用现有 `t_account / sys_user / sys_user_role` 账号体系，避免平行自建密码系统；具体账号创建与登录约束需继续核验。
+- 现有账号模型已经满足“组织 + 个人账号”：`sys_dept` 是供应商组织，`t_account` 是手机号唯一自然人，`sys_user` 是自然人在组织内的工作身份，`sys_user_role` 绑定供应商角色；无需新增平行 membership 表。
+- `AuthService.login` 使用手机号 + 短信验证码，不存在密码字段；激活成功只需创建/复用 `t_account`、新增供应商 `sys_user`、绑定角色并回填 last-active identity。
+- `WorkIdentityRepository` 已具备账号、工作身份、角色绑定与 last-active identity 的写能力，但其应用服务受后台操作员权限约束，不适合直接复用为公开邀请激活入口；供应商激活应有独立应用服务并复用 repository 端口。
+- 供应商组织 `sys_dept.dept_type=9 / dept_category=S / tenant_id=NULL`，符合跨租户服务商模型；具体可见工单由 `t_repair_quote_invitation.supplier_dept_id` 限定。
+- 系统没有独立“发送登录验证码”接口，但已有按环境切换的 `SmsVerificationStrategy`：dev/test 固定 `123456`，prod 从 Redis 一次性消费验证码。供应商激活可复用同一验证策略，避免另造验证码规则。
+- 供应商部门 `tenant_id=NULL` 时 `UserContext` 的 tenant 也为 null；供应商业务端点必须继续按 `supplier_dept_id` 做授权，不能错误依赖 tenant。
+- 公开激活入口需要加入 SecurityConfig 白名单；安全边界应是“受邀手机号 + 短信验证码 + 未过期且未消费的邀请”，不应把默认密码或共享 token 暴露给物业。
+- `sys_user_role` 已允许记录 `granted_by`，邀请激活时可记录原始邀请人，保留授权审计链。
+- `sys_user_role` 以 `user_id` 为主键落实“一工作身份一角色”；同一供应商多人经办应共享供应商 `sys_dept`，每个自然人各建一条 `sys_user`，无需新建 Membership 表。
+- 现有 `SmsVerificationStrategy` 位于 interfaces 层并直接抛 Web 异常，不适合由 application 激活事务复用；应抽为 application 端口，由 dev/test 与 prod 适配器实现一次性校验。
+- 供应商组织注册与邀价目前只写组织/租户关系和报价邀请，不会创建账号激活邀请；需要补独立邀请接口，并在邀价时为未开通联系人确保存在有效邀请。
+- 激活成功后继续通过既有 `/api/v1/auth/login` 签发 JWT，激活接口不同时承担会话签发职责。
+- 仅删除供应商角色的旧 `sys_role_menu` 绑定不足以隔离菜单：现有查询会把 `required_permission / required_any_permissions / required_role_keys` 全为空的内部通用菜单开放给所有角色。
+- 导航隔离应是角色策略而不是供应商硬编码；新增 `sys_role.navigation_isolated` 后，外部协作角色只接收显式 `sys_role_menu`，供应商最终只看到 `supplier-service / supplier-workbench`。
+- 本地验收账号已通过真实邀请激活链创建：`13800000031`，供应商组织 `盘古验收维修服务有限公司`，角色 `SERVICE_PROVIDER_STAFF`，可见邀价工单 `RO-20260708-000099`。
+
+## Historical Findings
+
 # Findings: 选举闭环对齐推进
 
 ## Current State
@@ -1111,3 +1136,13 @@
 - 边界：
   - 不拆 `voting:subject:publish` 目录项；它仍是 GENERAL/MAJOR 日常公示能力点。
   - yaochi 之前已隐藏 ELECTION 直接公示按钮，本轮无需再改前端。
+
+## 报修初勘遗漏独立完成态
+- 原型和流程方案已经明确 `SURVEYING -> SURVEY_COMPLETED`，并要求形成现场勘验记录和照片；实现却把初勘字段塞进 `submit-plan`，且允许从 `VERIFIED`、`ASSIGNED` 直接提交，导致派单与初勘表单同时出现并可绕过现场勘验。
+- 修正原则：位置核验只确认空间与责任边界；初勘必须在派单、开始勘验后独立提交，至少一张现场照片；初勘完成后才能确认维修范围、估算金额和资金来源，再进入供应商邀价。
+
+## 报修附件 OSS 接入
+- 之前的现场照片/视频只停留在页面选择和业务 JSON 字段，没有真实对象存储、上传确认或可下载对象，因此不能作为可调阅的原始证据。
+- 当前改为小程序上传 pangu + 后端 Java OSS SDK `PutObject`；AccessKey 只在后端环境变量中，小程序不再获得 OSS URL，也不直接访问 OSS Endpoint。
+- 后端按实际文件字节计算 `Content-MD5`，校验类型和大小，取得 ETag 后一次性创建 `READY` 记录，避免客户端签名直传和二次确认造成的中间状态。
+- 当前提供的 AccessKey 在 Java SDK 请求中仍可能被 OSS 以 `SignatureDoesNotMatch` 拒绝；若重构后复验仍失败，根因是云端 AccessKey 与所给 Secret 不匹配或凭证已失效，而不是客户端跨域或直传逻辑。

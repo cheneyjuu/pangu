@@ -1,17 +1,22 @@
 package com.pangu.infrastructure.repository;
 
 import com.pangu.domain.model.user.AssignableUser;
+import com.pangu.domain.model.user.AssignedBuildingSummary;
 import com.pangu.domain.model.user.BuildingAssignment;
 import com.pangu.domain.model.user.BuildingOccupant;
+import com.pangu.domain.model.user.WorkIdentityBuildingScope;
 import com.pangu.domain.repository.BuildingAssignmentRepository;
 import com.pangu.infrastructure.persistence.entity.AssignableUserRow;
+import com.pangu.infrastructure.persistence.entity.AssignedBuildingSummaryRow;
 import com.pangu.infrastructure.persistence.entity.BuildingAssignmentRow;
 import com.pangu.infrastructure.persistence.entity.BuildingOccupantRow;
 import com.pangu.infrastructure.persistence.mapper.BuildingAssignmentMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Repository;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 /**
  * {@link BuildingAssignmentRepository} 默认实现。
@@ -56,6 +61,15 @@ public class BuildingAssignmentRepositoryImpl implements BuildingAssignmentRepos
     public List<BuildingAssignment> listAssignmentsByUser(Long userId) {
         return mapper.selectAssignmentsByUser(userId).stream()
                 .map(this::toAssignment).toList();
+    }
+
+    @Override
+    public List<AssignedBuildingSummary> listBuildingSummaries(Set<WorkIdentityBuildingScope> scopes) {
+        if (scopes == null || scopes.isEmpty()) {
+            return List.of();
+        }
+        return mapper.selectBuildingSummariesByScopes(new ArrayList<>(scopes)).stream()
+                .map(this::toAssignedBuildingSummary).toList();
     }
 
     @Override
@@ -119,5 +133,12 @@ public class BuildingAssignmentRepositoryImpl implements BuildingAssignmentRepos
                 row.getAssignedBy(),
                 row.getAssignedAt(),
                 row.getStatus() == null ? 0 : row.getStatus());
+    }
+
+    private AssignedBuildingSummary toAssignedBuildingSummary(AssignedBuildingSummaryRow row) {
+        return new AssignedBuildingSummary(
+                row.getBuildingId(),
+                row.getUnitCount() == null ? 0 : row.getUnitCount(),
+                row.getReminderCompletionRate());
     }
 }

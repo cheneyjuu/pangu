@@ -1,3 +1,44 @@
+# Progress: 供应商账号激活闭环
+
+## Session: 2026-07-11
+
+### Phase 1: 当前缺口核验 — complete
+- 确认本地供应商角色账号为 0 条。
+- 确认 `t_supplier_activation_invitation` 仅有迁移表结构，尚无应用代码。
+- 确认供应商组织登记与供应商工作台已存在，但登录身份链路缺失。
+- 确认统一登录为手机号 + 短信验证码，不使用默认密码；账号激活应接入既有 `t_account/sys_user/sys_user_role`。
+- 确认供应商组织使用跨租户 S 端部门，报价访问由邀价记录收口。
+- 决定采用“受邀手机号 + 短信验证码”激活，不增加密码；公开激活接口只消费有效邀请。
+- 决定复用现有账号/工作身份仓储能力，激活后绑定 `SERVICE_PROVIDER_STAFF` 并记录邀请人为授权人。
+- Phase 1 模型核验完成：不新增供应商账号表，不引入密码，以现有自然人账号和供应商工作身份组成闭环。
+
+### Phase 2: 后端激活闭环 — complete
+- 新增供应商账号激活应用服务：创建/自动确保邀请、手机号与有效期校验、短信验证码校验、一次性消费、账号创建/复用、供应商工作身份和角色绑定、授权审计回填。
+- 新增公开激活接口与物业经理邀请接口，并将公开激活加入 Security 白名单。
+- 邀价动作会为未激活的企业联系人自动创建有效邀请，物业代录报价路径保持不变。
+- 新增 `V3.54` 待激活邀请唯一约束与手机号状态索引。
+- 聚焦测试已贯通“邀价 -> 联系人激活 -> 统一登录 -> 查看待报价 -> 供应商本人在线报价”，并验证同一企业两个独立经办人和邀请不可重复消费。
+- 首轮聚焦测试暴露供应商工单 SQL 只有首列带表别名，JOIN 后 `tenant_id` 歧义；已改为明确读取 `wo.*`，复跑 9 tests 全部通过。
+
+### Phase 3: Yaochi 与本地验收账号 — complete
+- Yaochi 登录页新增“供应商激活”模式，支持邀请编号、经办人姓名、受邀手机号和短信验证码激活。
+- 物业工单的供应商列表新增激活邀请动作，页面展示生成的邀请编号。
+- 前端补齐 S 端供应商角色映射、供应商工作台顶栏与“本服务组织”范围语义。
+- 本地已通过真实 API 创建并激活验收账号 `13800000031`，角色为 `SERVICE_PROVIDER_STAFF`；开发验证码为 `123456`，账号已收到工单 `RO-20260708-000099` 的邀价。
+
+### Phase 4: 导航隔离与全量验证 — complete
+- 浏览器验收发现供应商仍继承内部通用菜单；根因是菜单查询把 `required_*` 全空菜单对所有角色开放，单纯清理 `sys_role_menu` 无法隔离外部角色。
+- 新增通用 `navigation_isolated` 角色策略；供应商角色启用后只下发显式绑定的供应商工作台菜单。
+- 后端全量 `mvn clean test`：583 tests，0 failures，0 errors，1 skipped。
+- Yaochi `npm run build` 通过，仅保留既有 chunk-size warning。
+- Playwright 已验证桌面与 390x844 移动视口：供应商账号登录后只显示供应商工作台，可见待报价工单，无控制台错误。
+
+### Phase 5: 文档与缺口审计 — complete
+- 业务方案已补充限时邀请、短信校验、账号/工作身份复用、多经办人、一次性消费与供应商数据隔离规则。
+- 生产短信发送仍属于已明确的外部可信服务集成边界；本轮没有用默认密码、共享账号或前端自报组织替代。
+
+## Historical Progress
+
 # Progress: 选举闭环对齐推进
 
 ## Session: 2026-06-27
@@ -1711,3 +1752,25 @@
   - `mvn -pl pangu-bootstrap -am -Dtest=WorkIdentityAdminTest,RoleAdminMatrixTest,RoleAdminQueryServiceTest -Dsurefire.failIfNoSpecifiedTests=false test`：37 tests，0 failures，0 errors；
   - yaochi `npm run build` 通过，仅保留 Vite chunk size 常规提示；
   - `git diff --check` 通过。
+
+### 报修初勘独立状态与现场照片 — complete
+- 对照页面原型和流程方案确认：`SURVEYING` 后必须进入独立的 `SURVEY_COMPLETED`，形成初勘结论、风险等级和现场照片，不能从 `VERIFIED` / `ASSIGNED` 直接提交方案估算。
+- pangu 新增 `submit-survey` 动作和 V3.57 状态约束；初勘至少上传 1 张、最多 3 张照片，可补充 1 段短视频，已确认 OSS 对象键、大小与 ETag 写入 `SUBMIT_SURVEY` 审计事件。
+- shennong-app 重排物业现场初勘页面，补齐照片/短视频入口，并将正式预算明确移交到物业 PC 管理后台处理。
+- `submit-plan` 仅允许从 `SURVEY_COMPLETED` 进入，保留初勘结果并只确认维修范围的估算金额与拟使用资金。
+- yaochi 与 shennong-app 已把动作严格拆成：已核验 -> 派单 -> 开始初勘 -> 提交初勘 -> 确认维修范围与估算；同一状态不再并列展示跨阶段按钮。
+- 验证：
+  - `RepairWorkOrderFlowTest`：9 tests，0 failures，0 errors；
+  - `mvn clean test`（沙箱外）：583 tests，0 failures，0 errors，1 skipped；
+  - yaochi `npm run build` 通过，仅保留 Vite chunk size 常规提示；
+  - shennong-app `npm run type-check` 通过；
+- Chrome 本地真实页面验证 `VERIFIED` 仅显示“派单”，`ASSIGNED` 仅显示“开始初勘”，`SURVEYING` 显示初勘结论、风险等级、现场照片和“提交初勘”。
+
+### 报修现场附件接入私有 OSS — code complete / credential blocked
+- pangu 新增 V3.58 `t_repair_attachment`、附件领域模型、仓储和阿里云 OSS Java SDK 适配器；小程序通过 pangu multipart 接口上传，后端以 `PutObject` 写入私有 Bucket，不向客户端暴露 OSS 上传地址。
+- 后端强制校验工单可见范围、现场角色、业务阶段、媒体类型和文件大小，并按实际字节计算 `Content-MD5`；OSS 返回 ETag 后直接创建 `READY` 记录。
+- 提交位置纠偏或初勘时只能绑定同工单 `READY` 附件，并转为不可删除的 `BOUND`；OSS 写入失败时不会创建附件记录。
+- shennong-app 已改为 `Taro.uploadFile` 上传到 pangu；照片/视频不再以 Base64 放进业务 JSON，也不再直接请求 OSS Endpoint。
+- 配置已改为环境变量；真实凭证仅写入被 Git 忽略且权限为 600 的 `.env.local`，仓库未保存凭证明文。
+- 验证：`mvn test` 584 tests，0 failures，0 errors，1 skipped；shennong-app `npm run type-check` 与 `npm run build:weapp:dev` 通过。
+- 真实联调：已通过 pangu multipart 接口进入 Java SDK `PutObject`，OSS 返回 `SignatureDoesNotMatch`，当前凭证无法完成上传；需更换有效 RAM AccessKey 后重跑上传/下载/删除冒烟测试。

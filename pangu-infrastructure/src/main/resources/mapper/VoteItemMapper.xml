@@ -15,13 +15,18 @@
         <result property="votedAt" column="voted_at"/>
         <result property="signatureHash" column="signature_hash"/>
         <result property="voteChannel" column="vote_channel"/>
+        <result property="validFlag" column="valid_flag"/>
+        <result property="invalidReason" column="invalid_reason"/>
+        <result property="invalidatedAt" column="invalidated_at"/>
     </resultMap>
 
     <select id="selectBySubjectId" resultMap="VoteItemRowMap">
         SELECT vote_id, subject_id, opid, uid, target_id, property_area,
-               choice, voted_at, signature_hash, vote_channel
+               choice, voted_at, signature_hash, vote_channel,
+               valid_flag, invalid_reason, invalidated_at
         FROM t_vote_item
         WHERE subject_id = #{subjectId}
+          AND valid_flag = 1
     </select>
 
     <!-- M3-2: 投票提交。voted_at 由 DB DEFAULT CURRENT_TIMESTAMP 兜底。 -->
@@ -32,6 +37,31 @@
             #{subjectId}, #{opid}, #{uid}, #{targetId}, #{propertyArea}, #{choice}, #{signatureHash}, #{voteChannel}
         )
     </insert>
+
+    <select id="selectActiveVote" resultMap="VoteItemRowMap">
+        SELECT vote_id, subject_id, opid, uid, target_id, property_area,
+               choice, voted_at, signature_hash, vote_channel,
+               valid_flag, invalid_reason, invalidated_at
+        FROM t_vote_item
+        WHERE subject_id = #{subjectId}
+          AND opid = #{opid}
+          AND valid_flag = 1
+          AND (
+              (#{targetId,jdbcType=BIGINT} IS NULL AND target_id IS NULL)
+              OR target_id = #{targetId,jdbcType=BIGINT}
+          )
+        ORDER BY voted_at DESC, vote_id DESC
+        LIMIT 1
+    </select>
+
+    <update id="invalidateVote">
+        UPDATE t_vote_item
+        SET valid_flag = 0,
+            invalid_reason = #{invalidReason},
+            invalidated_at = CURRENT_TIMESTAMP
+        WHERE vote_id = #{voteId}
+          AND valid_flag = 1
+    </update>
 
     <resultMap id="VoteDetailRowMap"
                type="com.pangu.infrastructure.persistence.entity.VoteDetailRow">
@@ -71,7 +101,9 @@
             FROM c_owner_property op
             JOIN c_user cu ON cu.uid = op.uid
             LEFT JOIN t_vote_item vi
-                   ON vi.subject_id = #{subjectId} AND vi.opid = op.opid
+                   ON vi.subject_id = #{subjectId}
+                  AND vi.opid = op.opid
+                  AND vi.valid_flag = 1
             WHERE op.tenant_id = #{tenantId}
               AND op.account_status = 1
             <if test="scope == 2">

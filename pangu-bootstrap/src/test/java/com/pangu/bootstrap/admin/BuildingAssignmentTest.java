@@ -11,6 +11,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.Map;
 
+import static org.hamcrest.Matchers.greaterThanOrEqualTo;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.is;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -65,6 +66,7 @@ public class BuildingAssignmentTest {
     private static final long ACC_COMMUNITY_ADMIN = 999803L, USR_COMMUNITY_ADMIN = 800003L; // 居委会主任
     private static final long ACC_DIRECTOR = 999811L, USR_DIRECTOR = 800101L;               // 业委会主任
     private static final long ACC_MEMBER = 999813L, USR_MEMBER = 800103L;                   // 业委会委员（非白名单）
+    private static final long ACC_OWNER_REP = 999812L, USR_OWNER_REP = 800102L;             // 业主代表
     // 目标用户
     private static final long USR_GRID = 800004L;       // 网格员
     private static final long USR_LIU_GRID_SHADOW = 800006L; // 刘主任的网格员分身
@@ -220,6 +222,18 @@ public class BuildingAssignmentTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code", is(200)))
                 .andExpect(jsonPath("$.data").isArray());
+    }
+
+    @Test
+    public void ownerRepresentative_listMyBuildings_returnsMobileSummary() throws Exception {
+        String token = jwtTokenProvider.generateToken(ACC_OWNER_REP, "SYS_USER", USR_OWNER_REP, TENANT_RUSHI);
+
+        mockMvc.perform(get("/api/v1/admin/building-assignments/users/me/buildings")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code", is(200)))
+                .andExpect(jsonPath("$.data[0].buildingId", is(30001)))
+                .andExpect(jsonPath("$.data[0].unitCount", greaterThanOrEqualTo(1)));
     }
 
     // ===== 10. 搜索 / 占用 / 合规 / 转移 =====

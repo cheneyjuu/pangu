@@ -1,0 +1,223 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pangu.infrastructure.persistence.mapper.OwnersAssemblyMapper">
+
+    <resultMap id="SessionMap" type="com.pangu.infrastructure.persistence.entity.OwnersAssemblySessionRow">
+        <id property="sessionId" column="session_id"/>
+        <result property="tenantId" column="tenant_id"/>
+        <result property="title" column="title"/>
+        <result property="preparationMode" column="preparation_mode"/>
+        <result property="status" column="status"/>
+        <result property="createdByUserId" column="created_by_user_id"/>
+        <result property="createTime" column="create_time"/>
+    </resultMap>
+
+    <resultMap id="PackageMap" type="com.pangu.infrastructure.persistence.entity.OwnersAssemblyPackageRow">
+        <id property="packageId" column="package_id"/>
+        <result property="sessionId" column="session_id"/>
+        <result property="tenantId" column="tenant_id"/>
+        <result property="packageVersion" column="package_version"/>
+        <result property="status" column="status"/>
+        <result property="votingChannelPolicy" column="voting_channel_policy"/>
+        <result property="publicNoticeDays" column="public_notice_days"/>
+        <result property="announcementHash" column="announcement_hash"/>
+        <result property="attachmentManifestHash" column="attachment_manifest_hash"/>
+        <result property="ballotTemplateHash" column="ballot_template_hash"/>
+        <result property="electronicSealHash" column="electronic_seal_hash"/>
+        <result property="packageHash" column="package_hash"/>
+        <result property="publicNoticeStartAt" column="public_notice_start_at"/>
+        <result property="publicNoticeEndAt" column="public_notice_end_at"/>
+        <result property="voteStartAt" column="vote_start_at"/>
+        <result property="voteEndAt" column="vote_end_at"/>
+        <result property="lockedByUserId" column="locked_by_user_id"/>
+        <result property="lockedAt" column="locked_at"/>
+    </resultMap>
+
+    <resultMap id="DeliveryMap" type="com.pangu.infrastructure.persistence.entity.OwnersAssemblyDeliveryRecordRow">
+        <id property="deliveryId" column="delivery_id"/>
+        <result property="packageId" column="package_id"/>
+        <result property="tenantId" column="tenant_id"/>
+        <result property="opid" column="opid"/>
+        <result property="uid" column="uid"/>
+        <result property="deliveryChannel" column="delivery_channel"/>
+        <result property="deliveryMethod" column="delivery_method"/>
+        <result property="evidenceHash" column="evidence_hash"/>
+        <result property="deliveredByUserId" column="delivered_by_user_id"/>
+        <result property="deliveredAt" column="delivered_at"/>
+    </resultMap>
+
+    <resultMap id="VoteRecordMap" type="com.pangu.infrastructure.persistence.entity.OwnersAssemblyVoteRecordRow">
+        <id property="assemblyVoteId" column="assembly_vote_id"/>
+        <result property="packageId" column="package_id"/>
+        <result property="subjectId" column="subject_id"/>
+        <result property="voteId" column="vote_id"/>
+        <result property="tenantId" column="tenant_id"/>
+        <result property="opid" column="opid"/>
+        <result property="uid" column="uid"/>
+        <result property="voteChannel" column="vote_channel"/>
+        <result property="packageHash" column="package_hash"/>
+        <result property="ballotFileHash" column="ballot_file_hash"/>
+        <result property="signatureHash" column="signature_hash"/>
+        <result property="validFlag" column="valid_flag"/>
+        <result property="invalidatedByVoteId" column="invalidated_by_vote_id"/>
+        <result property="invalidReason" column="invalid_reason"/>
+        <result property="createTime" column="create_time"/>
+    </resultMap>
+
+    <insert id="insertSession" useGeneratedKeys="true" keyProperty="sessionId" keyColumn="session_id">
+        INSERT INTO t_owners_assembly_session (
+            tenant_id, title, preparation_mode, status, created_by_user_id
+        ) VALUES (
+            #{tenantId}, #{title}, #{preparationMode}, #{status}, #{createdByUserId}
+        )
+    </insert>
+
+    <select id="findSession" resultMap="SessionMap">
+        SELECT session_id, tenant_id, title, preparation_mode, status, created_by_user_id, create_time
+        FROM t_owners_assembly_session
+        WHERE session_id = #{sessionId}
+          AND tenant_id = #{tenantId}
+    </select>
+
+    <insert id="insertPackage" useGeneratedKeys="true" keyProperty="packageId" keyColumn="package_id">
+        INSERT INTO t_owners_assembly_package (
+            session_id, tenant_id, package_version, status, voting_channel_policy,
+            public_notice_days, announcement_hash, attachment_manifest_hash,
+            ballot_template_hash, electronic_seal_hash, vote_start_at, vote_end_at
+        ) VALUES (
+            #{sessionId}, #{tenantId}, #{packageVersion}, #{status}, #{votingChannelPolicy},
+            #{publicNoticeDays}, #{announcementHash}, #{attachmentManifestHash},
+            #{ballotTemplateHash}, #{electronicSealHash}, #{voteStartAt}, #{voteEndAt}
+        )
+    </insert>
+
+    <select id="findPackage" resultMap="PackageMap">
+        SELECT *
+        FROM t_owners_assembly_package
+        WHERE package_id = #{packageId}
+          AND tenant_id = #{tenantId}
+    </select>
+
+    <select id="findPackageForUpdate" resultMap="PackageMap">
+        SELECT *
+        FROM t_owners_assembly_package
+        WHERE package_id = #{packageId}
+          AND tenant_id = #{tenantId}
+        FOR UPDATE
+    </select>
+
+    <select id="findPackageBySubjectId" resultMap="PackageMap">
+        SELECT p.*
+        FROM t_owners_assembly_package p
+        JOIN t_owners_assembly_subject s ON s.package_id = p.package_id
+        WHERE s.subject_id = #{subjectId}
+    </select>
+
+    <insert id="insertSubjectLink">
+        INSERT INTO t_owners_assembly_subject(package_id, tenant_id, subject_id)
+        VALUES (#{packageId}, #{tenantId}, #{subjectId})
+    </insert>
+
+    <select id="listSubjectIds" resultType="long">
+        SELECT subject_id
+        FROM t_owners_assembly_subject
+        WHERE package_id = #{packageId}
+          AND tenant_id = #{tenantId}
+        ORDER BY assembly_subject_id
+    </select>
+
+    <update id="lockPackage">
+        UPDATE t_owners_assembly_package
+        SET status = 'PUBLIC_NOTICE',
+            package_hash = #{packageHash},
+            public_notice_start_at = #{publicNoticeStartAt},
+            public_notice_end_at = #{publicNoticeEndAt},
+            locked_by_user_id = #{lockedByUserId},
+            locked_at = CURRENT_TIMESTAMP,
+            update_time = CURRENT_TIMESTAMP
+        WHERE package_id = #{packageId}
+          AND tenant_id = #{tenantId}
+          AND status = 'PACKAGE_DRAFT'
+    </update>
+
+    <update id="markPackageVoting">
+        UPDATE t_owners_assembly_package
+        SET status = 'VOTING',
+            update_time = CURRENT_TIMESTAMP
+        WHERE package_id = #{packageId}
+          AND tenant_id = #{tenantId}
+          AND status = 'PUBLIC_NOTICE'
+    </update>
+
+    <update id="markPackageSettled">
+        UPDATE t_owners_assembly_package
+        SET status = 'SETTLED',
+            update_time = CURRENT_TIMESTAMP
+        WHERE package_id = #{packageId}
+          AND tenant_id = #{tenantId}
+          AND status = 'VOTING'
+    </update>
+
+    <insert id="insertDelivery" useGeneratedKeys="true" keyProperty="deliveryId" keyColumn="delivery_id">
+        INSERT INTO t_owners_assembly_delivery (
+            package_id, tenant_id, opid, uid, delivery_channel, delivery_method,
+            evidence_hash, delivered_by_user_id, delivered_at
+        ) VALUES (
+            #{packageId}, #{tenantId}, #{opid}, #{uid}, #{deliveryChannel}, #{deliveryMethod},
+            #{evidenceHash}, #{deliveredByUserId}, COALESCE(#{deliveredAt}, CURRENT_TIMESTAMP)
+        )
+    </insert>
+
+    <select id="deliveryExists" resultType="boolean">
+        SELECT EXISTS (
+            SELECT 1
+            FROM t_owners_assembly_delivery
+            WHERE package_id = #{packageId}
+              AND tenant_id = #{tenantId}
+              AND opid = #{opid}
+              AND uid = #{uid}
+              AND delivery_channel = #{deliveryChannel}
+        )
+    </select>
+
+    <insert id="insertVoteRecord" useGeneratedKeys="true" keyProperty="assemblyVoteId" keyColumn="assembly_vote_id">
+        INSERT INTO t_owners_assembly_vote_record (
+            package_id, subject_id, vote_id, tenant_id, opid, uid, vote_channel,
+            package_hash, ballot_file_hash, signature_hash, valid_flag
+        ) VALUES (
+            #{packageId}, #{subjectId}, #{voteId}, #{tenantId}, #{opid}, #{uid}, #{voteChannel},
+            #{packageHash}, #{ballotFileHash}, #{signatureHash}, #{validFlag}
+        )
+    </insert>
+
+    <select id="findActiveVoteRecord" resultMap="VoteRecordMap">
+        SELECT *
+        FROM t_owners_assembly_vote_record
+        WHERE subject_id = #{subjectId}
+          AND opid = #{opid}
+          AND valid_flag = 1
+        ORDER BY create_time DESC, assembly_vote_id DESC
+        LIMIT 1
+    </select>
+
+    <update id="invalidateVoteRecordByVoteId">
+        UPDATE t_owners_assembly_vote_record
+        SET valid_flag = 0,
+            invalidated_by_vote_id = #{invalidatedByVoteId},
+            invalid_reason = #{invalidReason}
+        WHERE vote_id = #{voteId}
+          AND valid_flag = 1
+    </update>
+
+    <select id="allSubjectsPassed" resultType="boolean">
+        SELECT NOT EXISTS (
+            SELECT 1
+            FROM t_owners_assembly_subject s
+            LEFT JOIN t_voting_result r ON r.subject_id = s.subject_id
+            WHERE s.package_id = #{packageId}
+              AND s.tenant_id = #{tenantId}
+              AND COALESCE(r.passed, 0) != 1
+        )
+    </select>
+</mapper>

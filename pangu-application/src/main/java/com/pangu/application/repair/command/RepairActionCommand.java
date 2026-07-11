@@ -1,4 +1,10 @@
 package com.pangu.application.repair.command;
 
-public record RepairActionCommand(String remark) {
+import java.util.List;
+
+public record RepairActionCommand(
+        String remark,
+        String fieldSupplement,
+        List<String> evidenceImagesBase64
+) {
 }

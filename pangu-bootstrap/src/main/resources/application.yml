@@ -6,6 +6,10 @@ server:
 spring:
   application:
     name: pangu-backend
+  servlet:
+    multipart:
+      max-file-size: 20MB
+      max-request-size: 21MB
   profiles:
     active: dev
 
@@ -64,11 +68,12 @@ platform:
     # 国密 SM4 16字节(128位) 对称加解密密钥十六进制字符串
     sm4-key-hex: 0123456789abcdeffedcba9876543210
   ali-oss:
-    endpoint: oss-cn-hangzhou.aliyuncs.com
-    bucket-name: pangu-residents-private
-    public-bucket-name: pangu-residents-public
-    access-key-id: DUMMY_KEY_ID_FOR_DEV
-    access-key-secret: DUMMY_KEY_SECRET_FOR_DEV
+    endpoint: ${PANGU_OSS_ENDPOINT:https://oss-cn-shanghai.aliyuncs.com}
+    region: ${PANGU_OSS_REGION:cn-shanghai}
+    bucket-name: ${PANGU_OSS_BUCKET_NAME:pangu20260711}
+    public-bucket-name: ${PANGU_OSS_PUBLIC_BUCKET_NAME:pangu-residents-public}
+    access-key-id: ${PANGU_OSS_ACCESS_KEY_ID:DUMMY_KEY_ID_FOR_DEV}
+    access-key-secret: ${PANGU_OSS_ACCESS_KEY_SECRET:DUMMY_KEY_SECRET_FOR_DEV}
   identity:
     tencent:
       region: ap-guangzhou

@@ -3,12 +3,14 @@ package com.pangu.interfaces.web.exception;
 import com.pangu.application.admin.BuildingAssignmentApplicationException;
 import com.pangu.application.admin.RoleAdminApplicationException;
 import com.pangu.application.admin.WorkIdentityApplicationException;
+import com.pangu.application.assembly.OwnersAssemblyApplicationException;
 import com.pangu.application.community.CommunitySettingsApplicationException;
 import com.pangu.application.disclosure.FinanceDisclosureApplicationException;
 import com.pangu.application.dispute.DisputeApplicationException;
 import com.pangu.application.lock.GovernanceLockApplicationException;
 import com.pangu.application.owner.PropertyBindingApplicationException;
 import com.pangu.application.repair.RepairWorkOrderApplicationException;
+import com.pangu.application.repair.SupplierActivationApplicationException;
 import com.pangu.application.voting.VotingApplicationException;
 import com.pangu.application.waiver.WaiverApplicationException;
 import com.pangu.interfaces.web.controller.Result;
@@ -223,6 +225,36 @@ public class GlobalExceptionHandler {
         RepairWorkOrderErrorCode errorCode = RepairWorkOrderExceptionTranslator.translate(ex);
         response.setStatus(errorCode.getHttpStatus());
         log.info("RepairWorkOrder business exception reason={} code={} msg={}",
+                ex.reason(), errorCode.getCode(), ex.getMessage());
+        return Result.fail(
+                errorCode.getCode(),
+                ex.getMessage() != null ? ex.getMessage() : errorCode.getMessage(),
+                null,
+                errorCode.getErrorType(),
+                errorCode.isNeedRetry());
+    }
+
+    @ExceptionHandler(SupplierActivationApplicationException.class)
+    public Result<Object> handleSupplierActivationApplicationException(
+            SupplierActivationApplicationException ex, HttpServletResponse response) {
+        SupplierActivationErrorCode errorCode = SupplierActivationExceptionTranslator.translate(ex);
+        response.setStatus(errorCode.getHttpStatus());
+        log.info("SupplierActivation business exception reason={} code={} msg={}",
+                ex.reason(), errorCode.getCode(), ex.getMessage());
+        return Result.fail(
+                errorCode.getCode(),
+                ex.getMessage() != null ? ex.getMessage() : errorCode.getMessage(),
+                null,
+                errorCode.getErrorType(),
+                errorCode.isNeedRetry());
+    }
+
+    @ExceptionHandler(OwnersAssemblyApplicationException.class)
+    public Result<Object> handleOwnersAssemblyApplicationException(
+            OwnersAssemblyApplicationException ex, HttpServletResponse response) {
+        OwnersAssemblyErrorCode errorCode = OwnersAssemblyExceptionTranslator.translate(ex);
+        response.setStatus(errorCode.getHttpStatus());
+        log.info("OwnersAssembly business exception reason={} code={} msg={}",
                 ex.reason(), errorCode.getCode(), ex.getMessage());
         return Result.fail(
                 errorCode.getCode(),

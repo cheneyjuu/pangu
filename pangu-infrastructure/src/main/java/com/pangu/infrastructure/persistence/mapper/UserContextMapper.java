@@ -65,6 +65,12 @@ public interface UserContextMapper {
     Long selectDefaultTenantByUid(@Param("uid") Long uid);
 
     /**
+     * 街道办等跨租户 G 端根节点登录管理端时，若前端尚未显式选择小区，
+     * 取其组织树下第一个可管辖 tenant 作为本次会话的默认小区上下文。
+     */
+    Long selectDefaultTenantByGovernmentDept(@Param("deptId") Long deptId);
+
+    /**
      * 给定 role_id 反查其所有 permission_key。
      */
     List<String> selectPermissionsByRoleId(@Param("roleId") Long roleId);

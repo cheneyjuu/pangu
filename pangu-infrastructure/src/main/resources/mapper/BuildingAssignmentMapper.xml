@@ -32,6 +32,13 @@
         <result property="roleKey" column="role_key"/>
     </resultMap>
 
+    <resultMap id="AssignedBuildingSummaryRowMap"
+               type="com.pangu.infrastructure.persistence.entity.AssignedBuildingSummaryRow">
+        <result property="buildingId" column="building_id"/>
+        <result property="unitCount" column="unit_count"/>
+        <result property="reminderCompletionRate" column="reminder_completion_rate"/>
+    </resultMap>
+
     <!-- 同租户内某角色用户 + 已生效楼栋数；tenantId=null 时跨租户（街道超管俯瞰） -->
     <select id="selectUsersByRole" resultMap="AssignableUserRowMap">
         SELECT u.user_id, u.nick_name, r.role_key,
@@ -109,6 +116,26 @@
         FROM sys_user_building
         WHERE user_id = #{userId} AND status = 1
         ORDER BY building_id ASC
+    </select>
+
+    <select id="selectBuildingSummariesByScopes" resultMap="AssignedBuildingSummaryRowMap">
+        WITH scopes(tenant_id, building_id) AS (
+            VALUES
+            <foreach collection="scopes" item="scope" separator=",">
+                (#{scope.tenantId}, #{scope.buildingId})
+            </foreach>
+        )
+        SELECT
+            s.building_id,
+            COUNT(DISTINCT op.opid)::int AS unit_count,
+            NULL::double precision AS reminder_completion_rate
+        FROM scopes s
+        LEFT JOIN c_owner_property op
+          ON op.tenant_id = s.tenant_id
+         AND op.building_id = s.building_id
+         AND op.account_status = 1
+        GROUP BY s.tenant_id, s.building_id
+        ORDER BY s.building_id ASC
     </select>
 
     <select id="selectExisting" resultMap="BuildingAssignmentRowMap">
