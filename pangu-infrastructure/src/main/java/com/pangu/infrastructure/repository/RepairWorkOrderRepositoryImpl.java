@@ -10,13 +10,17 @@ import com.pangu.domain.model.repair.RepairDecisionRoom;
 import com.pangu.domain.model.repair.RepairFrameworkRelation;
 import com.pangu.domain.model.repair.RepairLocationOption;
 import com.pangu.domain.model.repair.RepairLocalDecision;
+import com.pangu.domain.model.repair.RepairLocalDecisionChannel;
 import com.pangu.domain.model.repair.RepairLocalDecisionScopeType;
+import com.pangu.domain.model.repair.RepairOwnerLocalDecision;
 import com.pangu.domain.model.repair.RepairQuoteConfirmationStatus;
 import com.pangu.domain.model.repair.RepairQuoteInvitation;
 import com.pangu.domain.model.repair.RepairQuoteSubmissionSource;
 import com.pangu.domain.model.repair.RepairSource;
+import com.pangu.domain.model.repair.RepairPublicAreaScope;
 import com.pangu.domain.model.repair.RepairSpaceScope;
 import com.pangu.domain.model.repair.RepairSupplierQuote;
+import com.pangu.domain.model.repair.RepairSupplierQuoteStatus;
 import com.pangu.domain.model.repair.RepairSupplierOrganization;
 import com.pangu.domain.model.repair.RepairSupplierRecommendation;
 import com.pangu.domain.model.repair.RepairSupplierSelectionMethod;
@@ -153,10 +157,39 @@ public class RepairWorkOrderRepositoryImpl implements RepairWorkOrderRepository 
     }
 
     @Override
+    public void lockQuoteSubmission(Long workOrderId) {
+        mapper.lockQuoteSubmission(workOrderId);
+    }
+
+    @Override
     public RepairSupplierQuote insertQuote(RepairSupplierQuote quote) {
         RepairSupplierQuoteRow row = toRow(quote);
         mapper.insertQuote(row);
         return findQuote(row.getQuoteId(), quote.workOrderId(), quote.tenantId()).orElseThrow();
+    }
+
+    @Override
+    public Optional<RepairSupplierQuote> findActiveQuote(Long workOrderId, Long tenantId, Long supplierDeptId) {
+        return Optional.ofNullable(mapper.findActiveQuote(workOrderId, tenantId, supplierDeptId))
+                .map(this::toDomain);
+    }
+
+    @Override
+    public Optional<RepairSupplierQuote> findLatestSupplierQuote(Long workOrderId,
+                                                                 Long tenantId,
+                                                                 Long supplierDeptId) {
+        return Optional.ofNullable(mapper.findLatestSupplierQuote(workOrderId, tenantId, supplierDeptId))
+                .map(this::toDomain);
+    }
+
+    @Override
+    public void supersedeQuote(Long quoteId) {
+        mapper.supersedeQuote(quoteId);
+    }
+
+    @Override
+    public void linkSupersededQuote(Long quoteId, Long supersededByQuoteId) {
+        mapper.linkSupersededQuote(quoteId, supersededByQuoteId);
     }
 
     @Override
@@ -179,7 +212,9 @@ public class RepairWorkOrderRepositoryImpl implements RepairWorkOrderRepository 
         return mapper.listQuoteInvitations(workOrderId, tenantId).stream()
                 .map(row -> new RepairQuoteInvitation(
                         row.getQuoteInvitationId(), row.getWorkOrderId(), row.getSupplierDeptId(),
-                        row.getSupplierName(), row.getStatus(), row.getDeadline(), row.getSentAt()))
+                        row.getSupplierName(), row.getStatus(),
+                        row.getInvitationRound() == null ? 1 : row.getInvitationRound(),
+                        row.getInvitationType(), row.getRevisionReason(), row.getDeadline(), row.getSentAt()))
                 .toList();
     }
 
@@ -198,6 +233,15 @@ public class RepairWorkOrderRepositoryImpl implements RepairWorkOrderRepository 
     @Override
     public List<RepairSupplierQuote> listSupplierQuotes(Long workOrderId, Long tenantId) {
         return mapper.listSupplierQuotes(workOrderId, tenantId).stream()
+                .map(this::toDomain)
+                .toList();
+    }
+
+    @Override
+    public List<RepairSupplierQuote> listSupplierQuoteHistory(Long workOrderId,
+                                                              Long tenantId,
+                                                              Long supplierDeptId) {
+        return mapper.listSupplierQuoteHistory(workOrderId, tenantId, supplierDeptId).stream()
                 .map(this::toDomain)
                 .toList();
     }
@@ -315,6 +359,22 @@ public class RepairWorkOrderRepositoryImpl implements RepairWorkOrderRepository 
     }
 
     @Override
+    public void inviteSupplierRevisions(Long workOrderId,
+                                        Long tenantId,
+                                        Long invitedByUserId,
+                                        List<Long> supplierDeptIds,
+                                        LocalDateTime deadline,
+                                        String revisionReason) {
+        supplierDeptIds.forEach(supplierDeptId -> mapper.insertQuoteRevisionInvitation(
+                workOrderId, tenantId, supplierDeptId, invitedByUserId, deadline, revisionReason));
+    }
+
+    @Override
+    public void markActiveQuoteRevisionRequested(Long workOrderId, Long tenantId, Long supplierDeptId) {
+        mapper.markActiveQuoteRevisionRequested(workOrderId, tenantId, supplierDeptId);
+    }
+
+    @Override
     public boolean supplierCanAccess(Long workOrderId, Long tenantId, Long supplierDeptId) {
         return mapper.supplierCanAccess(workOrderId, tenantId, supplierDeptId);
     }
@@ -339,6 +399,12 @@ public class RepairWorkOrderRepositoryImpl implements RepairWorkOrderRepository 
     }
 
     @Override
+    public Optional<RepairSupplierRecommendation> findLatestRecommendation(Long workOrderId, Long tenantId) {
+        return Optional.ofNullable(mapper.findLatestRecommendation(workOrderId, tenantId))
+                .map(this::toDomain);
+    }
+
+    @Override
     public boolean frameworkRelationActive(Long relationId,
                                            Long tenantId,
                                            Long supplierDeptId,
@@ -357,7 +423,7 @@ public class RepairWorkOrderRepositoryImpl implements RepairWorkOrderRepository 
     @Override
     public List<RepairDecisionRoom> listDecisionRooms(Long tenantId, Long buildingId, String unitName) {
         return mapper.listDecisionRooms(tenantId, buildingId, unitName).stream()
-                .map(row -> new RepairDecisionRoom(row.getRoomId(), row.getBuildArea()))
+                .map(row -> new RepairDecisionRoom(row.getRoomId(), row.getRoomLabel(), row.getBuildArea()))
                 .toList();
     }
 
@@ -371,6 +437,36 @@ public class RepairWorkOrderRepositoryImpl implements RepairWorkOrderRepository 
     @Override
     public Optional<RepairLocalDecision> findLocalDecision(Long workOrderId, Long tenantId) {
         return Optional.ofNullable(mapper.findLocalDecision(workOrderId, tenantId)).map(this::toDomain);
+    }
+
+    @Override
+    public List<RepairOwnerLocalDecision> listOwnerLocalDecisions(Long uid, Long tenantId) {
+        return mapper.listOwnerLocalDecisions(uid, tenantId, null, null).stream()
+                .map(this::toDomain)
+                .toList();
+    }
+
+    @Override
+    public Optional<RepairOwnerLocalDecision> findOwnerLocalDecision(
+            Long decisionId, Long opid, Long uid, Long tenantId) {
+        return mapper.listOwnerLocalDecisions(uid, tenantId, decisionId, opid).stream()
+                .findFirst()
+                .map(this::toDomain);
+    }
+
+    @Override
+    public void submitOnlineDecisionVote(Long decisionId, Long tenantId, Long roomId, Long ownerUid,
+                                         Long accountId, String choice, BigDecimal buildArea) {
+        mapper.submitOnlineDecisionVote(decisionId, tenantId, roomId, ownerUid, accountId, choice, buildArea);
+    }
+
+    @Override
+    public List<RepairSolitaireEntry> listSolitaireEntries(Long decisionId, Long tenantId) {
+        return mapper.listSolitaireEntries(decisionId, tenantId).stream()
+                .map(row -> new RepairSolitaireEntry(row.getRoomId(), row.getOwnerUid(),
+                        com.pangu.domain.model.repair.RepairVoteChoice.valueOf(row.getChoice()),
+                        row.getBuildArea(), row.getOriginalText()))
+                .toList();
     }
 
     @Override
@@ -636,6 +732,7 @@ public class RepairWorkOrderRepositoryImpl implements RepairWorkOrderRepository 
                 row.getDescription(),
                 RepairSource.valueOf(row.getSource()),
                 RepairSpaceScope.valueOf(row.getSpaceScope()),
+                row.getPublicAreaScope() == null ? null : RepairPublicAreaScope.valueOf(row.getPublicAreaScope()),
                 RepairWorkOrderStatus.valueOf(row.getStatus()),
                 row.getReporterAccountId(),
                 row.getReporterUid(),
@@ -671,6 +768,7 @@ public class RepairWorkOrderRepositoryImpl implements RepairWorkOrderRepository 
         row.setDescription(domain.description());
         row.setSource(domain.source().name());
         row.setSpaceScope(domain.spaceScope().name());
+        row.setPublicAreaScope(domain.publicAreaScope() == null ? null : domain.publicAreaScope().name());
         row.setStatus(domain.status().name());
         row.setReporterAccountId(domain.reporterAccountId());
         row.setReporterUid(domain.reporterUid());
@@ -732,6 +830,10 @@ public class RepairWorkOrderRepositoryImpl implements RepairWorkOrderRepository 
                 row.getConfirmationStatus() == null ? null : RepairQuoteConfirmationStatus.valueOf(row.getConfirmationStatus()),
                 row.getOriginalSource(),
                 row.getOriginalAttachmentHash(),
+                row.getQuoteStatus() == null ? RepairSupplierQuoteStatus.ACTIVE
+                        : RepairSupplierQuoteStatus.valueOf(row.getQuoteStatus()),
+                row.getRevisionNo() == null ? 1 : row.getRevisionNo(),
+                row.getSupersededByQuoteId(),
                 row.getCreateTime());
     }
 
@@ -799,6 +901,9 @@ public class RepairWorkOrderRepositoryImpl implements RepairWorkOrderRepository 
         row.setConfirmationStatus(domain.confirmationStatus().name());
         row.setOriginalSource(domain.originalSource());
         row.setOriginalAttachmentHash(domain.originalAttachmentHash());
+        row.setQuoteStatus(domain.quoteStatus().name());
+        row.setRevisionNo(domain.revisionNo());
+        row.setSupersededByQuoteId(domain.supersededByQuoteId());
         return row;
     }
 
@@ -818,6 +923,22 @@ public class RepairWorkOrderRepositoryImpl implements RepairWorkOrderRepository 
         return row;
     }
 
+    private RepairSupplierRecommendation toDomain(RepairSupplierRecommendationRow row) {
+        return new RepairSupplierRecommendation(
+                row.getRecommendationId(),
+                row.getWorkOrderId(),
+                row.getTenantId(),
+                row.getQuoteId(),
+                row.getRecommendedByUserId(),
+                row.getRecommendationReason(),
+                flag(row.getSingleSource()),
+                row.getSingleSourceReason(),
+                RepairSupplierSelectionMethod.valueOf(row.getSelectionMethod()),
+                row.getInsufficientQuoteReason(),
+                row.getFrameworkRelationId(),
+                row.getCreateTime());
+    }
+
     private RepairBuildingDecisionSnapshot toDomain(RepairBuildingDecisionSnapshotRow row) {
         return new RepairBuildingDecisionSnapshot(
                 row.getTotalOwnerCount() == null ? 0 : row.getTotalOwnerCount(),
@@ -831,6 +952,7 @@ public class RepairWorkOrderRepositoryImpl implements RepairWorkOrderRepository 
                 row.getTenantId(),
                 row.getBuildingId(),
                 RepairLocalDecisionScopeType.valueOf(row.getScopeType()),
+                RepairLocalDecisionChannel.valueOf(row.getDecisionChannel()),
                 row.getUnitName(),
                 row.getScopeLabel(),
                 row.getTotalOwnerCount() == null ? 0 : row.getTotalOwnerCount(),
@@ -859,6 +981,7 @@ public class RepairWorkOrderRepositoryImpl implements RepairWorkOrderRepository 
         row.setTenantId(domain.tenantId());
         row.setBuildingId(domain.buildingId());
         row.setScopeType(domain.scopeType().name());
+        row.setDecisionChannel(domain.decisionChannel().name());
         row.setUnitName(domain.unitName());
         row.setScopeLabel(domain.scopeLabel());
         row.setTotalOwnerCount(domain.totalOwnerCount());
@@ -877,6 +1000,17 @@ public class RepairWorkOrderRepositoryImpl implements RepairWorkOrderRepository 
         row.setPrintedAndAttached(flag(domain.printedAndAttached()));
         row.setResult(domain.result());
         return row;
+    }
+
+    private RepairOwnerLocalDecision toDomain(
+            com.pangu.infrastructure.persistence.entity.RepairOwnerLocalDecisionRow row) {
+        return new RepairOwnerLocalDecision(
+                row.getDecisionId(), row.getWorkOrderId(), row.getOrderNo(), row.getTitle(),
+                row.getLocationText(), row.getSurveySummary(), row.getScopeLabel(), row.getOpid(),
+                row.getRoomId(), row.getRoomName(), row.getBuildArea(), row.getSupplierName(),
+                row.getQuoteAmount(), row.getQuoteSummary(), row.getQuoteAttachmentId(),
+                row.getMyChoice() == null ? null
+                        : com.pangu.domain.model.repair.RepairVoteChoice.valueOf(row.getMyChoice()));
     }
 
     private RepairWorkOrderEventRow toRow(RepairWorkOrderEvent event) {

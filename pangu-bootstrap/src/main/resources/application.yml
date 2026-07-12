@@ -78,6 +78,11 @@ platform:
     public-bucket-name: ${PANGU_OSS_PUBLIC_BUCKET_NAME:pangu-residents-public}
     access-key-id: ${PANGU_OSS_ACCESS_KEY_ID:DUMMY_KEY_ID_FOR_DEV}
     access-key-secret: ${PANGU_OSS_ACCESS_KEY_SECRET:DUMMY_KEY_SECRET_FOR_DEV}
+  document-preview:
+    excel:
+      soffice-command: ${PANGU_LIBREOFFICE_COMMAND:soffice}
+      timeout-seconds: ${PANGU_EXCEL_PREVIEW_TIMEOUT_SECONDS:45}
+      cjk-font-family: ${PANGU_EXCEL_PREVIEW_CJK_FONT:Noto Sans CJK SC}
   identity:
     tencent:
       region: ap-guangzhou

@@ -10,6 +10,7 @@ public record RepairLocalDecision(
         Long tenantId,
         Long buildingId,
         RepairLocalDecisionScopeType scopeType,
+        RepairLocalDecisionChannel decisionChannel,
         String unitName,
         String scopeLabel,
         int totalOwnerCount,
@@ -30,4 +31,39 @@ public record RepairLocalDecision(
         LocalDateTime createTime,
         LocalDateTime updateTime
 ) {
+    private static final BigDecimal TWO = new BigDecimal("2");
+    private static final BigDecimal THREE = new BigDecimal("3");
+
+    public boolean currentThresholdPassed() {
+        return participatedOwnerCount != null
+                && participatedArea != null
+                && agreeOwnerCount != null
+                && agreeArea != null
+                && passesThreshold(
+                        participatedOwnerCount, participatedArea,
+                        agreeOwnerCount, agreeArea,
+                        totalOwnerCount, totalArea);
+    }
+
+    public static boolean passesThreshold(int participatedOwnerCount,
+                                          BigDecimal participatedArea,
+                                          int agreeOwnerCount,
+                                          BigDecimal agreeArea,
+                                          int totalOwnerCount,
+                                          BigDecimal totalArea) {
+        boolean quorum = participatedOwnerCount * 3 >= totalOwnerCount * 2
+                && participatedArea.multiply(THREE).compareTo(totalArea.multiply(TWO)) >= 0;
+        boolean majority = agreeOwnerCount * 2 > participatedOwnerCount
+                && agreeArea.multiply(TWO).compareTo(participatedArea) > 0;
+        return quorum && majority;
+    }
+
+    public RepairLocalDecision withResult(String nextResult) {
+        return new RepairLocalDecision(
+                decisionId, workOrderId, tenantId, buildingId, scopeType, decisionChannel,
+                unitName, scopeLabel, totalOwnerCount, totalArea, participatedOwnerCount,
+                participatedArea, agreeOwnerCount, agreeArea, disagreeOwnerCount, disagreeArea,
+                abstainOwnerCount, abstainArea, invalidOwnerCount, invalidArea,
+                evidenceAttachmentHash, printedAndAttached, nextResult, createTime, updateTime);
+    }
 }

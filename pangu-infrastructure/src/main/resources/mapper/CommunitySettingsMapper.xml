@@ -55,12 +55,55 @@
             FROM c_owner_property op
             WHERE op.tenant_id = #{tenantId}
               AND op.account_status = 1
+        ),
+        building_space AS (
+            SELECT DISTINCT building_id
+            FROM c_owner_property
+            WHERE tenant_id = #{tenantId}
+              AND account_status = 1
+              AND building_id IS NOT NULL
+            UNION
+            SELECT DISTINCT building_id
+            FROM c_property_roster
+            WHERE tenant_id = #{tenantId}
+              AND status = 'ACTIVE'
+              AND building_id IS NOT NULL
         )
         SELECT COALESCE(SUM(build_area) FILTER (WHERE room_rn = 1), 0)::NUMERIC(14, 2) AS total_area,
                COUNT(DISTINCT uid) FILTER (WHERE room_rn = 1) AS owner_count,
                COUNT(*) FILTER (WHERE room_rn = 1) AS unit_count,
-               COUNT(DISTINCT building_id) AS building_count
+               (SELECT COUNT(*) FROM building_space) AS building_count
         FROM scoped
+    </select>
+
+    <select id="selectBuildingDirectory"
+            resultType="com.pangu.infrastructure.persistence.entity.CommunityBuildingRow">
+        WITH space AS (
+            SELECT DISTINCT tenant_id, building_id, room_id
+            FROM c_owner_property
+            WHERE tenant_id = #{tenantId}
+              AND account_status = 1
+              AND building_id IS NOT NULL
+              AND room_id IS NOT NULL
+            UNION
+            SELECT DISTINCT tenant_id, building_id, room_id
+            FROM c_property_roster
+            WHERE tenant_id = #{tenantId}
+              AND status = 'ACTIVE'
+              AND building_id IS NOT NULL
+              AND room_id IS NOT NULL
+        )
+        SELECT s.building_id,
+               COALESCE(MAX(pr.building_name), CONCAT(s.building_id::TEXT, ' 号楼')) AS building_name,
+               COUNT(DISTINCT COALESCE(pr.unit_name, '默认单元')) AS unit_count,
+               COUNT(DISTINCT s.room_id) AS room_count
+        FROM space s
+        LEFT JOIN c_property_roster pr
+          ON pr.tenant_id = s.tenant_id
+         AND pr.room_id = s.room_id
+         AND pr.status = 'ACTIVE'
+        GROUP BY s.building_id
+        ORDER BY s.building_id
     </select>
 
     <select id="selectDenominatorBreakdown" resultType="com.pangu.infrastructure.persistence.entity.DenominatorBreakdownRow">
@@ -190,6 +233,7 @@
         SET rule_config_id = #{ruleConfigId},
             shared_ownership_strategy = #{sharedOwnershipStrategy},
             repair_estimate_required = #{repairEstimateRequired},
+            building_repair_default_decision_channel = #{buildingRepairDefaultDecisionChannel},
             fund_managed_enabled = #{fundManagedEnabled},
             financial_control_config_id = #{financialControlConfigId},
             quarterly_disclosure_deadline_day = #{quarterlyDisclosureDeadlineDay},

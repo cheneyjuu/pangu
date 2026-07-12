@@ -47,6 +47,7 @@ public record TenantCommunity(
         Long ruleConfigId,
         String sharedOwnershipStrategy,
         boolean repairEstimateRequired,
+        String buildingRepairDefaultDecisionChannel,
         boolean fundManagedEnabled,
         String financialControlConfigId,
         int quarterlyDisclosureDeadlineDay,

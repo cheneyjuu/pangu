@@ -24,12 +24,14 @@ import com.pangu.application.repair.command.StartRepairLocalDecisionCommand;
 import com.pangu.application.repair.command.SetRepairAcceptanceScopeCommand;
 import com.pangu.application.repair.command.SubmitRepairApprovalPackageCommand;
 import com.pangu.application.repair.command.SubmitRepairSupplierQuoteCommand;
+import com.pangu.application.repair.command.SubmitRepairOnlineVoteCommand;
+import com.pangu.application.repair.command.SubmitRepairInspectionCommand;
 import com.pangu.application.repair.command.SubmitRepairPlanCommand;
 import com.pangu.application.repair.command.SubmitRepairSurveyCommand;
 import com.pangu.application.repair.command.ReviewRepairPriceCommand;
 import com.pangu.domain.common.Page;
+import com.pangu.domain.model.repair.RepairAttachmentKind;
 import com.pangu.domain.model.repair.RepairSpaceScope;
-import com.pangu.domain.model.repair.RepairApprovalAttachment;
 import com.pangu.domain.model.repair.RepairContractSignature;
 import com.pangu.domain.model.repair.RepairWorkOrder;
 import com.pangu.domain.model.repair.RepairWorkOrderStatus;
@@ -47,6 +49,7 @@ import com.pangu.interfaces.web.controller.dto.repair.RepairQuoteInvitationRespo
 import com.pangu.interfaces.web.controller.dto.repair.RecommendRepairSupplierRequest;
 import com.pangu.interfaces.web.controller.dto.repair.RepairDecisionRoomResponse;
 import com.pangu.interfaces.web.controller.dto.repair.RepairAttachmentDownloadTicketResponse;
+import com.pangu.interfaces.web.controller.dto.repair.RepairAttachmentPreviewTicketResponse;
 import com.pangu.interfaces.web.controller.dto.repair.RepairAttachmentResponse;
 import com.pangu.interfaces.web.controller.dto.repair.RepairFrameworkRelationResponse;
 import com.pangu.interfaces.web.controller.dto.repair.RegisterSupplierOrganizationRequest;
@@ -57,6 +60,10 @@ import com.pangu.interfaces.web.controller.dto.repair.RepairLocationOptionsRespo
 import com.pangu.interfaces.web.controller.dto.repair.RepairPlanningPolicyResponse;
 import com.pangu.interfaces.web.controller.dto.repair.RepairSupplierOrganizationResponse;
 import com.pangu.interfaces.web.controller.dto.repair.RepairSupplierQuoteResponse;
+import com.pangu.interfaces.web.controller.dto.repair.RepairOwnerLocalDecisionResponse;
+import com.pangu.interfaces.web.controller.dto.repair.RepairLocalDecisionResponse;
+import com.pangu.interfaces.web.controller.dto.repair.SubmitRepairOnlineVoteRequest;
+import com.pangu.interfaces.web.controller.dto.repair.SubmitRepairInspectionRequest;
 import com.pangu.interfaces.web.controller.dto.repair.RepairSupplierWorkOrderResponse;
 import com.pangu.interfaces.web.controller.dto.repair.SealRepairGovernanceRequest;
 import com.pangu.interfaces.web.controller.dto.repair.StartRepairAssemblyDecisionRequest;
@@ -100,7 +107,7 @@ public class RepairWorkOrderController extends BaseController {
     @PostMapping(
             value = "/admin/repair-work-orders/{workOrderId}/attachments",
             consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @PreAuthorize("hasAuthority('repair:workorder:field')")
+    @PreAuthorize("hasAnyAuthority('repair:workorder:field','repair:workorder:manage')")
     public Result<RepairAttachmentResponse> uploadAttachment(
             @PathVariable("workOrderId") Long workOrderId,
             @RequestParam("attachmentKind") String attachmentKind,
@@ -113,6 +120,25 @@ public class RepairWorkOrderController extends BaseController {
         } catch (IOException ex) {
             throw new RepairWorkOrderApplicationException(
                     RepairWorkOrderApplicationException.Reason.PARAM_INVALID, "读取上传附件失败", ex);
+        }
+    }
+
+    @PostMapping(
+            value = "/admin/repair-work-orders/{workOrderId}/intake-attachments",
+            consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PreAuthorize("hasAuthority('repair:workorder:intake')")
+    public Result<RepairAttachmentResponse> uploadIntakeAttachment(
+            @PathVariable("workOrderId") Long workOrderId,
+            @RequestParam("contentType") String contentType,
+            @RequestPart("file") MultipartFile file) {
+        try {
+            return success(RepairAttachmentResponse.from(attachmentService.uploadIntakeAttachment(
+                    workOrderId, new UploadRepairAttachmentCommand(
+                            RepairAttachmentKind.INTAKE_ATTACHMENT.name(), file.getOriginalFilename(),
+                            contentType, file.getBytes()))));
+        } catch (IOException ex) {
+            throw new RepairWorkOrderApplicationException(
+                    RepairWorkOrderApplicationException.Reason.PARAM_INVALID, "读取登记附件失败", ex);
         }
     }
 
@@ -142,6 +168,15 @@ public class RepairWorkOrderController extends BaseController {
                 attachmentService.createDownloadTicket(workOrderId, attachmentId)));
     }
 
+    @GetMapping("/admin/repair-work-orders/{workOrderId}/attachments/{attachmentId}/preview-url")
+    @PreAuthorize("hasAuthority('repair:workorder:field')")
+    public Result<RepairAttachmentPreviewTicketResponse> createAttachmentPreviewTicket(
+            @PathVariable("workOrderId") Long workOrderId,
+            @PathVariable("attachmentId") Long attachmentId) {
+        return success(RepairAttachmentPreviewTicketResponse.from(
+                attachmentService.createPreviewTicket(workOrderId, attachmentId)));
+    }
+
     @DeleteMapping("/admin/repair-work-orders/{workOrderId}/attachments/{attachmentId}")
     @PreAuthorize("hasAuthority('repair:workorder:field')")
     public Result<Void> deleteAttachment(
@@ -164,6 +199,32 @@ public class RepairWorkOrderController extends BaseController {
     @PreAuthorize("isAuthenticated()")
     public Result<List<RepairWorkOrderResponse>> listMine() {
         return success(service.listMine().stream().map(RepairWorkOrderResponse::from).toList());
+    }
+
+    @GetMapping("/me/repair-local-decisions")
+    @PreAuthorize("isAuthenticated()")
+    public Result<List<RepairOwnerLocalDecisionResponse>> listMyLocalDecisions() {
+        return success(service.listMyLocalDecisions().stream()
+                .map(RepairOwnerLocalDecisionResponse::from)
+                .toList());
+    }
+
+    @PostMapping("/me/repair-local-decisions/{decisionId}/votes")
+    @PreAuthorize("isAuthenticated()")
+    public Result<RepairOwnerLocalDecisionResponse> submitMyLocalDecisionVote(
+            @PathVariable("decisionId") Long decisionId,
+            @Valid @RequestBody SubmitRepairOnlineVoteRequest request) {
+        return success(RepairOwnerLocalDecisionResponse.from(service.submitMyOnlineVote(
+                decisionId, new SubmitRepairOnlineVoteCommand(request.opid(), request.choice()))));
+    }
+
+    @GetMapping("/me/repair-local-decisions/{decisionId}/quote-preview")
+    @PreAuthorize("isAuthenticated()")
+    public Result<RepairAttachmentPreviewTicketResponse> createMyDecisionQuotePreviewTicket(
+            @PathVariable("decisionId") Long decisionId,
+            @RequestParam("opid") Long opid) {
+        return success(RepairAttachmentPreviewTicketResponse.from(
+                attachmentService.createOwnerDecisionQuotePreviewTicket(decisionId, opid)));
     }
 
     @GetMapping("/me/repairs/{workOrderId}")
@@ -297,6 +358,16 @@ public class RepairWorkOrderController extends BaseController {
                 .toList());
     }
 
+    @GetMapping("/admin/repair-work-orders/{workOrderId}/supplier-quotes/{supplierDeptId}/history")
+    @PreAuthorize("hasAuthority('repair:workorder:manage')")
+    public Result<List<RepairSupplierQuoteResponse>> listSupplierQuoteHistory(
+            @PathVariable("workOrderId") Long workOrderId,
+            @PathVariable("supplierDeptId") Long supplierDeptId) {
+        return success(service.listSupplierQuoteHistory(workOrderId, supplierDeptId).stream()
+                .map(RepairSupplierQuoteResponse::from)
+                .toList());
+    }
+
     @GetMapping("/admin/repair-work-orders/{workOrderId}/quote-invitations")
     @PreAuthorize("hasAuthority('repair:workorder:manage')")
     public Result<List<RepairQuoteInvitationResponse>> listQuoteInvitations(
@@ -324,7 +395,7 @@ public class RepairWorkOrderController extends BaseController {
     public Result<RepairWorkOrderResponse> correctLocation(@PathVariable("workOrderId") Long workOrderId,
                                                            @Valid @RequestBody CorrectRepairLocationRequest request) {
         RepairWorkOrder order = service.correctLocation(workOrderId, new CorrectRepairLocationCommand(
-                request.buildingId(), request.roomId(), request.locationText(), request.reason(),
+                request.publicAreaScope(), request.buildingId(), request.roomId(), request.locationText(), request.reason(),
                 request.fieldSupplement(), request.evidenceImageAttachmentIds()));
         return success(RepairWorkOrderResponse.from(order));
     }
@@ -362,6 +433,18 @@ public class RepairWorkOrderController extends BaseController {
         return success(RepairWorkOrderResponse.from(order));
     }
 
+    @PostMapping("/admin/repair-work-orders/{workOrderId}/submit-inspection")
+    @PreAuthorize("hasAuthority('repair:workorder:field')")
+    public Result<RepairWorkOrderResponse> submitInspection(
+            @PathVariable("workOrderId") Long workOrderId,
+            @Valid @RequestBody SubmitRepairInspectionRequest request) {
+        RepairWorkOrder order = service.submitInspection(workOrderId, new SubmitRepairInspectionCommand(
+                request.publicAreaScope(), request.buildingId(), request.roomId(), request.locationText(),
+                request.fieldSupplement(), request.surveySummary(), request.riskLevel(),
+                request.evidenceImageAttachmentIds(), request.evidenceVideoAttachmentId(), request.remark()));
+        return success(RepairWorkOrderResponse.from(order));
+    }
+
     @PostMapping("/admin/repair-work-orders/{workOrderId}/submit-plan")
     @PreAuthorize("hasAuthority('repair:workorder:field')")
     public Result<RepairWorkOrderResponse> submitPlan(@PathVariable("workOrderId") Long workOrderId,
@@ -386,6 +469,26 @@ public class RepairWorkOrderController extends BaseController {
         RepairWorkOrder order = service.inviteSuppliers(workOrderId, new InviteRepairSuppliersCommand(
                 request.supplierDeptIds(), request.deadline(), request.remark()));
         return success(RepairWorkOrderResponse.from(order));
+    }
+
+    @PostMapping("/admin/repair-work-orders/{workOrderId}/revision-quote-invitations")
+    @PreAuthorize("hasAuthority('repair:workorder:manage')")
+    public Result<RepairWorkOrderResponse> requestSupplierQuoteRevisions(
+            @PathVariable("workOrderId") Long workOrderId,
+            @Valid @RequestBody InviteRepairSuppliersRequest request) {
+        RepairWorkOrder order = service.requestSupplierQuoteRevisions(workOrderId,
+                new InviteRepairSuppliersCommand(
+                        request.supplierDeptIds(), request.deadline(), request.remark()));
+        return success(RepairWorkOrderResponse.from(order));
+    }
+
+    @PostMapping("/admin/repair-work-orders/{workOrderId}/reuse-supplier-quote")
+    @PreAuthorize("hasAuthority('repair:workorder:manage')")
+    public Result<RepairWorkOrderResponse> reusePreviousSupplierQuote(
+            @PathVariable("workOrderId") Long workOrderId,
+            @Valid @RequestBody RepairActionRequest request) {
+        return success(RepairWorkOrderResponse.from(
+                service.reusePreviousSupplierQuote(workOrderId, action(request))));
     }
 
     @PostMapping("/admin/repair-work-orders/{workOrderId}/supplier-quotes")
@@ -429,10 +532,10 @@ public class RepairWorkOrderController extends BaseController {
             @PathVariable("workOrderId") Long workOrderId,
             @Valid @RequestBody(required = false) StartRepairLocalDecisionRequest request) {
         StartRepairLocalDecisionRequest safeRequest = request == null
-                ? new StartRepairLocalDecisionRequest(null, null, null, null)
+                ? new StartRepairLocalDecisionRequest(null, null, null, null, null)
                 : request;
         RepairWorkOrder order = service.startLocalDecision(workOrderId,
-                new StartRepairLocalDecisionCommand(safeRequest.scopeType(), safeRequest.unitName(),
+                new StartRepairLocalDecisionCommand(safeRequest.scopeType(), safeRequest.decisionChannel(), safeRequest.unitName(),
                         safeRequest.scopeLabel(), safeRequest.remark()));
         return success(RepairWorkOrderResponse.from(order));
     }
@@ -442,12 +545,34 @@ public class RepairWorkOrderController extends BaseController {
     public Result<RepairWorkOrderResponse> completeLocalDecision(
             @PathVariable("workOrderId") Long workOrderId,
             @Valid @RequestBody CompleteRepairLocalDecisionRequest request) {
-        List<CompleteRepairLocalDecisionCommand.Entry> entries = request.entries().stream()
+        List<CompleteRepairLocalDecisionCommand.Entry> entries = (request.entries() == null
+                ? List.<CompleteRepairLocalDecisionRequest.Entry>of()
+                : request.entries()).stream()
                 .map(item -> new CompleteRepairLocalDecisionCommand.Entry(
                         item.roomId(), item.ownerUid(), item.choice(), item.originalText()))
                 .toList();
         RepairWorkOrder order = service.completeLocalDecision(workOrderId, new CompleteRepairLocalDecisionCommand(
-                entries, request.evidenceAttachmentHash(), request.remark()));
+                entries, request.evidenceAttachmentId(), request.evidenceAttachmentHash(), request.remark()));
+        return success(RepairWorkOrderResponse.from(order));
+    }
+
+    @PostMapping("/admin/repair-work-orders/{workOrderId}/pause-local-decision")
+    @PreAuthorize("hasAnyAuthority('repair:workorder:field','repair:workorder:local-decision')")
+    public Result<RepairWorkOrderResponse> pauseLocalDecision(
+            @PathVariable("workOrderId") Long workOrderId,
+            @RequestBody(required = false) RepairActionRequest request) {
+        RepairWorkOrder order = service.pauseLocalDecision(workOrderId,
+                new RepairActionCommand(request == null ? null : request.remark(), null, List.of()));
+        return success(RepairWorkOrderResponse.from(order));
+    }
+
+    @PostMapping("/admin/repair-work-orders/{workOrderId}/resume-local-decision")
+    @PreAuthorize("hasAnyAuthority('repair:workorder:field','repair:workorder:local-decision')")
+    public Result<RepairWorkOrderResponse> resumeLocalDecision(
+            @PathVariable("workOrderId") Long workOrderId,
+            @RequestBody(required = false) RepairActionRequest request) {
+        RepairWorkOrder order = service.resumeLocalDecision(workOrderId,
+                new RepairActionCommand(request == null ? null : request.remark(), null, List.of()));
         return success(RepairWorkOrderResponse.from(order));
     }
 
@@ -460,18 +585,20 @@ public class RepairWorkOrderController extends BaseController {
                 .toList());
     }
 
+    @GetMapping("/admin/repair-work-orders/{workOrderId}/local-decision")
+    @PreAuthorize("hasAnyAuthority('repair:workorder:field','repair:workorder:local-decision')")
+    public Result<RepairLocalDecisionResponse> getLocalDecision(
+            @PathVariable("workOrderId") Long workOrderId) {
+        return success(RepairLocalDecisionResponse.from(service.getLocalDecision(workOrderId)));
+    }
+
     @PostMapping("/admin/repair-work-orders/{workOrderId}/approval-package")
     @PreAuthorize("hasAuthority('repair:workorder:manage')")
     public Result<RepairWorkOrderResponse> submitApprovalPackage(
             @PathVariable("workOrderId") Long workOrderId,
             @Valid @RequestBody SubmitRepairApprovalPackageRequest request) {
-        List<RepairApprovalAttachment> attachments = request.attachments().stream()
-                .map(item -> new RepairApprovalAttachment(item.attachmentType(), item.attachmentHash(),
-                        item.originalFileName(), item.sortOrder()))
-                .toList();
         RepairWorkOrder order = service.submitApprovalPackage(workOrderId, new SubmitRepairApprovalPackageCommand(
-                request.officialDocumentHash(), request.mergedPackageHash(), request.printedAndAttached(),
-                attachments, request.remark()));
+                request.officialDocumentAttachmentId(), request.solitaireScreenshotAttachmentIds(), request.remark()));
         return success(RepairWorkOrderResponse.from(order));
     }
 
@@ -625,7 +752,7 @@ public class RepairWorkOrderController extends BaseController {
 
     private CreatePublicRepairCommand toCommand(CreatePublicRepairRequest request) {
         return new CreatePublicRepairCommand(
-                request.buildingId(), request.locationText(), request.title(),
+                request.publicAreaScope(), request.buildingId(), request.locationText(), request.title(),
                 request.description(), request.category(), request.evidenceText());
     }
 

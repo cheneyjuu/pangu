@@ -11,6 +11,9 @@ public class RepairQuoteInvitationRow {
     private Long supplierDeptId;
     private String supplierName;
     private String status;
+    private Integer invitationRound;
+    private String invitationType;
+    private String revisionReason;
     private LocalDateTime deadline;
     private LocalDateTime sentAt;
 }

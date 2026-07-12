@@ -23,6 +23,9 @@ public record RepairSupplierQuote(
         RepairQuoteConfirmationStatus confirmationStatus,
         String originalSource,
         String originalAttachmentHash,
+        RepairSupplierQuoteStatus quoteStatus,
+        int revisionNo,
+        Long supersededByQuoteId,
         LocalDateTime createTime
 ) {
 

@@ -4,6 +4,7 @@ import java.util.List;
 
 public record CompleteRepairLocalDecisionCommand(
         List<Entry> entries,
+        Long evidenceAttachmentId,
         String evidenceAttachmentHash,
         String remark
 ) {

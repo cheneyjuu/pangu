@@ -14,6 +14,9 @@ public record RepairSupplierQuoteResponse(
         Long attachmentId,
         String submissionSource,
         String confirmationStatus,
+        String quoteStatus,
+        int revisionNo,
+        Long supersededByQuoteId,
         LocalDateTime createTime
 ) {
     public static RepairSupplierQuoteResponse from(RepairSupplierQuote quote) {
@@ -26,6 +29,9 @@ public record RepairSupplierQuoteResponse(
                 quote.attachmentId(),
                 quote.submissionSource() == null ? null : quote.submissionSource().name(),
                 quote.confirmationStatus() == null ? null : quote.confirmationStatus().name(),
+                quote.quoteStatus() == null ? null : quote.quoteStatus().name(),
+                quote.revisionNo(),
+                quote.supersededByQuoteId(),
                 quote.createTime());
     }
 }

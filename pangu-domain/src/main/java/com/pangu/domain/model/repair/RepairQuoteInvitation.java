@@ -8,6 +8,9 @@ public record RepairQuoteInvitation(
         Long supplierDeptId,
         String supplierName,
         String status,
+        int invitationRound,
+        String invitationType,
+        String revisionReason,
         LocalDateTime deadline,
         LocalDateTime sentAt
 ) {

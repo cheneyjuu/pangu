@@ -10,6 +10,7 @@ import com.pangu.domain.model.repair.RepairDecisionRoom;
 import com.pangu.domain.model.repair.RepairFrameworkRelation;
 import com.pangu.domain.model.repair.RepairLocationOption;
 import com.pangu.domain.model.repair.RepairLocalDecision;
+import com.pangu.domain.model.repair.RepairOwnerLocalDecision;
 import com.pangu.domain.model.repair.RepairQuoteInvitation;
 import com.pangu.domain.model.repair.RepairSpaceScope;
 import com.pangu.domain.model.repair.RepairSupplierQuote;
@@ -77,7 +78,15 @@ public interface RepairWorkOrderRepository {
 
     int update(RepairWorkOrder workOrder);
 
+    void lockQuoteSubmission(Long workOrderId);
+
     RepairSupplierQuote insertQuote(RepairSupplierQuote quote);
+
+    Optional<RepairSupplierQuote> findActiveQuote(Long workOrderId, Long tenantId, Long supplierDeptId);
+
+    void supersedeQuote(Long quoteId);
+
+    void linkSupersededQuote(Long quoteId, Long supersededByQuoteId);
 
     Optional<RepairSupplierQuote> findQuote(Long quoteId, Long workOrderId, Long tenantId);
 
@@ -92,6 +101,10 @@ public interface RepairWorkOrderRepository {
     List<RepairSupplierOrganization> listSupplierOrganizations(Long tenantId);
 
     List<RepairSupplierQuote> listSupplierQuotes(Long workOrderId, Long tenantId);
+
+    List<RepairSupplierQuote> listSupplierQuoteHistory(Long workOrderId, Long tenantId, Long supplierDeptId);
+
+    Optional<RepairSupplierQuote> findLatestSupplierQuote(Long workOrderId, Long tenantId, Long supplierDeptId);
 
     List<RepairFrameworkRelation> listActiveFrameworkRelations(Long tenantId, String serviceCategory);
 
@@ -136,9 +149,20 @@ public interface RepairWorkOrderRepository {
                          List<Long> supplierDeptIds,
                          LocalDateTime deadline);
 
+    void inviteSupplierRevisions(Long workOrderId,
+                                 Long tenantId,
+                                 Long invitedByUserId,
+                                 List<Long> supplierDeptIds,
+                                 LocalDateTime deadline,
+                                 String revisionReason);
+
+    void markActiveQuoteRevisionRequested(Long workOrderId, Long tenantId, Long supplierDeptId);
+
     boolean supplierCanAccess(Long workOrderId, Long tenantId, Long supplierDeptId);
 
     RepairSupplierRecommendation insertRecommendation(RepairSupplierRecommendation recommendation);
+
+    Optional<RepairSupplierRecommendation> findLatestRecommendation(Long workOrderId, Long tenantId);
 
     boolean frameworkRelationActive(Long relationId,
                                     Long tenantId,
@@ -154,6 +178,15 @@ public interface RepairWorkOrderRepository {
     RepairLocalDecision insertLocalDecision(RepairLocalDecision decision);
 
     Optional<RepairLocalDecision> findLocalDecision(Long workOrderId, Long tenantId);
+
+    List<RepairOwnerLocalDecision> listOwnerLocalDecisions(Long uid, Long tenantId);
+
+    Optional<RepairOwnerLocalDecision> findOwnerLocalDecision(Long decisionId, Long opid, Long uid, Long tenantId);
+
+    void submitOnlineDecisionVote(Long decisionId, Long tenantId, Long roomId, Long ownerUid,
+                                  Long accountId, String choice, BigDecimal buildArea);
+
+    List<RepairSolitaireEntry> listSolitaireEntries(Long decisionId, Long tenantId);
 
     int updateLocalDecisionResult(RepairLocalDecision decision);
 

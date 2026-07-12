@@ -2,15 +2,15 @@ package com.pangu.interfaces.web.controller.dto.repair;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
 import java.util.List;
 
 public record CompleteRepairLocalDecisionRequest(
-        @NotEmpty List<@Valid Entry> entries,
-        @NotBlank @Size(max = 128) String evidenceAttachmentHash,
+        List<@Valid Entry> entries,
+        Long evidenceAttachmentId,
+        @Size(max = 128) String evidenceAttachmentHash,
         @Size(max = 500) String remark
 ) {
     public record Entry(

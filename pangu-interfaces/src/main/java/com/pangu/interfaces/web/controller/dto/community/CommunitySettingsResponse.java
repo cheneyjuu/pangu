@@ -2,6 +2,7 @@ package com.pangu.interfaces.web.controller.dto.community;
 
 import com.pangu.application.community.CommunitySettingsView;
 import com.pangu.domain.model.community.CommunityLedgerStats;
+import com.pangu.domain.model.community.CommunityBuilding;
 import com.pangu.domain.model.community.CommunitySettingsAudit;
 import com.pangu.domain.model.community.DenominatorBreakdown;
 import com.pangu.domain.model.community.DenominatorReviewRequest;
@@ -28,7 +29,8 @@ public record CommunitySettingsResponse(
         return new CommunitySettingsResponse(
                 Header.from(community),
                 view.permissions().canViewOrganization() ? Organization.from(community) : null,
-                AssetLedger.from(community, view.liveLedgerStats(), view.denominatorBreakdown(), view.permissions()),
+                AssetLedger.from(community, view.liveLedgerStats(), view.buildings(),
+                        view.denominatorBreakdown(), view.permissions()),
                 Denominator.from(community, view.denominatorBreakdown(), view.pendingReviewRequests()),
                 view.permissions().canViewRules()
                         ? Rules.from(community, view.currentPolicy(), view.policyOptions(), view.daysUntilDisclosureDeadline())
@@ -100,10 +102,12 @@ public record CommunitySettingsResponse(
             int parkingSpaceCount,
             BigDecimal plotRatio,
             LedgerStats liveLedgerStats,
+            List<Building> buildings,
             List<DenominatorBreakdownItem> denominatorBreakdown
     ) {
         private static AssetLedger from(TenantCommunity c,
                                         CommunityLedgerStats live,
+                                        List<CommunityBuilding> buildings,
                                         List<DenominatorBreakdown> breakdown,
                                         CommunitySettingsView.Permissions permissions) {
             return new AssetLedger(c.propertyAreaName(), c.propertyAreaCode(), c.developerName(),
@@ -112,7 +116,20 @@ public record CommunitySettingsResponse(
                     c.registeredVotingOwnerCount(), c.totalPlannedBuildingArea(), c.totalExclusiveArea(),
                     c.registeredVotingTotalArea(), c.excludedParkingArea(), c.publicArea(), c.buildingCount(),
                     c.unitCount(), c.parkingSpaceCount(), c.plotRatio(), LedgerStats.from(live),
+                    buildings.stream().map(Building::from).toList(),
                     breakdown.stream().map(DenominatorBreakdownItem::from).toList());
+        }
+    }
+
+    public record Building(
+            Long buildingId,
+            String buildingName,
+            long unitCount,
+            long roomCount
+    ) {
+        private static Building from(CommunityBuilding building) {
+            return new Building(building.buildingId(), building.buildingName(),
+                    building.unitCount(), building.roomCount());
         }
     }
 
@@ -140,6 +157,7 @@ public record CommunitySettingsResponse(
             List<Policy> policyOptions,
             String sharedOwnershipStrategy,
             boolean repairEstimateRequired,
+            String buildingRepairDefaultDecisionChannel,
             boolean fundManagedEnabled,
             String financialControlConfigId,
             int quarterlyDisclosureDeadlineDay,
@@ -150,7 +168,8 @@ public record CommunitySettingsResponse(
                                   List<GovernancePolicy> options,
                                   int daysUntilDisclosureDeadline) {
             return new Rules(Policy.from(current), options.stream().map(Policy::from).toList(),
-                    c.sharedOwnershipStrategy(), c.repairEstimateRequired(), c.fundManagedEnabled(), c.financialControlConfigId(),
+                    c.sharedOwnershipStrategy(), c.repairEstimateRequired(),
+                    c.buildingRepairDefaultDecisionChannel(), c.fundManagedEnabled(), c.financialControlConfigId(),
                     c.quarterlyDisclosureDeadlineDay(), daysUntilDisclosureDeadline);
         }
     }

@@ -23,6 +23,8 @@ import com.pangu.application.repair.command.StartRepairLocalDecisionCommand;
 import com.pangu.application.repair.command.SetRepairAcceptanceScopeCommand;
 import com.pangu.application.repair.command.SubmitRepairApprovalPackageCommand;
 import com.pangu.application.repair.command.SubmitRepairSupplierQuoteCommand;
+import com.pangu.application.repair.command.SubmitRepairOnlineVoteCommand;
+import com.pangu.application.repair.command.SubmitRepairInspectionCommand;
 import com.pangu.application.repair.command.SubmitRepairPlanCommand;
 import com.pangu.application.repair.command.SubmitRepairSurveyCommand;
 import com.pangu.application.repair.command.ReviewRepairPriceCommand;
@@ -43,13 +45,18 @@ import com.pangu.domain.model.repair.RepairDecisionRoom;
 import com.pangu.domain.model.repair.RepairFrameworkRelation;
 import com.pangu.domain.model.repair.RepairLocationOption;
 import com.pangu.domain.model.repair.RepairLocalDecision;
+import com.pangu.domain.model.repair.RepairLocalDecisionChannel;
 import com.pangu.domain.model.repair.RepairLocalDecisionScopeType;
+import com.pangu.domain.model.repair.RepairOwnerLocalDecision;
 import com.pangu.domain.model.repair.RepairQuoteConfirmationStatus;
 import com.pangu.domain.model.repair.RepairQuoteInvitation;
 import com.pangu.domain.model.repair.RepairQuoteSubmissionSource;
+import com.pangu.domain.model.repair.RepairCategory;
+import com.pangu.domain.model.repair.RepairPublicAreaScope;
 import com.pangu.domain.model.repair.RepairSource;
 import com.pangu.domain.model.repair.RepairSpaceScope;
 import com.pangu.domain.model.repair.RepairSupplierQuote;
+import com.pangu.domain.model.repair.RepairSupplierQuoteStatus;
 import com.pangu.domain.model.repair.RepairSupplierOrganization;
 import com.pangu.domain.model.repair.RepairSupplierRecommendation;
 import com.pangu.domain.model.repair.RepairSupplierSelectionMethod;
@@ -109,8 +116,6 @@ public class RepairWorkOrderService {
     private static final Set<String> ASSEMBLY_FUND_SOURCES = Set.of(
             FUND_PUBLIC_REVENUE,
             FUND_COMMUNITY_MAINTENANCE);
-    private static final BigDecimal TWO = new BigDecimal("2");
-    private static final BigDecimal THREE = new BigDecimal("3");
 
     private static final Set<String> INTAKE_ROLES = Set.of("PROPERTY_STAFF", "PROPERTY_MANAGER");
     private static final Set<String> FIELD_ROLES = Set.of(
@@ -156,9 +161,9 @@ public class RepairWorkOrderService {
         }
         RepairWorkOrder inserted = repository.insert(new RepairWorkOrder(
                 null, null, ctx.tenantId(), title, trim(command.description()), RepairSource.C_OWNER_APP,
-                RepairSpaceScope.PRIVATE, RepairWorkOrderStatus.SUBMITTED, ctx.accountId(),
+                RepairSpaceScope.PRIVATE, null, RepairWorkOrderStatus.SUBMITTED, ctx.accountId(),
                 ctx.uid(), null, property.roomId(), property.buildingId(), null,
-                false, false, null, null, null, trim(command.category()), null,
+                false, false, null, null, null, normalizeCategory(command.category()), null,
                 trim(command.evidenceText()), null, null, null, true, null, null, 0L, null, null));
         event(inserted, "OWNER_SUBMIT_PRIVATE", null, inserted.status(), "业主提交私有空间报修");
         return inserted;
@@ -169,11 +174,13 @@ public class RepairWorkOrderService {
         UserContext ctx = requireOwnerContext();
         String title = requireText(command.title(), "title");
         Long buildingId = command.buildingId();
+        RepairPublicAreaScope publicAreaScope = resolvePublicAreaScope(
+                command.publicAreaScope(), buildingId, command.locationText());
         if (buildingId != null && !repository.buildingExists(ctx.tenantId(), buildingId)) {
             throw new RepairWorkOrderApplicationException(BUILDING_NOT_IN_SCOPE,
                     "楼栋不在当前小区范围内 buildingId=" + buildingId);
         }
-        boolean needManualLocation = buildingId == null;
+        boolean needManualLocation = publicAreaScope == null;
         RepairWorkOrder duplicate = duplicate(ctx, RepairSpaceScope.PUBLIC, null, buildingId, title);
         if (duplicate != null) {
             return duplicate;
@@ -183,9 +190,9 @@ public class RepairWorkOrderService {
                 : RepairWorkOrderStatus.SUBMITTED;
         RepairWorkOrder inserted = repository.insert(new RepairWorkOrder(
                 null, null, ctx.tenantId(), title, trim(command.description()), RepairSource.C_OWNER_APP,
-                RepairSpaceScope.PUBLIC, status, ctx.accountId(), ctx.uid(), null,
+                RepairSpaceScope.PUBLIC, publicAreaScope, status, ctx.accountId(), ctx.uid(), null,
                 null, buildingId, trim(command.locationText()), needManualLocation, false,
-                null, null, null, trim(command.category()), null, trim(command.evidenceText()),
+                null, null, null, normalizeCategory(command.category()), null, trim(command.evidenceText()),
                 null, null, null, true, null, null, 0L, null, null));
         event(inserted, "OWNER_SUBMIT_PUBLIC", null, inserted.status(),
                 needManualLocation ? "公共报修信息不足，进入现场补充" : "业主提交公共区域报修");
@@ -198,19 +205,21 @@ public class RepairWorkOrderService {
         String title = requireText(command.title(), "title");
         Long tenantId = requireTenant(ctx);
         Long buildingId = command.buildingId();
+        RepairPublicAreaScope publicAreaScope = resolvePublicAreaScope(
+                command.publicAreaScope(), buildingId, command.locationText());
         if (buildingId != null && !repository.buildingExists(tenantId, buildingId)) {
             throw new RepairWorkOrderApplicationException(BUILDING_NOT_IN_SCOPE,
                     "楼栋不在当前小区范围内 buildingId=" + buildingId);
         }
-        boolean needManualLocation = buildingId == null;
+        boolean needManualLocation = publicAreaScope == null;
         RepairWorkOrderStatus status = needManualLocation
                 ? RepairWorkOrderStatus.NEED_MANUAL_LOCATION
                 : RepairWorkOrderStatus.SUBMITTED;
         RepairWorkOrder inserted = repository.insert(new RepairWorkOrder(
                 null, null, tenantId, title, trim(command.description()), RepairSource.ADMIN_PC,
-                RepairSpaceScope.PUBLIC, status, ctx.accountId(), null, ctx.userId(),
+                RepairSpaceScope.PUBLIC, publicAreaScope, status, ctx.accountId(), null, ctx.userId(),
                 null, buildingId, trim(command.locationText()), needManualLocation, false,
-                null, null, null, trim(command.category()), null, trim(command.evidenceText()),
+                null, null, null, normalizeCategory(command.category()), null, trim(command.evidenceText()),
                 null, null, null, true, null, null, 0L, null, null));
         event(inserted, "ADMIN_REGISTER_PUBLIC", null, inserted.status(),
                 needManualLocation ? "物业登记公共报修，待现场定位" : "物业登记公共报修");
@@ -288,6 +297,15 @@ public class RepairWorkOrderService {
     }
 
     @Transactional(readOnly = true)
+    public List<RepairSupplierQuote> listSupplierQuoteHistory(Long workOrderId, Long supplierDeptId) {
+        RepairWorkOrder order = findAdmin(workOrderId);
+        if (supplierDeptId == null) {
+            throw new RepairWorkOrderApplicationException(PARAM_INVALID, "supplierDeptId 必填");
+        }
+        return repository.listSupplierQuoteHistory(order.workOrderId(), order.tenantId(), supplierDeptId);
+    }
+
+    @Transactional(readOnly = true)
     public List<RepairQuoteInvitation> listQuoteInvitations(Long workOrderId) {
         RepairWorkOrder order = findAdmin(workOrderId);
         return repository.listQuoteInvitations(order.workOrderId(), order.tenantId());
@@ -296,7 +314,8 @@ public class RepairWorkOrderService {
     @Transactional(readOnly = true)
     public List<RepairFrameworkRelation> listActiveFrameworkRelations(String serviceCategory) {
         UserContext ctx = requireSysContext();
-        return repository.listActiveFrameworkRelations(requireTenant(ctx), trim(serviceCategory));
+        String normalizedCategory = trim(serviceCategory) == null ? null : normalizeCategory(serviceCategory);
+        return repository.listActiveFrameworkRelations(requireTenant(ctx), normalizedCategory);
     }
 
     @Transactional(readOnly = true)
@@ -342,7 +361,11 @@ public class RepairWorkOrderService {
     public RepairWorkOrder correctLocation(Long workOrderId, CorrectRepairLocationCommand command) {
         UserContext ctx = requireRole(FIELD_ROLES, "当前角色无权纠偏报修位置");
         RepairWorkOrder order = loadVisible(ctx, workOrderId);
-        if (command.buildingId() == null && command.roomId() == null) {
+        RepairPublicAreaScope publicAreaScope = order.spaceScope() == RepairSpaceScope.PUBLIC
+                ? resolvePublicAreaScope(command.publicAreaScope(), command.buildingId(), command.locationText())
+                : null;
+        if (order.spaceScope() == RepairSpaceScope.PRIVATE
+                && command.buildingId() == null && command.roomId() == null) {
             throw new RepairWorkOrderApplicationException(PARAM_INVALID, "buildingId 或 roomId 至少填写一个");
         }
         if (command.buildingId() != null && !repository.buildingExists(order.tenantId(), command.buildingId())) {
@@ -354,7 +377,8 @@ public class RepairWorkOrderService {
                     "房号不在当前小区或楼栋范围内 roomId=" + command.roomId());
         }
         RepairWorkOrder next = order.withLocation(command.buildingId(), command.roomId(),
-                trim(command.locationText()), RepairWorkOrderStatus.PENDING_VERIFY, false, false, true);
+                trim(command.locationText()), publicAreaScope,
+                RepairWorkOrderStatus.PENDING_VERIFY, false, false, true);
         List<RepairAttachment> attachments = readyAttachments(order, command.evidenceImageAttachmentIds(),
                 RepairAttachmentKind.LOCATION_IMAGE, 0, MAX_EVIDENCE_IMAGE_COUNT);
         RepairWorkOrder persisted = transition(order, next, "CORRECT_LOCATION", command.reason(),
@@ -373,7 +397,10 @@ public class RepairWorkOrderService {
             throw new RepairWorkOrderApplicationException(LOCATION_NOT_VERIFIED,
                     "工单位置仍需现场补充，禁止核验通过");
         }
-        if (order.buildingId() == null && order.roomId() == null) {
+        boolean communityLocationComplete = order.spaceScope() == RepairSpaceScope.PUBLIC
+                && order.publicAreaScope() == RepairPublicAreaScope.COMMUNITY
+                && trim(order.locationText()) != null;
+        if (!communityLocationComplete && order.buildingId() == null && order.roomId() == null) {
             throw new RepairWorkOrderApplicationException(LOCATION_NOT_VERIFIED,
                     "工单未绑定楼栋或房屋，禁止核验通过");
         }
@@ -407,23 +434,89 @@ public class RepairWorkOrderService {
         UserContext ctx = requireRole(FIELD_ROLES, "当前角色无权提交现场初勘");
         RepairWorkOrder order = loadVisible(ctx, workOrderId);
         requireStatus(order, RepairWorkOrderStatus.SURVEYING);
-        String surveySummary = requireText(command.surveySummary(), "surveySummary");
-        String riskLevel = requireText(command.riskLevel(), "riskLevel").toUpperCase();
+        return completeInspection(order, command.surveySummary(), command.riskLevel(),
+                command.evidenceImageAttachmentIds(), command.evidenceVideoAttachmentId(), command.remark());
+    }
+
+    @Transactional
+    public RepairWorkOrder submitInspection(Long workOrderId, SubmitRepairInspectionCommand command) {
+        UserContext ctx = requireRole(FIELD_ROLES, "当前角色无权提交现场勘验");
+        RepairWorkOrder order = loadVisible(ctx, workOrderId);
+        requireStatus(order,
+                RepairWorkOrderStatus.SUBMITTED,
+                RepairWorkOrderStatus.NEED_MANUAL_LOCATION,
+                RepairWorkOrderStatus.PENDING_VERIFY,
+                RepairWorkOrderStatus.VERIFIED,
+                RepairWorkOrderStatus.ASSIGNED,
+                RepairWorkOrderStatus.SURVEYING);
+
+        if (order.status() == RepairWorkOrderStatus.SUBMITTED) {
+            RepairWorkOrderStatus nextStatus = order.needManualLocation()
+                    ? RepairWorkOrderStatus.NEED_MANUAL_LOCATION
+                    : RepairWorkOrderStatus.PENDING_VERIFY;
+            order = transition(order, order.withStatus(nextStatus, order.needManualLocation(), false, true),
+                    "ACCEPT", "勘验提交时系统完成受理");
+        }
+        if (order.status() == RepairWorkOrderStatus.NEED_MANUAL_LOCATION) {
+            order = correctInspectionLocation(order, command);
+        }
+        if (order.status() == RepairWorkOrderStatus.PENDING_VERIFY) {
+            assertLocationComplete(order);
+            order = transition(order, order.withStatus(RepairWorkOrderStatus.VERIFIED, false, true, false),
+                    "VERIFY_LOCATION", "勘验提交时核验现场位置",
+                    fieldEvidencePayload(command.fieldSupplement(), List.of()));
+        }
+        if (order.status() == RepairWorkOrderStatus.VERIFIED) {
+            RepairWorkOrder assigned = order.withAssignment(ctx.userId(), ctx.roleKey(), ctx.deptId(),
+                    RepairWorkOrderStatus.ASSIGNED);
+            order = transition(order, assigned, "ASSIGN", "勘验提交时指派当前处理人");
+        }
+        if (order.status() == RepairWorkOrderStatus.ASSIGNED) {
+            order = transition(order, order.withStatus(RepairWorkOrderStatus.SURVEYING, false, true, false),
+                    "START_SURVEY", "勘验提交时开始现场勘验");
+        }
+        return completeInspection(order, command.surveySummary(), command.riskLevel(),
+                command.evidenceImageAttachmentIds(), command.evidenceVideoAttachmentId(), command.remark());
+    }
+
+    private RepairWorkOrder correctInspectionLocation(RepairWorkOrder order,
+                                                       SubmitRepairInspectionCommand command) {
+        RepairPublicAreaScope publicAreaScope = order.spaceScope() == RepairSpaceScope.PUBLIC
+                ? resolvePublicAreaScope(command.publicAreaScope(), command.buildingId(), command.locationText())
+                : null;
+        validateInspectionLocation(order, command.buildingId(), command.roomId(),
+                command.locationText(), publicAreaScope);
+        RepairWorkOrder next = order.withLocation(command.buildingId(), command.roomId(),
+                trim(command.locationText()), publicAreaScope,
+                RepairWorkOrderStatus.PENDING_VERIFY, false, false, true);
+        return transition(order, next, "CORRECT_LOCATION", "勘验提交时补充现场位置",
+                fieldEvidencePayload(command.fieldSupplement(), List.of()));
+    }
+
+    private RepairWorkOrder completeInspection(RepairWorkOrder order,
+                                               String summary,
+                                               String risk,
+                                               List<Long> imageAttachmentIds,
+                                               Long videoAttachmentId,
+                                               String remark) {
+        requireStatus(order, RepairWorkOrderStatus.SURVEYING);
+        String surveySummary = requireText(summary, "surveySummary");
+        String riskLevel = requireText(risk, "riskLevel").toUpperCase();
         if (!Set.of("LOW", "MEDIUM", "HIGH").contains(riskLevel)) {
             throw new RepairWorkOrderApplicationException(PARAM_INVALID,
                     "riskLevel 仅支持 LOW、MEDIUM、HIGH");
         }
-        List<RepairAttachment> evidenceImages = readyAttachments(order, command.evidenceImageAttachmentIds(),
+        List<RepairAttachment> evidenceImages = readyAttachments(order, imageAttachmentIds,
                 RepairAttachmentKind.SURVEY_IMAGE, 1, MAX_EVIDENCE_IMAGE_COUNT);
-        List<RepairAttachment> evidenceVideo = command.evidenceVideoAttachmentId() == null
+        List<RepairAttachment> evidenceVideo = videoAttachmentId == null
                 ? List.of()
-                : readyAttachments(order, List.of(command.evidenceVideoAttachmentId()),
+                : readyAttachments(order, List.of(videoAttachmentId),
                 RepairAttachmentKind.SURVEY_VIDEO, 0, 1);
         List<RepairAttachment> attachments = new ArrayList<>(evidenceImages);
         attachments.addAll(evidenceVideo);
         RepairWorkOrder next = order.withSurvey(surveySummary, riskLevel,
                 RepairWorkOrderStatus.SURVEY_COMPLETED);
-        RepairWorkOrder persisted = transition(order, next, "SUBMIT_SURVEY", command.remark(),
+        RepairWorkOrder persisted = transition(order, next, "SUBMIT_SURVEY", remark,
                 surveyEvidencePayload(surveySummary, riskLevel, attachments));
         bindAttachments(order, attachments, "SUBMIT_SURVEY");
         return persisted;
@@ -437,7 +530,9 @@ public class RepairWorkOrderService {
             throw new RepairWorkOrderApplicationException(LOCATION_NOT_VERIFIED,
                     "未完成现场核验，禁止提交方案预算");
         }
-        requireStatus(order, RepairWorkOrderStatus.SURVEY_COMPLETED, RepairWorkOrderStatus.PLAN_SUBMITTED);
+        requireStatus(order, RepairWorkOrderStatus.SURVEY_COMPLETED,
+                RepairWorkOrderStatus.PLAN_SUBMITTED,
+                RepairWorkOrderStatus.PLAN_REVISION_REQUIRED);
         RepairPlanningPolicy policy = planningPolicy(order.tenantId());
         if (policy.internalEstimateRequired() && command.planBudget() == null) {
             throw new RepairWorkOrderApplicationException(PARAM_INVALID, "当前社区要求填写物业内部估算金额");
@@ -450,6 +545,7 @@ public class RepairWorkOrderService {
             throw new RepairWorkOrderApplicationException(PARAM_INVALID, "公开最高限价必须大于 0");
         }
         String fundSource = requireAllowed(command.fundSource(), "fundSource", REPAIR_FUND_SOURCES);
+        validateFundSourceForPublicArea(order, fundSource);
         if (FUND_PROPERTY_INTERNAL.equals(fundSource) && command.publicCeilingPrice() != null) {
             throw new RepairWorkOrderApplicationException(PARAM_INVALID,
                     "物业包干维修不进入供应商邀价，不能设置公开最高限价");
@@ -540,6 +636,92 @@ public class RepairWorkOrderService {
     }
 
     @Transactional
+    public RepairWorkOrder requestSupplierQuoteRevisions(Long workOrderId,
+                                                         InviteRepairSuppliersCommand command) {
+        UserContext ctx = requireRole(SUPPLIER_RECOMMEND_ROLES, "当前角色无权要求供应商修订报价");
+        RepairWorkOrder order = loadVisible(ctx, workOrderId);
+        requireStatus(order, RepairWorkOrderStatus.PLAN_SUBMITTED,
+                RepairWorkOrderStatus.QUOTE_COLLECTING, RepairWorkOrderStatus.QUOTE_SUBMITTED);
+        List<Long> supplierDeptIds = command.supplierDeptIds() == null
+                ? List.of()
+                : command.supplierDeptIds().stream().filter(java.util.Objects::nonNull).distinct().toList();
+        if (supplierDeptIds.isEmpty() || supplierDeptIds.size() > 20) {
+            throw new RepairWorkOrderApplicationException(PARAM_INVALID, "每次必须选择 1 至 20 家供应商修订报价");
+        }
+        String revisionReason = requireText(command.remark(), "修订报价原因");
+        if (command.deadline() != null && !command.deadline().isAfter(LocalDateTime.now())) {
+            throw new RepairWorkOrderApplicationException(PARAM_INVALID, "报价截止时间必须晚于当前时间");
+        }
+        repository.lockQuoteSubmission(order.workOrderId());
+        for (Long supplierDeptId : supplierDeptIds) {
+            RepairSupplierQuote latestQuote = repository.findLatestSupplierQuote(
+                            order.workOrderId(), order.tenantId(), supplierDeptId)
+                    .orElseThrow(() -> new RepairWorkOrderApplicationException(NOT_FOUND,
+                            "所选供应商没有可修订的历史报价 supplierDeptId=" + supplierDeptId));
+            if (latestQuote.quoteStatus() == RepairSupplierQuoteStatus.REVISION_REQUESTED) {
+                throw new RepairWorkOrderApplicationException(PARAM_INVALID,
+                        "所选供应商已有待提交的修订报价 supplierDeptId=" + supplierDeptId);
+            }
+            if (latestQuote.quoteStatus() != RepairSupplierQuoteStatus.ACTIVE) {
+                throw new RepairWorkOrderApplicationException(PARAM_INVALID,
+                        "所选供应商没有当前有效报价 supplierDeptId=" + supplierDeptId);
+            }
+        }
+        repository.inviteSupplierRevisions(order.workOrderId(), order.tenantId(), ctx.userId(),
+                supplierDeptIds, command.deadline(), revisionReason);
+        supplierDeptIds.forEach(supplierDeptId -> {
+            repository.markActiveQuoteRevisionRequested(order.workOrderId(), order.tenantId(), supplierDeptId);
+            supplierActivationService.ensureContactInvitation(
+                    order.tenantId(), supplierDeptId, order.workOrderId(), ctx.userId());
+        });
+        RepairWorkOrder next = order.withStatus(RepairWorkOrderStatus.QUOTE_COLLECTING, false, true, false);
+        return transition(order, next, "REQUEST_SUPPLIER_QUOTE_REVISIONS", revisionReason, jsonPayload(Map.of(
+                "supplierDeptIds", supplierDeptIds,
+                "supplierCount", supplierDeptIds.size())));
+    }
+
+    @Transactional
+    public RepairWorkOrder reusePreviousSupplierQuote(Long workOrderId, RepairActionCommand command) {
+        UserContext ctx = requireRole(SUPPLIER_RECOMMEND_ROLES, "当前角色无权沿用上一轮供应商报价");
+        RepairWorkOrder order = loadVisible(ctx, workOrderId);
+        requireStatus(order, RepairWorkOrderStatus.PLAN_SUBMITTED,
+                RepairWorkOrderStatus.QUOTE_COLLECTING, RepairWorkOrderStatus.QUOTE_SUBMITTED);
+        String reuseReason = requireText(command.remark(), "沿用上一轮报价原因");
+        repository.lockQuoteSubmission(order.workOrderId());
+        RepairSupplierRecommendation previousRecommendation = repository.findLatestRecommendation(
+                        order.workOrderId(), order.tenantId())
+                .orElseThrow(() -> new RepairWorkOrderApplicationException(NOT_FOUND, "没有可沿用的历史供应商推荐记录"));
+        RepairSupplierQuote quote = repository.findQuote(
+                        previousRecommendation.quoteId(), order.workOrderId(), order.tenantId())
+                .orElseThrow(() -> new RepairWorkOrderApplicationException(PARAM_INVALID,
+                        "上一轮推荐报价已失效，请要求供应商修订报价"));
+        if (quote.confirmationStatus() == null || !quote.confirmationStatus().confirmedForContract()) {
+            throw new RepairWorkOrderApplicationException(PARAM_INVALID, "上一轮推荐报价尚未完成供应商确认，不能直接沿用");
+        }
+        RepairSupplierRecommendation recommendation = repository.insertRecommendation(
+                new RepairSupplierRecommendation(
+                        null,
+                        order.workOrderId(),
+                        order.tenantId(),
+                        quote.quoteId(),
+                        ctx.userId(),
+                        "沿用上一轮推荐：" + reuseReason,
+                        previousRecommendation.singleSource(),
+                        previousRecommendation.singleSourceReason(),
+                        previousRecommendation.selectionMethod(),
+                        previousRecommendation.insufficientQuoteReason(),
+                        previousRecommendation.frameworkRelationId(),
+                        null));
+        RepairWorkOrder next = order.withStatus(RepairWorkOrderStatus.SUPPLIER_RECOMMENDED, false, true, false);
+        return transition(order, next, "REUSE_SUPPLIER_QUOTE", reuseReason, jsonPayload(Map.of(
+                "previousRecommendationId", previousRecommendation.recommendationId(),
+                "recommendationId", recommendation.recommendationId(),
+                "quoteId", quote.quoteId(),
+                "quoteRevisionNo", quote.revisionNo(),
+                "supplierName", quote.supplierName())));
+    }
+
+    @Transactional
     public RepairWorkOrder submitSupplierQuote(Long workOrderId, SubmitRepairSupplierQuoteCommand command) {
         UserContext ctx = requireSysContext();
         boolean supplierSubmission = SUPPLIER_ROLES.contains(ctx.roleKey());
@@ -584,6 +766,15 @@ public class RepairWorkOrderService {
         if (!supplierSubmission && trim(command.originalSource()) == null) {
             throw new RepairWorkOrderApplicationException(PARAM_INVALID, "物业代录必须记录原始报价来源");
         }
+        repository.lockQuoteSubmission(order.workOrderId());
+        RepairSupplierQuote previousQuote = repository.findLatestSupplierQuote(
+                order.workOrderId(), order.tenantId(), supplierDeptId).orElse(null);
+        int revisionNo = previousQuote == null ? 1 : previousQuote.revisionNo() + 1;
+        boolean replacePreviousQuote = previousQuote != null
+                && previousQuote.quoteStatus() != RepairSupplierQuoteStatus.SUPERSEDED;
+        if (replacePreviousQuote) {
+            repository.supersedeQuote(previousQuote.quoteId());
+        }
         RepairSupplierQuote quote = repository.insertQuote(new RepairSupplierQuote(
                 null,
                 order.workOrderId(),
@@ -603,13 +794,21 @@ public class RepairWorkOrderService {
                 confirmationStatus,
                 trim(command.originalSource()),
                 attachmentHash,
+                RepairSupplierQuoteStatus.ACTIVE,
+                revisionNo,
+                null,
                 null));
+        if (replacePreviousQuote) {
+            repository.linkSupersededQuote(previousQuote.quoteId(), quote.quoteId());
+        }
         bindAttachments(order, quoteAttachments, "SUBMIT_SUPPLIER_QUOTE");
         RepairWorkOrder next = order.withStatus(RepairWorkOrderStatus.QUOTE_SUBMITTED, false, true, false);
         return transition(order, next, "SUBMIT_SUPPLIER_QUOTE", command.remark(), jsonPayload(Map.of(
                 "quoteId", quote.quoteId(),
                 "supplierName", quote.supplierName(),
                 "quoteAmount", quote.quoteAmount(),
+                "revisionNo", quote.revisionNo(),
+                "replacedQuoteId", replacePreviousQuote ? previousQuote.quoteId() : "",
                 "submissionSource", submissionSource,
                 "confirmationStatus", confirmationStatus)));
     }
@@ -675,22 +874,33 @@ public class RepairWorkOrderService {
 
     @Transactional
     public RepairWorkOrder startLocalDecision(Long workOrderId, StartRepairLocalDecisionCommand command) {
-        UserContext ctx = requireRole(LOCAL_DECISION_ROLES, "当前角色无权发起楼栋维修接龙");
+        UserContext ctx = requireRole(LOCAL_DECISION_ROLES, "当前角色无权发起楼栋维修表决");
         RepairWorkOrder order = loadVisible(ctx, workOrderId);
         requireStatus(order, RepairWorkOrderStatus.SUPPLIER_RECOMMENDED);
         if (!FUND_BUILDING_MAINTENANCE.equals(order.fundSource())) {
             throw new RepairWorkOrderApplicationException(PARAM_INVALID,
-                    "仅使用楼栋专项维修资金的维修可以发起楼栋接龙");
+                    "仅使用楼栋专项维修资金的维修可以发起楼栋表决");
         }
         if (order.buildingId() == null) {
-            throw new RepairWorkOrderApplicationException(LOCATION_NOT_VERIFIED, "接龙维修必须先绑定楼栋");
+            throw new RepairWorkOrderApplicationException(LOCATION_NOT_VERIFIED, "楼栋表决必须先绑定楼栋");
         }
         if ("OWNER_REPRESENTATIVE".equals(ctx.roleKey()) && !ctx.authorizedBuildingScopes()
                 .contains(new WorkIdentityBuildingScope(order.tenantId(), order.buildingId()))) {
-            throw new RepairWorkOrderApplicationException(BUILDING_NOT_IN_SCOPE, "楼主无权发起该楼栋接龙");
+            throw new RepairWorkOrderApplicationException(BUILDING_NOT_IN_SCOPE, "楼主无权发起该楼栋表决");
         }
         RepairLocalDecisionScopeType scopeType = parseEnum(command.scopeType(), RepairLocalDecisionScopeType.class,
                 RepairLocalDecisionScopeType.BUILDING, "scopeType");
+        RepairPlanningPolicy planningPolicy = planningPolicy(order.tenantId());
+        RepairLocalDecisionChannel communityDefaultChannel = parseEnum(
+                planningPolicy.buildingRepairDefaultDecisionChannel(),
+                RepairLocalDecisionChannel.class, RepairLocalDecisionChannel.WECHAT,
+                "buildingRepairDefaultDecisionChannel");
+        String requestedChannel = trim(command.decisionChannel());
+        RepairLocalDecisionChannel decisionChannel = parseEnum(requestedChannel,
+                RepairLocalDecisionChannel.class, communityDefaultChannel, "decisionChannel");
+        String channelSource = requestedChannel != null && decisionChannel != communityDefaultChannel
+                ? "WORK_ORDER_OVERRIDE"
+                : "COMMUNITY_DEFAULT";
         String unitName = trim(command.unitName());
         if (scopeType == RepairLocalDecisionScopeType.BUILDING_UNIT && unitName == null) {
             throw new RepairWorkOrderApplicationException(PARAM_INVALID, "按单元接龙时 unitName 必填");
@@ -711,6 +921,7 @@ public class RepairWorkOrderService {
                 order.tenantId(),
                 order.buildingId(),
                 scopeType,
+                decisionChannel,
                 unitName,
                 trim(command.scopeLabel()),
                 snapshot.totalOwnerCount(),
@@ -735,6 +946,8 @@ public class RepairWorkOrderService {
                 "decisionId", decision.decisionId(),
                 "buildingId", decision.buildingId(),
                 "scopeType", decision.scopeType(),
+                "decisionChannel", decision.decisionChannel(),
+                "decisionChannelSource", channelSource,
                 "unitName", decision.unitName() == null ? "" : decision.unitName(),
                 "totalOwnerCount", decision.totalOwnerCount(),
                 "totalArea", decision.totalArea())));
@@ -742,17 +955,53 @@ public class RepairWorkOrderService {
 
     @Transactional
     public RepairWorkOrder completeLocalDecision(Long workOrderId, CompleteRepairLocalDecisionCommand command) {
-        UserContext ctx = requireRole(LOCAL_DECISION_ROLES, "当前角色无权完成楼栋维修接龙");
+        UserContext ctx = requireRole(PROPERTY_QUOTE_ROLES, "仅物业可以汇总并结束楼栋维修表决");
         RepairWorkOrder order = loadVisible(ctx, workOrderId);
         requireStatus(order, RepairWorkOrderStatus.LOCAL_DECISION_PENDING);
-        String evidenceAttachmentHash = requireText(command.evidenceAttachmentHash(), "evidenceAttachmentHash");
         RepairLocalDecision decision = repository.findLocalDecision(order.workOrderId(), order.tenantId())
                 .orElseThrow(() -> new RepairWorkOrderApplicationException(NOT_FOUND, "接龙决策不存在"));
-        LocalDecisionTally tally = tallyLocalDecision(command, decision);
-        repository.replaceSolitaireEntries(decision.decisionId(), decision.tenantId(), ctx.userId(), tally.entries());
-        repository.insertSolitaireEvidence(decision.decisionId(), decision.tenantId(), evidenceAttachmentHash,
-                ctx.accountId(), ctx.userId());
-        boolean passed = localDecisionPassed(tally.participatedOwnerCount(), tally.participatedArea(),
+        if (!"COLLECTING".equals(decision.result())) {
+            throw new RepairWorkOrderApplicationException(INVALID_STATUS,
+                    "仅进行中的楼栋表决可以结束并结算 result=" + decision.result());
+        }
+        String evidenceAttachmentHash = null;
+        List<RepairAttachment> evidenceAttachments = List.of();
+        LocalDecisionTally tally;
+        if (decision.decisionChannel() == RepairLocalDecisionChannel.WECHAT) {
+            if (command.evidenceAttachmentId() != null) {
+                evidenceAttachments = readyAttachments(order, List.of(command.evidenceAttachmentId()),
+                        RepairAttachmentKind.SOLITAIRE_SCREENSHOT, 1, 1);
+                RepairAttachment screenshot = evidenceAttachments.getFirst();
+                evidenceAttachmentHash = "attachment:%d:%s".formatted(
+                        screenshot.attachmentId(), screenshot.etag());
+            } else {
+                evidenceAttachmentHash = requireText(command.evidenceAttachmentHash(), "evidenceAttachmentHash");
+            }
+            tally = tallyLocalDecision(command, decision);
+            repository.replaceSolitaireEntries(decision.decisionId(), decision.tenantId(), ctx.userId(), tally.entries());
+            repository.insertSolitaireEvidence(decision.decisionId(), decision.tenantId(), evidenceAttachmentHash,
+                    ctx.accountId(), ctx.userId());
+            bindAttachments(order, evidenceAttachments, "COMPLETE_LOCAL_DECISION");
+        } else {
+            List<RepairSolitaireEntry> onlineEntries = repository.listSolitaireEntries(
+                    decision.decisionId(), decision.tenantId());
+            Map<Long, RepairSolitaireEntry> submittedByRoom = onlineEntries.stream()
+                    .collect(java.util.stream.Collectors.toMap(RepairSolitaireEntry::roomId, entry -> entry));
+            List<CompleteRepairLocalDecisionCommand.Entry> completedEntries = repository
+                    .listDecisionRooms(decision.tenantId(), decision.buildingId(), decision.unitName()).stream()
+                    .map(room -> {
+                        RepairSolitaireEntry entry = submittedByRoom.get(room.roomId());
+                        return entry == null
+                                ? new CompleteRepairLocalDecisionCommand.Entry(
+                                        room.roomId(), null, RepairVoteChoice.NOT_VOTED.name(), null)
+                                : new CompleteRepairLocalDecisionCommand.Entry(
+                                        entry.roomId(), entry.ownerUid(), entry.choice().name(), entry.originalText());
+                    })
+                    .toList();
+            tally = tallyLocalDecisionEntries(completedEntries, decision);
+        }
+        boolean passed = RepairLocalDecision.passesThreshold(
+                tally.participatedOwnerCount(), tally.participatedArea(),
                 tally.agreeOwnerCount(), tally.agreeArea(),
                 decision.totalOwnerCount(), decision.totalArea());
         String result = passed ? "PASSED" : "FAILED";
@@ -762,6 +1011,7 @@ public class RepairWorkOrderService {
                 decision.tenantId(),
                 decision.buildingId(),
                 decision.scopeType(),
+                decision.decisionChannel(),
                 decision.unitName(),
                 decision.scopeLabel(),
                 decision.totalOwnerCount(),
@@ -788,12 +1038,45 @@ public class RepairWorkOrderService {
         return transition(order, order.withStatus(nextStatus, false, true, false),
                 "COMPLETE_LOCAL_DECISION", command.remark(), jsonPayload(Map.of(
                         "decisionId", decision.decisionId(),
+                        "decisionChannel", decision.decisionChannel(),
                         "result", result,
                         "participatedOwnerCount", tally.participatedOwnerCount(),
                         "agreeOwnerCount", tally.agreeOwnerCount(),
                         "totalOwnerCount", decision.totalOwnerCount(),
                         "agreeArea", tally.agreeArea(),
                         "totalArea", decision.totalArea())));
+    }
+
+    @Transactional
+    public RepairWorkOrder pauseLocalDecision(Long workOrderId, RepairActionCommand command) {
+        UserContext ctx = requireRole(PROPERTY_QUOTE_ROLES, "仅物业可以暂停楼栋表决");
+        RepairWorkOrder order = loadVisible(ctx, workOrderId);
+        requireStatus(order, RepairWorkOrderStatus.LOCAL_DECISION_PENDING);
+        RepairLocalDecision decision = repository.findLocalDecision(order.workOrderId(), order.tenantId())
+                .orElseThrow(() -> new RepairWorkOrderApplicationException(NOT_FOUND, "楼栋表决不存在"));
+        if (!"COLLECTING".equals(decision.result())) {
+            throw new RepairWorkOrderApplicationException(INVALID_STATUS, "仅进行中的楼栋表决可以暂停");
+        }
+        repository.updateLocalDecisionResult(decision.withResult("PAUSED"));
+        event(order, "PAUSE_LOCAL_DECISION", order.status(), order.status(), command.remark(),
+                jsonPayload(Map.of("decisionId", decision.decisionId(), "preserveVotes", true)));
+        return order;
+    }
+
+    @Transactional
+    public RepairWorkOrder resumeLocalDecision(Long workOrderId, RepairActionCommand command) {
+        UserContext ctx = requireRole(PROPERTY_QUOTE_ROLES, "仅物业可以恢复楼栋表决");
+        RepairWorkOrder order = loadVisible(ctx, workOrderId);
+        requireStatus(order, RepairWorkOrderStatus.LOCAL_DECISION_PENDING);
+        RepairLocalDecision decision = repository.findLocalDecision(order.workOrderId(), order.tenantId())
+                .orElseThrow(() -> new RepairWorkOrderApplicationException(NOT_FOUND, "楼栋表决不存在"));
+        if (!"PAUSED".equals(decision.result())) {
+            throw new RepairWorkOrderApplicationException(INVALID_STATUS, "仅已暂停的楼栋表决可以恢复");
+        }
+        repository.updateLocalDecisionResult(decision.withResult("COLLECTING"));
+        event(order, "RESUME_LOCAL_DECISION", order.status(), order.status(), command.remark(),
+                jsonPayload(Map.of("decisionId", decision.decisionId(), "preserveVotes", true)));
+        return order;
     }
 
     @Transactional(readOnly = true)
@@ -804,6 +1087,46 @@ public class RepairWorkOrderService {
         RepairLocalDecision decision = repository.findLocalDecision(order.workOrderId(), order.tenantId())
                 .orElseThrow(() -> new RepairWorkOrderApplicationException(NOT_FOUND, "接龙决策不存在"));
         return repository.listDecisionRooms(decision.tenantId(), decision.buildingId(), decision.unitName());
+    }
+
+    @Transactional(readOnly = true)
+    public RepairLocalDecision getLocalDecision(Long workOrderId) {
+        UserContext ctx = requireRole(LOCAL_DECISION_ROLES, "当前角色无权查看楼栋维修表决");
+        RepairWorkOrder order = loadVisible(ctx, workOrderId);
+        requireStatus(order, RepairWorkOrderStatus.LOCAL_DECISION_PENDING,
+                RepairWorkOrderStatus.LOCAL_DECISION_PASSED);
+        return repository.findLocalDecision(order.workOrderId(), order.tenantId())
+                .orElseThrow(() -> new RepairWorkOrderApplicationException(NOT_FOUND, "楼栋表决不存在"));
+    }
+
+    @Transactional(readOnly = true)
+    public List<RepairOwnerLocalDecision> listMyLocalDecisions() {
+        UserContext ctx = requireOwnerContext();
+        return repository.listOwnerLocalDecisions(ctx.uid(), ctx.tenantId());
+    }
+
+    @Transactional
+    public RepairOwnerLocalDecision submitMyOnlineVote(Long decisionId, SubmitRepairOnlineVoteCommand command) {
+        UserContext ctx = requireOwnerContext();
+        if (command.opid() == null) {
+            throw new RepairWorkOrderApplicationException(PARAM_INVALID, "opid 必填");
+        }
+        RepairVoteChoice choice = parseEnum(command.choice(), RepairVoteChoice.class, null, "choice");
+        if (!Set.of(RepairVoteChoice.AGREE, RepairVoteChoice.DISAGREE, RepairVoteChoice.ABSTAIN)
+                .contains(choice)) {
+            throw new RepairWorkOrderApplicationException(PARAM_INVALID, "在线表决仅支持同意、不同意或弃权");
+        }
+        RepairOwnerLocalDecision decision = repository.findOwnerLocalDecision(
+                        decisionId, command.opid(), ctx.uid(), ctx.tenantId())
+                .orElseThrow(() -> new RepairWorkOrderApplicationException(NOT_FOUND,
+                        "表决不存在、已结束或房屋不在表决范围内"));
+        repository.submitOnlineDecisionVote(decision.decisionId(), ctx.tenantId(), decision.roomId(),
+                ctx.uid(), ctx.accountId(), choice.name(), decision.buildArea());
+        RepairWorkOrder order = repository.findById(decision.workOrderId()).orElseThrow();
+        event(order, "OWNER_CAST_LOCAL_DECISION", order.status(), order.status(), "业主提交楼栋维修在线表决",
+                jsonPayload(Map.of("decisionId", decisionId, "opid", command.opid(), "choice", choice)));
+        return repository.findOwnerLocalDecision(decisionId, command.opid(), ctx.uid(), ctx.tenantId())
+                .orElseThrow();
     }
 
     @Transactional
@@ -870,27 +1193,60 @@ public class RepairWorkOrderService {
         RepairWorkOrder order = loadVisible(ctx, workOrderId);
         requireStatus(order, RepairWorkOrderStatus.LOCAL_DECISION_PASSED,
                 RepairWorkOrderStatus.APPROVAL_DOCUMENT_PREPARING);
-        if (order.status() == RepairWorkOrderStatus.LOCAL_DECISION_PASSED && !command.printedAndAttached()) {
-            throw new RepairWorkOrderApplicationException(PARAM_INVALID,
-                    "楼栋接龙截图打印件必须附在物业正式报审文件后");
+        RepairLocalDecision decision = repository.findLocalDecision(order.workOrderId(), order.tenantId())
+                .orElse(null);
+        boolean requireWechatEvidence = decision != null
+                && decision.decisionChannel() == RepairLocalDecisionChannel.WECHAT;
+        RepairAttachment officialDocument = readyAttachments(
+                order, List.of(command.officialDocumentAttachmentId()),
+                RepairAttachmentKind.APPROVAL_DOCUMENT, 1, 1).getFirst();
+        List<RepairAttachment> uploadedSolitaireScreenshots = List.of();
+        if (requireWechatEvidence && command.solitaireScreenshotAttachmentIds() != null
+                && !command.solitaireScreenshotAttachmentIds().isEmpty()) {
+            uploadedSolitaireScreenshots = readyAttachments(
+                    order, command.solitaireScreenshotAttachmentIds(),
+                    RepairAttachmentKind.SOLITAIRE_SCREENSHOT, 1, 3);
         }
-        List<RepairApprovalAttachment> attachments = command.attachments() == null
-                ? List.of()
-                : List.copyOf(command.attachments());
-        validateApprovalAttachments(attachments, order.status() == RepairWorkOrderStatus.LOCAL_DECISION_PASSED);
+        List<RepairApprovalAttachment> attachments = new ArrayList<>();
+        attachments.add(new RepairApprovalAttachment(
+                "APPROVAL_DOCUMENT", attachmentHash(officialDocument),
+                officialDocument.originalFileName(), 1));
+        int sortOrder = 2;
+        if (requireWechatEvidence) {
+            if (!uploadedSolitaireScreenshots.isEmpty()) {
+                for (RepairAttachment screenshot : uploadedSolitaireScreenshots) {
+                    attachments.add(new RepairApprovalAttachment(
+                            "SOLITAIRE_SCREENSHOT", attachmentHash(screenshot),
+                            screenshot.originalFileName(), sortOrder++));
+                }
+            } else {
+                String evidenceHash = requireText(decision.evidenceAttachmentHash(), "evidenceAttachmentHash");
+                attachments.add(new RepairApprovalAttachment(
+                        "SOLITAIRE_SCREENSHOT", evidenceHash, "微信接龙截图", sortOrder));
+            }
+        }
+        validateApprovalAttachments(attachments, requireWechatEvidence);
+        String officialDocumentHash = attachmentHash(officialDocument);
+        String mergedPackageHash = sha256(attachments.stream()
+                .map(item -> item.sortOrder() + "|" + item.attachmentType() + "|" + item.attachmentHash())
+                .collect(java.util.stream.Collectors.joining("\n")));
         Long packageId = repository.insertApprovalPackage(
                 order.workOrderId(),
                 order.tenantId(),
-                requireText(command.officialDocumentHash(), "officialDocumentHash"),
-                requireText(command.mergedPackageHash(), "mergedPackageHash"),
-                command.printedAndAttached(),
+                officialDocumentHash,
+                mergedPackageHash,
+                requireWechatEvidence,
                 ctx.userId(),
                 attachments);
+        List<RepairAttachment> uploadedAttachments = new ArrayList<>();
+        uploadedAttachments.add(officialDocument);
+        uploadedAttachments.addAll(uploadedSolitaireScreenshots);
+        bindAttachments(order, uploadedAttachments, "SUBMIT_APPROVAL_PACKAGE");
         return transition(order, order.withStatus(RepairWorkOrderStatus.PRICE_REVIEW_PENDING, false, true, false),
                 "SUBMIT_APPROVAL_PACKAGE", command.remark(), jsonPayload(Map.of(
                         "packageId", packageId,
                         "attachmentCount", attachments.size(),
-                        "printedAndAttached", command.printedAndAttached())));
+                        "printedAndAttached", requireWechatEvidence)));
     }
 
     @Transactional
@@ -1245,6 +1601,12 @@ public class RepairWorkOrderService {
         List<CompleteRepairLocalDecisionCommand.Entry> submitted = command.entries() == null
                 ? List.of()
                 : List.copyOf(command.entries());
+        return tallyLocalDecisionEntries(submitted, decision);
+    }
+
+    private LocalDecisionTally tallyLocalDecisionEntries(
+            List<CompleteRepairLocalDecisionCommand.Entry> submitted,
+            RepairLocalDecision decision) {
         List<RepairDecisionRoom> rooms = repository.listDecisionRooms(
                 decision.tenantId(), decision.buildingId(), decision.unitName());
         if (rooms.size() != decision.totalOwnerCount()) {
@@ -1253,12 +1615,12 @@ public class RepairWorkOrderService {
         Map<Long, CompleteRepairLocalDecisionCommand.Entry> byRoom = new LinkedHashMap<>();
         for (CompleteRepairLocalDecisionCommand.Entry entry : submitted) {
             if (entry == null || entry.roomId() == null || byRoom.putIfAbsent(entry.roomId(), entry) != null) {
-                throw new RepairWorkOrderApplicationException(PARAM_INVALID, "接龙逐户明细不能为空或重复");
+                throw new RepairWorkOrderApplicationException(PARAM_INVALID, "表决逐产权人明细不能为空或重复");
             }
         }
         if (byRoom.size() != rooms.size() || rooms.stream().anyMatch(room -> !byRoom.containsKey(room.roomId()))) {
             throw new RepairWorkOrderApplicationException(PARAM_INVALID,
-                    "必须完整登记范围内每套房屋的接龙选择，包括未参与户");
+                    "必须完整登记范围内每个产权人的表决选择，包括未参与人");
         }
 
         int participatedCount = 0;
@@ -1311,19 +1673,6 @@ public class RepairWorkOrderService {
                 verifiedEntries);
     }
 
-    private boolean localDecisionPassed(int participatedOwnerCount,
-                                        BigDecimal participatedArea,
-                                        int agreeOwnerCount,
-                                        BigDecimal agreeArea,
-                                        int totalOwnerCount,
-                                        BigDecimal totalArea) {
-        boolean quorum = participatedOwnerCount * 3 >= totalOwnerCount * 2
-                && participatedArea.multiply(THREE).compareTo(totalArea.multiply(TWO)) >= 0;
-        boolean majority = agreeOwnerCount * 2 > participatedOwnerCount
-                && agreeArea.multiply(TWO).compareTo(participatedArea) > 0;
-        return quorum && majority;
-    }
-
     private record LocalDecisionTally(
             int participatedOwnerCount,
             BigDecimal participatedArea,
@@ -1359,6 +1708,10 @@ public class RepairWorkOrderService {
         if (requireSolitaireEvidence && !hasSolitaireEvidence) {
             throw new RepairWorkOrderApplicationException(PARAM_INVALID, "楼栋维修报审包必须包含接龙截图附件");
         }
+    }
+
+    private String attachmentHash(RepairAttachment attachment) {
+        return "attachment:%d:%s".formatted(attachment.attachmentId(), attachment.etag());
     }
 
     private void validateContractSignatures(List<RepairContractSignature> signatures) {
@@ -1613,10 +1966,11 @@ public class RepairWorkOrderService {
     }
 
     private RepairPlanningPolicy planningPolicy(Long tenantId) {
-        boolean estimateRequired = communitySettingsRepository.findCommunity(tenantId)
-                .map(community -> community.repairEstimateRequired())
-                .orElse(false);
-        return new RepairPlanningPolicy(estimateRequired);
+        return communitySettingsRepository.findCommunity(tenantId)
+                .map(community -> new RepairPlanningPolicy(
+                        community.repairEstimateRequired(),
+                        community.buildingRepairDefaultDecisionChannel()))
+                .orElseGet(() -> new RepairPlanningPolicy(false, RepairLocalDecisionChannel.WECHAT.name()));
     }
 
     private RepairWorkOrder loadVisible(UserContext ctx, Long workOrderId) {
@@ -1714,6 +2068,104 @@ public class RepairWorkOrderService {
             throw new RepairWorkOrderApplicationException(PARAM_INVALID, field + " 取值不合法");
         }
         return normalized;
+    }
+
+    private String normalizeCategory(String value) {
+        String category = trim(value);
+        if (category == null) {
+            return null;
+        }
+        try {
+            return RepairCategory.fromInput(category).name();
+        } catch (IllegalArgumentException ex) {
+            throw new RepairWorkOrderApplicationException(PARAM_INVALID, "不支持的维修专业：" + category);
+        }
+    }
+
+    private RepairPublicAreaScope resolvePublicAreaScope(String value,
+                                                         Long buildingId,
+                                                         String locationText) {
+        String normalized = trim(value);
+        if (normalized == null) {
+            return buildingId == null ? null : RepairPublicAreaScope.BUILDING;
+        }
+        RepairPublicAreaScope scope;
+        try {
+            scope = RepairPublicAreaScope.valueOf(normalized.toUpperCase());
+        } catch (IllegalArgumentException ex) {
+            throw new RepairWorkOrderApplicationException(PARAM_INVALID,
+                    "publicAreaScope 仅支持 BUILDING、COMMUNITY");
+        }
+        if (scope == RepairPublicAreaScope.BUILDING && buildingId == null) {
+            throw new RepairWorkOrderApplicationException(PARAM_INVALID,
+                    "楼栋公共部位报修必须选择维修楼栋");
+        }
+        if (scope == RepairPublicAreaScope.COMMUNITY && buildingId != null) {
+            throw new RepairWorkOrderApplicationException(PARAM_INVALID,
+                    "小区公共区域报修不能绑定具体楼栋");
+        }
+        if (scope == RepairPublicAreaScope.COMMUNITY && trim(locationText) == null) {
+            throw new RepairWorkOrderApplicationException(PARAM_INVALID,
+                    "小区公共区域报修必须填写具体位置");
+        }
+        return scope;
+    }
+
+    private void validateInspectionLocation(RepairWorkOrder order,
+                                            Long buildingId,
+                                            Long roomId,
+                                            String locationText,
+                                            RepairPublicAreaScope publicAreaScope) {
+        if (order.spaceScope() == RepairSpaceScope.PUBLIC && publicAreaScope == null) {
+            throw new RepairWorkOrderApplicationException(PARAM_INVALID,
+                    "公共区域勘验必须确认楼栋公共部位或小区公共区域");
+        }
+        if (order.spaceScope() == RepairSpaceScope.PRIVATE && buildingId == null && roomId == null) {
+            throw new RepairWorkOrderApplicationException(PARAM_INVALID,
+                    "buildingId 或 roomId 至少填写一个");
+        }
+        if (buildingId != null && !repository.buildingExists(order.tenantId(), buildingId)) {
+            throw new RepairWorkOrderApplicationException(BUILDING_NOT_IN_SCOPE,
+                    "楼栋不在当前小区范围内 buildingId=" + buildingId);
+        }
+        if (roomId != null && !repository.roomExists(order.tenantId(), buildingId, roomId)) {
+            throw new RepairWorkOrderApplicationException(PARAM_INVALID,
+                    "房号不在当前小区或楼栋范围内 roomId=" + roomId);
+        }
+        if (publicAreaScope == RepairPublicAreaScope.COMMUNITY && trim(locationText) == null) {
+            throw new RepairWorkOrderApplicationException(PARAM_INVALID,
+                    "小区公共区域勘验必须填写具体位置");
+        }
+    }
+
+    private void assertLocationComplete(RepairWorkOrder order) {
+        if (order.needManualLocation()) {
+            throw new RepairWorkOrderApplicationException(LOCATION_NOT_VERIFIED,
+                    "工单位置仍需现场补充，禁止提交勘验");
+        }
+        boolean communityLocationComplete = order.spaceScope() == RepairSpaceScope.PUBLIC
+                && order.publicAreaScope() == RepairPublicAreaScope.COMMUNITY
+                && trim(order.locationText()) != null;
+        if (!communityLocationComplete && order.buildingId() == null && order.roomId() == null) {
+            throw new RepairWorkOrderApplicationException(LOCATION_NOT_VERIFIED,
+                    "工单未绑定楼栋或房屋，禁止提交勘验");
+        }
+    }
+
+    private void validateFundSourceForPublicArea(RepairWorkOrder order, String fundSource) {
+        if (order.spaceScope() != RepairSpaceScope.PUBLIC || order.publicAreaScope() == null) {
+            return;
+        }
+        if (order.publicAreaScope() == RepairPublicAreaScope.BUILDING
+                && FUND_COMMUNITY_MAINTENANCE.equals(fundSource)) {
+            throw new RepairWorkOrderApplicationException(PARAM_INVALID,
+                    "楼栋公共部位维修不能使用小区公共维修资金");
+        }
+        if (order.publicAreaScope() == RepairPublicAreaScope.COMMUNITY
+                && FUND_BUILDING_MAINTENANCE.equals(fundSource)) {
+            throw new RepairWorkOrderApplicationException(PARAM_INVALID,
+                    "小区公共区域维修不能使用楼栋维修资金");
+        }
     }
 
     private <E extends Enum<E>> E parseEnum(String value,

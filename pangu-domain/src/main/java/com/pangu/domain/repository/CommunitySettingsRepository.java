@@ -1,6 +1,7 @@
 package com.pangu.domain.repository;
 
 import com.pangu.domain.model.community.CommunityLedgerStats;
+import com.pangu.domain.model.community.CommunityBuilding;
 import com.pangu.domain.model.community.CommunitySettingsAudit;
 import com.pangu.domain.model.community.DenominatorBreakdown;
 import com.pangu.domain.model.community.DenominatorReviewRequest;
@@ -27,6 +28,8 @@ public interface CommunitySettingsRepository {
     List<GovernancePolicy> listActivePolicies();
 
     CommunityLedgerStats calculateLiveLedgerStats(Long tenantId);
+
+    List<CommunityBuilding> listBuildingDirectory(Long tenantId);
 
     List<DenominatorBreakdown> listDenominatorBreakdown(Long tenantId);
 

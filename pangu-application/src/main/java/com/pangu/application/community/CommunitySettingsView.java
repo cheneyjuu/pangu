@@ -1,6 +1,7 @@
 package com.pangu.application.community;
 
 import com.pangu.domain.model.community.CommunityLedgerStats;
+import com.pangu.domain.model.community.CommunityBuilding;
 import com.pangu.domain.model.community.CommunitySettingsAudit;
 import com.pangu.domain.model.community.DenominatorBreakdown;
 import com.pangu.domain.model.community.DenominatorReviewRequest;
@@ -17,6 +18,7 @@ public record CommunitySettingsView(
         GovernancePolicy currentPolicy,
         List<GovernancePolicy> policyOptions,
         CommunityLedgerStats liveLedgerStats,
+        List<CommunityBuilding> buildings,
         List<DenominatorBreakdown> denominatorBreakdown,
         List<DenominatorReviewRequest> pendingReviewRequests,
         List<CommunitySettingsAudit> auditLogs,

@@ -1,6 +1,7 @@
 package com.pangu.infrastructure.persistence.mapper;
 
 import com.pangu.infrastructure.persistence.entity.CommunityLedgerStatsRow;
+import com.pangu.infrastructure.persistence.entity.CommunityBuildingRow;
 import com.pangu.infrastructure.persistence.entity.CommunitySettingsAuditRow;
 import com.pangu.infrastructure.persistence.entity.DenominatorBreakdownRow;
 import com.pangu.infrastructure.persistence.entity.DenominatorReviewRequestRow;
@@ -26,6 +27,8 @@ public interface CommunitySettingsMapper {
     List<GovernancePolicyRow> selectActivePolicies();
 
     CommunityLedgerStatsRow selectLiveLedgerStats(@Param("tenantId") Long tenantId);
+
+    List<CommunityBuildingRow> selectBuildingDirectory(@Param("tenantId") Long tenantId);
 
     List<DenominatorBreakdownRow> selectDenominatorBreakdown(@Param("tenantId") Long tenantId);
 

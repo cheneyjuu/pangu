@@ -14,6 +14,7 @@ public class RepairWorkOrderRow {
     private String description;
     private String source;
     private String spaceScope;
+    private String publicAreaScope;
     private String status;
     private Long reporterAccountId;
     private Long reporterUid;

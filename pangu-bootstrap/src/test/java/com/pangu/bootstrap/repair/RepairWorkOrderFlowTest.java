@@ -3,6 +3,7 @@ package com.pangu.bootstrap.repair;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pangu.interfaces.security.JwtTokenProvider;
+import com.pangu.domain.repository.RepairWorkOrderRepository;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -16,11 +17,13 @@ import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.math.BigDecimal;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 
+import com.pangu.domain.repository.RepairDocumentPreviewConverter;
 import com.pangu.domain.repository.RepairEvidenceObjectStorage;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -28,6 +31,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.hamcrest.Matchers.greaterThanOrEqualTo;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.hasItem;
@@ -64,19 +69,34 @@ public class RepairWorkOrderFlowTest {
     @Autowired private ObjectMapper objectMapper;
     @Autowired private JwtTokenProvider jwtTokenProvider;
     @Autowired private JdbcTemplate jdbcTemplate;
+    @Autowired private RepairWorkOrderRepository repairWorkOrderRepository;
     @MockBean private RepairEvidenceObjectStorage objectStorage;
+    @MockBean private RepairDocumentPreviewConverter documentPreviewConverter;
 
     @BeforeEach
-    public void configureObjectStorage() {
+    public void configureObjectStorage() throws Exception {
         when(objectStorage.put(anyString(), any(byte[].class), anyString(), anyString()))
                 .thenAnswer(invocation -> new RepairEvidenceObjectStorage.StoredObjectMetadata(
                         ((byte[]) invocation.getArgument(1)).length,
                         invocation.getArgument(2), "etag-test"));
+        when(objectStorage.createPreviewUrl(anyString(), anyString(), any()))
+                .thenReturn(URI.create("https://oss.example.test/repair-preview").toURL());
+        when(objectStorage.createDownloadUrl(anyString(), any()))
+                .thenReturn(URI.create("https://oss.example.test/repair-download").toURL());
+        when(objectStorage.read(anyString())).thenReturn("excel-source".getBytes(StandardCharsets.UTF_8));
+        when(objectStorage.exists(anyString())).thenReturn(false, true);
+        when(documentPreviewConverter.convertExcelToPdf(anyString(), anyString(), any(byte[].class)))
+                .thenReturn("%PDF-1.7\npreview".getBytes(StandardCharsets.UTF_8));
     }
 
     @AfterEach
     public void clean() {
-        jdbcTemplate.update("UPDATE t_tenant_community SET repair_estimate_required = 0 WHERE tenant_id = ?", TENANT);
+        jdbcTemplate.update("""
+                UPDATE t_tenant_community
+                SET repair_estimate_required = 0,
+                    building_repair_default_decision_channel = 'WECHAT'
+                WHERE tenant_id = ?
+                """, TENANT);
         jdbcTemplate.update("DELETE FROM t_repair_work_order WHERE title LIKE 'IT-报修-%'");
         jdbcTemplate.update("DELETE FROM t_supplier_activation_invitation WHERE supplier_dept_id IN (SELECT dept_id FROM sys_dept WHERE dept_name LIKE 'IT-供应商-%')");
         jdbcTemplate.update("DELETE FROM sys_user_role WHERE user_id IN (SELECT user_id FROM sys_user WHERE dept_id IN (SELECT dept_id FROM sys_dept WHERE dept_name LIKE 'IT-供应商-%'))");
@@ -97,6 +117,118 @@ public class RepairWorkOrderFlowTest {
                 DELETE FROM c_owner_property
                 WHERE uid = 70001 AND tenant_id = ? AND room_id = ?
                 """, TENANT_CROSS, CROSS_ROOM);
+    }
+
+    @Test
+    public void buildingDecisionDenominator_sameOwnerMultipleRooms_countsOnePersonAndAggregatesArea() {
+        var snapshot = repairWorkOrderRepository.loadBuildingDecisionSnapshot(TENANT, 30005L, null).orElseThrow();
+        var participants = repairWorkOrderRepository.listDecisionRooms(TENANT, 30005L, null);
+
+        assertEquals(1, snapshot.totalOwnerCount(), "同一产权人在同一表决范围内持有多套房屋时只计一个人数");
+        assertEquals(0, new BigDecimal("154.00").compareTo(snapshot.totalArea()));
+        assertEquals(1, participants.size());
+        assertEquals(0, new BigDecimal("154.00").compareTo(participants.getFirst().buildArea()));
+        assertTrue(participants.getFirst().roomLabel().contains("30005101"));
+        assertTrue(participants.getFirst().roomLabel().contains("30005201"));
+    }
+
+    @Test
+    public void failedLocalDecision_canRevisePlanAndStartANewAuditedRound() throws Exception {
+        String staffToken = token(ACC_PROPERTY_STAFF, "SYS_USER", USR_PROPERTY_STAFF);
+        String managerToken = token(ACC_PROPERTY_MANAGER, "SYS_USER", USR_PROPERTY_MANAGER);
+        String ownerRepToken = token(999812L, "SYS_USER", 800102L);
+        long workOrderId = insertSupplierRecommendedBuildingRepair(
+                "IT-报修-表决未通过后修订方案-" + System.nanoTime());
+        long supplierDeptId = registerMinimalSupplier(
+                managerToken, "IT-供应商-沿用报价-" + System.nanoTime());
+        insertConfirmedQuoteAndRecommendation(workOrderId, supplierDeptId);
+
+        action(ownerRepToken, workOrderId, "start-local-decision", Map.of(
+                "scopeType", "BUILDING",
+                "decisionChannel", "WECHAT",
+                "scopeLabel", "1号楼",
+                "remark", "发起首轮表决"));
+        var firstRoundEntries = repairWorkOrderRepository.listDecisionRooms(TENANT, 30001L, null).stream()
+                .map(room -> Map.<String, Object>of(
+                        "roomId", room.roomId(),
+                        "choice", "NOT_VOTED"))
+                .toList();
+        action(staffToken, workOrderId, "complete-local-decision", Map.of(
+                "entries", firstRoundEntries,
+                "evidenceAttachmentHash", "wechat-round-1-evidence",
+                "remark", "首轮表决未通过"))
+                .andExpect(jsonPath("$.data.status", is("PLAN_REVISION_REQUIRED")));
+
+        action(staffToken, workOrderId, "submit-plan", Map.of(
+                "planBudget", new BigDecimal("12000.00"),
+                "fundSource", "BUILDING_MAINTENANCE_FUND",
+                "remark", "根据表决意见提交修订方案"))
+                .andExpect(jsonPath("$.data.status", is("PLAN_SUBMITTED")));
+
+        action(managerToken, workOrderId, "reuse-supplier-quote", Map.of(
+                "remark", "维修范围和报价条件未变化，沿用上一轮已确认报价"))
+                .andExpect(jsonPath("$.data.status", is("SUPPLIER_RECOMMENDED")));
+        assertEquals(2, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_repair_supplier_recommendation WHERE work_order_id = ?",
+                Integer.class, workOrderId));
+        assertEquals("REUSE_SUPPLIER_QUOTE", jdbcTemplate.queryForObject("""
+                SELECT action FROM t_repair_work_order_event
+                WHERE work_order_id = ? ORDER BY event_id DESC LIMIT 1
+                """, String.class, workOrderId));
+        action(ownerRepToken, workOrderId, "start-local-decision", Map.of(
+                "scopeType", "BUILDING",
+                "decisionChannel", "ONLINE",
+                "scopeLabel", "1号楼修订方案",
+                "remark", "发起第二轮表决"))
+                .andExpect(jsonPath("$.data.status", is("LOCAL_DECISION_PENDING")));
+
+        assertEquals(2, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_repair_local_decision WHERE work_order_id = ?",
+                Integer.class, workOrderId));
+        assertEquals("COLLECTING", repairWorkOrderRepository.findLocalDecision(workOrderId, TENANT)
+                .orElseThrow().result());
+    }
+
+    @Test
+    public void revisedPlan_canRequestNewQuoteVersionWithoutOverwritingHistory() throws Exception {
+        String staffToken = token(ACC_PROPERTY_STAFF, "SYS_USER", USR_PROPERTY_STAFF);
+        String managerToken = token(ACC_PROPERTY_MANAGER, "SYS_USER", USR_PROPERTY_MANAGER);
+        long workOrderId = insertSupplierRecommendedBuildingRepair(
+                "IT-报修-方案变更后修订报价-" + System.nanoTime());
+        long supplierDeptId = registerMinimalSupplier(
+                managerToken, "IT-供应商-修订报价-" + System.nanoTime());
+        long previousQuoteId = insertConfirmedQuoteAndRecommendation(workOrderId, supplierDeptId);
+        jdbcTemplate.update("UPDATE t_repair_work_order SET status = 'PLAN_SUBMITTED' WHERE work_order_id = ?",
+                workOrderId);
+
+        action(managerToken, workOrderId, "revision-quote-invitations", Map.of(
+                "supplierDeptIds", List.of(supplierDeptId),
+                "deadline", LocalDateTime.now().plusDays(2).toString(),
+                "remark", "设备门规格和工程量发生变化，请重新报价"))
+                .andExpect(jsonPath("$.data.status", is("QUOTE_COLLECTING")));
+
+        assertEquals("REVISION_REQUESTED", jdbcTemplate.queryForObject(
+                "SELECT quote_status FROM t_repair_supplier_quote WHERE quote_id = ?",
+                String.class, previousQuoteId));
+        mockMvc.perform(get("/api/v1/admin/repair-work-orders/" + workOrderId + "/quote-invitations")
+                        .header("Authorization", "Bearer " + managerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].invitationRound", is(2)))
+                .andExpect(jsonPath("$.data[0].invitationType", is("REVISION")))
+                .andExpect(jsonPath("$.data[0].revisionReason",
+                        is("设备门规格和工程量发生变化，请重新报价")));
+
+        submitQuote(staffToken, workOrderId, supplierDeptId, "26800.00")
+                .andExpect(jsonPath("$.data.status", is("QUOTE_SUBMITTED")));
+        mockMvc.perform(get("/api/v1/admin/repair-work-orders/" + workOrderId
+                        + "/supplier-quotes/" + supplierDeptId + "/history")
+                        .header("Authorization", "Bearer " + managerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()", is(2)))
+                .andExpect(jsonPath("$.data[0].revisionNo", is(2)))
+                .andExpect(jsonPath("$.data[0].quoteStatus", is("ACTIVE")))
+                .andExpect(jsonPath("$.data[1].quoteId", is((int) previousQuoteId)))
+                .andExpect(jsonPath("$.data[1].quoteStatus", is("SUPERSEDED")));
     }
 
     @Test
@@ -236,6 +368,57 @@ public class RepairWorkOrderFlowTest {
     }
 
     @Test
+    public void propertyStaffSubmitsInspectionFromSubmittedWithOneBusinessAction() throws Exception {
+        String staffToken = token(ACC_PROPERTY_STAFF, "SYS_USER", USR_PROPERTY_STAFF);
+        String created = mockMvc.perform(post("/api/v1/admin/repair-work-orders")
+                        .header("Authorization", "Bearer " + staffToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "buildingId", 30001,
+                                "title", "IT-报修-统一勘验-" + System.nanoTime(),
+                                "description", "物业现场勘验统一提交",
+                                "locationText", "1号楼设备层",
+                                "category", "PUBLIC_FACILITY"))))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.status", is("SUBMITTED")))
+                .andReturn().getResponse().getContentAsString();
+        long id = dataId(created);
+
+        MockMultipartFile image = new MockMultipartFile(
+                "file", "勘验现场.jpg", "image/jpeg", new byte[1024]);
+        String uploaded = mockMvc.perform(multipart("/api/v1/admin/repair-work-orders/" + id + "/attachments")
+                        .file(image)
+                        .param("attachmentKind", "SURVEY_IMAGE")
+                        .param("contentType", "image/jpeg")
+                        .header("Authorization", "Bearer " + staffToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status", is("READY")))
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+        long imageId = objectMapper.readTree(uploaded).path("data").path("attachmentId").asLong();
+
+        action(staffToken, id, "submit-inspection", Map.of(
+                "surveySummary", "设备门合页损坏，需要更换并校正门框",
+                "riskLevel", "LOW",
+                "evidenceImageAttachmentIds", List.of(imageId),
+                "remark", "管理后台提交勘验记录"))
+                .andExpect(jsonPath("$.data.status", is("SURVEY_COMPLETED")))
+                .andExpect(jsonPath("$.data.locationLocked", is(true)))
+                .andExpect(jsonPath("$.data.assignedUserId", is((int) USR_PROPERTY_STAFF)));
+
+        List<String> actions = jdbcTemplate.queryForList("""
+                SELECT action FROM t_repair_work_order_event
+                WHERE work_order_id = ?
+                ORDER BY event_id
+                """, String.class, id);
+        assertTrue(actions.containsAll(List.of(
+                "ACCEPT", "VERIFY_LOCATION", "ASSIGN", "START_SURVEY", "SUBMIT_SURVEY")));
+        assertEquals(1, jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM t_repair_attachment
+                WHERE attachment_id = ? AND status = 'BOUND' AND bound_action = 'SUBMIT_SURVEY'
+                """, Integer.class, imageId));
+    }
+
+    @Test
     public void publicRepairWithoutBuilding_requiresManualLocationBeforeVerify() throws Exception {
         String ownerToken = token(ACC_OWNER, "C_USER", UID_OWNER);
         String staffToken = token(ACC_PROPERTY_STAFF, "SYS_USER", USR_PROPERTY_STAFF);
@@ -289,18 +472,56 @@ public class RepairWorkOrderFlowTest {
         String staffToken = token(ACC_PROPERTY_STAFF, "SYS_USER", USR_PROPERTY_STAFF);
         String title = "IT-报修-物业登记公共区域-" + System.nanoTime();
 
-        mockMvc.perform(post("/api/v1/admin/repair-work-orders")
+        String response = mockMvc.perform(post("/api/v1/admin/repair-work-orders")
                         .header("Authorization", "Bearer " + staffToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(Map.of(
                                 "title", title,
                                 "description", "物业客服接报公共区域报修",
+                                "publicAreaScope", "COMMUNITY",
                                 "locationText", "地下车库入口",
-                                "category", "PUBLIC_FACILITY"))))
+                                "category", "FIRE"))))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.data.source", is("ADMIN_PC")))
-                .andExpect(jsonPath("$.data.status", is("NEED_MANUAL_LOCATION")))
-                .andExpect(jsonPath("$.data.spaceScope", is("PUBLIC")));
+                .andExpect(jsonPath("$.data.status", is("SUBMITTED")))
+                .andExpect(jsonPath("$.data.spaceScope", is("PUBLIC")))
+                .andExpect(jsonPath("$.data.publicAreaScope", is("COMMUNITY")))
+                .andExpect(jsonPath("$.data.needManualLocation", is(false)))
+                .andExpect(jsonPath("$.data.category", is("FIRE_PROTECTION")))
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+        long workOrderId = objectMapper.readTree(response).path("data").path("workOrderId").asLong();
+
+        MockMultipartFile attachment = new MockMultipartFile(
+                "file", "设备门现场说明.pdf", "application/pdf", new byte[1024]);
+        mockMvc.perform(multipart("/api/v1/admin/repair-work-orders/" + workOrderId + "/intake-attachments")
+                        .file(attachment)
+                        .param("contentType", "application/pdf")
+                        .header("Authorization", "Bearer " + staffToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.attachmentKind", is("INTAKE_ATTACHMENT")))
+                .andExpect(jsonPath("$.data.status", is("BOUND")))
+                .andExpect(jsonPath("$.data.originalFileName", is("设备门现场说明.pdf")));
+        assertEquals(1, jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM t_repair_attachment
+                WHERE work_order_id = ? AND attachment_kind = 'INTAKE_ATTACHMENT'
+                  AND status = 'BOUND' AND bound_action = 'ADMIN_REGISTER_PUBLIC'
+                """, Integer.class, workOrderId));
+    }
+
+    @Test
+    public void propertyStaffCannotRegisterCommunityPublicRepairWithoutLocation() throws Exception {
+        String staffToken = token(ACC_PROPERTY_STAFF, "SYS_USER", USR_PROPERTY_STAFF);
+
+        mockMvc.perform(post("/api/v1/admin/repair-work-orders")
+                        .header("Authorization", "Bearer " + staffToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "title", "IT-报修-小区公共位置缺失-" + System.nanoTime(),
+                                "description", "位置范围已知为小区公共区域，但未填写具体位置",
+                                "publicAreaScope", "COMMUNITY",
+                                "category", "ELECTRICAL"))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.msg", is("小区公共区域报修必须填写具体位置")));
     }
 
     @Test
@@ -338,7 +559,49 @@ public class RepairWorkOrderFlowTest {
     }
 
     @Test
+    public void buildingRepairDecisionUsesCommunityDefaultAndAllowsPreStartOverride() throws Exception {
+        String ownerRepToken = token(999812L, "SYS_USER", 800102L);
+        jdbcTemplate.update("""
+                UPDATE t_tenant_community
+                SET building_repair_default_decision_channel = 'ONLINE'
+                WHERE tenant_id = ?
+                """, TENANT);
+
+        long defaultOrderId = insertSupplierRecommendedBuildingRepair(
+                "IT-报修-社区默认在线表决-" + System.nanoTime());
+        action(ownerRepToken, defaultOrderId, "start-local-decision", Map.of(
+                "scopeType", "BUILDING",
+                "scopeLabel", "1号楼",
+                "remark", "采用社区默认表决方式"))
+                .andExpect(jsonPath("$.data.status", is("LOCAL_DECISION_PENDING")));
+
+        assertEquals("ONLINE", jdbcTemplate.queryForObject("""
+                SELECT decision_channel
+                FROM t_repair_local_decision
+                WHERE work_order_id = ?
+                """, String.class, defaultOrderId));
+        assertEquals("COMMUNITY_DEFAULT", decisionChannelSource(defaultOrderId));
+
+        long overriddenOrderId = insertSupplierRecommendedBuildingRepair(
+                "IT-报修-工单覆盖微信接龙-" + System.nanoTime());
+        action(ownerRepToken, overriddenOrderId, "start-local-decision", Map.of(
+                "scopeType", "BUILDING",
+                "decisionChannel", "WECHAT",
+                "scopeLabel", "1号楼",
+                "remark", "本工单改用微信接龙"))
+                .andExpect(jsonPath("$.data.status", is("LOCAL_DECISION_PENDING")));
+
+        assertEquals("WECHAT", jdbcTemplate.queryForObject("""
+                SELECT decision_channel
+                FROM t_repair_local_decision
+                WHERE work_order_id = ?
+                """, String.class, overriddenOrderId));
+        assertEquals("WORK_ORDER_OVERRIDE", decisionChannelSource(overriddenOrderId));
+    }
+
+    @Test
     public void publicBuildingRepair_fullDeliveryContractAndOwnerAcceptance() throws Exception {
+        String votingOwnerToken = token(999812L, "C_USER", 70001L);
         String staffToken = token(ACC_PROPERTY_STAFF, "SYS_USER", USR_PROPERTY_STAFF);
         String managerToken = token(ACC_PROPERTY_MANAGER, "SYS_USER", USR_PROPERTY_MANAGER);
         String ownerRepToken = token(999812L, "SYS_USER", 800102L);
@@ -405,7 +668,7 @@ public class RepairWorkOrderFlowTest {
                 supplierA, supplierB);
         jdbcTemplate.update("""
                 UPDATE t_supplier_tenant_relation
-                SET relation_type = 'FRAMEWORK', service_category = 'PUBLIC_FACILITY',
+                SET relation_type = 'FRAMEWORK', service_category = 'PUBLIC_AREA_FACILITY',
                     status = 'ACTIVE', valid_from = CURRENT_DATE, valid_until = CURRENT_DATE + 365
                 WHERE tenant_id = ? AND supplier_dept_id = ?
                 """, TENANT, supplierA);
@@ -414,7 +677,7 @@ public class RepairWorkOrderFlowTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data[*].supplierDeptId", hasItem((int) supplierA)));
         mockMvc.perform(get("/api/v1/admin/supplier-framework-relations")
-                        .param("serviceCategory", "PUBLIC_FACILITY")
+                        .param("serviceCategory", "PUBLIC_AREA_FACILITY")
                         .header("Authorization", "Bearer " + managerToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data[0].supplierDeptId", is((int) supplierA)));
@@ -511,6 +774,45 @@ public class RepairWorkOrderFlowTest {
                 .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
         long supplierQuoteAttachmentId = objectMapper.readTree(supplierQuoteUpload)
                 .path("data").path("attachmentId").asLong();
+        mockMvc.perform(get("/api/v1/admin/repair-work-orders/" + id + "/attachments/"
+                        + supplierQuoteAttachmentId + "/preview-url")
+                        .header("Authorization", "Bearer " + managerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.attachmentId", is((int) supplierQuoteAttachmentId)))
+                .andExpect(jsonPath("$.data.originalFileName", is("供应商报价.pdf")))
+                .andExpect(jsonPath("$.data.contentType", is("application/pdf")))
+                .andExpect(jsonPath("$.data.actualSize", is(2048)))
+                .andExpect(jsonPath("$.data.converted", is(false)))
+                .andExpect(jsonPath("$.data.previewUrl", is("https://oss.example.test/repair-preview")));
+        MockMultipartFile supplierExcelFile = new MockMultipartFile(
+                "file", "供应商报价.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "excel-source".getBytes(StandardCharsets.UTF_8));
+        String supplierExcelUpload = mockMvc.perform(multipart(
+                        "/api/v1/supplier/repair-work-orders/" + id + "/quote-attachments")
+                        .file(supplierExcelFile)
+                        .header("Authorization", "Bearer " + supplierToken))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+        long supplierExcelAttachmentId = objectMapper.readTree(supplierExcelUpload)
+                .path("data").path("attachmentId").asLong();
+        mockMvc.perform(get("/api/v1/admin/repair-work-orders/" + id + "/attachments/"
+                        + supplierExcelAttachmentId + "/preview-url")
+                        .header("Authorization", "Bearer " + managerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.attachmentId", is((int) supplierExcelAttachmentId)))
+                .andExpect(jsonPath("$.data.originalFileName", is("供应商报价.xlsx")))
+                .andExpect(jsonPath("$.data.contentType", is("application/pdf")))
+                .andExpect(jsonPath("$.data.actualSize", is(12)))
+                .andExpect(jsonPath("$.data.converted", is(true)))
+                .andExpect(jsonPath("$.data.previewUrl", is("https://oss.example.test/repair-preview")));
+        mockMvc.perform(get("/api/v1/admin/repair-work-orders/" + id + "/attachments/"
+                        + supplierExcelAttachmentId + "/preview-url")
+                        .header("Authorization", "Bearer " + managerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.converted", is(true)));
+        verify(documentPreviewConverter, times(1))
+                .convertExcelToPdf(anyString(), anyString(), any(byte[].class));
         mockMvc.perform(post("/api/v1/supplier/repair-work-orders/" + id + "/quote")
                         .header("Authorization", "Bearer " + supplierToken)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -588,15 +890,37 @@ public class RepairWorkOrderFlowTest {
         submitQuote(staffToken, id, supplierB, "9000.00");
         submitQuote(staffToken, id, supplierC, "9500.00")
                 .andExpect(jsonPath("$.data.status", is("QUOTE_SUBMITTED")));
+        submitQuote(staffToken, id, supplierC, "9400.00")
+                .andExpect(jsonPath("$.data.status", is("QUOTE_SUBMITTED")));
         mockMvc.perform(get("/api/v1/admin/repair-work-orders/" + id + "/supplier-quotes")
                         .header("Authorization", "Bearer " + managerToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.length()", is(3)))
-                .andExpect(jsonPath("$.data[0].supplierDeptId", is((int) supplierA)));
+                .andExpect(jsonPath("$.data[0].supplierDeptId", is((int) supplierA)))
+                .andExpect(jsonPath("$.data[2].supplierDeptId", is((int) supplierC)))
+                .andExpect(jsonPath("$.data[2].quoteAmount", is(9400.0)))
+                .andExpect(jsonPath("$.data[2].revisionNo", is(2)))
+                .andExpect(jsonPath("$.data[2].quoteStatus", is("ACTIVE")));
+        mockMvc.perform(get("/api/v1/admin/repair-work-orders/" + id
+                        + "/supplier-quotes/" + supplierC + "/history")
+                        .header("Authorization", "Bearer " + managerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()", is(2)))
+                .andExpect(jsonPath("$.data[0].quoteAmount", is(9400.0)))
+                .andExpect(jsonPath("$.data[0].revisionNo", is(2)))
+                .andExpect(jsonPath("$.data[0].quoteStatus", is("ACTIVE")))
+                .andExpect(jsonPath("$.data[1].quoteAmount", is(9500.0)))
+                .andExpect(jsonPath("$.data[1].revisionNo", is(1)))
+                .andExpect(jsonPath("$.data[1].quoteStatus", is("SUPERSEDED")));
+        assertEquals(3, jdbcTemplate.queryForObject("""
+                SELECT COUNT(DISTINCT supplier_dept_id)
+                FROM t_repair_supplier_quote
+                WHERE work_order_id = ? AND quote_status = 'ACTIVE'
+                """, Integer.class, id));
 
         Long quoteId = jdbcTemplate.queryForObject("""
                 SELECT quote_id FROM t_repair_supplier_quote
-                WHERE work_order_id = ? AND supplier_dept_id = ?
+                WHERE work_order_id = ? AND supplier_dept_id = ? AND quote_status = 'ACTIVE'
                 """, Long.class, id, supplierA);
         action(managerToken, id, "recommend-supplier", Map.of(
                 "quoteId", quoteId,
@@ -613,9 +937,88 @@ public class RepairWorkOrderFlowTest {
 
         action(ownerRepToken, id, "start-local-decision", Map.of(
                 "scopeType", "BUILDING",
+                "decisionChannel", "ONLINE",
                 "scopeLabel", "1号楼",
-                "remark", "楼主发起微信接龙"))
+                "remark", "物业选择C端在线表决"))
                 .andExpect(jsonPath("$.data.status", is("LOCAL_DECISION_PENDING")));
+
+        long decisionId = jdbcTemplate.queryForObject(
+                "SELECT decision_id FROM t_repair_local_decision WHERE work_order_id = ?",
+                Long.class, id);
+        long ownerOpid = jdbcTemplate.queryForObject("""
+                SELECT opid FROM c_owner_property
+                WHERE uid = ? AND tenant_id = ? AND building_id = 30001 AND account_status = 1
+                ORDER BY opid LIMIT 1
+                """, Long.class, 70001L, TENANT);
+        mockMvc.perform(get("/api/v1/admin/repair-work-orders/" + id + "/local-decision")
+                .header("Authorization", "Bearer " + staffToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.decisionChannel", is("ONLINE")))
+                .andExpect(jsonPath("$.data.currentThresholdPassed", is(false)));
+        mockMvc.perform(get("/api/v1/me/repair-local-decisions")
+                        .header("Authorization", "Bearer " + votingOwnerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].decisionId", is((int) decisionId)))
+                .andExpect(jsonPath("$.data[0].quoteAmount", is(8000.0)))
+                .andExpect(jsonPath("$.data[0].myChoice").doesNotExist());
+        mockMvc.perform(get("/api/v1/me/repair-local-decisions/" + decisionId + "/quote-preview")
+                        .param("opid", String.valueOf(ownerOpid))
+                        .header("Authorization", "Bearer " + votingOwnerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.previewUrl", is("https://oss.example.test/repair-preview")));
+        mockMvc.perform(post("/api/v1/me/repair-local-decisions/" + decisionId + "/votes")
+                        .header("Authorization", "Bearer " + votingOwnerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("opid", ownerOpid, "choice", "AGREE"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.myChoice", is("AGREE")));
+        BigDecimal submittedVotingArea = jdbcTemplate.queryForObject("""
+                SELECT SUM(build_area) FROM t_repair_solitaire_entry
+                WHERE decision_id = ? AND submission_channel = 'ONLINE'
+                """, BigDecimal.class, decisionId);
+        mockMvc.perform(get("/api/v1/admin/repair-work-orders/" + id + "/local-decision")
+                        .header("Authorization", "Bearer " + staffToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.participatedOwnerCount", is(1)))
+                .andExpect(jsonPath("$.data.participatedArea", is(submittedVotingArea.doubleValue())))
+                .andExpect(jsonPath("$.data.currentThresholdPassed", is(true)))
+                .andExpect(jsonPath("$.data.agreeOwnerCount").doesNotExist());
+        assertEquals("ONLINE", jdbcTemplate.queryForObject("""
+                SELECT submission_channel FROM t_repair_solitaire_entry
+                WHERE decision_id = ? AND room_id = (
+                    SELECT room_id FROM c_owner_property WHERE opid = ?
+                )
+                """, String.class, decisionId, ownerOpid));
+
+        action(managerToken, id, "pause-local-decision", Map.of("remark", "临时暂停，保留选票"))
+                .andExpect(jsonPath("$.data.status", is("LOCAL_DECISION_PENDING")));
+        assertEquals("PAUSED", jdbcTemplate.queryForObject(
+                "SELECT result FROM t_repair_local_decision WHERE decision_id = ?",
+                String.class, decisionId));
+        assertEquals(1, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_repair_solitaire_entry WHERE decision_id = ?",
+                Integer.class, decisionId));
+        mockMvc.perform(get("/api/v1/me/repair-local-decisions")
+                        .header("Authorization", "Bearer " + votingOwnerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()", is(0)));
+        actionRaw(managerToken, id, "complete-local-decision", Map.of(
+                "entries", List.of(), "remark", "暂停状态错误结算"))
+                .andExpect(status().isConflict());
+
+        action(managerToken, id, "resume-local-decision", Map.of("remark", "恢复表决"))
+                .andExpect(jsonPath("$.data.status", is("LOCAL_DECISION_PENDING")));
+        assertEquals("COLLECTING", jdbcTemplate.queryForObject(
+                "SELECT result FROM t_repair_local_decision WHERE decision_id = ?",
+                String.class, decisionId));
+        mockMvc.perform(get("/api/v1/me/repair-local-decisions")
+                        .header("Authorization", "Bearer " + votingOwnerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].myChoice", is("AGREE")));
+
+        jdbcTemplate.update("DELETE FROM t_repair_solitaire_entry WHERE decision_id = ?", decisionId);
+        jdbcTemplate.update("UPDATE t_repair_local_decision SET decision_channel = 'WECHAT' WHERE decision_id = ?",
+                decisionId);
 
         String decisionRoomsResponse = mockMvc.perform(get("/api/v1/admin/repair-work-orders/" + id + "/local-decision-rooms")
                         .header("Authorization", "Bearer " + staffToken))
@@ -626,21 +1029,30 @@ public class RepairWorkOrderFlowTest {
                 "roomId", room.path("roomId").asLong(),
                 "choice", "AGREE",
                 "originalText", "微信接龙同意")));
+        long solitaireScreenshotId = readyAttachment(id, "SOLITAIRE_SCREENSHOT", "image/png", 4096L);
         action(staffToken, id, "complete-local-decision", Map.of(
                 "entries", entries,
-                "evidenceAttachmentHash", "wechat-solitaire-print-hash",
+                "evidenceAttachmentId", solitaireScreenshotId,
                 "remark", "物业完成接龙核验"))
                 .andExpect(jsonPath("$.data.status", is("LOCAL_DECISION_PASSED")));
+        assertEquals("BOUND", jdbcTemplate.queryForObject(
+                "SELECT status FROM t_repair_attachment WHERE attachment_id = ?",
+                String.class, solitaireScreenshotId));
 
+        long approvalDocumentId = readyAttachment(id, "APPROVAL_DOCUMENT", "application/pdf", 8192L);
         action(managerToken, id, "approval-package", Map.of(
-                "officialDocumentHash", "property-official-report-hash",
-                "mergedPackageHash", "immutable-merged-package-hash",
-                "printedAndAttached", true,
-                "attachments", List.of(
-                        Map.of("attachmentType", "SOLITAIRE_SCREENSHOT", "attachmentHash", "wechat-solitaire-print-hash", "originalFileName", "接龙截图.pdf", "sortOrder", 1),
-                        Map.of("attachmentType", "QUOTE", "attachmentHash", "supplier-a-quote-hash", "originalFileName", "报价单.pdf", "sortOrder", 2)),
+                "officialDocumentAttachmentId", approvalDocumentId,
                 "remark", "物业上传正式报审文件并生成不可变合并包"))
                 .andExpect(jsonPath("$.data.status", is("PRICE_REVIEW_PENDING")));
+        assertEquals("BOUND", jdbcTemplate.queryForObject(
+                "SELECT status FROM t_repair_attachment WHERE attachment_id = ?",
+                String.class, approvalDocumentId));
+        assertEquals(2, jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM t_repair_approval_attachment attachment
+                JOIN t_repair_approval_package package ON package.package_id = attachment.package_id
+                WHERE package.work_order_id = ?
+                  AND attachment.attachment_type IN ('APPROVAL_DOCUMENT', 'SOLITAIRE_SCREENSHOT')
+                """, Integer.class, id));
 
         action(directorToken, id, "price-review", Map.of(
                 "reviewMode", "INTERNAL_PRICE_REVIEW",
@@ -906,6 +1318,70 @@ public class RepairWorkOrderFlowTest {
             }
         }
         throw new AssertionError("未找到供应商 supplierDeptId=" + supplierDeptId);
+    }
+
+    private long insertSupplierRecommendedBuildingRepair(String title) {
+        return jdbcTemplate.queryForObject("""
+                INSERT INTO t_repair_work_order (
+                    tenant_id, title, description, source, space_scope, status,
+                    reporter_account_id, reporter_user_id, building_id, location_text,
+                    need_manual_location, location_locked, category, fund_source, fund_gate_blocked
+                ) VALUES (
+                    ?, ?, '楼栋公共区域维修', 'ADMIN_PC', 'PUBLIC', 'SUPPLIER_RECOMMENDED',
+                    ?, ?, 30001, '1号楼公共区域',
+                    0, 1, 'PUBLIC_FACILITY', 'BUILDING_MAINTENANCE_FUND', 0
+                )
+                RETURNING work_order_id
+                """, Long.class, TENANT, title, ACC_PROPERTY_STAFF, USR_PROPERTY_STAFF);
+    }
+
+    private long insertConfirmedQuoteAndRecommendation(long workOrderId, long supplierDeptId) {
+        long invitationId = jdbcTemplate.queryForObject("""
+                INSERT INTO t_repair_quote_invitation (
+                    work_order_id, tenant_id, supplier_dept_id, invited_by_user_id,
+                    status, invitation_round, invitation_type
+                ) VALUES (?, ?, ?, ?, 'SUBMITTED', 1, 'INITIAL')
+                RETURNING quote_invitation_id
+                """, Long.class, workOrderId, TENANT, supplierDeptId, USR_PROPERTY_MANAGER);
+        String supplierName = jdbcTemplate.queryForObject(
+                "SELECT legal_name FROM t_supplier_org_profile WHERE supplier_dept_id = ?",
+                String.class, supplierDeptId);
+        long quoteId = jdbcTemplate.queryForObject("""
+                INSERT INTO t_repair_supplier_quote (
+                    work_order_id, tenant_id, supplier_name, quote_amount, quote_summary,
+                    submitted_by_user_id, submitted_by_role_key, submitted_by_supplier,
+                    supplier_confirmed, supplier_dept_id, quote_invitation_id, submission_source,
+                    confirmation_status, original_source, original_attachment_hash,
+                    quote_status, revision_no
+                ) VALUES (
+                    ?, ?, ?, 25000.00, '上一轮已确认报价',
+                    ?, 'PROPERTY_MANAGER', 0,
+                    1, ?, ?, 'PROPERTY_ENTRY',
+                    'OFFLINE_EVIDENCE_VERIFIED', 'PAPER', 'previous-quote-hash',
+                    'ACTIVE', 1
+                )
+                RETURNING quote_id
+                """, Long.class, workOrderId, TENANT, supplierName,
+                USR_PROPERTY_MANAGER, supplierDeptId, invitationId);
+        jdbcTemplate.update("""
+                INSERT INTO t_repair_supplier_recommendation (
+                    work_order_id, tenant_id, quote_id, recommended_by_user_id,
+                    recommendation_reason, single_source, single_source_reason,
+                    selection_method, insufficient_quote_reason
+                ) VALUES (?, ?, ?, ?, '上一轮物业推荐', 1, '原方案采用直接选择',
+                          'DIRECT_AWARD', '原轮次报价不足三家')
+                """, workOrderId, TENANT, quoteId, USR_PROPERTY_MANAGER);
+        return quoteId;
+    }
+
+    private String decisionChannelSource(long workOrderId) {
+        return jdbcTemplate.queryForObject("""
+                SELECT payload_json ->> 'decisionChannelSource'
+                FROM t_repair_work_order_event
+                WHERE work_order_id = ? AND action = 'START_LOCAL_DECISION'
+                ORDER BY event_id DESC
+                LIMIT 1
+                """, String.class, workOrderId);
     }
 
     private Map<String, Object> signature(String partyType, String signerName) {

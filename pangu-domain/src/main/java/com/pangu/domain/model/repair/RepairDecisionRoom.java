@@ -2,9 +2,10 @@ package com.pangu.domain.model.repair;
 
 import java.math.BigDecimal;
 
-/** 接龙范围内的一套房屋及法定面积分母。 */
+/** 表决范围内的一个产权人参与单元，合并其在当前范围内的全部专有部分。 */
 public record RepairDecisionRoom(
         Long roomId,
+        String roomLabel,
         BigDecimal buildArea
 ) {
 }

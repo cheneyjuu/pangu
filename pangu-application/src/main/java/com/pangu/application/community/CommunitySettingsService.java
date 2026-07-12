@@ -188,6 +188,7 @@ public class CommunitySettingsService {
                 policy,
                 repository.listActivePolicies(),
                 repository.calculateLiveLedgerStats(community.tenantId()),
+                repository.listBuildingDirectory(community.tenantId()),
                 repository.listDenominatorBreakdown(community.tenantId()),
                 repository.listPendingDenominatorRequests(community.tenantId()),
                 repository.listAuditLogs(community.tenantId(), 20),
@@ -342,7 +343,8 @@ public class CommunitySettingsService {
                 str(cmd.currentCommitteeTermName(), c.currentCommitteeTermName()),
                 str(cmd.transitionOrgType(), c.transitionOrgType()),
                 str(cmd.transitionOrgStatus(), c.transitionOrgStatus()),
-                c.ruleConfigId(), c.sharedOwnershipStrategy(), c.repairEstimateRequired(), c.fundManagedEnabled(),
+                c.ruleConfigId(), c.sharedOwnershipStrategy(), c.repairEstimateRequired(),
+                c.buildingRepairDefaultDecisionChannel(), c.fundManagedEnabled(),
                 c.financialControlConfigId(), c.quarterlyDisclosureDeadlineDay(),
                 c.statisticsVersion(), c.statisticsUpdatedAt(), c.governanceStatus(), c.status(), c.updateTime());
     }
@@ -369,7 +371,8 @@ public class CommunitySettingsService {
                 nonNegative(cmd.plotRatio(), c.plotRatio(), "plotRatio"),
                 c.ownersAssemblyEstablished(), c.committeeEstablished(), c.currentCommitteeTermName(),
                 c.transitionOrgType(), c.transitionOrgStatus(), c.ruleConfigId(), c.sharedOwnershipStrategy(),
-                c.repairEstimateRequired(), c.fundManagedEnabled(), c.financialControlConfigId(),
+                c.repairEstimateRequired(), c.buildingRepairDefaultDecisionChannel(),
+                c.fundManagedEnabled(), c.financialControlConfigId(),
                 c.quarterlyDisclosureDeadlineDay(),
                 c.statisticsVersion(), c.statisticsUpdatedAt(), c.governanceStatus(), c.status(), c.updateTime());
     }
@@ -380,6 +383,13 @@ public class CommunitySettingsService {
             throw new CommunitySettingsApplicationException(
                     CommunitySettingsApplicationException.Reason.PARAM_INVALID,
                     "sharedOwnershipStrategy 取值非法：" + sharedStrategy);
+        }
+        String defaultDecisionChannel = str(cmd.buildingRepairDefaultDecisionChannel(),
+                c.buildingRepairDefaultDecisionChannel());
+        if (!Set.of("ONLINE", "WECHAT").contains(defaultDecisionChannel)) {
+            throw new CommunitySettingsApplicationException(
+                    CommunitySettingsApplicationException.Reason.PARAM_INVALID,
+                    "buildingRepairDefaultDecisionChannel 取值非法：" + defaultDecisionChannel);
         }
         return new TenantCommunity(
                 c.tenantId(), c.tenantCode(), c.tenantShortCode(), c.tenantName(), c.propertyAreaName(),
@@ -392,6 +402,7 @@ public class CommunitySettingsService {
                 c.plotRatio(), c.ownersAssemblyEstablished(), c.committeeEstablished(), c.currentCommitteeTermName(),
                 c.transitionOrgType(), c.transitionOrgStatus(), val(cmd.ruleConfigId(), c.ruleConfigId()),
                 sharedStrategy, bool(cmd.repairEstimateRequired(), c.repairEstimateRequired()),
+                defaultDecisionChannel,
                 bool(cmd.fundManagedEnabled(), c.fundManagedEnabled()),
                 str(cmd.financialControlConfigId(), c.financialControlConfigId()),
                 nonNegative(cmd.quarterlyDisclosureDeadlineDay(), c.quarterlyDisclosureDeadlineDay(),

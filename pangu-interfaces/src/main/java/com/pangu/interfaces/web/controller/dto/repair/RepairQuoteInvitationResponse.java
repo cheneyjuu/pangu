@@ -9,12 +9,16 @@ public record RepairQuoteInvitationResponse(
         Long supplierDeptId,
         String supplierName,
         String status,
+        int invitationRound,
+        String invitationType,
+        String revisionReason,
         LocalDateTime deadline,
         LocalDateTime sentAt
 ) {
     public static RepairQuoteInvitationResponse from(RepairQuoteInvitation invitation) {
         return new RepairQuoteInvitationResponse(
                 invitation.quoteInvitationId(), invitation.supplierDeptId(), invitation.supplierName(),
-                invitation.status(), invitation.deadline(), invitation.sentAt());
+                invitation.status(), invitation.invitationRound(), invitation.invitationType(),
+                invitation.revisionReason(), invitation.deadline(), invitation.sentAt());
     }
 }

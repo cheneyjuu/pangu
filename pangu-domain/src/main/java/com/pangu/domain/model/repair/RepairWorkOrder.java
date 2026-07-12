@@ -12,6 +12,7 @@ public record RepairWorkOrder(
         String description,
         RepairSource source,
         RepairSpaceScope spaceScope,
+        RepairPublicAreaScope publicAreaScope,
         RepairWorkOrderStatus status,
         Long reporterAccountId,
         Long reporterUid,
@@ -43,7 +44,7 @@ public record RepairWorkOrder(
                                       boolean nextLocationLocked,
                                       boolean nextFundGateBlocked) {
         return new RepairWorkOrder(workOrderId, orderNo, tenantId, title, description, source,
-                spaceScope, nextStatus, reporterAccountId, reporterUid, reporterUserId,
+                spaceScope, publicAreaScope, nextStatus, reporterAccountId, reporterUid, reporterUserId,
                 roomId, buildingId, locationText, nextNeedManualLocation, nextLocationLocked,
                 assignedUserId, assigneeRoleKey, assigneeDeptId, category, riskLevel,
                 surveySummary, planBudget, publicCeilingPrice, fundSource, nextFundGateBlocked,
@@ -53,12 +54,13 @@ public record RepairWorkOrder(
     public RepairWorkOrder withLocation(Long nextBuildingId,
                                         Long nextRoomId,
                                         String nextLocationText,
+                                        RepairPublicAreaScope nextPublicAreaScope,
                                         RepairWorkOrderStatus nextStatus,
                                         boolean nextNeedManualLocation,
                                         boolean nextLocationLocked,
                                         boolean nextFundGateBlocked) {
         return new RepairWorkOrder(workOrderId, orderNo, tenantId, title, description, source,
-                spaceScope, nextStatus, reporterAccountId, reporterUid, reporterUserId,
+                spaceScope, nextPublicAreaScope, nextStatus, reporterAccountId, reporterUid, reporterUserId,
                 nextRoomId, nextBuildingId, nextLocationText, nextNeedManualLocation,
                 nextLocationLocked, assignedUserId, assigneeRoleKey, assigneeDeptId,
                 category, riskLevel, surveySummary, planBudget, publicCeilingPrice, fundSource, nextFundGateBlocked,
@@ -70,7 +72,7 @@ public record RepairWorkOrder(
                                           Long nextAssigneeDeptId,
                                           RepairWorkOrderStatus nextStatus) {
         return new RepairWorkOrder(workOrderId, orderNo, tenantId, title, description, source,
-                spaceScope, nextStatus, reporterAccountId, reporterUid, reporterUserId,
+                spaceScope, publicAreaScope, nextStatus, reporterAccountId, reporterUid, reporterUserId,
                 roomId, buildingId, locationText, needManualLocation, locationLocked,
                 nextAssignedUserId, nextAssigneeRoleKey, nextAssigneeDeptId, category,
                 riskLevel, surveySummary, planBudget, publicCeilingPrice, fundSource, fundGateBlocked,
@@ -81,7 +83,7 @@ public record RepairWorkOrder(
                                       String nextRiskLevel,
                                       RepairWorkOrderStatus nextStatus) {
         return new RepairWorkOrder(workOrderId, orderNo, tenantId, title, description, source,
-                spaceScope, nextStatus, reporterAccountId, reporterUid, reporterUserId,
+                spaceScope, publicAreaScope, nextStatus, reporterAccountId, reporterUid, reporterUserId,
                 roomId, buildingId, locationText, needManualLocation, locationLocked,
                 assignedUserId, assigneeRoleKey, assigneeDeptId, category, nextRiskLevel,
                 nextSurveySummary, planBudget, publicCeilingPrice, fundSource, fundGateBlocked,
@@ -93,7 +95,7 @@ public record RepairWorkOrder(
                                     String nextFundSource,
                                     RepairWorkOrderStatus nextStatus) {
         return new RepairWorkOrder(workOrderId, orderNo, tenantId, title, description, source,
-                spaceScope, nextStatus, reporterAccountId, reporterUid, reporterUserId,
+                spaceScope, publicAreaScope, nextStatus, reporterAccountId, reporterUid, reporterUserId,
                 roomId, buildingId, locationText, needManualLocation, locationLocked,
                 assignedUserId, assigneeRoleKey, assigneeDeptId, category, riskLevel,
                 surveySummary, nextPlanBudget, nextPublicCeilingPrice, nextFundSource, fundGateBlocked,
@@ -104,7 +106,7 @@ public record RepairWorkOrder(
                                           String nextSatisfactionComment,
                                           RepairWorkOrderStatus nextStatus) {
         return new RepairWorkOrder(workOrderId, orderNo, tenantId, title, description, source,
-                spaceScope, nextStatus, reporterAccountId, reporterUid, reporterUserId,
+                spaceScope, publicAreaScope, nextStatus, reporterAccountId, reporterUid, reporterUserId,
                 roomId, buildingId, locationText, needManualLocation, locationLocked,
                 assignedUserId, assigneeRoleKey, assigneeDeptId, category, riskLevel,
                 surveySummary, planBudget, publicCeilingPrice, fundSource, fundGateBlocked,

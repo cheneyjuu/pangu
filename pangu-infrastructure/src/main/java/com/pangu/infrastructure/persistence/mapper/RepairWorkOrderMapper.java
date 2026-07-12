@@ -12,6 +12,7 @@ import com.pangu.infrastructure.persistence.entity.RepairAcceptanceSummaryRow;
 import com.pangu.infrastructure.persistence.entity.RepairLocationOptionRow;
 import com.pangu.infrastructure.persistence.entity.RepairQuoteInvitationRow;
 import com.pangu.infrastructure.persistence.entity.RepairLocalDecisionRow;
+import com.pangu.infrastructure.persistence.entity.RepairOwnerLocalDecisionRow;
 import com.pangu.infrastructure.persistence.entity.RepairSupplierQuoteRow;
 import com.pangu.infrastructure.persistence.entity.RepairSupplierOrganizationRow;
 import com.pangu.infrastructure.persistence.entity.RepairSupplierRecommendationRow;
@@ -87,7 +88,22 @@ public interface RepairWorkOrderMapper {
 
     int update(RepairWorkOrderRow row);
 
+    Long lockQuoteSubmission(@Param("workOrderId") Long workOrderId);
+
     int insertQuote(RepairSupplierQuoteRow row);
+
+    RepairSupplierQuoteRow findActiveQuote(@Param("workOrderId") Long workOrderId,
+                                           @Param("tenantId") Long tenantId,
+                                           @Param("supplierDeptId") Long supplierDeptId);
+
+    RepairSupplierQuoteRow findLatestSupplierQuote(@Param("workOrderId") Long workOrderId,
+                                                   @Param("tenantId") Long tenantId,
+                                                   @Param("supplierDeptId") Long supplierDeptId);
+
+    int supersedeQuote(@Param("quoteId") Long quoteId);
+
+    int linkSupersededQuote(@Param("quoteId") Long quoteId,
+                            @Param("supersededByQuoteId") Long supersededByQuoteId);
 
     RepairSupplierQuoteRow findQuote(@Param("quoteId") Long quoteId,
                                      @Param("workOrderId") Long workOrderId,
@@ -108,6 +124,10 @@ public interface RepairWorkOrderMapper {
 
     List<RepairSupplierQuoteRow> listSupplierQuotes(@Param("workOrderId") Long workOrderId,
                                                     @Param("tenantId") Long tenantId);
+
+    List<RepairSupplierQuoteRow> listSupplierQuoteHistory(@Param("workOrderId") Long workOrderId,
+                                                          @Param("tenantId") Long tenantId,
+                                                          @Param("supplierDeptId") Long supplierDeptId);
 
     List<RepairFrameworkRelationRow> listActiveFrameworkRelations(@Param("tenantId") Long tenantId,
                                                                   @Param("serviceCategory") String serviceCategory);
@@ -171,11 +191,25 @@ public interface RepairWorkOrderMapper {
                               @Param("invitedByUserId") Long invitedByUserId,
                               @Param("deadline") LocalDateTime deadline);
 
+    int insertQuoteRevisionInvitation(@Param("workOrderId") Long workOrderId,
+                                      @Param("tenantId") Long tenantId,
+                                      @Param("supplierDeptId") Long supplierDeptId,
+                                      @Param("invitedByUserId") Long invitedByUserId,
+                                      @Param("deadline") LocalDateTime deadline,
+                                      @Param("revisionReason") String revisionReason);
+
+    int markActiveQuoteRevisionRequested(@Param("workOrderId") Long workOrderId,
+                                         @Param("tenantId") Long tenantId,
+                                         @Param("supplierDeptId") Long supplierDeptId);
+
     boolean supplierCanAccess(@Param("workOrderId") Long workOrderId,
                               @Param("tenantId") Long tenantId,
                               @Param("supplierDeptId") Long supplierDeptId);
 
     int insertRecommendation(RepairSupplierRecommendationRow row);
+
+    RepairSupplierRecommendationRow findLatestRecommendation(@Param("workOrderId") Long workOrderId,
+                                                             @Param("tenantId") Long tenantId);
 
     boolean frameworkRelationActive(@Param("relationId") Long relationId,
                                     @Param("tenantId") Long tenantId,
@@ -194,6 +228,22 @@ public interface RepairWorkOrderMapper {
 
     RepairLocalDecisionRow findLocalDecision(@Param("workOrderId") Long workOrderId,
                                              @Param("tenantId") Long tenantId);
+
+    List<RepairOwnerLocalDecisionRow> listOwnerLocalDecisions(@Param("uid") Long uid,
+                                                               @Param("tenantId") Long tenantId,
+                                                               @Param("decisionId") Long decisionId,
+                                                               @Param("opid") Long opid);
+
+    int submitOnlineDecisionVote(@Param("decisionId") Long decisionId,
+                                 @Param("tenantId") Long tenantId,
+                                 @Param("roomId") Long roomId,
+                                 @Param("ownerUid") Long ownerUid,
+                                 @Param("accountId") Long accountId,
+                                 @Param("choice") String choice,
+                                 @Param("buildArea") BigDecimal buildArea);
+
+    List<com.pangu.infrastructure.persistence.entity.RepairSolitaireEntryRow> listSolitaireEntries(
+            @Param("decisionId") Long decisionId, @Param("tenantId") Long tenantId);
 
     int updateLocalDecisionResult(RepairLocalDecisionRow row);
 

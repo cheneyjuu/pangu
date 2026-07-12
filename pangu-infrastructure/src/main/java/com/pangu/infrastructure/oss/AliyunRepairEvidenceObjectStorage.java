@@ -1,20 +1,27 @@
 package com.pangu.infrastructure.oss;
 
 import com.aliyun.oss.ClientBuilderConfiguration;
+import com.aliyun.oss.HttpMethod;
 import com.aliyun.oss.OSS;
 import com.aliyun.oss.OSSClientBuilder;
 import com.aliyun.oss.common.auth.DefaultCredentialProvider;
 import com.aliyun.oss.common.comm.SignVersion;
+import com.aliyun.oss.model.GeneratePresignedUrlRequest;
 import com.aliyun.oss.model.ObjectMetadata;
 import com.aliyun.oss.model.PutObjectRequest;
 import com.aliyun.oss.model.PutObjectResult;
+import com.aliyun.oss.model.ResponseHeaderOverrides;
+import com.aliyun.oss.model.OSSObject;
 import com.pangu.domain.repository.RepairEvidenceObjectStorage;
 import jakarta.annotation.PreDestroy;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.net.URL;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Date;
@@ -56,13 +63,43 @@ public class AliyunRepairEvidenceObjectStorage implements RepairEvidenceObjectSt
     }
 
     @Override
+    public byte[] read(String objectKey) {
+        try (OSSObject object = client.getObject(bucketName, objectKey)) {
+            return object.getObjectContent().readAllBytes();
+        } catch (IOException ex) {
+            throw new IllegalStateException("读取 OSS 对象失败", ex);
+        }
+    }
+
+    @Override
+    public boolean exists(String objectKey) {
+        return client.doesObjectExist(bucketName, objectKey);
+    }
+
+    @Override
     public URL createDownloadUrl(String objectKey, Duration validity) {
         return client.generatePresignedUrl(bucketName, objectKey, Date.from(Instant.now().plus(validity)));
     }
 
     @Override
+    public URL createPreviewUrl(String objectKey, String originalFileName, Duration validity) {
+        GeneratePresignedUrlRequest request = new GeneratePresignedUrlRequest(
+                bucketName, objectKey, HttpMethod.GET);
+        request.setExpiration(Date.from(Instant.now().plus(validity)));
+        ResponseHeaderOverrides responseHeaders = new ResponseHeaderOverrides();
+        responseHeaders.setContentDisposition("inline; filename=\"preview\"; filename*=UTF-8''"
+                + encodeFileName(originalFileName));
+        request.setResponseHeaders(responseHeaders);
+        return client.generatePresignedUrl(request);
+    }
+
+    @Override
     public void delete(String objectKey) {
         client.deleteObject(bucketName, objectKey);
+    }
+
+    private String encodeFileName(String fileName) {
+        return URLEncoder.encode(fileName, StandardCharsets.UTF_8).replace("+", "%20");
     }
 
     @PreDestroy

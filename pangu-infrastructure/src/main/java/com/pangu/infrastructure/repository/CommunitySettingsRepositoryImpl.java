@@ -1,6 +1,7 @@
 package com.pangu.infrastructure.repository;
 
 import com.pangu.domain.model.community.CommunityLedgerStats;
+import com.pangu.domain.model.community.CommunityBuilding;
 import com.pangu.domain.model.community.CommunitySettingsAudit;
 import com.pangu.domain.model.community.DenominatorBreakdown;
 import com.pangu.domain.model.community.DenominatorReviewRequest;
@@ -8,6 +9,7 @@ import com.pangu.domain.model.community.GovernancePolicy;
 import com.pangu.domain.model.community.TenantCommunity;
 import com.pangu.domain.repository.CommunitySettingsRepository;
 import com.pangu.infrastructure.persistence.entity.CommunityLedgerStatsRow;
+import com.pangu.infrastructure.persistence.entity.CommunityBuildingRow;
 import com.pangu.infrastructure.persistence.entity.CommunitySettingsAuditRow;
 import com.pangu.infrastructure.persistence.entity.DenominatorBreakdownRow;
 import com.pangu.infrastructure.persistence.entity.DenominatorReviewRequestRow;
@@ -66,9 +68,24 @@ public class CommunitySettingsRepositoryImpl implements CommunitySettingsReposit
     }
 
     @Override
+    public List<CommunityBuilding> listBuildingDirectory(Long tenantId) {
+        return mapper.selectBuildingDirectory(tenantId).stream()
+                .map(this::toBuilding)
+                .toList();
+    }
+
+    @Override
     public List<DenominatorBreakdown> listDenominatorBreakdown(Long tenantId) {
         return mapper.selectDenominatorBreakdown(tenantId).stream()
                 .map(this::toBreakdown).toList();
+    }
+
+    private CommunityBuilding toBuilding(CommunityBuildingRow row) {
+        return new CommunityBuilding(
+                row.getBuildingId(),
+                row.getBuildingName(),
+                row.getUnitCount() == null ? 0 : row.getUnitCount(),
+                row.getRoomCount() == null ? 0 : row.getRoomCount());
     }
 
     @Override
@@ -167,6 +184,7 @@ public class CommunitySettingsRepositoryImpl implements CommunitySettingsReposit
                 r.getPlotRatio(), flag(r.getOwnersAssemblyEstablished()), flag(r.getCommitteeEstablished()),
                 r.getCurrentCommitteeTermName(), r.getTransitionOrgType(), r.getTransitionOrgStatus(),
                 r.getRuleConfigId(), r.getSharedOwnershipStrategy(), flag(r.getRepairEstimateRequired()),
+                r.getBuildingRepairDefaultDecisionChannel(),
                 flag(r.getFundManagedEnabled()),
                 r.getFinancialControlConfigId(), intVal(r.getQuarterlyDisclosureDeadlineDay()),
                 r.getStatisticsVersion() == null ? 1 : r.getStatisticsVersion(), r.getStatisticsUpdatedAt(),
@@ -212,6 +230,7 @@ public class CommunitySettingsRepositoryImpl implements CommunitySettingsReposit
         r.setRuleConfigId(c.ruleConfigId());
         r.setSharedOwnershipStrategy(c.sharedOwnershipStrategy());
         r.setRepairEstimateRequired(c.repairEstimateRequired() ? 1 : 0);
+        r.setBuildingRepairDefaultDecisionChannel(c.buildingRepairDefaultDecisionChannel());
         r.setFundManagedEnabled(c.fundManagedEnabled() ? 1 : 0);
         r.setFinancialControlConfigId(c.financialControlConfigId());
         r.setQuarterlyDisclosureDeadlineDay(c.quarterlyDisclosureDeadlineDay());

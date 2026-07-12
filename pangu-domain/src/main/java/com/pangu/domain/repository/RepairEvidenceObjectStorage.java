@@ -8,7 +8,13 @@ public interface RepairEvidenceObjectStorage {
     StoredObjectMetadata put(
             String objectKey, byte[] content, String contentType, String contentMd5Base64);
 
+    byte[] read(String objectKey);
+
+    boolean exists(String objectKey);
+
     URL createDownloadUrl(String objectKey, Duration validity);
+
+    URL createPreviewUrl(String objectKey, String originalFileName, Duration validity);
 
     void delete(String objectKey);
 

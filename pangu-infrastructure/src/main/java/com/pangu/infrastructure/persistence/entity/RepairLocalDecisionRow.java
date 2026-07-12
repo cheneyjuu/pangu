@@ -12,6 +12,7 @@ public class RepairLocalDecisionRow {
     private Long tenantId;
     private Long buildingId;
     private String scopeType;
+    private String decisionChannel;
     private String unitName;
     private String scopeLabel;
     private Integer totalOwnerCount;

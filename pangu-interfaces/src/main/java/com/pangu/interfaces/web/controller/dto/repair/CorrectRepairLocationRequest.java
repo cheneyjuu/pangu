@@ -6,6 +6,7 @@ import jakarta.validation.constraints.Positive;
 import java.util.List;
 
 public record CorrectRepairLocationRequest(
+        @Size(max = 16) String publicAreaScope,
         Long buildingId,
         Long roomId,
         @Size(max = 200) String locationText,

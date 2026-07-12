@@ -25,5 +25,8 @@ public class RepairSupplierQuoteRow {
     private String confirmationStatus;
     private String originalSource;
     private String originalAttachmentHash;
+    private String quoteStatus;
+    private Integer revisionNo;
+    private Long supersededByQuoteId;
     private LocalDateTime createTime;
 }

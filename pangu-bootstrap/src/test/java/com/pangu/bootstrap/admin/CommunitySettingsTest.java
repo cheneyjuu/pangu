@@ -56,11 +56,22 @@ public class CommunitySettingsTest {
     @BeforeEach
     @AfterEach
     public void cleanup() {
-        jdbcTemplate.update("UPDATE t_tenant_community SET repair_estimate_required = 0 WHERE tenant_id = ?", TENANT_RUSHI);
+        jdbcTemplate.update("""
+                UPDATE t_tenant_community
+                SET repair_estimate_required = 0,
+                    building_repair_default_decision_channel = 'WECHAT'
+                WHERE tenant_id = ?
+                """, TENANT_RUSHI);
         jdbcTemplate.update("""
                 DELETE FROM t_tenant_community_settings_audit
                 WHERE tenant_id = ?
-                  AND operation_type IN ('SUBMIT_DENOMINATOR_REVIEW', 'RECALCULATE_DENOMINATOR')
+                  AND (
+                    operation_type IN ('SUBMIT_DENOMINATOR_REVIEW', 'RECALCULATE_DENOMINATOR')
+                    OR (
+                      operation_type = 'UPDATE_RULES'
+                      AND jsonb_exists(payload_json, 'buildingRepairDefaultDecisionChannel')
+                    )
+                  )
                 """, TENANT_RUSHI);
         jdbcTemplate.update("""
                 DELETE FROM t_tenant_denominator_review_request
@@ -80,6 +91,11 @@ public class CommunitySettingsTest {
                 .andExpect(jsonPath("$.data.header.tenantId", is((int) TENANT_RUSHI)))
                 .andExpect(jsonPath("$.data.permissions.government", is(true)))
                 .andExpect(jsonPath("$.data.organization.communityName", is("求是居民委员会")))
+                .andExpect(jsonPath("$.data.assetLedger.liveLedgerStats.buildingCount", is(7)))
+                .andExpect(jsonPath("$.data.assetLedger.buildings.length()", is(7)))
+                .andExpect(jsonPath("$.data.assetLedger.buildings[6].buildingId", is(30007)))
+                .andExpect(jsonPath("$.data.assetLedger.buildings[6].buildingName", is("冷启楼")))
+                .andExpect(jsonPath("$.data.rules.buildingRepairDefaultDecisionChannel", is("WECHAT")))
                 .andExpect(jsonPath("$.data.rules.currentPolicy.policyCode", is("SH_DEFAULT_MAJORITY_2026")));
 
         String response = mockMvc.perform(get("/api/v1/auth/menus")
@@ -138,6 +154,26 @@ public class CommunitySettingsTest {
                         .content(objectMapper.writeValueAsString(Map.of("repairEstimateRequired", true))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.rules.repairEstimateRequired", is(true)));
+    }
+
+    @Test
+    public void govCanSetBuildingRepairDefaultDecisionChannel() throws Exception {
+        String token = token(ACC_SUPER, USR_SUPER, null);
+
+        mockMvc.perform(patch("/api/v1/admin/community-settings/rules")
+                        .param("tenantId", String.valueOf(TENANT_RUSHI))
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "buildingRepairDefaultDecisionChannel", "ONLINE"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.rules.buildingRepairDefaultDecisionChannel", is("ONLINE")));
+
+        mockMvc.perform(get("/api/v1/admin/community-settings")
+                        .param("tenantId", String.valueOf(TENANT_RUSHI))
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.rules.buildingRepairDefaultDecisionChannel", is("ONLINE")));
     }
 
     @Test

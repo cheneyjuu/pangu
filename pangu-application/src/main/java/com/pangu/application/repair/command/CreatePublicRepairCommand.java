@@ -1,6 +1,7 @@
 package com.pangu.application.repair.command;
 
 public record CreatePublicRepairCommand(
+        String publicAreaScope,
         Long buildingId,
         String locationText,
         String title,

@@ -12,6 +12,7 @@
         <result property="description" column="description"/>
         <result property="source" column="source"/>
         <result property="spaceScope" column="space_scope"/>
+        <result property="publicAreaScope" column="public_area_scope"/>
         <result property="status" column="status"/>
         <result property="reporterAccountId" column="reporter_account_id"/>
         <result property="reporterUid" column="reporter_uid"/>
@@ -95,6 +96,9 @@
         <result property="confirmationStatus" column="confirmation_status"/>
         <result property="originalSource" column="original_source"/>
         <result property="originalAttachmentHash" column="original_attachment_hash"/>
+        <result property="quoteStatus" column="quote_status"/>
+        <result property="revisionNo" column="revision_no"/>
+        <result property="supersededByQuoteId" column="superseded_by_quote_id"/>
         <result property="createTime" column="create_time"/>
     </resultMap>
 
@@ -105,6 +109,9 @@
         <result property="supplierDeptId" column="supplier_dept_id"/>
         <result property="supplierName" column="supplier_name"/>
         <result property="status" column="status"/>
+        <result property="invitationRound" column="invitation_round"/>
+        <result property="invitationType" column="invitation_type"/>
+        <result property="revisionReason" column="revision_reason"/>
         <result property="deadline" column="deadline"/>
         <result property="sentAt" column="sent_at"/>
     </resultMap>
@@ -160,6 +167,7 @@
         <result property="tenantId" column="tenant_id"/>
         <result property="buildingId" column="building_id"/>
         <result property="scopeType" column="scope_type"/>
+        <result property="decisionChannel" column="decision_channel"/>
         <result property="unitName" column="unit_name"/>
         <result property="scopeLabel" column="scope_label"/>
         <result property="totalOwnerCount" column="total_owner_count"/>
@@ -188,7 +196,7 @@
     </resultMap>
 
     <sql id="BaseColumns">
-        work_order_id, order_no, tenant_id, title, description, source, space_scope, status,
+        work_order_id, order_no, tenant_id, title, description, source, space_scope, public_area_scope, status,
         reporter_account_id, reporter_uid, reporter_user_id, room_id, building_id, location_text,
         need_manual_location, location_locked, assigned_user_id, assignee_role_key, assignee_dept_id,
         category, risk_level, survey_summary, plan_budget, public_ceiling_price, fund_source, fund_gate_blocked,
@@ -311,13 +319,13 @@
             keyProperty="workOrderId"
             keyColumn="work_order_id">
         INSERT INTO t_repair_work_order (
-            tenant_id, title, description, source, space_scope, status,
+            tenant_id, title, description, source, space_scope, public_area_scope, status,
             reporter_account_id, reporter_uid, reporter_user_id, room_id, building_id, location_text,
             need_manual_location, location_locked, assigned_user_id, assignee_role_key, assignee_dept_id,
             category, risk_level, survey_summary, plan_budget, public_ceiling_price, fund_source, fund_gate_blocked,
             satisfaction_score, satisfaction_comment, version
         ) VALUES (
-            #{tenantId}, #{title}, #{description}, #{source}, #{spaceScope}, #{status},
+            #{tenantId}, #{title}, #{description}, #{source}, #{spaceScope}, #{publicAreaScope}, #{status},
             #{reporterAccountId}, #{reporterUid}, #{reporterUserId}, #{roomId}, #{buildingId}, #{locationText},
             #{needManualLocation}, #{locationLocked}, #{assignedUserId}, #{assigneeRoleKey}, #{assigneeDeptId},
             #{category}, #{riskLevel}, #{surveySummary}, #{planBudget}, #{publicCeilingPrice}, #{fundSource}, #{fundGateBlocked},
@@ -340,12 +348,15 @@
               wo.reporter_account_id = #{accountId}
               OR (
                   wo.space_scope = 'PUBLIC'
-                  AND wo.building_id IN (
-                      SELECT DISTINCT op.building_id
-                      FROM c_owner_property op
-                      WHERE op.uid = #{uid}
-                        AND op.tenant_id = #{tenantId}
-                        AND op.account_status = 1
+                  AND (
+                      wo.public_area_scope = 'COMMUNITY'
+                      OR wo.building_id IN (
+                          SELECT DISTINCT op.building_id
+                          FROM c_owner_property op
+                          WHERE op.uid = #{uid}
+                            AND op.tenant_id = #{tenantId}
+                            AND op.account_status = 1
+                      )
                   )
               )
           )
@@ -359,12 +370,15 @@
               wo.reporter_account_id = #{accountId}
               OR (
                   wo.space_scope = 'PUBLIC'
-                  AND wo.building_id IN (
-                      SELECT DISTINCT op.building_id
-                      FROM c_owner_property op
-                      WHERE op.uid = #{uid}
-                        AND op.tenant_id = #{tenantId}
-                        AND op.account_status = 1
+                  AND (
+                      wo.public_area_scope = 'COMMUNITY'
+                      OR wo.building_id IN (
+                          SELECT DISTINCT op.building_id
+                          FROM c_owner_property op
+                          WHERE op.uid = #{uid}
+                            AND op.tenant_id = #{tenantId}
+                            AND op.account_status = 1
+                      )
                   )
               )
           )
@@ -436,6 +450,7 @@
         SET title = #{title},
             description = #{description},
             status = #{status},
+            public_area_scope = #{publicAreaScope},
             room_id = #{roomId},
             building_id = #{buildingId},
             location_text = #{locationText},
@@ -459,6 +474,13 @@
           AND version = #{version}
     </update>
 
+    <select id="lockQuoteSubmission" resultType="long">
+        SELECT work_order_id
+        FROM t_repair_work_order
+        WHERE work_order_id = #{workOrderId}
+        FOR UPDATE
+    </select>
+
     <insert id="insertQuote"
             parameterType="com.pangu.infrastructure.persistence.entity.RepairSupplierQuoteRow"
             useGeneratedKeys="true"
@@ -468,25 +490,69 @@
             work_order_id, tenant_id, supplier_name, quote_amount, quote_summary,
             attachment_id, attachment_hash, submitted_by_user_id, submitted_by_role_key,
             submitted_by_supplier, supplier_confirmed, supplier_dept_id, quote_invitation_id,
-            submission_source, confirmation_status, original_source, original_attachment_hash
+            submission_source, confirmation_status, original_source, original_attachment_hash,
+            quote_status, revision_no, superseded_by_quote_id
         ) VALUES (
             #{workOrderId}, #{tenantId}, #{supplierName}, #{quoteAmount}, #{quoteSummary},
             #{attachmentId}, #{attachmentHash}, #{submittedByUserId}, #{submittedByRoleKey},
             #{submittedBySupplier}, #{supplierConfirmed}, #{supplierDeptId}, #{quoteInvitationId},
-            #{submissionSource}, #{confirmationStatus}, #{originalSource}, #{originalAttachmentHash}
+            #{submissionSource}, #{confirmationStatus}, #{originalSource}, #{originalAttachmentHash},
+            #{quoteStatus}, #{revisionNo}, #{supersededByQuoteId}
         )
     </insert>
+
+    <select id="findActiveQuote" resultMap="RepairSupplierQuoteResultMap">
+        SELECT quote_id, work_order_id, tenant_id, supplier_name, quote_amount, quote_summary,
+               attachment_id, attachment_hash, submitted_by_user_id, submitted_by_role_key,
+               submitted_by_supplier, supplier_confirmed, supplier_dept_id, quote_invitation_id,
+               submission_source, confirmation_status, original_source, original_attachment_hash,
+               quote_status, revision_no, superseded_by_quote_id, create_time
+        FROM t_repair_supplier_quote
+        WHERE work_order_id = #{workOrderId}
+          AND tenant_id = #{tenantId}
+          AND supplier_dept_id = #{supplierDeptId}
+          AND quote_status = 'ACTIVE'
+    </select>
+
+    <select id="findLatestSupplierQuote" resultMap="RepairSupplierQuoteResultMap">
+        SELECT quote_id, work_order_id, tenant_id, supplier_name, quote_amount, quote_summary,
+               attachment_id, attachment_hash, submitted_by_user_id, submitted_by_role_key,
+               submitted_by_supplier, supplier_confirmed, supplier_dept_id, quote_invitation_id,
+               submission_source, confirmation_status, original_source, original_attachment_hash,
+               quote_status, revision_no, superseded_by_quote_id, create_time
+        FROM t_repair_supplier_quote
+        WHERE work_order_id = #{workOrderId}
+          AND tenant_id = #{tenantId}
+          AND supplier_dept_id = #{supplierDeptId}
+        ORDER BY revision_no DESC, quote_id DESC
+        LIMIT 1
+    </select>
+
+    <update id="supersedeQuote">
+        UPDATE t_repair_supplier_quote
+        SET quote_status = 'SUPERSEDED'
+        WHERE quote_id = #{quoteId}
+          AND quote_status IN ('ACTIVE', 'REVISION_REQUESTED')
+    </update>
+
+    <update id="linkSupersededQuote">
+        UPDATE t_repair_supplier_quote
+        SET superseded_by_quote_id = #{supersededByQuoteId}
+        WHERE quote_id = #{quoteId}
+          AND quote_status = 'SUPERSEDED'
+    </update>
 
     <select id="findQuote" resultMap="RepairSupplierQuoteResultMap">
         SELECT quote_id, work_order_id, tenant_id, supplier_name, quote_amount, quote_summary,
                attachment_id, attachment_hash, submitted_by_user_id, submitted_by_role_key,
                submitted_by_supplier, supplier_confirmed, supplier_dept_id, quote_invitation_id,
                submission_source, confirmation_status, original_source, original_attachment_hash,
-               create_time
+               quote_status, revision_no, superseded_by_quote_id, create_time
         FROM t_repair_supplier_quote
         WHERE quote_id = #{quoteId}
           AND work_order_id = #{workOrderId}
           AND tenant_id = #{tenantId}
+          AND quote_status = 'ACTIVE'
     </select>
 
     <select id="listSupplierQuotes" resultMap="RepairSupplierQuoteResultMap">
@@ -494,11 +560,25 @@
                attachment_id, attachment_hash, submitted_by_user_id, submitted_by_role_key,
                submitted_by_supplier, supplier_confirmed, supplier_dept_id, quote_invitation_id,
                submission_source, confirmation_status, original_source, original_attachment_hash,
-               create_time
+               quote_status, revision_no, superseded_by_quote_id, create_time
         FROM t_repair_supplier_quote
         WHERE work_order_id = #{workOrderId}
           AND tenant_id = #{tenantId}
+          AND quote_status = 'ACTIVE'
         ORDER BY quote_amount ASC, quote_id ASC
+    </select>
+
+    <select id="listSupplierQuoteHistory" resultMap="RepairSupplierQuoteResultMap">
+        SELECT quote_id, work_order_id, tenant_id, supplier_name, quote_amount, quote_summary,
+               attachment_id, attachment_hash, submitted_by_user_id, submitted_by_role_key,
+               submitted_by_supplier, supplier_confirmed, supplier_dept_id, quote_invitation_id,
+               submission_source, confirmation_status, original_source, original_attachment_hash,
+               quote_status, revision_no, superseded_by_quote_id, create_time
+        FROM t_repair_supplier_quote
+        WHERE work_order_id = #{workOrderId}
+          AND tenant_id = #{tenantId}
+          AND supplier_dept_id = #{supplierDeptId}
+        ORDER BY revision_no DESC, quote_id DESC
     </select>
 
     <select id="supplierCanAccess" resultType="boolean">
@@ -513,14 +593,15 @@
     </select>
 
     <select id="countQuotes" resultType="int">
-        SELECT COUNT(1)
+        SELECT COUNT(DISTINCT supplier_dept_id)
         FROM t_repair_supplier_quote
         WHERE work_order_id = #{workOrderId}
           AND tenant_id = #{tenantId}
+          AND quote_status = 'ACTIVE'
     </select>
 
     <select id="countQuoteInvitations" resultType="int">
-        SELECT COUNT(1)
+        SELECT COUNT(DISTINCT supplier_dept_id)
         FROM t_repair_quote_invitation
         WHERE work_order_id = #{workOrderId}
           AND tenant_id = #{tenantId}
@@ -533,14 +614,21 @@
                invitation.supplier_dept_id,
                supplier.legal_name AS supplier_name,
                invitation.status,
+               invitation.invitation_round,
+               invitation.invitation_type,
+               invitation.revision_reason,
                invitation.deadline,
                invitation.sent_at
-        FROM t_repair_quote_invitation invitation
+        FROM (
+            SELECT DISTINCT ON (supplier_dept_id) latest.*
+            FROM t_repair_quote_invitation latest
+            WHERE latest.work_order_id = #{workOrderId}
+              AND latest.tenant_id = #{tenantId}
+              AND latest.status &lt;&gt; 'CANCELLED'
+            ORDER BY supplier_dept_id, invitation_round DESC, quote_invitation_id DESC
+        ) invitation
         JOIN t_supplier_org_profile supplier
           ON supplier.supplier_dept_id = invitation.supplier_dept_id
-        WHERE invitation.work_order_id = #{workOrderId}
-          AND invitation.tenant_id = #{tenantId}
-          AND invitation.status &lt;&gt; 'CANCELLED'
         ORDER BY invitation.sent_at, invitation.quote_invitation_id
     </select>
 
@@ -796,11 +884,13 @@
 
     <insert id="insertQuoteInvitation">
         INSERT INTO t_repair_quote_invitation (
-            work_order_id, tenant_id, supplier_dept_id, invited_by_user_id, deadline, status
+            work_order_id, tenant_id, supplier_dept_id, invited_by_user_id, deadline, status,
+            invitation_round, invitation_type
         ) VALUES (
-            #{workOrderId}, #{tenantId}, #{supplierDeptId}, #{invitedByUserId}, #{deadline}, 'PENDING'
+            #{workOrderId}, #{tenantId}, #{supplierDeptId}, #{invitedByUserId}, #{deadline}, 'PENDING',
+            1, 'INITIAL'
         )
-        ON CONFLICT (work_order_id, supplier_dept_id) DO UPDATE
+        ON CONFLICT (work_order_id, supplier_dept_id, invitation_round) DO UPDATE
         SET deadline = EXCLUDED.deadline,
             status = CASE
                 WHEN t_repair_quote_invitation.status IN ('DECLINED', 'EXPIRED', 'CANCELLED') THEN 'PENDING'
@@ -808,6 +898,29 @@
             END,
             sent_at = CURRENT_TIMESTAMP
     </insert>
+
+    <insert id="insertQuoteRevisionInvitation">
+        INSERT INTO t_repair_quote_invitation (
+            work_order_id, tenant_id, supplier_dept_id, invited_by_user_id, deadline, status,
+            invitation_round, invitation_type, revision_reason
+        )
+        SELECT #{workOrderId}, #{tenantId}, #{supplierDeptId}, #{invitedByUserId}, #{deadline}, 'PENDING',
+               COALESCE(MAX(invitation_round), 0) + 1,
+               CASE WHEN COUNT(1) = 0 THEN 'INITIAL' ELSE 'REVISION' END,
+               CASE WHEN COUNT(1) = 0 THEN NULL ELSE #{revisionReason} END
+        FROM t_repair_quote_invitation
+        WHERE work_order_id = #{workOrderId}
+          AND supplier_dept_id = #{supplierDeptId}
+    </insert>
+
+    <update id="markActiveQuoteRevisionRequested">
+        UPDATE t_repair_supplier_quote
+        SET quote_status = 'REVISION_REQUESTED'
+        WHERE work_order_id = #{workOrderId}
+          AND tenant_id = #{tenantId}
+          AND supplier_dept_id = #{supplierDeptId}
+          AND quote_status = 'ACTIVE'
+    </update>
 
     <insert id="insertRecommendation"
             parameterType="com.pangu.infrastructure.persistence.entity.RepairSupplierRecommendationRow"
@@ -825,6 +938,18 @@
         )
     </insert>
 
+    <select id="findLatestRecommendation"
+            resultType="com.pangu.infrastructure.persistence.entity.RepairSupplierRecommendationRow">
+        SELECT recommendation_id, work_order_id, tenant_id, quote_id, recommended_by_user_id,
+               recommendation_reason, single_source, single_source_reason, selection_method,
+               insufficient_quote_reason, framework_relation_id, create_time
+        FROM t_repair_supplier_recommendation
+        WHERE work_order_id = #{workOrderId}
+          AND tenant_id = #{tenantId}
+        ORDER BY recommendation_id DESC
+        LIMIT 1
+    </select>
+
     <select id="frameworkRelationActive" resultType="boolean">
         SELECT EXISTS (
             SELECT 1
@@ -840,74 +965,63 @@
         )
     </select>
 
-    <select id="loadBuildingDecisionSnapshot" resultMap="RepairBuildingDecisionSnapshotResultMap">
-        WITH all_rooms AS (
-            SELECT room_id, build_area
-            FROM c_property_roster
-            WHERE tenant_id = #{tenantId}
-              AND building_id = #{buildingId}
-              AND status = 'ACTIVE'
-              AND room_id IS NOT NULL
-            <if test="unitName != null and unitName != ''">
-              AND unit_name = #{unitName}
-            </if>
-            <if test="unitName == null or unitName == ''">
-            UNION ALL
-            SELECT op.room_id, op.build_area
+    <sql id="repairDecisionParticipantCtes">
+        scoped_ownership AS (
+            SELECT op.opid, op.uid, op.room_id, op.build_area, op.is_voting_delegate,
+                   COALESCE(roster.room_name, op.room_id::TEXT) AS room_name
             FROM c_owner_property op
+            LEFT JOIN LATERAL (
+                SELECT pr.room_name, pr.unit_name
+                FROM c_property_roster pr
+                WHERE pr.tenant_id = op.tenant_id
+                  AND pr.room_id = op.room_id
+                  AND pr.status = 'ACTIVE'
+                ORDER BY pr.roster_id
+                LIMIT 1
+            ) roster ON TRUE
             WHERE op.tenant_id = #{tenantId}
               AND op.building_id = #{buildingId}
               AND op.account_status = 1
               AND op.room_id IS NOT NULL
-              AND NOT EXISTS (
-                  SELECT 1 FROM c_property_roster pr
-                  WHERE pr.tenant_id = op.tenant_id
-                    AND pr.room_id = op.room_id
-                    AND pr.status = 'ACTIVE'
-              )
+            <if test="unitName != null and unitName != ''">
+              AND roster.unit_name = #{unitName}
             </if>
         ),
-        rooms AS (
-            SELECT room_id, MAX(build_area) AS build_area
-            FROM all_rooms
-            GROUP BY room_id
+        ranked_room_ownership AS (
+            SELECT ownership.*,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY ownership.room_id
+                       ORDER BY ownership.is_voting_delegate DESC, ownership.opid
+                   ) AS room_rank
+            FROM scoped_ownership ownership
+        ),
+        represented_rooms AS (
+            SELECT uid, room_id, room_name, build_area
+            FROM ranked_room_ownership
+            WHERE room_rank = 1
+        ),
+        decision_participants AS (
+            SELECT uid,
+                   MIN(room_id) AS room_id,
+                   STRING_AGG(room_name, '、' ORDER BY room_id) AS room_label,
+                   SUM(build_area)::NUMERIC(14, 2) AS build_area
+            FROM represented_rooms
+            GROUP BY uid
         )
+    </sql>
+
+    <select id="loadBuildingDecisionSnapshot" resultMap="RepairBuildingDecisionSnapshotResultMap">
+        WITH <include refid="repairDecisionParticipantCtes"/>
         SELECT COUNT(1)::INT AS total_owner_count,
                COALESCE(SUM(build_area), 0)::NUMERIC(14, 2) AS total_area
-        FROM rooms
+        FROM decision_participants
     </select>
 
     <select id="listDecisionRooms"
             resultType="com.pangu.infrastructure.persistence.entity.RepairDecisionRoomRow">
-        WITH all_rooms AS (
-            SELECT room_id, build_area
-            FROM c_property_roster
-            WHERE tenant_id = #{tenantId}
-              AND building_id = #{buildingId}
-              AND status = 'ACTIVE'
-              AND room_id IS NOT NULL
-            <if test="unitName != null and unitName != ''">
-              AND unit_name = #{unitName}
-            </if>
-            <if test="unitName == null or unitName == ''">
-            UNION ALL
-            SELECT op.room_id, op.build_area
-            FROM c_owner_property op
-            WHERE op.tenant_id = #{tenantId}
-              AND op.building_id = #{buildingId}
-              AND op.account_status = 1
-              AND op.room_id IS NOT NULL
-              AND NOT EXISTS (
-                  SELECT 1 FROM c_property_roster pr
-                  WHERE pr.tenant_id = op.tenant_id
-                    AND pr.room_id = op.room_id
-                    AND pr.status = 'ACTIVE'
-              )
-            </if>
-        )
-        SELECT room_id, MAX(build_area)::NUMERIC(14, 2) AS build_area
-        FROM all_rooms
-        GROUP BY room_id
+        WITH <include refid="repairDecisionParticipantCtes"/>
+        SELECT room_id, room_label, build_area
+        FROM decision_participants
         ORDER BY room_id
     </select>
 
@@ -917,23 +1031,188 @@
             keyProperty="decisionId"
             keyColumn="decision_id">
         INSERT INTO t_repair_local_decision (
-            work_order_id, tenant_id, building_id, scope_type, unit_name, scope_label,
+            work_order_id, tenant_id, building_id, scope_type, decision_channel, unit_name, scope_label,
             total_owner_count, total_area, result
         ) VALUES (
-            #{workOrderId}, #{tenantId}, #{buildingId}, #{scopeType}, #{unitName}, #{scopeLabel},
+            #{workOrderId}, #{tenantId}, #{buildingId}, #{scopeType}, #{decisionChannel}, #{unitName}, #{scopeLabel},
             #{totalOwnerCount}, #{totalArea}, #{result}
         )
     </insert>
 
     <select id="findLocalDecision" resultMap="RepairLocalDecisionResultMap">
-        SELECT decision_id, work_order_id, tenant_id, building_id, scope_type, unit_name, scope_label,
-               total_owner_count, total_area, participated_owner_count, participated_area,
-               agree_owner_count, agree_area, disagree_owner_count, disagree_area,
-               abstain_owner_count, abstain_area, invalid_owner_count, invalid_area,
-               evidence_attachment_hash, printed_and_attached, result, create_time, update_time
-        FROM t_repair_local_decision
-        WHERE work_order_id = #{workOrderId}
+        SELECT decision.decision_id, decision.work_order_id, decision.tenant_id,
+               decision.building_id, decision.scope_type, decision.decision_channel,
+               decision.unit_name, decision.scope_label,
+               decision.total_owner_count, decision.total_area,
+               CASE
+                   WHEN decision.decision_channel = 'ONLINE'
+                        AND decision.result IN ('COLLECTING', 'PAUSED')
+                       THEN COALESCE(live.participated_owner_count, 0)
+                   ELSE decision.participated_owner_count
+               END AS participated_owner_count,
+               CASE
+                   WHEN decision.decision_channel = 'ONLINE'
+                        AND decision.result IN ('COLLECTING', 'PAUSED')
+                       THEN COALESCE(live.participated_area, 0)
+                   ELSE decision.participated_area
+               END AS participated_area,
+               CASE
+                   WHEN decision.decision_channel = 'ONLINE'
+                        AND decision.result IN ('COLLECTING', 'PAUSED')
+                       THEN COALESCE(live.agree_owner_count, 0)
+                   ELSE decision.agree_owner_count
+               END AS agree_owner_count,
+               CASE
+                   WHEN decision.decision_channel = 'ONLINE'
+                        AND decision.result IN ('COLLECTING', 'PAUSED')
+                       THEN COALESCE(live.agree_area, 0)
+                   ELSE decision.agree_area
+               END AS agree_area,
+               decision.disagree_owner_count, decision.disagree_area,
+               decision.abstain_owner_count, decision.abstain_area,
+               decision.invalid_owner_count, decision.invalid_area,
+               decision.evidence_attachment_hash, decision.printed_and_attached,
+               decision.result, decision.create_time, decision.update_time
+        FROM t_repair_local_decision decision
+        LEFT JOIN LATERAL (
+            SELECT COUNT(DISTINCT entry.owner_uid)::INTEGER AS participated_owner_count,
+                   COALESCE(SUM(entry.build_area), 0)::NUMERIC(14, 2) AS participated_area,
+                   COUNT(DISTINCT entry.owner_uid) FILTER (WHERE entry.choice = 'AGREE')::INTEGER
+                       AS agree_owner_count,
+                   COALESCE(SUM(entry.build_area) FILTER (WHERE entry.choice = 'AGREE'), 0)::NUMERIC(14, 2)
+                       AS agree_area
+            FROM t_repair_solitaire_entry entry
+            WHERE entry.decision_id = decision.decision_id
+              AND entry.tenant_id = decision.tenant_id
+              AND entry.submission_channel = 'ONLINE'
+              AND entry.verification_status = 'VERIFIED'
+        ) live ON TRUE
+        WHERE decision.work_order_id = #{workOrderId}
+          AND decision.tenant_id = #{tenantId}
+        ORDER BY decision.decision_id DESC
+        LIMIT 1
+    </select>
+
+    <select id="listOwnerLocalDecisions"
+            resultType="com.pangu.infrastructure.persistence.entity.RepairOwnerLocalDecisionRow">
+        SELECT decision.decision_id, work_order.work_order_id, work_order.order_no,
+               work_order.title, work_order.location_text, work_order.survey_summary,
+               decision.scope_label, MIN(property.opid) AS opid, MIN(property.room_id) AS room_id,
+               STRING_AGG(COALESCE(roster.room_name, property.room_id::TEXT), '、' ORDER BY property.room_id)
+                   AS room_name,
+               SUM(property.build_area)::NUMERIC(14, 2) AS build_area,
+               quote.supplier_name, quote.quote_amount,
+               quote.quote_summary, quote.attachment_id AS quote_attachment_id,
+               entry.choice AS my_choice
+        FROM t_repair_local_decision decision
+        JOIN t_repair_work_order work_order
+          ON work_order.work_order_id = decision.work_order_id
+         AND work_order.tenant_id = decision.tenant_id
+        JOIN c_owner_property property
+          ON property.tenant_id = decision.tenant_id
+         AND property.building_id = decision.building_id
+         AND property.uid = #{uid}
+         AND property.account_status = 1
+         AND property.opid = (
+             SELECT representative.opid
+             FROM c_owner_property representative
+             WHERE representative.tenant_id = property.tenant_id
+               AND representative.building_id = property.building_id
+               AND representative.room_id = property.room_id
+               AND representative.account_status = 1
+             ORDER BY representative.is_voting_delegate DESC, representative.opid ASC
+             LIMIT 1
+         )
+        LEFT JOIN LATERAL (
+            SELECT pr.room_name, pr.unit_name
+            FROM c_property_roster pr
+            WHERE pr.tenant_id = property.tenant_id
+              AND pr.room_id = property.room_id
+              AND pr.status = 'ACTIVE'
+            ORDER BY pr.roster_id
+            LIMIT 1
+        ) roster ON TRUE
+        JOIN LATERAL (
+            SELECT supplier_quote.supplier_name, supplier_quote.quote_amount,
+                   supplier_quote.quote_summary, supplier_quote.attachment_id
+            FROM t_repair_supplier_recommendation recommendation
+            JOIN t_repair_supplier_quote supplier_quote
+              ON supplier_quote.quote_id = recommendation.quote_id
+            WHERE recommendation.work_order_id = decision.work_order_id
+              AND recommendation.tenant_id = decision.tenant_id
+            ORDER BY recommendation.create_time DESC, recommendation.recommendation_id DESC
+            LIMIT 1
+        ) quote ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT online_entry.choice
+            FROM t_repair_solitaire_entry online_entry
+            WHERE online_entry.decision_id = decision.decision_id
+              AND online_entry.owner_uid = property.uid
+              AND online_entry.submission_channel = 'ONLINE'
+            ORDER BY online_entry.update_time DESC, online_entry.entry_id DESC
+            LIMIT 1
+        ) entry ON TRUE
+        WHERE decision.decision_channel = 'ONLINE'
+          AND decision.result = 'COLLECTING'
+          AND work_order.status = 'LOCAL_DECISION_PENDING'
+          AND (decision.scope_type = 'BUILDING'
+               OR COALESCE(roster.unit_name, '默认单元') = decision.unit_name)
+          <if test="decisionId != null">AND decision.decision_id = #{decisionId}</if>
+          <if test="opid != null">
+          AND EXISTS (
+              SELECT 1
+              FROM c_owner_property selected_property
+              WHERE selected_property.opid = #{opid}
+                AND selected_property.tenant_id = property.tenant_id
+                AND selected_property.uid = property.uid
+                AND selected_property.account_status = 1
+          )
+          </if>
+        GROUP BY decision.decision_id, work_order.work_order_id, work_order.order_no,
+                 work_order.title, work_order.location_text, work_order.survey_summary,
+                 decision.scope_label, quote.supplier_name, quote.quote_amount,
+                 quote.quote_summary, quote.attachment_id, entry.choice
+        ORDER BY decision.decision_id DESC
+    </select>
+
+    <insert id="submitOnlineDecisionVote">
+        WITH removed_duplicate_owner_entries AS (
+            DELETE FROM t_repair_solitaire_entry
+            WHERE decision_id = #{decisionId}
+              AND tenant_id = #{tenantId}
+              AND owner_uid = #{ownerUid}
+              AND submission_channel = 'ONLINE'
+              AND room_id != #{roomId}
+        )
+        INSERT INTO t_repair_solitaire_entry (
+            decision_id, tenant_id, room_id, owner_uid, choice, build_area,
+            original_text, verification_status, verified_by_user_id,
+            submission_channel, submitted_by_account_id, revision_no
+        ) VALUES (
+            #{decisionId}, #{tenantId}, #{roomId}, #{ownerUid}, #{choice}, #{buildArea},
+            'C端业主在线表决', 'VERIFIED', NULL, 'ONLINE', #{accountId}, 1
+        )
+        ON CONFLICT (decision_id, room_id) DO UPDATE
+        SET owner_uid = EXCLUDED.owner_uid,
+            choice = EXCLUDED.choice,
+            build_area = EXCLUDED.build_area,
+            original_text = EXCLUDED.original_text,
+            verification_status = 'VERIFIED',
+            verified_by_user_id = NULL,
+            submission_channel = 'ONLINE',
+            submitted_by_account_id = EXCLUDED.submitted_by_account_id,
+            revision_no = t_repair_solitaire_entry.revision_no + 1,
+            update_time = CURRENT_TIMESTAMP
+        WHERE t_repair_solitaire_entry.submission_channel = 'ONLINE'
+    </insert>
+
+    <select id="listSolitaireEntries"
+            resultType="com.pangu.infrastructure.persistence.entity.RepairSolitaireEntryRow">
+        SELECT room_id, owner_uid, choice, build_area, original_text
+        FROM t_repair_solitaire_entry
+        WHERE decision_id = #{decisionId}
           AND tenant_id = #{tenantId}
+        ORDER BY room_id
     </select>
 
     <update id="updateLocalDecisionResult"
@@ -996,14 +1275,22 @@
         FROM t_repair_assembly_decision
         WHERE work_order_id = #{workOrderId}
           AND tenant_id = #{tenantId}
+        ORDER BY repair_assembly_decision_id DESC
+        LIMIT 1
     </select>
 
     <update id="updateAssemblyDecisionResult">
         UPDATE t_repair_assembly_decision
         SET result = #{result},
             update_time = CURRENT_TIMESTAMP
-        WHERE work_order_id = #{workOrderId}
-          AND tenant_id = #{tenantId}
+        WHERE repair_assembly_decision_id = (
+            SELECT latest.repair_assembly_decision_id
+            FROM t_repair_assembly_decision latest
+            WHERE latest.work_order_id = #{workOrderId}
+              AND latest.tenant_id = #{tenantId}
+            ORDER BY latest.repair_assembly_decision_id DESC
+            LIMIT 1
+        )
     </update>
 
     <select id="nextApprovalPackageVersion" resultType="int">
