@@ -61,6 +61,7 @@ import com.pangu.interfaces.web.controller.dto.repair.RepairLocationOptionsRespo
 import com.pangu.interfaces.web.controller.dto.repair.RepairPlanningPolicyResponse;
 import com.pangu.interfaces.web.controller.dto.repair.RepairSupplierOrganizationResponse;
 import com.pangu.interfaces.web.controller.dto.repair.RepairSupplierQuoteResponse;
+import com.pangu.interfaces.web.controller.dto.repair.RepairContractSupplierCandidateResponse;
 import com.pangu.interfaces.web.controller.dto.repair.RepairOwnerLocalDecisionResponse;
 import com.pangu.interfaces.web.controller.dto.repair.RepairLocalDecisionResponse;
 import com.pangu.interfaces.web.controller.dto.repair.SubmitRepairOnlineVoteRequest;
@@ -357,6 +358,14 @@ public class RepairWorkOrderController extends BaseController {
         return success(service.listSupplierQuotes(workOrderId).stream()
                 .map(RepairSupplierQuoteResponse::from)
                 .toList());
+    }
+
+    @GetMapping("/admin/repair-work-orders/{workOrderId}/contract-supplier-candidate")
+    @PreAuthorize("hasAuthority('repair:workorder:manage')")
+    public Result<RepairContractSupplierCandidateResponse> getContractSupplierCandidate(
+            @PathVariable("workOrderId") Long workOrderId) {
+        return success(RepairContractSupplierCandidateResponse.from(
+                service.getContractSupplierCandidate(workOrderId)));
     }
 
     @GetMapping("/admin/repair-work-orders/{workOrderId}/supplier-quotes/{supplierDeptId}/history")

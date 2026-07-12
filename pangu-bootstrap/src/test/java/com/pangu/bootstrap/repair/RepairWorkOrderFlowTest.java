@@ -1126,6 +1126,28 @@ public class RepairWorkOrderFlowTest {
                 ORDER BY usage_id DESC LIMIT 1
                 """, String.class, id));
 
+        jdbcTemplate.update(
+                "UPDATE t_supplier_org_profile SET verification_status = 'PENDING_VERIFICATION' WHERE supplier_dept_id = ?",
+                supplierA);
+        mockMvc.perform(get("/api/v1/admin/repair-work-orders/" + id + "/contract-supplier-candidate")
+                        .header("Authorization", "Bearer " + managerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.supplierDeptId", is((int) supplierA)))
+                .andExpect(jsonPath("$.data.supplierName").isNotEmpty())
+                .andExpect(jsonPath("$.data.verificationStatus", is("PENDING_VERIFICATION")))
+                .andExpect(jsonPath("$.data.contractEligible", is(false)))
+                .andExpect(jsonPath("$.data.contractEligibilityMessage",
+                        is("推荐供应商的企业主体尚未完成独立核验，暂不能发起合同签署")));
+        jdbcTemplate.update(
+                "UPDATE t_supplier_org_profile SET verification_status = 'VERIFIED' WHERE supplier_dept_id = ?",
+                supplierA);
+        mockMvc.perform(get("/api/v1/admin/repair-work-orders/" + id + "/contract-supplier-candidate")
+                        .header("Authorization", "Bearer " + managerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.supplierDeptId", is((int) supplierA)))
+                .andExpect(jsonPath("$.data.contractEligible", is(true)))
+                .andExpect(jsonPath("$.data.contractEligibilityMessage").doesNotExist());
+
         action(managerToken, id, "contracts", Map.of(
                 "supplierDeptId", supplierA,
                 "contractAmount", new BigDecimal("8000.00"),

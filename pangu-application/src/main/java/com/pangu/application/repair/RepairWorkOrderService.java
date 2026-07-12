@@ -319,6 +319,38 @@ public class RepairWorkOrderService {
         return repository.listSupplierQuotes(order.workOrderId(), order.tenantId());
     }
 
+    /**
+     * 读取合同阶段唯一可用的供应商候选，并在后端判定企业主体是否具备签约资格。
+     */
+    @Transactional(readOnly = true)
+    public RepairContractSupplierCandidate getContractSupplierCandidate(Long workOrderId) {
+        RepairWorkOrder order = findAdmin(workOrderId);
+        RepairSupplierRecommendation recommendation = repository.findLatestRecommendation(
+                        order.workOrderId(), order.tenantId())
+                .orElseThrow(() -> new RepairWorkOrderApplicationException(
+                        NOT_FOUND, "工单尚未形成供应商推荐结果"));
+        RepairSupplierQuote quote = repository.findQuote(
+                        recommendation.quoteId(), order.workOrderId(), order.tenantId())
+                .orElseThrow(() -> new RepairWorkOrderApplicationException(
+                        INVALID_STATUS, "推荐供应商的有效报价不存在，请重新确认报价"));
+
+        if (quote.supplierDeptId() == null) {
+            return new RepairContractSupplierCandidate(
+                    quote.quoteId(), null, quote.supplierName(), quote.quoteAmount(),
+                    null, true, null);
+        }
+
+        String verificationStatus = repository.findSupplierOrganization(
+                        order.tenantId(), quote.supplierDeptId())
+                .map(RepairSupplierOrganization::verificationStatus)
+                .orElse("NOT_REGISTERED");
+        boolean contractEligible = "VERIFIED".equals(verificationStatus);
+        return new RepairContractSupplierCandidate(
+                quote.quoteId(), quote.supplierDeptId(), quote.supplierName(), quote.quoteAmount(),
+                verificationStatus, contractEligible,
+                contractEligible ? null : contractSupplierEligibilityMessage(verificationStatus));
+    }
+
     @Transactional(readOnly = true)
     public List<RepairSupplierQuote> listSupplierQuoteHistory(Long workOrderId, Long supplierDeptId) {
         RepairWorkOrder order = findAdmin(workOrderId);
@@ -326,6 +358,16 @@ public class RepairWorkOrderService {
             throw new RepairWorkOrderApplicationException(PARAM_INVALID, "supplierDeptId 必填");
         }
         return repository.listSupplierQuoteHistory(order.workOrderId(), order.tenantId(), supplierDeptId);
+    }
+
+    private String contractSupplierEligibilityMessage(String verificationStatus) {
+        return switch (verificationStatus) {
+            case "PENDING_VERIFICATION" -> "推荐供应商的企业主体尚未完成独立核验，暂不能发起合同签署";
+            case "REJECTED" -> "推荐供应商的企业主体核验未通过，暂不能发起合同签署";
+            case "DISABLED" -> "推荐供应商已停用，暂不能发起合同签署";
+            case "NOT_REGISTERED" -> "推荐供应商组织不存在，暂不能发起合同签署";
+            default -> "推荐供应商当前不具备签约资格";
+        };
     }
 
     @Transactional(readOnly = true)
