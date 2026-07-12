@@ -289,12 +289,13 @@ class PropertyBindingFlowTest {
         mockMvc.perform(post("/api/v1/me/auth/l2")
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(Map.of(
+                .content(objectMapper.writeValueAsString(Map.of(
                                 "realName", realName,
                                 "idCardNumber", idCard
                         ))))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.user_info.auth_level", is(2)));
+                .andExpect(jsonPath("$.data.user_info.auth_level", is(2)))
+                .andExpect(jsonPath("$.data.user_info.display_name", is(realName)));
     }
 
     private void importRoster(String token,

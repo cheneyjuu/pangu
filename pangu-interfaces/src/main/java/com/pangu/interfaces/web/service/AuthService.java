@@ -1,3 +1,4 @@
+// 关联业务：统一登录、实名认证与会话资料下发，确保 C 端展示当前登录人的真实会话信息。
 package com.pangu.interfaces.web.service;
 
 import com.pangu.domain.context.UserContext;
@@ -11,6 +12,7 @@ import com.pangu.domain.repository.AuthAccountRepository;
 import com.pangu.domain.repository.IdentityShadowRepository;
 import com.pangu.domain.repository.NavigationMenuRepository;
 import com.pangu.domain.repository.OwnerIdentityVerificationRepository;
+import com.pangu.domain.security.NameDecryptor;
 import com.pangu.interfaces.security.JwtTokenProvider;
 import com.pangu.interfaces.web.controller.dto.LoginRequest;
 import com.pangu.interfaces.web.controller.dto.NavMenuResponse;
@@ -58,6 +60,7 @@ public class AuthService {
     private final SmsVerificationStrategy smsVerificationStrategy;
     private final OwnerIdentityVerificationRepository ownerIdentityVerificationRepository;
     private final IdCardOcrGateway idCardOcrGateway;
+    private final NameDecryptor nameDecryptor;
 
     /**
      * 双端统一登录：手机号 + 短信验证码 → 默认身份 → JWT。
@@ -372,6 +375,8 @@ public class AuthService {
 
     private Map<String, Object> buildUserInfo(UserContext ctx) {
         Map<String, Object> userInfo = new LinkedHashMap<>();
+        AuthAccountRepository.AccountIdentitySnapshot identity =
+                authAccountRepository.findIdentityByAccountId(ctx.accountId());
         userInfo.put("account_id", ctx.accountId());
         userInfo.put("identity_type", ctx.identityType().name());
         userInfo.put("active_identity_id", ctx.activeIdentityId());
@@ -381,6 +386,11 @@ public class AuthService {
         userInfo.put("role_key", ctx.roleKey());
         userInfo.put("permissions", ctx.permissions());
         userInfo.put("menu_permissions", menuRouteIds(ctx));
+        // 仅回传当前会话本人已完成实名核验的姓名；未实名账户不能从产权名册反向补造身份。
+        userInfo.put("display_name", identity != null && Integer.valueOf(1).equals(identity.realNameVerified())
+                ? trimToNull(nameDecryptor.safeDecrypt(identity.realNameCipher()))
+                : null);
+        userInfo.put("phone", identity == null ? null : identity.phone());
         return userInfo;
     }
 
