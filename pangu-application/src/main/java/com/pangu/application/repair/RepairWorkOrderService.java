@@ -1,7 +1,9 @@
+// 关联业务：编排维修工单从登记、勘验、方案、表决、报审、盖章到施工验收的状态机。
 package com.pangu.application.repair;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.pangu.application.committee.CommitteeSealService;
 import com.pangu.application.handover.TenantTermLockGuard;
 import com.pangu.application.repair.command.AssignRepairCommand;
 import com.pangu.application.repair.command.CompleteRepairContractCommand;
@@ -33,6 +35,8 @@ import com.pangu.domain.context.UserContext;
 import com.pangu.domain.context.UserContextHolder;
 import com.pangu.domain.model.asset.OwnerPropertyDetail;
 import com.pangu.domain.model.assembly.OwnersAssemblyPackage;
+import com.pangu.domain.model.committee.CommitteeElectronicSeal;
+import com.pangu.domain.model.committee.CommitteeSealUsageRecord;
 import com.pangu.domain.model.repair.RepairBuildingDecisionSnapshot;
 import com.pangu.domain.model.repair.RepairAttachment;
 import com.pangu.domain.model.repair.RepairAttachmentKind;
@@ -67,8 +71,11 @@ import com.pangu.domain.model.repair.RepairWorkOrderEvent;
 import com.pangu.domain.model.repair.RepairWorkOrderStatus;
 import com.pangu.domain.model.user.WorkIdentityBuildingScope;
 import com.pangu.domain.repository.OwnersAssemblyRepository;
+import com.pangu.domain.repository.CommitteeSealRepository;
 import com.pangu.domain.repository.CommunitySettingsRepository;
+import com.pangu.domain.repository.ElectronicSealProvider;
 import com.pangu.domain.repository.RepairAttachmentRepository;
+import com.pangu.domain.repository.RepairEvidenceObjectStorage;
 import com.pangu.domain.repository.RepairWorkOrderRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -78,14 +85,18 @@ import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.HashSet;
+import java.util.UUID;
 
 import static com.pangu.application.repair.RepairWorkOrderApplicationException.Reason.BUILDING_NOT_IN_SCOPE;
 import static com.pangu.application.repair.RepairWorkOrderApplicationException.Reason.FORBIDDEN;
@@ -95,6 +106,7 @@ import static com.pangu.application.repair.RepairWorkOrderApplicationException.R
 import static com.pangu.application.repair.RepairWorkOrderApplicationException.Reason.NOT_FOUND;
 import static com.pangu.application.repair.RepairWorkOrderApplicationException.Reason.PARAM_INVALID;
 import static com.pangu.application.repair.RepairWorkOrderApplicationException.Reason.PROPERTY_NOT_OWNED;
+import static com.pangu.application.repair.RepairWorkOrderApplicationException.Reason.STORAGE_UNAVAILABLE;
 
 @Service
 @RequiredArgsConstructor
@@ -108,6 +120,14 @@ public class RepairWorkOrderService {
     private static final String FUND_PUBLIC_REVENUE = "PUBLIC_REVENUE";
     private static final String FUND_BUILDING_MAINTENANCE = "BUILDING_MAINTENANCE_FUND";
     private static final String FUND_COMMUNITY_MAINTENANCE = "COMMUNITY_MAINTENANCE_FUND";
+    private static final String SEAL_METHOD_UPLOADED_PHYSICAL = "UPLOADED_PHYSICAL";
+    private static final String SEAL_METHOD_UPLOADED_EXTERNAL_ELECTRONIC =
+            "UPLOADED_EXTERNAL_ELECTRONIC";
+    private static final String SEAL_METHOD_PLATFORM_ELECTRONIC = "PLATFORM_ELECTRONIC";
+    private static final Set<String> GOVERNANCE_SEAL_METHODS = Set.of(
+            SEAL_METHOD_UPLOADED_PHYSICAL,
+            SEAL_METHOD_UPLOADED_EXTERNAL_ELECTRONIC,
+            SEAL_METHOD_PLATFORM_ELECTRONIC);
     private static final Set<String> REPAIR_FUND_SOURCES = Set.of(
             FUND_PROPERTY_INTERNAL,
             FUND_PUBLIC_REVENUE,
@@ -143,6 +163,9 @@ public class RepairWorkOrderService {
     private final TenantTermLockGuard tenantTermLockGuard;
     private final ObjectMapper objectMapper;
     private final SupplierActivationService supplierActivationService;
+    private final CommitteeSealService committeeSealService;
+    private final CommitteeSealRepository committeeSealRepository;
+    private final RepairEvidenceObjectStorage objectStorage;
 
     @Transactional
     public RepairWorkOrder createPrivate(CreatePrivateRepairCommand command) {
@@ -1304,14 +1327,201 @@ public class RepairWorkOrderService {
         UserContext ctx = requireRole(SEAL_ROLES, "当前角色无权加盖业委会公章");
         RepairWorkOrder order = loadVisible(ctx, workOrderId);
         requireStatus(order, RepairWorkOrderStatus.GOVERNANCE_CONFIRMED);
-        String sealedFileHash = requireText(command.sealedFileHash(), "sealedFileHash");
-        String sealType = trim(command.sealType()) == null ? "COMMITTEE_SEAL" : trim(command.sealType());
-        repository.insertGovernanceSeal(order.workOrderId(), order.tenantId(), ctx.userId(),
-                sealType, sealedFileHash, trim(command.remark()));
-        return transition(order, order.withStatus(RepairWorkOrderStatus.SEALED, false, true, false),
-                "GOVERNANCE_SEAL", command.remark(), jsonPayload(Map.of(
-                        "sealType", sealType,
-                        "sealedFileHash", sealedFileHash)));
+        String sealingMethod = requireAllowed(
+                command.sealingMethod(), "sealingMethod", GOVERNANCE_SEAL_METHODS);
+        if (SEAL_METHOD_PLATFORM_ELECTRONIC.equals(sealingMethod) && command.sealedAttachmentId() != null) {
+            throw new RepairWorkOrderApplicationException(PARAM_INVALID, "平台电子签章不能同时提交已盖章文件");
+        }
+        if (!SEAL_METHOD_PLATFORM_ELECTRONIC.equals(sealingMethod) && command.electronicSealId() != null) {
+            throw new RepairWorkOrderApplicationException(PARAM_INVALID, "上传已盖章文件不能同时选择平台电子印章");
+        }
+        GovernanceSealResult result = switch (sealingMethod) {
+            case SEAL_METHOD_UPLOADED_PHYSICAL -> uploadedGovernanceSeal(
+                    order, command.sealedAttachmentId(), false);
+            case SEAL_METHOD_UPLOADED_EXTERNAL_ELECTRONIC -> uploadedGovernanceSeal(
+                    order, command.sealedAttachmentId(), true);
+            case SEAL_METHOD_PLATFORM_ELECTRONIC -> platformGovernanceSeal(
+                    order, ctx, command.electronicSealId());
+            default -> throw new RepairWorkOrderApplicationException(PARAM_INVALID, "不支持的盖章方式");
+        };
+        try {
+            Long usageId = committeeSealRepository.insertUsage(new CommitteeSealUsageRecord(
+                    null, order.tenantId(), result.electronicSealId(), result.sealName(),
+                    "REPAIR", order.workOrderId(), order.title(), sealingMethod,
+                    result.sourceAttachmentId(), result.sealedAttachment().attachmentId(),
+                    result.sourceFileHash(), result.sealedFileHash(), result.providerTransactionId(),
+                    result.certificateSerial(), result.verificationStatus(), result.simulated(),
+                    ctx.userId(), null, trim(command.remark()), null));
+            bindAttachments(order, List.of(result.sealedAttachment()), "GOVERNANCE_SEAL");
+            repository.insertGovernanceSeal(order.workOrderId(), order.tenantId(), ctx.userId(),
+                    usageId, result.sealType(), result.sealedFileHash(), trim(command.remark()));
+
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("usageId", usageId);
+            payload.put("sealingMethod", sealingMethod);
+            payload.put("sealType", result.sealType());
+            payload.put("sealedAttachmentId", result.sealedAttachment().attachmentId());
+            payload.put("sealedFileHash", result.sealedFileHash());
+            payload.put("verificationStatus", result.verificationStatus());
+            payload.put("simulated", result.simulated());
+            return transition(order, order.withStatus(RepairWorkOrderStatus.SEALED, false, true, false),
+                    "GOVERNANCE_SEAL", command.remark(), jsonPayload(payload));
+        } catch (RuntimeException ex) {
+            cleanupGeneratedSeal(result.generatedObjectKey(), ex);
+            throw ex;
+        }
+    }
+
+    private GovernanceSealResult uploadedGovernanceSeal(
+            RepairWorkOrder order, Long sealedAttachmentId, boolean verifyExternalElectronicSeal) {
+        if (sealedAttachmentId == null) {
+            throw new RepairWorkOrderApplicationException(PARAM_INVALID, "请上传已盖章的报审文件");
+        }
+        RepairAttachment attachment = readyAttachments(
+                order, List.of(sealedAttachmentId), RepairAttachmentKind.GOVERNANCE_SEALED_DOCUMENT, 1, 1)
+                .getFirst();
+        byte[] content = readAttachmentContent(attachment);
+        String sealedFileHash = sha256(content);
+        if (!verifyExternalElectronicSeal) {
+            return new GovernanceSealResult(
+                    null, "业主委员会实物印章", "OWNERS_COMMITTEE", null, attachment,
+                    null, sealedFileHash, null, null, "PHYSICAL_STAMP_FILE_UPLOADED",
+                    false, null);
+        }
+        if (!"application/pdf".equals(attachment.contentType())) {
+            throw new RepairWorkOrderApplicationException(PARAM_INVALID, "外部电子签章验签仅支持 PDF 文件");
+        }
+        ElectronicSealProvider.VerificationResult verification;
+        try {
+            verification = committeeSealService.provider().verify(new ElectronicSealProvider.VerificationRequest(
+                    attachment.originalFileName(), content, sealedFileHash));
+        } catch (IllegalArgumentException ex) {
+            throw new RepairWorkOrderApplicationException(PARAM_INVALID, ex.getMessage(), ex);
+        } catch (RuntimeException ex) {
+            throw new RepairWorkOrderApplicationException(STORAGE_UNAVAILABLE, "电子签章验签服务不可用", ex);
+        }
+        return new GovernanceSealResult(
+                null, "外部电子印章", "OWNERS_COMMITTEE", null, attachment,
+                null, sealedFileHash, verification.providerTransactionId(),
+                verification.certificateSerial(), verification.verificationStatus(),
+                committeeSealService.provider().simulated(), null);
+    }
+
+    private GovernanceSealResult platformGovernanceSeal(
+            RepairWorkOrder order, UserContext context, Long electronicSealId) {
+        if (electronicSealId == null) {
+            throw new RepairWorkOrderApplicationException(PARAM_INVALID, "请选择要使用的电子印章");
+        }
+        CommitteeElectronicSeal seal = committeeSealService.requireUsableSeal(electronicSealId, context);
+        RepairAttachment source = attachmentRepository.findLatestByKind(
+                        order.workOrderId(), order.tenantId(), RepairAttachmentKind.APPROVAL_DOCUMENT)
+                .orElseThrow(() -> new RepairWorkOrderApplicationException(
+                        NOT_FOUND, "未找到可供盖章的正式报审文件"));
+        if (!"application/pdf".equals(source.contentType())) {
+            throw new RepairWorkOrderApplicationException(
+                    PARAM_INVALID, "模拟电子签章仅支持 PDF，请由物业重新上传 PDF 版正式报审文件");
+        }
+        byte[] sourceContent = readAttachmentContent(source);
+        String sourceFileHash = sha256(sourceContent);
+        ElectronicSealProvider.SignedDocument signed;
+        try {
+            signed = committeeSealService.provider().sign(new ElectronicSealProvider.SignRequest(
+                    seal.providerSealId(), seal.certificateSerial(), source.originalFileName(),
+                    sourceContent, sourceFileHash));
+        } catch (IllegalArgumentException ex) {
+            throw new RepairWorkOrderApplicationException(PARAM_INVALID, ex.getMessage(), ex);
+        } catch (RuntimeException ex) {
+            throw new RepairWorkOrderApplicationException(STORAGE_UNAVAILABLE, "电子签章服务不可用", ex);
+        }
+        validateSignedDocument(signed);
+        String objectKey = governanceSealedObjectKey(order);
+        RepairAttachment sealedAttachment = storeGeneratedGovernanceSeal(
+                order, context, objectKey, signed.content());
+        return new GovernanceSealResult(
+                seal.sealId(), seal.sealName(), seal.sealType().name(), source.attachmentId(),
+                sealedAttachment, sourceFileHash, sha256(signed.content()),
+                signed.providerTransactionId(), signed.certificateSerial(), signed.verificationStatus(),
+                seal.simulated() || committeeSealService.provider().simulated(), objectKey);
+    }
+
+    private void validateSignedDocument(ElectronicSealProvider.SignedDocument signed) {
+        if (signed == null || signed.content() == null || signed.content().length == 0
+                || !"application/pdf".equalsIgnoreCase(trim(signed.contentType()))
+                || trim(signed.providerTransactionId()) == null
+                || trim(signed.verificationStatus()) == null) {
+            throw new RepairWorkOrderApplicationException(
+                    STORAGE_UNAVAILABLE, "电子签章服务返回的签章文件或审计标识不完整");
+        }
+    }
+
+    private RepairAttachment storeGeneratedGovernanceSeal(
+            RepairWorkOrder order, UserContext context, String objectKey, byte[] content) {
+        RepairEvidenceObjectStorage.StoredObjectMetadata metadata;
+        try {
+            metadata = objectStorage.put(objectKey, content, "application/pdf", contentMd5(content));
+        } catch (RuntimeException ex) {
+            throw new RepairWorkOrderApplicationException(STORAGE_UNAVAILABLE, "保存模拟盖章文件失败", ex);
+        }
+        if (metadata.size() != content.length
+                || !"application/pdf".equalsIgnoreCase(trim(metadata.contentType()))
+                || trim(metadata.etag()) == null) {
+            cleanupGeneratedSeal(objectKey, null);
+            throw new RepairWorkOrderApplicationException(STORAGE_UNAVAILABLE, "模拟盖章文件完整性校验失败");
+        }
+        try {
+            return attachmentRepository.insert(new RepairAttachment(
+                    null, order.workOrderId(), order.tenantId(),
+                    RepairAttachmentKind.GOVERNANCE_SEALED_DOCUMENT, objectKey,
+                    "盖章文件-" + order.orderNo() + ".pdf", "application/pdf",
+                    content.length, metadata.size(), metadata.etag(), RepairAttachmentStatus.READY,
+                    context.accountId(), null, null, LocalDateTime.now()));
+        } catch (RuntimeException ex) {
+            cleanupGeneratedSeal(objectKey, ex);
+            throw ex;
+        }
+    }
+
+    private byte[] readAttachmentContent(RepairAttachment attachment) {
+        try {
+            byte[] content = objectStorage.read(attachment.objectKey());
+            if (content == null || content.length == 0) {
+                throw new RepairWorkOrderApplicationException(STORAGE_UNAVAILABLE, "附件内容为空");
+            }
+            return content;
+        } catch (RepairWorkOrderApplicationException ex) {
+            throw ex;
+        } catch (RuntimeException ex) {
+            throw new RepairWorkOrderApplicationException(STORAGE_UNAVAILABLE, "读取报审附件失败", ex);
+        }
+    }
+
+    private String governanceSealedObjectKey(RepairWorkOrder order) {
+        LocalDate today = LocalDate.now();
+        return "repair/%d/%d/%s/%04d/%02d/%s.pdf".formatted(
+                order.tenantId(), order.workOrderId(),
+                RepairAttachmentKind.GOVERNANCE_SEALED_DOCUMENT.name().toLowerCase(Locale.ROOT),
+                today.getYear(), today.getMonthValue(), UUID.randomUUID());
+    }
+
+    private String contentMd5(byte[] content) {
+        try {
+            return Base64.getEncoder().encodeToString(MessageDigest.getInstance("MD5").digest(content));
+        } catch (NoSuchAlgorithmException ex) {
+            throw new IllegalStateException("JVM 不支持 MD5", ex);
+        }
+    }
+
+    private void cleanupGeneratedSeal(String objectKey, RuntimeException original) {
+        if (objectKey == null) {
+            return;
+        }
+        try {
+            objectStorage.delete(objectKey);
+        } catch (RuntimeException cleanupError) {
+            if (original != null) {
+                original.addSuppressed(cleanupError);
+            }
+        }
     }
 
     @Transactional
@@ -1954,6 +2164,30 @@ public class RepairWorkOrderService {
         } catch (NoSuchAlgorithmException ex) {
             throw new IllegalStateException("SHA-256 not available", ex);
         }
+    }
+
+    private String sha256(byte[] value) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value));
+        } catch (NoSuchAlgorithmException ex) {
+            throw new IllegalStateException("SHA-256 not available", ex);
+        }
+    }
+
+    private record GovernanceSealResult(
+            Long electronicSealId,
+            String sealName,
+            String sealType,
+            Long sourceAttachmentId,
+            RepairAttachment sealedAttachment,
+            String sourceFileHash,
+            String sealedFileHash,
+            String providerTransactionId,
+            String certificateSerial,
+            String verificationStatus,
+            boolean simulated,
+            String generatedObjectKey
+    ) {
     }
 
     private void assertHandoverUnlocked(RepairWorkOrder order) {

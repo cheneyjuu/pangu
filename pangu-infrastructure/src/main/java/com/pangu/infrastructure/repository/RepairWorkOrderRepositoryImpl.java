@@ -1,3 +1,4 @@
+// 关联业务：实现维修工单状态机及其表决、报审、盖章、合同和验收数据访问。
 package com.pangu.infrastructure.repository;
 
 import com.pangu.domain.model.asset.OwnerPropertyDetail;
@@ -569,10 +570,12 @@ public class RepairWorkOrderRepositoryImpl implements RepairWorkOrderRepository 
     public void insertGovernanceSeal(Long workOrderId,
                                      Long tenantId,
                                      Long sealedByUserId,
+                                     Long usageId,
                                      String sealType,
                                      String sealedFileHash,
                                      String remark) {
-        mapper.insertGovernanceSeal(workOrderId, tenantId, sealedByUserId, sealType, sealedFileHash, remark);
+        mapper.insertGovernanceSeal(
+                workOrderId, tenantId, sealedByUserId, usageId, sealType, sealedFileHash, remark);
     }
 
     @Override

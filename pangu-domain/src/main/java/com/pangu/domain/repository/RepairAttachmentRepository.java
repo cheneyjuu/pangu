@@ -1,3 +1,4 @@
+// 关联业务：持久化维修工单各阶段附件及其业务绑定状态。
 package com.pangu.domain.repository;
 
 import com.pangu.domain.model.repair.RepairAttachment;
@@ -14,6 +15,9 @@ public interface RepairAttachmentRepository {
     Optional<RepairAttachment> findById(Long attachmentId, Long workOrderId, Long tenantId);
 
     List<RepairAttachment> findByIds(Collection<Long> attachmentIds, Long workOrderId, Long tenantId);
+
+    Optional<RepairAttachment> findLatestByKind(
+            Long workOrderId, Long tenantId, RepairAttachmentKind kind);
 
     int countActive(Long workOrderId, Long tenantId, RepairAttachmentKind kind);
 

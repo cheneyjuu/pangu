@@ -1,3 +1,4 @@
+// 关联业务：持久化维修工单全流程状态、表决、报审、盖章、合同及验收记录。
 package com.pangu.infrastructure.persistence.mapper;
 
 import com.pangu.domain.model.repair.RepairAcceptanceRecord;
@@ -321,6 +322,7 @@ public interface RepairWorkOrderMapper {
     int insertGovernanceSeal(@Param("workOrderId") Long workOrderId,
                              @Param("tenantId") Long tenantId,
                              @Param("sealedByUserId") Long sealedByUserId,
+                             @Param("usageId") Long usageId,
                              @Param("sealType") String sealType,
                              @Param("sealedFileHash") String sealedFileHash,
                              @Param("remark") String remark);

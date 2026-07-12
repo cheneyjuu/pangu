@@ -1,3 +1,4 @@
+// 关联业务：查询和更新维修附件在上传、绑定及盖章阶段的持久化状态。
 package com.pangu.infrastructure.persistence.mapper;
 
 import com.pangu.infrastructure.persistence.entity.RepairAttachmentRow;
@@ -19,6 +20,10 @@ public interface RepairAttachmentMapper {
     List<RepairAttachmentRow> findByIds(@Param("attachmentIds") Collection<Long> attachmentIds,
                                         @Param("workOrderId") Long workOrderId,
                                         @Param("tenantId") Long tenantId);
+
+    RepairAttachmentRow findLatestByKind(@Param("workOrderId") Long workOrderId,
+                                         @Param("tenantId") Long tenantId,
+                                         @Param("attachmentKind") String attachmentKind);
 
     int countActive(@Param("workOrderId") Long workOrderId,
                     @Param("tenantId") Long tenantId,

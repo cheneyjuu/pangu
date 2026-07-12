@@ -1,3 +1,4 @@
+// 关联业务：描述维修工单附件在对象存储中的完整性、绑定状态和审计归属。
 package com.pangu.domain.model.repair;
 
 import java.time.LocalDateTime;

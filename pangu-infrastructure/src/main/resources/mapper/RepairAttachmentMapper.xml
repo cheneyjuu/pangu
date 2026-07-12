@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!-- 关联业务：持久化维修附件，并读取报审盖章所需的最新正式文件。 -->
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.pangu.infrastructure.persistence.mapper.RepairAttachmentMapper">
 
@@ -56,6 +57,17 @@
               #{id}
           </foreach>
         ORDER BY attachment_id
+    </select>
+
+    <select id="findLatestByKind" resultMap="AttachmentMap">
+        SELECT <include refid="columns"/>
+        FROM t_repair_attachment
+        WHERE work_order_id = #{workOrderId}
+          AND tenant_id = #{tenantId}
+          AND attachment_kind = #{attachmentKind}
+          AND status IN ('READY', 'BOUND')
+        ORDER BY attachment_id DESC
+        LIMIT 1
     </select>
 
     <select id="countActive" resultType="int">

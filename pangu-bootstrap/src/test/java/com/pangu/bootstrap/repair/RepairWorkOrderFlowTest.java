@@ -1,3 +1,4 @@
+// 关联业务：验证维修工单从登记到表决、报审、盖章、合同、施工和验收的完整闭环。
 package com.pangu.bootstrap.repair;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -97,6 +98,20 @@ public class RepairWorkOrderFlowTest {
                     building_repair_default_decision_channel = 'WECHAT'
                 WHERE tenant_id = ?
                 """, TENANT);
+        jdbcTemplate.update("""
+                DELETE FROM t_repair_governance_seal
+                WHERE work_order_id IN (
+                    SELECT work_order_id FROM t_repair_work_order WHERE title LIKE 'IT-报修-%'
+                )
+                """);
+        jdbcTemplate.update("""
+                DELETE FROM t_committee_seal_usage
+                WHERE business_type = 'REPAIR'
+                  AND business_id IN (
+                    SELECT work_order_id FROM t_repair_work_order WHERE title LIKE 'IT-报修-%'
+                  )
+                """);
+        jdbcTemplate.update("DELETE FROM t_committee_electronic_seal WHERE seal_name LIKE 'IT-模拟印章-%'");
         jdbcTemplate.update("DELETE FROM t_repair_work_order WHERE title LIKE 'IT-报修-%'");
         jdbcTemplate.update("DELETE FROM t_supplier_activation_invitation WHERE supplier_dept_id IN (SELECT dept_id FROM sys_dept WHERE dept_name LIKE 'IT-供应商-%')");
         jdbcTemplate.update("DELETE FROM sys_user_role WHERE user_id IN (SELECT user_id FROM sys_user WHERE dept_id IN (SELECT dept_id FROM sys_dept WHERE dept_name LIKE 'IT-供应商-%'))");
@@ -117,6 +132,38 @@ public class RepairWorkOrderFlowTest {
                 DELETE FROM c_owner_property
                 WHERE uid = 70001 AND tenant_id = ? AND room_id = ?
                 """, TENANT_CROSS, CROSS_ROOM);
+    }
+
+    @Test
+    void committeeDirectorCanCreateListAndDeactivateMockSeal() throws Exception {
+        String directorToken = token(ACC_DIRECTOR, "SYS_USER", USR_DIRECTOR);
+        String sealName = "IT-模拟印章-" + System.nanoTime();
+
+        String created = mockMvc.perform(post("/api/v1/admin/committee-seals/mock")
+                        .header("Authorization", "Bearer " + directorToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "sealName", sealName,
+                                "sealType", "OWNERS_COMMITTEE"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.sealName", is(sealName)))
+                .andExpect(jsonPath("$.data.providerCode", is("MOCK")))
+                .andExpect(jsonPath("$.data.simulated", is(true)))
+                .andExpect(jsonPath("$.data.status", is("ACTIVE")))
+                .andExpect(jsonPath("$.data.custodianUserId", is((int) USR_DIRECTOR)))
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+        long sealId = objectMapper.readTree(created).path("data").path("sealId").asLong();
+
+        mockMvc.perform(get("/api/v1/admin/committee-seals")
+                        .header("Authorization", "Bearer " + directorToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].sealId", is((int) sealId)))
+                .andExpect(jsonPath("$.data[0].committeeTermName", is("第三届业委会-2026")));
+
+        mockMvc.perform(post("/api/v1/admin/committee-seals/" + sealId + "/deactivate")
+                        .header("Authorization", "Bearer " + directorToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status", is("INACTIVE")));
     }
 
     @Test
@@ -1063,11 +1110,21 @@ public class RepairWorkOrderFlowTest {
 
         action(directorToken, id, "governance-confirm", Map.of("remark", "主任确认同意报批"))
                 .andExpect(jsonPath("$.data.status", is("GOVERNANCE_CONFIRMED")));
+        long sealedDocumentId = readyAttachment(
+                id, "GOVERNANCE_SEALED_DOCUMENT", "image/png", 8192L);
         action(directorToken, id, "seal", Map.of(
-                "sealType", "COMMITTEE_SEAL",
-                "sealedFileHash", "committee-sealed-approval-hash",
+                "sealingMethod", "UPLOADED_PHYSICAL",
+                "sealedAttachmentId", sealedDocumentId,
                 "remark", "业委会盖章"))
                 .andExpect(jsonPath("$.data.status", is("SEALED")));
+        assertEquals("BOUND", jdbcTemplate.queryForObject(
+                "SELECT status FROM t_repair_attachment WHERE attachment_id = ?",
+                String.class, sealedDocumentId));
+        assertEquals("PHYSICAL_STAMP_FILE_UPLOADED", jdbcTemplate.queryForObject("""
+                SELECT verification_status FROM t_committee_seal_usage
+                WHERE business_type = 'REPAIR' AND business_id = ?
+                ORDER BY usage_id DESC LIMIT 1
+                """, String.class, id));
 
         action(managerToken, id, "contracts", Map.of(
                 "supplierDeptId", supplierA,

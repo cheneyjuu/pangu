@@ -1,3 +1,4 @@
+// 关联业务：暴露维修工单从登记、勘验、表决、报审、盖章到验收的后台接口。
 package com.pangu.interfaces.web.controller;
 
 import com.pangu.application.repair.RepairWorkOrderApplicationException;
@@ -107,7 +108,7 @@ public class RepairWorkOrderController extends BaseController {
     @PostMapping(
             value = "/admin/repair-work-orders/{workOrderId}/attachments",
             consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @PreAuthorize("hasAnyAuthority('repair:workorder:field','repair:workorder:manage')")
+    @PreAuthorize("hasAnyAuthority('repair:workorder:field','repair:workorder:manage','repair:workorder:governance')")
     public Result<RepairAttachmentResponse> uploadAttachment(
             @PathVariable("workOrderId") Long workOrderId,
             @RequestParam("attachmentKind") String attachmentKind,
@@ -160,7 +161,7 @@ public class RepairWorkOrderController extends BaseController {
     }
 
     @GetMapping("/admin/repair-work-orders/{workOrderId}/attachments/{attachmentId}/download-url")
-    @PreAuthorize("hasAuthority('repair:workorder:field')")
+    @PreAuthorize("hasAnyAuthority('repair:workorder:field','repair:workorder:governance')")
     public Result<RepairAttachmentDownloadTicketResponse> createAttachmentDownloadTicket(
             @PathVariable("workOrderId") Long workOrderId,
             @PathVariable("attachmentId") Long attachmentId) {
@@ -169,7 +170,7 @@ public class RepairWorkOrderController extends BaseController {
     }
 
     @GetMapping("/admin/repair-work-orders/{workOrderId}/attachments/{attachmentId}/preview-url")
-    @PreAuthorize("hasAuthority('repair:workorder:field')")
+    @PreAuthorize("hasAnyAuthority('repair:workorder:field','repair:workorder:governance')")
     public Result<RepairAttachmentPreviewTicketResponse> createAttachmentPreviewTicket(
             @PathVariable("workOrderId") Long workOrderId,
             @PathVariable("attachmentId") Long attachmentId) {
@@ -178,7 +179,7 @@ public class RepairWorkOrderController extends BaseController {
     }
 
     @DeleteMapping("/admin/repair-work-orders/{workOrderId}/attachments/{attachmentId}")
-    @PreAuthorize("hasAuthority('repair:workorder:field')")
+    @PreAuthorize("hasAnyAuthority('repair:workorder:field','repair:workorder:governance')")
     public Result<Void> deleteAttachment(
             @PathVariable("workOrderId") Long workOrderId,
             @PathVariable("attachmentId") Long attachmentId) {
@@ -650,7 +651,8 @@ public class RepairWorkOrderController extends BaseController {
     public Result<RepairWorkOrderResponse> seal(@PathVariable("workOrderId") Long workOrderId,
                                                 @Valid @RequestBody SealRepairGovernanceRequest request) {
         RepairWorkOrder order = service.sealGovernance(workOrderId,
-                new SealRepairGovernanceCommand(request.sealType(), request.sealedFileHash(), request.remark()));
+                new SealRepairGovernanceCommand(request.sealingMethod(), request.sealedAttachmentId(),
+                        request.electronicSealId(), request.remark()));
         return success(RepairWorkOrderResponse.from(order));
     }
 

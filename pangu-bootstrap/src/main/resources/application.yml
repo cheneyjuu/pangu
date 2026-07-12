@@ -1,3 +1,4 @@
+# 关联业务：盘古后端运行配置，包含维修附件预览与电子印章服务商选择。
 server:
   port: 8080
   servlet:
@@ -65,6 +66,9 @@ platform:
   committee-key-revocation:
     # mock 仅用于开发/测试：不真实吊销证书或密钥。
     provider: mock
+  electronic-seal:
+    # mock 仅在 dev/test profile 注册；生产环境必须配置真实服务商适配器。
+    provider: ${PANGU_ELECTRONIC_SEAL_PROVIDER:mock}
   security:
     # JWT 秘钥（SM2 或 HMAC-SHA256 秘钥占位，开发环境使用默认，生产通过环境变量替换）
     jwt-secret: pangu-secure-jwt-token-secret-key-32-chars-minimum

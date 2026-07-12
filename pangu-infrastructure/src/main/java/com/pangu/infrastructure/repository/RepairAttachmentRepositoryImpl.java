@@ -1,3 +1,4 @@
+// 关联业务：实现维修工单附件台账及业务绑定状态的持久化访问。
 package com.pangu.infrastructure.repository;
 
 import com.pangu.domain.model.repair.RepairAttachment;
@@ -37,6 +38,13 @@ public class RepairAttachmentRepositoryImpl implements RepairAttachmentRepositor
             return List.of();
         }
         return mapper.findByIds(attachmentIds, workOrderId, tenantId).stream().map(this::toDomain).toList();
+    }
+
+    @Override
+    public Optional<RepairAttachment> findLatestByKind(
+            Long workOrderId, Long tenantId, RepairAttachmentKind kind) {
+        return Optional.ofNullable(mapper.findLatestByKind(workOrderId, tenantId, kind.name()))
+                .map(this::toDomain);
     }
 
     @Override

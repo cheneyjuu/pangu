@@ -1,3 +1,4 @@
+// 关联业务：校验、存储、预览和绑定维修现场证据、报审材料及盖章结果文件。
 package com.pangu.application.repair;
 
 import com.pangu.application.repair.command.UploadRepairAttachmentCommand;
@@ -62,6 +63,7 @@ public class RepairAttachmentService {
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     private static final Set<String> FIELD_ROLES = Set.of(
             "PROPERTY_STAFF", "PROPERTY_MANAGER", "GRID_MEMBER", "VOLUNTEER", "OWNER_REPRESENTATIVE");
+    private static final Set<String> GOVERNANCE_SEAL_ROLES = Set.of("COMMITTEE_DIRECTOR", "COMMITTEE_MEMBER");
     private static final Set<String> SUPPLIER_ROLES = Set.of("SERVICE_PROVIDER_ADMIN", "SERVICE_PROVIDER_STAFF");
 
     private final RepairAttachmentRepository attachmentRepository;
@@ -316,6 +318,7 @@ public class RepairAttachmentService {
             case QUOTE_DOCUMENT -> 20;
             case APPROVAL_DOCUMENT -> 3;
             case SOLITAIRE_SCREENSHOT -> 3;
+            case GOVERNANCE_SEALED_DOCUMENT -> 3;
             case INTAKE_ATTACHMENT -> 5;
             default -> 3;
         };
@@ -326,6 +329,7 @@ public class RepairAttachmentService {
                         case QUOTE_DOCUMENT -> "单个工单最多保留 20 份待提交报价原件";
                         case APPROVAL_DOCUMENT -> "单个工单最多保留 3 份待提交报审文件";
                         case SOLITAIRE_SCREENSHOT -> "微信接龙截图最多上传 3 张";
+                        case GOVERNANCE_SEALED_DOCUMENT -> "单个工单最多保留 3 份待确认盖章文件";
                         case INTAKE_ATTACHMENT -> "登记工单最多上传 5 个附件";
                         default -> "现场证据图片最多上传 3 张";
                     });
@@ -333,13 +337,20 @@ public class RepairAttachmentService {
     }
 
     private void validateMedia(RepairAttachmentKind kind, String contentType, long fileSize) {
-        if (kind == RepairAttachmentKind.INTAKE_ATTACHMENT) {
+        if (kind == RepairAttachmentKind.INTAKE_ATTACHMENT
+                || kind == RepairAttachmentKind.GOVERNANCE_SEALED_DOCUMENT) {
             boolean supported = IMAGE_CONTENT_TYPES.contains(contentType) || "application/pdf".equals(contentType);
             if (!supported) {
-                throw new RepairWorkOrderApplicationException(PARAM_INVALID, "登记附件仅支持图片或 PDF 文件");
+                throw new RepairWorkOrderApplicationException(PARAM_INVALID,
+                        kind == RepairAttachmentKind.GOVERNANCE_SEALED_DOCUMENT
+                                ? "盖章结果文件仅支持图片或 PDF 文件"
+                                : "登记附件仅支持图片或 PDF 文件");
             }
             if (fileSize <= 0 || fileSize > MAX_DOCUMENT_SIZE) {
-                throw new RepairWorkOrderApplicationException(PARAM_INVALID, "单个登记附件大小必须在 20MB 以内");
+                throw new RepairWorkOrderApplicationException(PARAM_INVALID,
+                        kind == RepairAttachmentKind.GOVERNANCE_SEALED_DOCUMENT
+                                ? "单个盖章结果文件大小必须在 20MB 以内"
+                                : "单个登记附件大小必须在 20MB 以内");
             }
             return;
         }
@@ -398,6 +409,7 @@ public class RepairAttachmentService {
                     RepairWorkOrderStatus.LOCAL_DECISION_PENDING,
                     RepairWorkOrderStatus.LOCAL_DECISION_PASSED,
                     RepairWorkOrderStatus.APPROVAL_DOCUMENT_PREPARING).contains(order.status());
+            case GOVERNANCE_SEALED_DOCUMENT -> order.status() == RepairWorkOrderStatus.GOVERNANCE_CONFIRMED;
         };
         if (!allowed) {
             throw new RepairWorkOrderApplicationException(INVALID_STATUS,
@@ -513,12 +525,20 @@ public class RepairAttachmentService {
     private UserContext requireAttachmentContext(RepairAttachmentKind kind) {
         UserContext ctx = userContextHolder.current();
         boolean fieldUser = ctx != null && ctx.isSysUser() && FIELD_ROLES.contains(ctx.roleKey());
+        boolean governanceUser = ctx != null && ctx.isSysUser() && GOVERNANCE_SEAL_ROLES.contains(ctx.roleKey());
         boolean supplierUser = ctx != null && ctx.isSysUser() && SUPPLIER_ROLES.contains(ctx.roleKey());
-        if (!fieldUser && !supplierUser) {
+        if (!fieldUser && !governanceUser && !supplierUser) {
             throw new RepairWorkOrderApplicationException(FORBIDDEN, "当前身份无权处理维修现场附件");
         }
         if (supplierUser && kind != null && kind != RepairAttachmentKind.QUOTE_DOCUMENT) {
             throw new RepairWorkOrderApplicationException(FORBIDDEN, "供应商只能上传报价原件");
+        }
+        if (kind == RepairAttachmentKind.GOVERNANCE_SEALED_DOCUMENT && !governanceUser) {
+            throw new RepairWorkOrderApplicationException(FORBIDDEN, "仅业委会印章经办人可上传盖章结果文件");
+        }
+        if (governanceUser && !fieldUser && kind != null
+                && kind != RepairAttachmentKind.GOVERNANCE_SEALED_DOCUMENT) {
+            throw new RepairWorkOrderApplicationException(FORBIDDEN, "业委会印章经办人只能上传盖章结果文件");
         }
         return ctx;
     }

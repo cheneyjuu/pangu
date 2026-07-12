@@ -1,3 +1,4 @@
+// 关联业务：持久化维修工单状态机、方案、表决、报审、盖章、合同及验收数据。
 package com.pangu.domain.repository;
 
 import com.pangu.domain.model.asset.OwnerPropertyDetail;
@@ -240,6 +241,7 @@ public interface RepairWorkOrderRepository {
     void insertGovernanceSeal(Long workOrderId,
                               Long tenantId,
                               Long sealedByUserId,
+                              Long usageId,
                               String sealType,
                               String sealedFileHash,
                               String remark);

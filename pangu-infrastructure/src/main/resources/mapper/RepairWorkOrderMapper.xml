@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!-- 关联业务：持久化维修工单全流程状态、表决、报审、盖章、合同及验收记录。 -->
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.pangu.infrastructure.persistence.mapper.RepairWorkOrderMapper">
@@ -1373,9 +1374,10 @@
 
     <insert id="insertGovernanceSeal">
         INSERT INTO t_repair_governance_seal (
-            work_order_id, tenant_id, sealed_by_user_id, seal_type, sealed_file_hash, remark
+            work_order_id, tenant_id, sealed_by_user_id, usage_id, seal_type, sealed_file_hash, remark
         ) VALUES (
-            #{workOrderId}, #{tenantId}, #{sealedByUserId}, #{sealType}, #{sealedFileHash}, #{remark}
+            #{workOrderId}, #{tenantId}, #{sealedByUserId}, #{usageId},
+            #{sealType}, #{sealedFileHash}, #{remark}
         )
     </insert>
 
