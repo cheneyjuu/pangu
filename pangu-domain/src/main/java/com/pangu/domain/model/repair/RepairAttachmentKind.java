@@ -2,6 +2,8 @@
 package com.pangu.domain.model.repair;
 
 public enum RepairAttachmentKind {
+    /** 业主首次提交报修时上传的现场照片，创建后立即绑定至工单。 */
+    OWNER_REPORT_IMAGE,
     INTAKE_ATTACHMENT,
     LOCATION_IMAGE,
     SURVEY_IMAGE,

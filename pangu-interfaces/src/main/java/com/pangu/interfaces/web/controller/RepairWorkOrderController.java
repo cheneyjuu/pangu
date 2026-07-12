@@ -258,6 +258,26 @@ public class RepairWorkOrderController extends BaseController {
         return ResponseEntity.status(HttpStatus.CREATED).body(success(RepairWorkOrderResponse.from(order)));
     }
 
+    /** 关联业务：业主提交报修后补传现场照片，并由服务端按工单归属立即固化。 */
+    @PostMapping(
+            value = "/me/repairs/{workOrderId}/attachments",
+            consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PreAuthorize("isAuthenticated()")
+    public Result<RepairAttachmentResponse> uploadMyRepairAttachment(
+            @PathVariable("workOrderId") Long workOrderId,
+            @RequestParam("contentType") String contentType,
+            @RequestPart("file") MultipartFile file) {
+        try {
+            return success(RepairAttachmentResponse.from(attachmentService.uploadOwnerReportImage(
+                    workOrderId, new UploadRepairAttachmentCommand(
+                            RepairAttachmentKind.OWNER_REPORT_IMAGE.name(), file.getOriginalFilename(),
+                            contentType, file.getBytes()))));
+        } catch (IOException ex) {
+            throw new RepairWorkOrderApplicationException(
+                    RepairWorkOrderApplicationException.Reason.PARAM_INVALID, "读取业主报修照片失败", ex);
+        }
+    }
+
     @PostMapping("/me/repairs/{workOrderId}/evaluation")
     @PreAuthorize("isAuthenticated()")
     public Result<RepairWorkOrderResponse> evaluate(@PathVariable("workOrderId") Long workOrderId,

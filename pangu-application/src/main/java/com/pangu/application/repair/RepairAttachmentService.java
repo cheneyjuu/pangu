@@ -77,6 +77,13 @@ public class RepairAttachmentService {
         RepairAttachmentKind kind = parseKind(command.attachmentKind());
         UserContext ctx = requireAttachmentContext(kind);
         RepairWorkOrder order = loadVisible(ctx, workOrderId);
+        return storeAttachment(ctx, order, kind, command);
+    }
+
+    private RepairAttachment storeAttachment(UserContext ctx,
+                                             RepairWorkOrder order,
+                                             RepairAttachmentKind kind,
+                                             UploadRepairAttachmentCommand command) {
         assertUploadStatus(order, kind);
         String contentType = normalizeContentType(command.contentType());
         byte[] content = command.content() == null ? new byte[0] : command.content();
@@ -118,6 +125,27 @@ public class RepairAttachmentService {
             }
             throw ex;
         }
+    }
+
+    /**
+     * 业主报修照片在工单创建后上传并立即绑定，避免仅在描述中记录照片数量而没有可审计原件。
+     */
+    @Transactional
+    public RepairAttachment uploadOwnerReportImage(Long workOrderId, UploadRepairAttachmentCommand command) {
+        UserContext ctx = requireOwnerAttachmentContext();
+        RepairWorkOrder order = workOrderRepository.findByIdForOwner(
+                        workOrderId, ctx.accountId(), ctx.uid(), ctx.tenantId())
+                .orElseThrow(() -> new RepairWorkOrderApplicationException(NOT_FOUND,
+                        "工单不存在或不属于当前业主"));
+        RepairAttachment attachment = storeAttachment(ctx, order, RepairAttachmentKind.OWNER_REPORT_IMAGE, command);
+        int bound = attachmentRepository.markBound(List.of(attachment.attachmentId()), order.workOrderId(),
+                order.tenantId(), "OWNER_SUBMIT_EVIDENCE");
+        if (bound != 1) {
+            deleteUploadedObject(attachment.objectKey());
+            throw new RepairWorkOrderApplicationException(INVALID_STATUS, "业主报修照片绑定失败，请刷新后重试");
+        }
+        return attachmentRepository.findById(attachment.attachmentId(), order.workOrderId(), order.tenantId())
+                .orElseThrow(() -> new RepairWorkOrderApplicationException(NOT_FOUND, "业主报修照片不存在"));
     }
 
     @Transactional
@@ -314,6 +342,7 @@ public class RepairAttachmentService {
 
     private void assertUploadCount(RepairWorkOrder order, RepairAttachmentKind kind) {
         int limit = switch (kind) {
+            case OWNER_REPORT_IMAGE -> 9;
             case SURVEY_VIDEO -> 1;
             case QUOTE_DOCUMENT -> 20;
             case APPROVAL_DOCUMENT -> 3;
@@ -385,6 +414,10 @@ public class RepairAttachmentService {
     private void assertUploadStatus(RepairWorkOrder order, RepairAttachmentKind kind) {
         boolean allowed = switch (kind) {
             case INTAKE_ATTACHMENT -> Set.of(
+                    RepairWorkOrderStatus.SUBMITTED,
+                    RepairWorkOrderStatus.NEED_MANUAL_LOCATION,
+                    RepairWorkOrderStatus.PENDING_VERIFY).contains(order.status());
+            case OWNER_REPORT_IMAGE -> Set.of(
                     RepairWorkOrderStatus.SUBMITTED,
                     RepairWorkOrderStatus.NEED_MANUAL_LOCATION,
                     RepairWorkOrderStatus.PENDING_VERIFY).contains(order.status());
