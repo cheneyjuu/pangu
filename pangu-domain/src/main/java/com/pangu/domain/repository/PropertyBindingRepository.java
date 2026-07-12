@@ -11,6 +11,13 @@ public interface PropertyBindingRepository {
 
     List<RosterTopology> findRosterTopology(Long tenantId);
 
+    /**
+     * 当前工作小区已激活的产权基础名册明细。
+     *
+     * <p>登记产权人是导入资料，不表示已完成实名认证、账户开通或法定产权核验。
+     */
+    List<Roster> findActiveRosters(Long tenantId);
+
     String findTenantName(Long tenantId);
 
     Roster findRosterById(Long rosterId);

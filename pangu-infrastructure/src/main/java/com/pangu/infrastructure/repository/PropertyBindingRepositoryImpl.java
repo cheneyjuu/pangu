@@ -29,6 +29,13 @@ public class PropertyBindingRepositoryImpl implements PropertyBindingRepository 
     }
 
     @Override
+    public List<Roster> findActiveRosters(Long tenantId) {
+        return mapper.selectActiveRosters(tenantId).stream()
+                .map(this::toRoster)
+                .toList();
+    }
+
+    @Override
     public String findTenantName(Long tenantId) {
         return mapper.selectTenantName(tenantId);
     }

@@ -16,6 +16,8 @@ public interface PropertyBindingMapper {
 
     List<RosterTopologyRow> selectRosterTopology(@Param("tenantId") Long tenantId);
 
+    List<RosterRow> selectActiveRosters(@Param("tenantId") Long tenantId);
+
     String selectTenantName(@Param("tenantId") Long tenantId);
 
     RosterRow selectRosterById(@Param("rosterId") Long rosterId);

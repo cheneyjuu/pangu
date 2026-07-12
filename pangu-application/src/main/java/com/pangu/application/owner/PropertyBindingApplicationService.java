@@ -100,6 +100,28 @@ public class PropertyBindingApplicationService {
                 buildings);
     }
 
+    /**
+     * 以导入时登记的姓名和手机号归并房屋，用于管理端核对导入结果。
+     *
+     * <p>该视图不将导入记录表述为已认证业主，也不补造认证、账户、委员或开发商状态。
+     */
+    public List<RegisteredOwnerResponse> listRegisteredOwners(Long tenantId) {
+        if (tenantId == null) {
+            throw new PropertyBindingApplicationException(
+                    PropertyBindingApplicationException.Reason.FORBIDDEN,
+                    "当前工作身份未绑定小区，无法查看产权登记名册");
+        }
+        Map<RegisteredOwnerKey, List<PropertyBindingRepository.Roster>> rostersByOwner = new LinkedHashMap<>();
+        for (PropertyBindingRepository.Roster roster : repository.findActiveRosters(tenantId)) {
+            RegisteredOwnerKey owner = new RegisteredOwnerKey(
+                    roster.registeredOwnerName(), roster.registeredOwnerPhone());
+            rostersByOwner.computeIfAbsent(owner, ignored -> new ArrayList<>()).add(roster);
+        }
+        return rostersByOwner.entrySet().stream()
+                .map(entry -> toRegisteredOwner(entry.getKey(), entry.getValue()))
+                .toList();
+    }
+
     @Transactional
     public ImportResult importRoster(Long currentTenantId, Long operatorUserId, PropertyRosterImportCommand command) {
         Long tenantId = resolveTenantId(currentTenantId, command.tenantId());
@@ -371,6 +393,27 @@ public class PropertyBindingApplicationService {
                 units);
     }
 
+    private RegisteredOwnerResponse toRegisteredOwner(
+            RegisteredOwnerKey owner,
+            List<PropertyBindingRepository.Roster> rosters) {
+        List<RegisteredPropertyResponse> properties = rosters.stream()
+                .map(roster -> new RegisteredPropertyResponse(
+                        roster.buildingName(),
+                        roster.unitName(),
+                        roster.roomName(),
+                        amountOrZero(roster.buildArea())))
+                .toList();
+        BigDecimal totalBuildArea = properties.stream()
+                .map(RegisteredPropertyResponse::buildArea)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        return new RegisteredOwnerResponse(
+                owner.name(),
+                owner.phone(),
+                properties.size(),
+                totalBuildArea,
+                properties);
+    }
+
     private ClaimResponse toResponse(PropertyBindingRepository.Claim row) {
         return new ClaimResponse(
                 row.claimId(),
@@ -560,5 +603,25 @@ public class PropertyBindingApplicationService {
             LocalDateTime createTime,
             LocalDateTime reviewedAt
     ) {
+    }
+
+    public record RegisteredOwnerResponse(
+            String registeredOwnerName,
+            String registeredOwnerPhone,
+            long propertyCount,
+            BigDecimal totalBuildArea,
+            List<RegisteredPropertyResponse> properties
+    ) {
+    }
+
+    public record RegisteredPropertyResponse(
+            String buildingName,
+            String unitName,
+            String roomName,
+            BigDecimal buildArea
+    ) {
+    }
+
+    private record RegisteredOwnerKey(String name, String phone) {
     }
 }

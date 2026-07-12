@@ -90,6 +90,16 @@ class PropertyBindingFlowTest {
                 .andExpect(jsonPath("$.data.buildings[?(@.buildingName == '冷启楼')].totalArea", hasItem(88.66)))
                 .andExpect(jsonPath("$.data.buildings[*].units[*].unitName", hasItem("一单元")));
 
+        mockMvc.perform(get("/api/v1/admin/property-roster/registered-owners")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[?(@.registeredOwnerName == '冷启业主')].registeredOwnerPhone",
+                        hasItem(AUTO_PHONE)))
+                .andExpect(jsonPath("$.data[?(@.registeredOwnerName == '冷启业主')].propertyCount",
+                        hasItem(1)))
+                .andExpect(jsonPath("$.data[?(@.registeredOwnerName == '冷启业主')].properties[0].roomName",
+                        hasItem("冷启1101")));
+
         mockMvc.perform(post("/api/v1/me/property-bindings/claims")
                         .header("Authorization", "Bearer " + ownerToken)
                         .contentType(MediaType.APPLICATION_JSON)

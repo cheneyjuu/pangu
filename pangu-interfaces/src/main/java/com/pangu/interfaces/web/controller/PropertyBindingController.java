@@ -66,6 +66,12 @@ public class PropertyBindingController extends BaseController {
         return success(service.getRosterTopology(SecurityUtils.getTenantId()));
     }
 
+    @GetMapping("/admin/property-roster/registered-owners")
+    @PreAuthorize("hasAuthority('property:roster:import')")
+    public Result<List<PropertyBindingApplicationService.RegisteredOwnerResponse>> registeredOwners() {
+        return success(service.listRegisteredOwners(SecurityUtils.getTenantId()));
+    }
+
     @GetMapping("/admin/property-binding-claims")
     @PreAuthorize("hasAuthority('property:binding:review')")
     public Result<PageResponse<PropertyBindingApplicationService.ClaimResponse>> adminClaims(
