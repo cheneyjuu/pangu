@@ -5,6 +5,7 @@ import com.pangu.application.admin.RoleAdminApplicationException;
 import com.pangu.application.admin.WorkIdentityApplicationException;
 import com.pangu.application.assembly.OwnersAssemblyApplicationException;
 import com.pangu.application.community.CommunitySettingsApplicationException;
+import com.pangu.application.registration.CommunityRegistrationApplicationException;
 import com.pangu.application.disclosure.FinanceDisclosureApplicationException;
 import com.pangu.application.dispute.DisputeApplicationException;
 import com.pangu.application.lock.GovernanceLockApplicationException;
@@ -207,6 +208,25 @@ public class GlobalExceptionHandler {
         CommunitySettingsErrorCode errorCode = CommunitySettingsExceptionTranslator.translate(ex);
         response.setStatus(errorCode.getHttpStatus());
         log.info("CommunitySettings business exception reason={} code={} msg={}",
+                ex.getReason(), errorCode.getCode(), ex.getMessage());
+        return Result.fail(
+                errorCode.getCode(),
+                ex.getMessage() != null ? ex.getMessage() : errorCode.getMessage(),
+                null,
+                errorCode.getErrorType(),
+                errorCode.isNeedRetry());
+    }
+
+    /**
+     * 小区注册申请、审核、材料和租户冷启动异常翻译。
+     */
+    @ExceptionHandler(CommunityRegistrationApplicationException.class)
+    public Result<Object> handleCommunityRegistrationApplicationException(
+            CommunityRegistrationApplicationException ex,
+            HttpServletResponse response) {
+        CommunityRegistrationErrorCode errorCode = CommunityRegistrationExceptionTranslator.translate(ex);
+        response.setStatus(errorCode.getHttpStatus());
+        log.info("CommunityRegistration business exception reason={} code={} msg={}",
                 ex.getReason(), errorCode.getCode(), ex.getMessage());
         return Result.fail(
                 errorCode.getCode(),

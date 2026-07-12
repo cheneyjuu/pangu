@@ -1,0 +1,367 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pangu.infrastructure.persistence.mapper.CommunityRegistrationMapper">
+
+    <!-- 关联业务：小区注册申请、证明材料、属地审核和事务性租户冷启动。 -->
+
+    <resultMap id="ApplicationMap"
+               type="com.pangu.infrastructure.persistence.mapper.CommunityRegistrationMapper$ApplicationRow">
+        <id property="applicationId" column="application_id"/>
+        <result property="applicationNo" column="application_no"/>
+        <result property="applicantAccountId" column="applicant_account_id"/>
+        <result property="applicantName" column="applicant_name"
+                typeHandler="com.pangu.infrastructure.persistence.handler.Sm4EncryptTypeHandler"/>
+        <result property="applicantPhone" column="applicant_phone"/>
+        <result property="claimedIdentity" column="claimed_identity"/>
+        <result property="provinceCode" column="province_code"/>
+        <result property="provinceName" column="province_name"/>
+        <result property="cityCode" column="city_code"/>
+        <result property="cityName" column="city_name"/>
+        <result property="districtCode" column="district_code"/>
+        <result property="districtName" column="district_name"/>
+        <result property="communityName" column="community_name"/>
+        <result property="communityAddress" column="community_address"/>
+        <result property="declaredHouseholdCount" column="declared_household_count"/>
+        <result property="communityFingerprint" column="community_fingerprint"/>
+        <result property="status" column="status"/>
+        <result property="reviewMode" column="review_mode"/>
+        <result property="reviewerAccountId" column="reviewer_account_id"/>
+        <result property="reviewerUserId" column="reviewer_user_id"/>
+        <result property="reviewerDeptId" column="reviewer_dept_id"/>
+        <result property="reviewComment" column="review_comment"/>
+        <result property="fallbackReason" column="fallback_reason"/>
+        <result property="provisionedTenantId" column="provisioned_tenant_id"/>
+        <result property="version" column="version"/>
+        <result property="submittedAt" column="submitted_at"/>
+        <result property="reviewedAt" column="reviewed_at"/>
+        <result property="createTime" column="create_time"/>
+        <result property="updateTime" column="update_time"/>
+    </resultMap>
+
+    <sql id="ApplicationColumns">
+        application_id, application_no, applicant_account_id, applicant_name, applicant_phone,
+        claimed_identity, province_code, province_name, city_code, city_name, district_code,
+        district_name, community_name, community_address, declared_household_count,
+        community_fingerprint, status, review_mode, reviewer_account_id, reviewer_user_id,
+        reviewer_dept_id, review_comment, fallback_reason, provisioned_tenant_id, version,
+        submitted_at, reviewed_at, create_time, update_time
+    </sql>
+
+    <insert id="insertApplication"
+            parameterType="com.pangu.infrastructure.persistence.mapper.CommunityRegistrationMapper$ApplicationRow"
+            useGeneratedKeys="true" keyProperty="applicationId" keyColumn="application_id">
+        INSERT INTO t_community_registration_application (
+            application_no, applicant_account_id, applicant_name, applicant_phone, claimed_identity,
+            province_code, province_name, city_code, city_name, district_code, district_name,
+            community_name, community_address, declared_household_count, community_fingerprint,
+            status, version, submitted_at, reviewed_at, create_time, update_time
+        ) VALUES (
+            #{applicationNo}, #{applicantAccountId},
+            #{applicantName,typeHandler=com.pangu.infrastructure.persistence.handler.Sm4EncryptTypeHandler},
+            #{applicantPhone}, #{claimedIdentity}, #{provinceCode}, #{provinceName}, #{cityCode}, #{cityName},
+            #{districtCode}, #{districtName}, #{communityName}, #{communityAddress},
+            #{declaredHouseholdCount}, #{communityFingerprint}, #{status}, #{version},
+            #{submittedAt}, #{reviewedAt}, #{createTime}, #{updateTime}
+        )
+    </insert>
+
+    <update id="updateApplication">
+        UPDATE t_community_registration_application
+        SET applicant_name = #{row.applicantName,typeHandler=com.pangu.infrastructure.persistence.handler.Sm4EncryptTypeHandler},
+            claimed_identity = #{row.claimedIdentity},
+            province_code = #{row.provinceCode},
+            province_name = #{row.provinceName},
+            city_code = #{row.cityCode},
+            city_name = #{row.cityName},
+            district_code = #{row.districtCode},
+            district_name = #{row.districtName},
+            community_name = #{row.communityName},
+            community_address = #{row.communityAddress},
+            declared_household_count = #{row.declaredHouseholdCount},
+            community_fingerprint = #{row.communityFingerprint},
+            status = #{row.status},
+            review_mode = #{row.reviewMode},
+            reviewer_account_id = #{row.reviewerAccountId},
+            reviewer_user_id = #{row.reviewerUserId},
+            reviewer_dept_id = #{row.reviewerDeptId},
+            review_comment = #{row.reviewComment},
+            fallback_reason = #{row.fallbackReason},
+            provisioned_tenant_id = #{row.provisionedTenantId},
+            submitted_at = #{row.submittedAt},
+            reviewed_at = #{row.reviewedAt},
+            version = version + 1,
+            update_time = #{row.updateTime}
+        WHERE application_id = #{row.applicationId}
+          AND version = #{expectedVersion}
+    </update>
+
+    <select id="selectApplication" resultMap="ApplicationMap">
+        SELECT <include refid="ApplicationColumns"/>
+        FROM t_community_registration_application
+        WHERE application_id = #{applicationId}
+    </select>
+
+    <select id="selectApplicationsByApplicant" resultMap="ApplicationMap">
+        SELECT <include refid="ApplicationColumns"/>
+        FROM t_community_registration_application
+        WHERE applicant_account_id = #{applicantAccountId}
+        ORDER BY create_time DESC, application_id DESC
+        LIMIT #{limit}
+    </select>
+
+    <select id="selectApplicationsForReview" resultMap="ApplicationMap">
+        SELECT <include refid="ApplicationColumns"/>
+        FROM t_community_registration_application
+        WHERE status = #{status}
+        ORDER BY submitted_at NULLS LAST, application_id ASC
+        LIMIT #{limit}
+    </select>
+
+    <select id="existsActiveFingerprint" resultType="boolean">
+        SELECT EXISTS (
+            SELECT 1
+            FROM t_community_registration_application
+            WHERE community_fingerprint = #{fingerprint}
+              AND status IN ('DRAFT', 'SUBMITTED', 'RETURNED', 'APPROVED')
+            <if test="excludeApplicationId != null">
+              AND application_id &lt;&gt; #{excludeApplicationId}
+            </if>
+        )
+    </select>
+
+    <select id="existsProvisionedCommunity" resultType="boolean">
+        SELECT EXISTS (
+            SELECT 1
+            FROM t_tenant_community
+            WHERE status = 'ACTIVE'
+              AND (
+                  registration_fingerprint = #{fingerprint}
+                  OR (
+                      district_code = #{districtCode}
+                      AND LOWER(REGEXP_REPLACE(tenant_name, '[[:space:]]+', '', 'g'))
+                          = LOWER(REGEXP_REPLACE(#{communityName}, '[[:space:]]+', '', 'g'))
+                      AND LOWER(REGEXP_REPLACE(COALESCE(address, ''), '[[:space:]]+', '', 'g'))
+                          = LOWER(REGEXP_REPLACE(#{communityAddress}, '[[:space:]]+', '', 'g'))
+                  )
+              )
+        )
+    </select>
+
+    <insert id="insertHousingTag">
+        INSERT INTO t_community_registration_housing_tag (application_id, housing_tag)
+        VALUES (#{applicationId}, #{housingTag})
+        ON CONFLICT (application_id, housing_tag) DO NOTHING
+    </insert>
+
+    <delete id="deleteHousingTags">
+        DELETE FROM t_community_registration_housing_tag
+        WHERE application_id = #{applicationId}
+    </delete>
+
+    <select id="selectHousingTags" resultType="string">
+        SELECT housing_tag
+        FROM t_community_registration_housing_tag
+        WHERE application_id = #{applicationId}
+        ORDER BY housing_tag
+    </select>
+
+    <insert id="insertMaterial"
+            parameterType="com.pangu.infrastructure.persistence.mapper.CommunityRegistrationMapper$MaterialRow"
+            useGeneratedKeys="true" keyProperty="materialId" keyColumn="material_id">
+        INSERT INTO t_community_registration_material (
+            application_id, material_type, object_key, original_file_name, content_type,
+            file_size, etag, sha256, uploaded_by_account_id, status, create_time
+        ) VALUES (
+            #{applicationId}, #{materialType}, #{objectKey}, #{originalFileName}, #{contentType},
+            #{fileSize}, #{etag}, #{sha256}, #{uploadedByAccountId}, #{status}, #{createTime}
+        )
+    </insert>
+
+    <select id="selectMaterial"
+            resultType="com.pangu.infrastructure.persistence.mapper.CommunityRegistrationMapper$MaterialRow">
+        SELECT material_id, application_id, material_type, object_key, original_file_name,
+               content_type, file_size, etag, sha256, uploaded_by_account_id, status, create_time
+        FROM t_community_registration_material
+        WHERE application_id = #{applicationId}
+          AND material_id = #{materialId}
+          AND status = 'ACTIVE'
+    </select>
+
+    <select id="selectMaterials"
+            resultType="com.pangu.infrastructure.persistence.mapper.CommunityRegistrationMapper$MaterialRow">
+        SELECT material_id, application_id, material_type, object_key, original_file_name,
+               content_type, file_size, etag, sha256, uploaded_by_account_id, status, create_time
+        FROM t_community_registration_material
+        WHERE application_id = #{applicationId}
+          AND status = 'ACTIVE'
+        ORDER BY create_time ASC, material_id ASC
+    </select>
+
+    <update id="deactivateMaterial">
+        UPDATE t_community_registration_material material
+        SET status = 'REMOVED', update_time = CURRENT_TIMESTAMP
+        WHERE material.application_id = #{applicationId}
+          AND material.material_id = #{materialId}
+          AND material.status = 'ACTIVE'
+          AND EXISTS (
+              SELECT 1
+              FROM t_community_registration_application application
+              WHERE application.application_id = material.application_id
+                AND application.applicant_account_id = #{applicantAccountId}
+                AND application.status IN ('DRAFT', 'RETURNED')
+          )
+    </update>
+
+    <select id="countActiveMaterials" resultType="long">
+        SELECT COUNT(*)
+        FROM t_community_registration_material
+        WHERE application_id = #{applicationId}
+          AND status = 'ACTIVE'
+    </select>
+
+    <insert id="insertReview"
+            parameterType="com.pangu.infrastructure.persistence.mapper.CommunityRegistrationMapper$ReviewRow"
+            useGeneratedKeys="true" keyProperty="reviewId" keyColumn="review_id">
+        INSERT INTO t_community_registration_review (
+            application_id, decision, review_mode, reviewer_account_id, reviewer_user_id,
+            reviewer_dept_id, review_comment, fallback_reason, create_time
+        ) VALUES (
+            #{applicationId}, #{decision}, #{reviewMode}, #{reviewerAccountId}, #{reviewerUserId},
+            #{reviewerDeptId}, #{reviewComment}, #{fallbackReason}, #{createTime}
+        )
+    </insert>
+
+    <select id="selectReviews"
+            resultType="com.pangu.infrastructure.persistence.mapper.CommunityRegistrationMapper$ReviewRow">
+        SELECT review_id, application_id, decision, review_mode, reviewer_account_id, reviewer_user_id,
+               reviewer_dept_id, review_comment, fallback_reason, create_time
+        FROM t_community_registration_review
+        WHERE application_id = #{applicationId}
+        ORDER BY create_time ASC, review_id ASC
+    </select>
+
+    <select id="selectOnboarding"
+            resultType="com.pangu.infrastructure.persistence.mapper.CommunityRegistrationMapper$OnboardingRow">
+        SELECT onboarding_id, application_id, tenant_id, status, official_affiliation_status,
+               space_ledger_status, property_roster_status, denominator_status, owner_access_qr_status,
+               initialization_dept_id, committee_dept_id, applicant_work_user_id, created_by_user_id,
+               create_time, update_time
+        FROM t_community_onboarding_workspace
+        WHERE application_id = #{applicationId}
+    </select>
+
+    <insert id="insertAudit">
+        INSERT INTO t_community_registration_audit (
+            application_id, actor_account_id, actor_user_id, actor_dept_id,
+            event_type, from_status, to_status, payload_json
+        ) VALUES (
+            #{applicationId}, #{actorAccountId}, #{actorUserId}, #{actorDeptId},
+            #{eventType}, #{fromStatus}, #{toStatus}, CAST(#{payloadJson} AS JSONB)
+        )
+    </insert>
+
+    <select id="nextTenantId" resultType="long">
+        SELECT nextval('community_tenant_id_seq')
+    </select>
+
+    <select id="selectDeptSource"
+            resultType="com.pangu.infrastructure.persistence.mapper.CommunityRegistrationMapper$DeptSourceRow">
+        SELECT dept_id, ancestors, dept_name, dept_type, dept_category, tenant_id
+        FROM sys_dept
+        WHERE dept_id = #{deptId}
+          AND status = '0'
+    </select>
+
+    <select id="selectDefaultGovernancePolicyId" resultType="long">
+        SELECT policy_id
+        FROM t_governance_policy
+        WHERE status = 1
+        ORDER BY effective_at DESC, policy_id DESC
+        LIMIT 1
+    </select>
+
+    <insert id="insertTenant"
+            parameterType="com.pangu.infrastructure.persistence.mapper.CommunityRegistrationMapper$TenantProvisionRow">
+        INSERT INTO t_tenant_community (
+            tenant_id, tenant_code, tenant_short_code, tenant_name, property_area_name,
+            province_code, province_name, city_code, city_name, district_code, district_name,
+            street_name, address, planned_household_count, owners_assembly_established,
+            committee_established, rule_config_id, governance_status, status, registration_fingerprint
+        ) VALUES (
+            #{tenantId}, #{tenantCode}, #{tenantShortCode}, #{tenantName}, #{propertyAreaName},
+            #{provinceCode}, #{provinceName}, #{cityCode}, #{cityName}, #{districtCode}, #{districtName},
+            #{streetName}, #{address}, #{plannedHouseholdCount}, #{ownersAssemblyEstablished},
+            #{committeeEstablished}, #{ruleConfigId}, #{governanceStatus}, 'ACTIVE', #{registrationFingerprint}
+        )
+    </insert>
+
+    <insert id="insertDept"
+            parameterType="com.pangu.infrastructure.persistence.mapper.CommunityRegistrationMapper$DeptInsertRow"
+            useGeneratedKeys="true" keyProperty="deptId" keyColumn="dept_id">
+        INSERT INTO sys_dept (
+            parent_id, ancestors, dept_name, dept_type, dept_category, tenant_id, order_num, status
+        ) VALUES (
+            #{parentId}, #{ancestors}, #{deptName}, #{deptType}, #{deptCategory},
+            #{tenantId}, #{orderNum}, '0'
+        )
+    </insert>
+
+    <select id="selectRoleByKey"
+            resultType="com.pangu.infrastructure.persistence.mapper.CommunityRegistrationMapper$RoleRow">
+        SELECT role_id, role_key, fixed_data_scope, default_data_scope
+        FROM sys_role
+        WHERE role_key = #{roleKey}
+          AND status = '0'
+    </select>
+
+    <insert id="insertSysUser"
+            parameterType="com.pangu.infrastructure.persistence.mapper.CommunityRegistrationMapper$SysUserInsertRow"
+            useGeneratedKeys="true" keyProperty="userId" keyColumn="user_id">
+        INSERT INTO sys_user (account_id, dept_id, user_name, nick_name, status)
+        VALUES (#{accountId}, #{deptId}, #{userName}, #{nickName}, '0')
+    </insert>
+
+    <insert id="insertSysUserRole">
+        INSERT INTO sys_user_role (user_id, role_id, effective_data_scope, granted_by)
+        VALUES (#{userId}, #{roleId}, #{effectiveDataScope}, #{grantedBy})
+    </insert>
+
+    <insert id="insertCommitteePosition">
+        INSERT INTO t_committee_member_position (tenant_id, user_id, position, status)
+        VALUES (#{tenantId}, #{userId}, #{position}, 1)
+    </insert>
+
+    <select id="selectExistingGovernmentUser" resultType="long">
+        SELECT user.user_id
+        FROM sys_user user
+        JOIN sys_dept dept ON dept.dept_id = user.dept_id
+        JOIN sys_user_role user_role ON user_role.user_id = user.user_id
+        JOIN sys_role role ON role.role_id = user_role.role_id
+        WHERE user.account_id = #{accountId}
+          AND user.status = '0'
+          AND dept.status = '0'
+          AND dept.dept_category = 'G'
+          AND (
+              dept.dept_id = #{reviewerDeptId}
+              OR #{reviewerDeptId}::TEXT = ANY(STRING_TO_ARRAY(dept.ancestors, ','))
+          )
+        ORDER BY CASE WHEN dept.dept_id = #{reviewerDeptId} THEN 0 ELSE 1 END, user.user_id
+        LIMIT 1
+    </select>
+
+    <insert id="insertOnboarding"
+            parameterType="com.pangu.infrastructure.persistence.mapper.CommunityRegistrationMapper$OnboardingInsertRow"
+            useGeneratedKeys="true" keyProperty="onboardingId" keyColumn="onboarding_id">
+        INSERT INTO t_community_onboarding_workspace (
+            application_id, tenant_id, status, official_affiliation_status,
+            space_ledger_status, property_roster_status, denominator_status, owner_access_qr_status,
+            initialization_dept_id, committee_dept_id, applicant_work_user_id, created_by_user_id
+        ) VALUES (
+            #{applicationId}, #{tenantId}, 'FOUNDATION_PENDING', #{officialAffiliationStatus},
+            'PENDING', 'PENDING', 'PENDING', 'DISABLED', #{initializationDeptId},
+            #{committeeDeptId}, #{applicantWorkUserId}, #{createdByUserId}
+        )
+    </insert>
+
+</mapper>

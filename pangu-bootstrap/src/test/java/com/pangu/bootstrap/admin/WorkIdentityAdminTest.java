@@ -1,3 +1,4 @@
+// 关联业务：验证工作身份、网格组织和后端菜单权限在管理端的完整契约。
 package com.pangu.bootstrap.admin;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -137,8 +138,9 @@ public class WorkIdentityAdminTest {
         JsonNode systemMenu = menus.get(menus.size() - 1);
         assertEquals("users", systemMenu.path("id").asText());
         assertEquals("系统管理", systemMenu.path("label").asText());
-        assertEquals("owners", systemMenu.path("pages").get(0).path("id").asText());
-        assertEquals("grid-management", systemMenu.path("pages").get(2).path("id").asText());
+        assertEquals("community-registration-review", systemMenu.path("pages").get(0).path("id").asText());
+        assertEquals("owners", systemMenu.path("pages").get(1).path("id").asText());
+        assertEquals("grid-management", systemMenu.path("pages").get(3).path("id").asText());
 
         for (JsonNode menu : menus) {
             assertNotEquals("building-assignment", menu.path("id").asText());

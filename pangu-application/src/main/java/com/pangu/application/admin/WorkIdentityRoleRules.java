@@ -1,3 +1,4 @@
+// 关联业务：约束管理端预置角色与真实组织类型的合法绑定关系。
 package com.pangu.application.admin;
 
 import java.util.Map;
@@ -16,6 +17,7 @@ final class WorkIdentityRoleRules {
 
     private static final Map<String, Set<Integer>> ROLE_DEPT_TYPES = Map.ofEntries(
             Map.entry("GOV_SUPER_ADMIN", Set.of(1)),
+            Map.entry("PLATFORM_OPERATOR", Set.of(1)),
             Map.entry(COMMUNITY_ADMIN, Set.of(2)),
             Map.entry("PARTY_SECRETARY", Set.of(6)),
             Map.entry(GRID_MEMBER, Set.of(5)),
