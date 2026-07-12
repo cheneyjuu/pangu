@@ -1,3 +1,4 @@
+// 关联业务：编排房屋产权基础名册导入、结构展示和业主房产绑定审核流程。
 package com.pangu.application.owner;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -63,6 +64,40 @@ public class PropertyBindingApplicationService {
             unit.rooms().add(new RoomOption(row.rosterId(), row.roomId(), row.roomName(), row.buildArea()));
         }
         return new RosterOptionsResponse(new ArrayList<>(communities.values()));
+    }
+
+    /**
+     * 返回当前工作小区已录入的房屋产权基础名册结构。
+     *
+     * <p>这里的户数和面积只反映当前名册录入结果，法定计票基数仍须走独立的核验、对账和发布流程。
+     */
+    public RosterTopologyResponse getRosterTopology(Long tenantId) {
+        if (tenantId == null) {
+            throw new PropertyBindingApplicationException(
+                    PropertyBindingApplicationException.Reason.FORBIDDEN,
+                    "当前工作身份未绑定小区，无法查看房屋基础名册");
+        }
+        List<PropertyBindingRepository.RosterTopology> rows = repository.findRosterTopology(tenantId);
+        Map<Long, List<PropertyBindingRepository.RosterTopology>> unitsByBuilding = new LinkedHashMap<>();
+        for (PropertyBindingRepository.RosterTopology row : rows) {
+            unitsByBuilding.computeIfAbsent(row.buildingId(), ignored -> new ArrayList<>()).add(row);
+        }
+
+        List<BuildingTopologyResponse> buildings = unitsByBuilding.values().stream()
+                .map(this::toBuildingTopology)
+                .toList();
+        long householdCount = buildings.stream()
+                .mapToLong(BuildingTopologyResponse::householdCount)
+                .sum();
+        BigDecimal totalArea = buildings.stream()
+                .map(BuildingTopologyResponse::totalArea)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        return new RosterTopologyResponse(
+                tenantId,
+                resolveCommunityName(tenantId),
+                householdCount,
+                totalArea,
+                buildings);
     }
 
     @Transactional
@@ -316,6 +351,26 @@ public class PropertyBindingApplicationService {
                 opid);
     }
 
+    private BuildingTopologyResponse toBuildingTopology(List<PropertyBindingRepository.RosterTopology> unitRows) {
+        PropertyBindingRepository.RosterTopology first = unitRows.get(0);
+        List<UnitTopologyResponse> units = unitRows.stream()
+                .map(row -> new UnitTopologyResponse(
+                        row.unitName(),
+                        numberOrZero(row.householdCount()),
+                        amountOrZero(row.totalArea())))
+                .toList();
+        long householdCount = units.stream().mapToLong(UnitTopologyResponse::householdCount).sum();
+        BigDecimal totalArea = units.stream()
+                .map(UnitTopologyResponse::totalArea)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        return new BuildingTopologyResponse(
+                first.buildingId(),
+                first.buildingName(),
+                householdCount,
+                totalArea,
+                units);
+    }
+
     private ClaimResponse toResponse(PropertyBindingRepository.Claim row) {
         return new ClaimResponse(
                 row.claimId(),
@@ -410,6 +465,14 @@ public class PropertyBindingApplicationService {
         return value == null || value.trim().isEmpty();
     }
 
+    private long numberOrZero(Long value) {
+        return value == null ? 0L : value;
+    }
+
+    private BigDecimal amountOrZero(BigDecimal value) {
+        return value == null ? BigDecimal.ZERO : value;
+    }
+
     public record PropertyRosterImportCommand(Long tenantId, List<Row> rows) {
         public record Row(
                 Long tenantId,
@@ -433,6 +496,28 @@ public class PropertyBindingApplicationService {
     }
 
     public record RosterOptionsResponse(List<CommunityOption> communities) {
+    }
+
+    public record RosterTopologyResponse(
+            Long tenantId,
+            String communityName,
+            long householdCount,
+            BigDecimal totalArea,
+            List<BuildingTopologyResponse> buildings) {
+    }
+
+    public record BuildingTopologyResponse(
+            Long buildingId,
+            String buildingName,
+            long householdCount,
+            BigDecimal totalArea,
+            List<UnitTopologyResponse> units) {
+    }
+
+    public record UnitTopologyResponse(
+            String unitName,
+            long householdCount,
+            BigDecimal totalArea) {
     }
 
     public record CommunityOption(Long tenantId, String communityName, List<BuildingOption> buildings) {

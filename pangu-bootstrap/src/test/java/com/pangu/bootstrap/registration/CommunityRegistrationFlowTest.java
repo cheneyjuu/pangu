@@ -225,6 +225,15 @@ public class CommunityRegistrationFlowTest {
                 .andExpect(jsonPath("$.data.user_info.identity_type", is("SYS_USER")))
                 .andExpect(jsonPath("$.data.user_info.active_identity_id", is((int) workUserId)))
                 .andExpect(jsonPath("$.data.user_info.role_key", is("COMMITTEE_DIRECTOR")));
+        String committeeToken = jwtTokenProvider.generateToken(
+                applicant.accountId(), "SYS_USER", workUserId, tenantId);
+        mockMvc.perform(get("/api/v1/admin/property-roster/topology")
+                        .header("Authorization", "Bearer " + committeeToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.tenantId", is((int) tenantId)))
+                .andExpect(jsonPath("$.data.communityName", is("春申新苑")))
+                .andExpect(jsonPath("$.data.householdCount", is(0)))
+                .andExpect(jsonPath("$.data.buildings.length()", is(0)));
         assertEquals(2, jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM t_community_registration_review WHERE application_id = ?",
                 Integer.class, applicationId));

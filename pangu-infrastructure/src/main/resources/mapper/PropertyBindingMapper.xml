@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 关联业务：映射房屋产权基础名册、楼栋单元结构汇总和业主房产绑定。 -->
 <mapper namespace="com.pangu.infrastructure.persistence.mapper.PropertyBindingMapper">
 
     <resultMap id="RosterOptionRowMap" type="com.pangu.infrastructure.persistence.mapper.PropertyBindingMapper$RosterOptionRow">
@@ -59,6 +60,20 @@
             AND tenant_id = #{tenantId}
         </if>
         ORDER BY community_name, building_id, unit_name, room_name
+    </select>
+
+    <select id="selectRosterTopology"
+            resultType="com.pangu.infrastructure.persistence.mapper.PropertyBindingMapper$RosterTopologyRow">
+        SELECT building_id,
+               building_name,
+               unit_name,
+               COUNT(*) AS household_count,
+               COALESCE(SUM(build_area), 0) AS total_area
+        FROM c_property_roster
+        WHERE tenant_id = #{tenantId}
+          AND status = 'ACTIVE'
+        GROUP BY building_id, building_name, unit_name
+        ORDER BY building_name, unit_name
     </select>
 
     <select id="selectTenantName" resultType="java.lang.String">

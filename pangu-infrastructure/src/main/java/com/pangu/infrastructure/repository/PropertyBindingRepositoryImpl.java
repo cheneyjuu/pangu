@@ -1,3 +1,4 @@
+// 关联业务：实现小区房屋产权基础名册、结构汇总和业主房产绑定的数据库访问。
 package com.pangu.infrastructure.repository;
 
 import com.pangu.domain.repository.PropertyBindingRepository;
@@ -17,6 +18,13 @@ public class PropertyBindingRepositoryImpl implements PropertyBindingRepository 
     public List<RosterOption> findRosterOptions(Long tenantId) {
         return mapper.selectRosterOptions(tenantId).stream()
                 .map(this::toRosterOption)
+                .toList();
+    }
+
+    @Override
+    public List<RosterTopology> findRosterTopology(Long tenantId) {
+        return mapper.selectRosterTopology(tenantId).stream()
+                .map(this::toRosterTopology)
                 .toList();
     }
 
@@ -130,6 +138,15 @@ public class PropertyBindingRepositoryImpl implements PropertyBindingRepository 
                 row.getRoomId(),
                 row.getRoomName(),
                 row.getBuildArea());
+    }
+
+    private RosterTopology toRosterTopology(PropertyBindingMapper.RosterTopologyRow row) {
+        return new RosterTopology(
+                row.getBuildingId(),
+                row.getBuildingName(),
+                row.getUnitName(),
+                row.getHouseholdCount(),
+                row.getTotalArea());
     }
 
     private Roster toRoster(PropertyBindingMapper.RosterRow row) {

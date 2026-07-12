@@ -1,3 +1,4 @@
+// 关联业务：映射小区房屋产权基础名册、结构汇总和业主房产绑定的持久化操作。
 package com.pangu.infrastructure.persistence.mapper;
 
 import lombok.Data;
@@ -12,6 +13,8 @@ import java.util.List;
 public interface PropertyBindingMapper {
 
     List<RosterOptionRow> selectRosterOptions(@Param("tenantId") Long tenantId);
+
+    List<RosterTopologyRow> selectRosterTopology(@Param("tenantId") Long tenantId);
 
     String selectTenantName(@Param("tenantId") Long tenantId);
 
@@ -81,6 +84,15 @@ public interface PropertyBindingMapper {
         private Long roomId;
         private String roomName;
         private BigDecimal buildArea;
+    }
+
+    @Data
+    public static class RosterTopologyRow {
+        private Long buildingId;
+        private String buildingName;
+        private String unitName;
+        private Long householdCount;
+        private BigDecimal totalArea;
     }
 
     @Data

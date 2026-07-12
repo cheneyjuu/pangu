@@ -1,3 +1,4 @@
+// 关联业务：验证房屋产权名册导入、空间汇总和业主房产绑定审核的冷启动闭环。
 package com.pangu.bootstrap.web;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -79,6 +80,15 @@ class PropertyBindingFlowTest {
         verifyL2(ownerToken, "冷启业主", "310101199001011234");
 
         importRoster(adminToken, "冷启楼", "一单元", "冷启1101", "冷启业主", AUTO_PHONE);
+
+        mockMvc.perform(get("/api/v1/admin/property-roster/topology")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                // 10001 复用系统种子名册，汇总断言必须定位本用例创建的楼栋，不能假定全租户总数。
+                .andExpect(jsonPath("$.data.buildings[*].buildingName", hasItem("冷启楼")))
+                .andExpect(jsonPath("$.data.buildings[?(@.buildingName == '冷启楼')].householdCount", hasItem(1)))
+                .andExpect(jsonPath("$.data.buildings[?(@.buildingName == '冷启楼')].totalArea", hasItem(88.66)))
+                .andExpect(jsonPath("$.data.buildings[*].units[*].unitName", hasItem("一单元")));
 
         mockMvc.perform(post("/api/v1/me/property-bindings/claims")
                         .header("Authorization", "Bearer " + ownerToken)

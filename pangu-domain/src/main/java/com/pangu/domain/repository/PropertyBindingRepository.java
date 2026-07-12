@@ -1,3 +1,4 @@
+// 关联业务：定义小区房屋与产权基础名册、房产绑定及名册空间汇总的持久化边界。
 package com.pangu.domain.repository;
 
 import java.math.BigDecimal;
@@ -7,6 +8,8 @@ import java.util.List;
 public interface PropertyBindingRepository {
 
     List<RosterOption> findRosterOptions(Long tenantId);
+
+    List<RosterTopology> findRosterTopology(Long tenantId);
 
     String findTenantName(Long tenantId);
 
@@ -54,6 +57,19 @@ public interface PropertyBindingRepository {
             Long roomId,
             String roomName,
             BigDecimal buildArea) {
+    }
+
+    /**
+     * 当前已激活房屋产权基础名册的楼栋/单元汇总。
+     *
+     * <p>该汇总仅用于管理端展示已录入的房屋结构，不能替代经核验、对账和发布的法定计票基数。
+     */
+    record RosterTopology(
+            Long buildingId,
+            String buildingName,
+            String unitName,
+            Long householdCount,
+            BigDecimal totalArea) {
     }
 
     record Roster(

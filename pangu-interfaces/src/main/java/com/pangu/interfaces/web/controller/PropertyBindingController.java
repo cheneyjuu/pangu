@@ -1,3 +1,4 @@
+// 关联业务：提供房屋产权基础名册导入、结构查看和业主房产绑定审核接口。
 package com.pangu.interfaces.web.controller;
 
 import com.pangu.application.owner.PropertyBindingApplicationService;
@@ -57,6 +58,12 @@ public class PropertyBindingController extends BaseController {
             @Valid @RequestBody PropertyRosterImportRequest request) {
         return success("名册导入完成", service.importRoster(
                 SecurityUtils.getTenantId(), SecurityUtils.getUserId(), toCommand(request)));
+    }
+
+    @GetMapping("/admin/property-roster/topology")
+    @PreAuthorize("hasAuthority('property:roster:import')")
+    public Result<PropertyBindingApplicationService.RosterTopologyResponse> topology() {
+        return success(service.getRosterTopology(SecurityUtils.getTenantId()));
     }
 
     @GetMapping("/admin/property-binding-claims")
