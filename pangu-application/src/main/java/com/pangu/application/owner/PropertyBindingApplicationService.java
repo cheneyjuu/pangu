@@ -482,10 +482,15 @@ public class PropertyBindingApplicationService {
         return name == null ? "小区 " + tenantId : name;
     }
 
+    /**
+     * 业务关联：业主房产绑定。
+     * 姓名录入来源可能包含半角或全角空白；匹配前统一消除空白，避免同一姓名因展示格式差异进入补充材料流程。
+     */
     private String normalizeRealName(String value) {
         String trimmed = trimToNull(value);
         if (trimmed == null) return null;
-        return trimmed.startsWith("MOCK_") ? trimmed.substring("MOCK_".length()) : trimmed;
+        String normalized = trimmed.replaceAll("[\\s\\u3000]+", "");
+        return normalized.startsWith("MOCK_") ? normalized.substring("MOCK_".length()) : normalized;
     }
 
     private String required(String value, String field) {

@@ -77,7 +77,7 @@ class PropertyBindingFlowTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.length()", is(0)));
 
-        verifyL2(ownerToken, "冷启业主", "310101199001011234");
+        verifyL2(ownerToken, "冷 启业主", "310101199001011234");
 
         importRoster(adminToken, "冷启楼", "一单元", "冷启1101", "冷启业主", AUTO_PHONE);
 
