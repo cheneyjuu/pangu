@@ -184,7 +184,8 @@ public interface RepairWorkOrderMapper {
                                                   @Param("userId") Long userId,
                                                   @Param("activatedAt") LocalDateTime activatedAt);
 
-    boolean supplierVerified(@Param("supplierDeptId") Long supplierDeptId);
+    boolean supplierVerified(@Param("tenantId") Long tenantId,
+                             @Param("supplierDeptId") Long supplierDeptId);
 
     int insertQuoteInvitation(@Param("workOrderId") Long workOrderId,
                               @Param("tenantId") Long tenantId,

@@ -69,6 +69,9 @@ platform:
   electronic-seal:
     # mock 仅在 dev/test profile 注册；生产环境必须配置真实服务商适配器。
     provider: ${PANGU_ELECTRONIC_SEAL_PROVIDER:mock}
+  enterprise-verification:
+    # mock-aliyun 仅在 dev/test profile 注册；模拟结论会显式标记且不得用于生产签约。
+    provider: ${PANGU_ENTERPRISE_VERIFICATION_PROVIDER:mock-aliyun}
   security:
     # JWT 秘钥（SM2 或 HMAC-SHA256 秘钥占位，开发环境使用默认，生产通过环境变量替换）
     jwt-secret: pangu-secure-jwt-token-secret-key-32-chars-minimum

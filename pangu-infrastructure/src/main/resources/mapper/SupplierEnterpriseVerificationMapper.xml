@@ -1,0 +1,152 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 关联业务：持久化物业手工或平台接口执行的供应商企业主体核验审计记录。 -->
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pangu.infrastructure.persistence.mapper.SupplierEnterpriseVerificationMapper">
+
+    <resultMap id="VerificationTargetResultMap"
+               type="com.pangu.infrastructure.persistence.entity.SupplierEnterpriseVerificationTargetRow">
+        <id property="supplierDeptId" column="supplier_dept_id"/>
+        <result property="tenantId" column="tenant_id"/>
+        <result property="legalName" column="legal_name"/>
+        <result property="unifiedSocialCreditCode" column="unified_social_credit_code"/>
+        <result property="verificationStatus" column="verification_status"/>
+    </resultMap>
+
+    <resultMap id="VerificationRecordResultMap"
+               type="com.pangu.infrastructure.persistence.entity.SupplierEnterpriseVerificationRow">
+        <id property="verificationId" column="verification_id"/>
+        <result property="tenantId" column="tenant_id"/>
+        <result property="supplierDeptId" column="supplier_dept_id"/>
+        <result property="legalNameSnapshot" column="legal_name_snapshot"/>
+        <result property="unifiedSocialCreditCodeSnapshot" column="unified_social_credit_code_snapshot"/>
+        <result property="verificationMethod" column="verification_method"/>
+        <result property="providerCode" column="provider_code"/>
+        <result property="sourceCode" column="source_code"/>
+        <result property="providerRequestId" column="provider_request_id"/>
+        <result property="providerResultCode" column="provider_result_code"/>
+        <result property="verificationResult" column="verification_result"/>
+        <result property="businessStatus" column="business_status"/>
+        <result property="resultMessage" column="result_message"/>
+        <result property="inconsistentFieldsJson" column="inconsistent_fields_json"/>
+        <result property="evidenceReference" column="evidence_reference"/>
+        <result property="remark" column="remark"/>
+        <result property="operatorAccountId" column="operator_account_id"/>
+        <result property="operatorUserId" column="operator_user_id"/>
+        <result property="operatorRoleKey" column="operator_role_key"/>
+        <result property="simulated" column="simulated"/>
+        <result property="verifiedAt" column="verified_at"/>
+    </resultMap>
+
+    <sql id="TargetColumns">
+        relation.tenant_id,
+        profile.supplier_dept_id,
+        profile.legal_name,
+        profile.unified_social_credit_code,
+        relation.enterprise_verification_status AS verification_status
+    </sql>
+
+    <select id="findTarget" resultMap="VerificationTargetResultMap">
+        SELECT <include refid="TargetColumns"/>
+        FROM t_supplier_tenant_relation relation
+        JOIN t_supplier_org_profile profile
+          ON profile.supplier_dept_id = relation.supplier_dept_id
+        WHERE relation.tenant_id = #{tenantId}
+          AND relation.supplier_dept_id = #{supplierDeptId}
+          AND relation.status &lt;&gt; 'DISABLED'
+          AND relation.enterprise_verification_status &lt;&gt; 'DISABLED'
+          AND profile.verification_status &lt;&gt; 'DISABLED'
+        ORDER BY relation.relation_id
+        LIMIT 1
+    </select>
+
+    <select id="findTargetForUpdate" resultMap="VerificationTargetResultMap">
+        SELECT <include refid="TargetColumns"/>
+        FROM t_supplier_tenant_relation relation
+        JOIN t_supplier_org_profile profile
+          ON profile.supplier_dept_id = relation.supplier_dept_id
+        WHERE relation.tenant_id = #{tenantId}
+          AND relation.supplier_dept_id = #{supplierDeptId}
+          AND relation.status &lt;&gt; 'DISABLED'
+          AND relation.enterprise_verification_status &lt;&gt; 'DISABLED'
+          AND profile.verification_status &lt;&gt; 'DISABLED'
+        ORDER BY relation.relation_id
+        LIMIT 1
+        FOR UPDATE OF relation, profile
+    </select>
+
+    <select id="findSupplierDeptIdByUscc" resultType="long">
+        SELECT supplier_dept_id
+        FROM t_supplier_org_profile
+        WHERE unified_social_credit_code = #{unifiedSocialCreditCode}
+    </select>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="verificationId" keyColumn="verification_id">
+        INSERT INTO t_supplier_enterprise_verification (
+            tenant_id, supplier_dept_id, legal_name_snapshot,
+            unified_social_credit_code_snapshot, verification_method,
+            provider_code, source_code, provider_request_id, provider_result_code,
+            verification_result, business_status, result_message, inconsistent_fields_json,
+            evidence_reference, remark, operator_account_id, operator_user_id,
+            operator_role_key, simulated, verified_at
+        ) VALUES (
+            #{tenantId}, #{supplierDeptId}, #{legalNameSnapshot},
+            #{unifiedSocialCreditCodeSnapshot}, #{verificationMethod},
+            #{providerCode}, #{sourceCode}, #{providerRequestId}, #{providerResultCode},
+            #{verificationResult}, #{businessStatus}, #{resultMessage},
+            CAST(#{inconsistentFieldsJson} AS JSONB),
+            #{evidenceReference}, #{remark}, #{operatorAccountId}, #{operatorUserId},
+            #{operatorRoleKey}, CASE WHEN #{simulated} THEN 1 ELSE 0 END, #{verifiedAt}
+        )
+    </insert>
+
+    <update id="completeSupplierUscc">
+        UPDATE t_supplier_org_profile
+        SET unified_social_credit_code = COALESCE(unified_social_credit_code, #{unifiedSocialCreditCode}),
+            update_time = CURRENT_TIMESTAMP
+        WHERE supplier_dept_id = #{supplierDeptId}
+          AND (unified_social_credit_code IS NULL
+               OR unified_social_credit_code = #{unifiedSocialCreditCode})
+    </update>
+
+    <update id="applyCurrentResult">
+        UPDATE t_supplier_tenant_relation
+        SET enterprise_verification_status = #{verificationStatus},
+            current_enterprise_verification_id = #{verificationId},
+            enterprise_verified_by_user_id = #{verifiedByUserId},
+            enterprise_verified_at = #{verifiedAt},
+            update_time = CURRENT_TIMESTAMP
+        WHERE tenant_id = #{tenantId}
+          AND supplier_dept_id = #{supplierDeptId}
+          AND status &lt;&gt; 'DISABLED'
+          AND enterprise_verification_status &lt;&gt; 'DISABLED'
+    </update>
+
+    <select id="list" resultMap="VerificationRecordResultMap">
+        SELECT verification_id,
+               tenant_id,
+               supplier_dept_id,
+               legal_name_snapshot,
+               unified_social_credit_code_snapshot,
+               verification_method,
+               provider_code,
+               source_code,
+               provider_request_id,
+               provider_result_code,
+               verification_result,
+               business_status,
+               result_message,
+               inconsistent_fields_json::TEXT AS inconsistent_fields_json,
+               evidence_reference,
+               remark,
+               operator_account_id,
+               operator_user_id,
+               operator_role_key,
+               simulated = 1 AS simulated,
+               verified_at
+        FROM t_supplier_enterprise_verification
+        WHERE tenant_id = #{tenantId}
+          AND supplier_dept_id = #{supplierDeptId}
+        ORDER BY verified_at DESC, verification_id DESC
+    </select>
+</mapper>

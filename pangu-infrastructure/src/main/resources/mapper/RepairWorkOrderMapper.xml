@@ -125,6 +125,14 @@
         <result property="contactName" column="contact_name"/>
         <result property="contactPhone" column="contact_phone"/>
         <result property="verificationStatus" column="verification_status"/>
+        <result property="verificationId" column="verification_id"/>
+        <result property="verificationMethod" column="verification_method"/>
+        <result property="verificationProviderCode" column="verification_provider_code"/>
+        <result property="verificationSourceCode" column="verification_source_code"/>
+        <result property="verificationSimulated" column="verification_simulated"/>
+        <result property="verifiedByAccountId" column="verified_by_account_id"/>
+        <result property="verifiedByUserId" column="verified_by_user_id"/>
+        <result property="verifiedAt" column="verified_at"/>
         <result property="accountStatus" column="account_status"/>
         <result property="activeAccountCount" column="active_account_count"/>
         <result property="loginPhone" column="login_phone"/>
@@ -637,7 +645,7 @@
         SELECT legal_name
         FROM t_supplier_org_profile
         WHERE supplier_dept_id = #{supplierDeptId}
-          AND verification_status IN ('PENDING_VERIFICATION', 'VERIFIED')
+          AND verification_status &lt;&gt; 'DISABLED'
     </select>
 
     <sql id="RepairSupplierOrganizationColumns">
@@ -646,7 +654,15 @@
         p.legal_name,
         p.contact_name,
         p.contact_phone,
-        p.verification_status,
+        r.enterprise_verification_status AS verification_status,
+        verification.verification_id,
+        verification.verification_method,
+        verification.provider_code AS verification_provider_code,
+        verification.source_code AS verification_source_code,
+        COALESCE(verification.simulated = 1, FALSE) AS verification_simulated,
+        verification.operator_account_id AS verified_by_account_id,
+        verification.operator_user_id AS verified_by_user_id,
+        verification.verified_at,
         CASE
             WHEN account.active_account_count &gt; 0 THEN 'ACTIVATED'
             WHEN invitation.invitation_id IS NOT NULL THEN 'PENDING_ACTIVATION'
@@ -661,6 +677,10 @@
     </sql>
 
     <sql id="RepairSupplierOrganizationAccountJoins">
+        LEFT JOIN t_supplier_enterprise_verification verification
+          ON verification.verification_id = r.current_enterprise_verification_id
+         AND verification.tenant_id = r.tenant_id
+         AND verification.supplier_dept_id = r.supplier_dept_id
         LEFT JOIN LATERAL (
             SELECT COUNT(DISTINCT u.user_id)::INT AS active_account_count,
                    (ARRAY_AGG(a.phone ORDER BY (a.phone = p.contact_phone) DESC, u.user_id))[1] AS login_phone
@@ -692,6 +712,7 @@
         <include refid="RepairSupplierOrganizationAccountJoins"/>
         WHERE r.tenant_id = #{tenantId}
           AND r.status &lt;&gt; 'DISABLED'
+          AND r.enterprise_verification_status &lt;&gt; 'DISABLED'
           AND p.verification_status &lt;&gt; 'DISABLED'
         ORDER BY p.legal_name, p.supplier_dept_id
     </select>
@@ -708,7 +729,8 @@
         WHERE r.tenant_id = #{tenantId}
           AND r.relation_type = 'FRAMEWORK'
           AND r.status = 'ACTIVE'
-          AND p.verification_status = 'VERIFIED'
+          AND r.enterprise_verification_status = 'VERIFIED'
+          AND p.verification_status &lt;&gt; 'DISABLED'
           AND (r.valid_from IS NULL OR r.valid_from &lt;= CURRENT_DATE)
           AND (r.valid_until IS NULL OR r.valid_until &gt;= CURRENT_DATE)
           AND (r.service_category IS NULL OR r.service_category = #{serviceCategory})
@@ -779,6 +801,7 @@
         WHERE r.tenant_id = #{tenantId}
           AND p.supplier_dept_id = #{supplierDeptId}
           AND r.status &lt;&gt; 'DISABLED'
+          AND r.enterprise_verification_status &lt;&gt; 'DISABLED'
           AND p.verification_status &lt;&gt; 'DISABLED'
     </select>
 
@@ -877,9 +900,15 @@
 
     <select id="supplierVerified" resultType="boolean">
         SELECT EXISTS (
-            SELECT 1 FROM t_supplier_org_profile
-            WHERE supplier_dept_id = #{supplierDeptId}
-              AND verification_status = 'VERIFIED'
+            SELECT 1
+            FROM t_supplier_tenant_relation relation
+            JOIN t_supplier_org_profile profile
+              ON profile.supplier_dept_id = relation.supplier_dept_id
+            WHERE relation.tenant_id = #{tenantId}
+              AND relation.supplier_dept_id = #{supplierDeptId}
+              AND relation.status &lt;&gt; 'DISABLED'
+              AND relation.enterprise_verification_status = 'VERIFIED'
+              AND profile.verification_status &lt;&gt; 'DISABLED'
         )
     </select>
 

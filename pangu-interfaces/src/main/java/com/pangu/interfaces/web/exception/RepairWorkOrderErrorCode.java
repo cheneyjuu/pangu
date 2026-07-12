@@ -1,3 +1,4 @@
+// 关联业务：定义维修工单与供应商企业核验接口的稳定错误码契约。
 package com.pangu.interfaces.web.exception;
 
 public enum RepairWorkOrderErrorCode implements ErrorCode {
@@ -10,7 +11,8 @@ public enum RepairWorkOrderErrorCode implements ErrorCode {
     INVALID_STATUS(42506, "当前工单状态不允许该动作", 409, ErrorType.BIZ, false),
     LOCATION_NOT_VERIFIED(42507, "工单位置未核验锁定，禁止进入资金或方案链路", 422, ErrorType.BIZ, false),
     HANDOVER_LOCKED(42508, "换届交接锁定中，大额维修动作已熔断", 423, ErrorType.BIZ, false),
-    STORAGE_UNAVAILABLE(42509, "附件存储服务暂时不可用", 503, ErrorType.THIRD_PARTY, true);
+    STORAGE_UNAVAILABLE(42509, "附件存储服务暂时不可用", 503, ErrorType.THIRD_PARTY, true),
+    EXTERNAL_VERIFICATION_UNAVAILABLE(42510, "企业核验平台暂时不可用", 503, ErrorType.THIRD_PARTY, true);
 
     private final int code;
     private final String message;

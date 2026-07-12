@@ -1583,7 +1583,8 @@ public class RepairWorkOrderService {
                 ? requireText(command.supplierName(), "supplierName")
                 : repository.findSupplierLegalName(command.supplierDeptId())
                 .orElseThrow(() -> new RepairWorkOrderApplicationException(NOT_FOUND, "供应商组织不存在"));
-        if (command.supplierDeptId() != null && !repository.supplierVerified(command.supplierDeptId())) {
+        if (command.supplierDeptId() != null
+                && !repository.supplierVerified(order.tenantId(), command.supplierDeptId())) {
             throw new RepairWorkOrderApplicationException(PARAM_INVALID, "供应商企业主体尚未完成独立核验");
         }
         if (!repository.recommendedQuoteMatches(order.workOrderId(), order.tenantId(),

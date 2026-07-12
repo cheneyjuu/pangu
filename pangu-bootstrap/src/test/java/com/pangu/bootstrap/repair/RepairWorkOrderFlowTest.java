@@ -37,6 +37,7 @@ import static org.mockito.Mockito.verify;
 import static org.hamcrest.Matchers.greaterThanOrEqualTo;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.hasItem;
+import static org.hamcrest.Matchers.startsWith;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -117,6 +118,7 @@ public class RepairWorkOrderFlowTest {
         jdbcTemplate.update("DELETE FROM sys_user_role WHERE user_id IN (SELECT user_id FROM sys_user WHERE dept_id IN (SELECT dept_id FROM sys_dept WHERE dept_name LIKE 'IT-供应商-%'))");
         jdbcTemplate.update("DELETE FROM sys_user WHERE dept_id IN (SELECT dept_id FROM sys_dept WHERE dept_name LIKE 'IT-供应商-%')");
         jdbcTemplate.update("DELETE FROM t_supplier_tenant_relation WHERE supplier_dept_id IN (SELECT dept_id FROM sys_dept WHERE dept_name LIKE 'IT-供应商-%')");
+        jdbcTemplate.update("DELETE FROM t_supplier_enterprise_verification WHERE supplier_dept_id IN (SELECT dept_id FROM sys_dept WHERE dept_name LIKE 'IT-供应商-%')");
         jdbcTemplate.update("DELETE FROM t_supplier_org_profile WHERE supplier_dept_id IN (SELECT dept_id FROM sys_dept WHERE dept_name LIKE 'IT-供应商-%')");
         jdbcTemplate.update("DELETE FROM sys_dept WHERE dept_name LIKE 'IT-供应商-%'");
         jdbcTemplate.update("DELETE FROM t_account WHERE phone IN ('13800000931', '13800000932') AND NOT EXISTS (SELECT 1 FROM sys_user WHERE sys_user.account_id = t_account.account_id) AND NOT EXISTS (SELECT 1 FROM c_user WHERE c_user.account_id = t_account.account_id)");
@@ -177,6 +179,95 @@ public class RepairWorkOrderFlowTest {
         assertEquals(0, new BigDecimal("154.00").compareTo(participants.getFirst().buildArea()));
         assertTrue(participants.getFirst().roomLabel().contains("30005101"));
         assertTrue(participants.getFirst().roomLabel().contains("30005201"));
+    }
+
+    @Test
+    public void supplierEnterpriseVerification_supportsManualAndReplaceableMockProviderWithTenantAudit()
+            throws Exception {
+        String managerToken = token(ACC_PROPERTY_MANAGER, "SYS_USER", USR_PROPERTY_MANAGER);
+        String staffToken = token(ACC_PROPERTY_STAFF, "SYS_USER", USR_PROPERTY_STAFF);
+        long supplierDeptId = registerMinimalSupplier(
+                managerToken, "IT-供应商-主体核验-" + System.nanoTime());
+        String uscc = "91310000A000000001";
+
+        jdbcTemplate.update("""
+                INSERT INTO t_supplier_tenant_relation (
+                    tenant_id, supplier_dept_id, relation_type, status, requested_by_user_id
+                ) VALUES (?, ?, 'NORMAL', 'PENDING_APPROVAL', ?)
+                ON CONFLICT DO NOTHING
+                """, TENANT_CROSS, supplierDeptId, USR_PROPERTY_MANAGER);
+
+        mockMvc.perform(post("/api/v1/admin/supplier-organizations/" + supplierDeptId + "/manual-verifications")
+                        .header("Authorization", "Bearer " + staffToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "unifiedSocialCreditCode", uscc,
+                                "sourceCode", "GSXT_WEB",
+                                "verificationResult", "PASSED"))))
+                .andExpect(status().isForbidden());
+
+        mockMvc.perform(get("/api/v1/admin/supplier-organizations/verification-provider")
+                        .header("Authorization", "Bearer " + managerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.providerCode", is("ALIYUN")))
+                .andExpect(jsonPath("$.data.displayName", is("阿里云企业二要素核验")))
+                .andExpect(jsonPath("$.data.simulated", is(true)));
+
+        mockMvc.perform(post("/api/v1/admin/supplier-organizations/" + supplierDeptId + "/manual-verifications")
+                        .header("Authorization", "Bearer " + managerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "unifiedSocialCreditCode", uscc,
+                                "sourceCode", "GSXT_WEB",
+                                "verificationResult", "PASSED",
+                                "remark", "已在国家企业信用信息公示系统核对"))))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.verificationMethod", is("PROPERTY_MANUAL")))
+                .andExpect(jsonPath("$.data.sourceCode", is("GSXT_WEB")))
+                .andExpect(jsonPath("$.data.verificationResult", is("PASSED")))
+                .andExpect(jsonPath("$.data.operatorAccountId", is((int) ACC_PROPERTY_MANAGER)))
+                .andExpect(jsonPath("$.data.operatorUserId", is((int) USR_PROPERTY_MANAGER)))
+                .andExpect(jsonPath("$.data.simulated", is(false)))
+                .andExpect(jsonPath("$.data.verifiedAt").isNotEmpty());
+
+        JsonNode manuallyVerified = supplierOrganization(managerToken, supplierDeptId);
+        assertEquals("VERIFIED", manuallyVerified.path("verificationStatus").asText());
+        assertEquals("PROPERTY_MANUAL", manuallyVerified.path("verificationMethod").asText());
+        assertEquals("GSXT_WEB", manuallyVerified.path("verificationSourceCode").asText());
+        assertEquals(ACC_PROPERTY_MANAGER, manuallyVerified.path("verifiedByAccountId").asLong());
+
+        assertEquals("PENDING_VERIFICATION", jdbcTemplate.queryForObject("""
+                SELECT enterprise_verification_status
+                FROM t_supplier_tenant_relation
+                WHERE tenant_id = ? AND supplier_dept_id = ?
+                """, String.class, TENANT_CROSS, supplierDeptId),
+                "物业手工核验结论不得传播到其他租户");
+
+        mockMvc.perform(post("/api/v1/admin/supplier-organizations/" + supplierDeptId + "/platform-verifications")
+                        .header("Authorization", "Bearer " + managerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "unifiedSocialCreditCode", uscc,
+                                "supplierAuthorizationConfirmed", true))))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.verificationMethod", is("PLATFORM_API")))
+                .andExpect(jsonPath("$.data.providerCode", is("ALIYUN")))
+                .andExpect(jsonPath("$.data.providerRequestId", startsWith("MOCK-ALIYUN-")))
+                .andExpect(jsonPath("$.data.providerResultCode", is("SIMULATED_MATCH")))
+                .andExpect(jsonPath("$.data.verificationResult", is("PASSED")))
+                .andExpect(jsonPath("$.data.simulated", is(true)));
+
+        mockMvc.perform(get("/api/v1/admin/supplier-organizations/" + supplierDeptId + "/verifications")
+                        .header("Authorization", "Bearer " + managerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()", is(2)))
+                .andExpect(jsonPath("$.data[0].verificationMethod", is("PLATFORM_API")))
+                .andExpect(jsonPath("$.data[1].verificationMethod", is("PROPERTY_MANUAL")));
+
+        JsonNode platformVerified = supplierOrganization(managerToken, supplierDeptId);
+        assertEquals("PLATFORM_API", platformVerified.path("verificationMethod").asText());
+        assertEquals("ALIYUN", platformVerified.path("verificationProviderCode").asText());
+        assertTrue(platformVerified.path("verificationSimulated").asBoolean());
     }
 
     @Test
@@ -711,8 +802,11 @@ public class RepairWorkOrderFlowTest {
         String provisionalSupplierName = "IT-供应商-丙-" + System.nanoTime();
         long supplierC = registerMinimalSupplier(managerToken, provisionalSupplierName);
         assertEquals(supplierC, registerMinimalSupplier(managerToken, provisionalSupplierName));
-        jdbcTemplate.update("UPDATE t_supplier_org_profile SET verification_status = 'VERIFIED' WHERE supplier_dept_id IN (?, ?)",
-                supplierA, supplierB);
+        jdbcTemplate.update("""
+                UPDATE t_supplier_tenant_relation
+                SET enterprise_verification_status = 'VERIFIED'
+                WHERE tenant_id = ? AND supplier_dept_id IN (?, ?)
+                """, TENANT, supplierA, supplierB);
         jdbcTemplate.update("""
                 UPDATE t_supplier_tenant_relation
                 SET relation_type = 'FRAMEWORK', service_category = 'PUBLIC_AREA_FACILITY',
@@ -1126,9 +1220,11 @@ public class RepairWorkOrderFlowTest {
                 ORDER BY usage_id DESC LIMIT 1
                 """, String.class, id));
 
-        jdbcTemplate.update(
-                "UPDATE t_supplier_org_profile SET verification_status = 'PENDING_VERIFICATION' WHERE supplier_dept_id = ?",
-                supplierA);
+        jdbcTemplate.update("""
+                UPDATE t_supplier_tenant_relation
+                SET enterprise_verification_status = 'PENDING_VERIFICATION'
+                WHERE tenant_id = ? AND supplier_dept_id = ?
+                """, TENANT, supplierA);
         mockMvc.perform(get("/api/v1/admin/repair-work-orders/" + id + "/contract-supplier-candidate")
                         .header("Authorization", "Bearer " + managerToken))
                 .andExpect(status().isOk())
@@ -1138,9 +1234,11 @@ public class RepairWorkOrderFlowTest {
                 .andExpect(jsonPath("$.data.contractEligible", is(false)))
                 .andExpect(jsonPath("$.data.contractEligibilityMessage",
                         is("推荐供应商的企业主体尚未完成独立核验，暂不能发起合同签署")));
-        jdbcTemplate.update(
-                "UPDATE t_supplier_org_profile SET verification_status = 'VERIFIED' WHERE supplier_dept_id = ?",
-                supplierA);
+        jdbcTemplate.update("""
+                UPDATE t_supplier_tenant_relation
+                SET enterprise_verification_status = 'VERIFIED'
+                WHERE tenant_id = ? AND supplier_dept_id = ?
+                """, TENANT, supplierA);
         mockMvc.perform(get("/api/v1/admin/repair-work-orders/" + id + "/contract-supplier-candidate")
                         .header("Authorization", "Bearer " + managerToken))
                 .andExpect(status().isOk())

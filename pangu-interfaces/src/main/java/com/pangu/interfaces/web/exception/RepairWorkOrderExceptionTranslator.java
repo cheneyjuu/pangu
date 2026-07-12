@@ -1,3 +1,4 @@
+// 关联业务：把维修工单及供应商企业核验应用异常翻译为统一 HTTP 错误码。
 package com.pangu.interfaces.web.exception;
 
 import com.pangu.application.repair.RepairWorkOrderApplicationException;
@@ -18,6 +19,7 @@ public final class RepairWorkOrderExceptionTranslator {
             case LOCATION_NOT_VERIFIED -> RepairWorkOrderErrorCode.LOCATION_NOT_VERIFIED;
             case HANDOVER_LOCKED -> RepairWorkOrderErrorCode.HANDOVER_LOCKED;
             case STORAGE_UNAVAILABLE -> RepairWorkOrderErrorCode.STORAGE_UNAVAILABLE;
+            case EXTERNAL_VERIFICATION_UNAVAILABLE -> RepairWorkOrderErrorCode.EXTERNAL_VERIFICATION_UNAVAILABLE;
         };
     }
 }

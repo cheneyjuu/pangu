@@ -142,7 +142,7 @@ public interface RepairWorkOrderRepository {
     void markSupplierActivationInvitationActivated(
             Long invitationId, Long accountId, Long userId, LocalDateTime activatedAt);
 
-    boolean supplierVerified(Long supplierDeptId);
+    boolean supplierVerified(Long tenantId, Long supplierDeptId);
 
     void inviteSuppliers(Long workOrderId,
                          Long tenantId,

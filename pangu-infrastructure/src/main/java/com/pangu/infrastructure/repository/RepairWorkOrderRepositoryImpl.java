@@ -345,8 +345,8 @@ public class RepairWorkOrderRepositoryImpl implements RepairWorkOrderRepository 
     }
 
     @Override
-    public boolean supplierVerified(Long supplierDeptId) {
-        return mapper.supplierVerified(supplierDeptId);
+    public boolean supplierVerified(Long tenantId, Long supplierDeptId) {
+        return mapper.supplierVerified(tenantId, supplierDeptId);
     }
 
     @Override
@@ -848,6 +848,14 @@ public class RepairWorkOrderRepositoryImpl implements RepairWorkOrderRepository 
                 row.getContactName(),
                 row.getContactPhone(),
                 row.getVerificationStatus(),
+                row.getVerificationId(),
+                row.getVerificationMethod(),
+                row.getVerificationProviderCode(),
+                row.getVerificationSourceCode(),
+                row.isVerificationSimulated(),
+                row.getVerifiedByAccountId(),
+                row.getVerifiedByUserId(),
+                row.getVerifiedAt(),
                 row.getAccountStatus(),
                 row.getActiveAccountCount(),
                 row.getLoginPhone(),

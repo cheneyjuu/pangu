@@ -1,3 +1,4 @@
+// 关联业务：统一表达维修工单、供应商核验及外部服务调用中的应用层失败原因。
 package com.pangu.application.repair;
 
 public class RepairWorkOrderApplicationException extends RuntimeException {
@@ -11,7 +12,8 @@ public class RepairWorkOrderApplicationException extends RuntimeException {
         INVALID_STATUS,
         LOCATION_NOT_VERIFIED,
         HANDOVER_LOCKED,
-        STORAGE_UNAVAILABLE
+        STORAGE_UNAVAILABLE,
+        EXTERNAL_VERIFICATION_UNAVAILABLE
     }
 
     private final Reason reason;
