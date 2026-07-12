@@ -215,6 +215,16 @@ public class CommunityRegistrationFlowTest {
                 FROM t_committee_member_position
                 WHERE tenant_id = ? AND user_id = ? AND status = 1
                 """, String.class, tenantId, workUserId));
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "username", DIRECTOR_PHONE,
+                                "smsCode", "123456",
+                                "clientPortal", "B"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.user_info.identity_type", is("SYS_USER")))
+                .andExpect(jsonPath("$.data.user_info.active_identity_id", is((int) workUserId)))
+                .andExpect(jsonPath("$.data.user_info.role_key", is("COMMITTEE_DIRECTOR")));
         assertEquals(2, jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM t_community_registration_review WHERE application_id = ?",
                 Integer.class, applicationId));

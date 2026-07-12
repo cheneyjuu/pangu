@@ -6,6 +6,7 @@ import com.pangu.domain.model.registration.CommunityApplicantIdentity;
 import com.pangu.domain.model.registration.CommunityRegistrationApplication;
 import com.pangu.domain.model.registration.CommunityRegistrationReviewMode;
 import com.pangu.domain.repository.CommunityProvisioningRepository;
+import com.pangu.infrastructure.persistence.mapper.AccountMapper;
 import com.pangu.infrastructure.persistence.mapper.CommunityRegistrationMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataAccessException;
@@ -24,6 +25,7 @@ public class CommunityProvisioningRepositoryImpl implements CommunityProvisionin
     private static final int COMMITTEE_DEPT_TYPE = 4;
 
     private final CommunityRegistrationMapper mapper;
+    private final AccountMapper accountMapper;
 
     @Override
     public ProvisioningResult provision(
@@ -156,6 +158,11 @@ public class CommunityProvisioningRepositoryImpl implements CommunityProvisionin
                 : role.getFixedDataScope();
         mapper.insertSysUserRole(user.getUserId(), role.getRoleId(), effectiveScope, reviewer.userId());
         mapper.insertCommitteePosition(tenantId, user.getUserId(), assignment.position());
+        // 审核通过后默认进入已核验的工作身份，避免保留注册前的 C 端身份而丢失管理菜单。
+        if (accountMapper.updateLastActiveIdentity(
+                application.applicantAccountId(), user.getUserId(), UserContext.IdentityType.SYS_USER.name()) != 1) {
+            throw new ProvisioningConsistencyException("注册人默认工作身份激活失败");
+        }
         return user.getUserId();
     }
 
