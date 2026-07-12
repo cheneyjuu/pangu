@@ -3,6 +3,8 @@
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.pangu.infrastructure.persistence.mapper.CommunitySettingsMapper">
 
+    <!-- 关联业务：社区法权配置、计票基数和变更记录的读写映射。 -->
+
     <select id="selectCommunity" resultType="com.pangu.infrastructure.persistence.entity.TenantCommunityRow">
         SELECT *
         FROM t_tenant_community
@@ -174,10 +176,29 @@
     </select>
 
     <select id="selectAuditLogs" resultType="com.pangu.infrastructure.persistence.entity.CommunitySettingsAuditRow">
-        SELECT audit_id, tenant_id, operation_type, operator_user_id, create_time
-        FROM t_tenant_community_settings_audit
-        WHERE tenant_id = #{tenantId}
-        ORDER BY create_time DESC, audit_id DESC
+        SELECT audit.audit_id,
+               audit.tenant_id,
+               audit.operation_type,
+               audit.payload_json::text AS payload_json,
+               actor_user.account_id AS operator_account_id,
+               audit.operator_user_id,
+               COALESCE(NULLIF(actor_user.nick_name, ''), actor_user.user_name) AS operator_name,
+               (
+                   SELECT STRING_AGG(role.role_name, '、' ORDER BY role.role_id)
+                   FROM sys_user_role user_role
+                   JOIN sys_role role ON role.role_id = user_role.role_id
+                   WHERE user_role.user_id = audit.operator_user_id
+                     AND role.status = '0'
+               ) AS operator_role_name,
+               audit.create_time
+        FROM t_tenant_community_settings_audit audit
+        LEFT JOIN sys_user actor_user ON actor_user.user_id = audit.operator_user_id
+        WHERE audit.tenant_id = #{tenantId}
+          AND audit.operation_type IN
+          <foreach collection="operationTypes" item="operationType" open="(" separator="," close=")">
+              #{operationType}
+          </foreach>
+        ORDER BY audit.create_time DESC, audit.audit_id DESC
         LIMIT #{limit}
     </select>
 

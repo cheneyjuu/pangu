@@ -1,3 +1,4 @@
+// 关联业务：持久化社区设置、法定计票基数及其可追溯变更记录。
 package com.pangu.infrastructure.persistence.mapper;
 
 import com.pangu.infrastructure.persistence.entity.CommunityLedgerStatsRow;
@@ -36,7 +37,9 @@ public interface CommunitySettingsMapper {
 
     DenominatorReviewRequestRow selectDenominatorReviewRequest(@Param("requestId") Long requestId);
 
-    List<CommunitySettingsAuditRow> selectAuditLogs(@Param("tenantId") Long tenantId, @Param("limit") int limit);
+    List<CommunitySettingsAuditRow> selectAuditLogs(@Param("tenantId") Long tenantId,
+                                                    @Param("operationTypes") List<String> operationTypes,
+                                                    @Param("limit") int limit);
 
     int updateOrganization(TenantCommunityRow row);
 

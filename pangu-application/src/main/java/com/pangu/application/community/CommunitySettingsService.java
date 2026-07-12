@@ -1,11 +1,11 @@
+// 关联业务：编排社区组织备案、建筑名册、计票基数、自治规则及其变更审计。
 package com.pangu.application.community;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pangu.application.support.PayloadHasher;
 import com.pangu.domain.context.UserContext;
 import com.pangu.domain.context.UserContextHolder;
 import com.pangu.domain.model.community.CommunityLedgerStats;
+import com.pangu.domain.model.community.CommunitySettingsOperation;
 import com.pangu.domain.model.community.DenominatorReviewRequest;
 import com.pangu.domain.model.community.GovernancePolicy;
 import com.pangu.domain.model.community.TenantCommunity;
@@ -17,7 +17,8 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
-import java.util.Map;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 
@@ -43,7 +44,7 @@ public class CommunitySettingsService {
 
     private final CommunitySettingsRepository repository;
     private final UserContextHolder userContextHolder;
-    private final ObjectMapper objectMapper;
+    private final CommunitySettingsAuditService auditService;
 
     @Transactional(readOnly = true)
     public CommunitySettingsView getSettings(Long requestedTenantId) {
@@ -65,7 +66,7 @@ public class CommunitySettingsService {
         TenantCommunity current = loadCommunity(tenantId);
         TenantCommunity updated = copyOrganization(current, cmd);
         ensureUpdated(repository.updateOrganization(updated), tenantId);
-        audit(tenantId, "UPDATE_ORGANIZATION", cmd, ctx.userId());
+        auditService.recordOrganizationChange(current, updated, ctx);
         return getSettings(tenantId);
     }
 
@@ -78,7 +79,7 @@ public class CommunitySettingsService {
         verifyAssetLedgerChangeAllowed(ctx, current, cmd);
         TenantCommunity updated = copyAssetLedger(current, cmd);
         ensureUpdated(repository.updateAssetLedger(updated), tenantId);
-        audit(tenantId, "UPDATE_ASSET_LEDGER", cmd, ctx.userId());
+        auditService.recordAssetLedgerChange(current, updated, ctx);
         return getSettings(tenantId);
     }
 
@@ -96,7 +97,7 @@ public class CommunitySettingsService {
         verifyRulesChangeAllowed(ctx, current, cmd);
         TenantCommunity updated = copyRules(current, cmd);
         ensureUpdated(repository.updateRules(updated), tenantId);
-        audit(tenantId, "UPDATE_RULES", cmd, ctx.userId());
+        auditService.recordRulesChange(current, updated, ctx);
         return getSettings(tenantId);
     }
 
@@ -105,13 +106,14 @@ public class CommunitySettingsService {
         UserContext ctx = requireContext();
         requirePermission(ctx, DENOMINATOR_RECONCILE);
         Long tenantId = resolveTenantId(ctx, requestedTenantId);
+        TenantCommunity current = loadCommunity(tenantId);
         CommunityLedgerStats stats = repository.calculateLiveLedgerStats(tenantId);
         validatePositiveStats(stats);
         long version = repository.updateStatistics(
                 tenantId, stats.totalArea(), stats.ownerCount(), stats.unitCount(), ctx.userId());
         insertStatisticsSnapshot(
                 tenantId, version, stats, "SYSTEM_RECALCULATE", null, ctx.userId());
-        audit(tenantId, "RECALCULATE_DENOMINATOR", stats, ctx.userId());
+        auditService.recordDenominatorRecalculation(current, stats, version, ctx);
         return getSettings(tenantId);
     }
 
@@ -125,6 +127,7 @@ public class CommunitySettingsService {
                     "仅业委会主任可提交计票基数复核申请");
         }
         Long tenantId = resolveTenantId(ctx, requestedTenantId);
+        TenantCommunity current = loadCommunity(tenantId);
         CommunityLedgerStats live = repository.calculateLiveLedgerStats(tenantId);
         BigDecimal requestedArea = cmd.requestedTotalArea() == null ? live.totalArea() : cmd.requestedTotalArea();
         long requestedOwnerCount = cmd.requestedOwnerCount() == null ? live.ownerCount() : cmd.requestedOwnerCount();
@@ -143,8 +146,14 @@ public class CommunitySettingsService {
         long requestId = repository.insertDenominatorReviewRequest(
                 tenantId, requestedArea, requestedOwnerCount, requestedUnitCount,
                 cmd.reason().trim(), ctx.userId());
-        audit(tenantId, "SUBMIT_DENOMINATOR_REVIEW",
-                Map.of("requestId", requestId, "request", cmd), ctx.userId());
+        auditService.recordReviewSubmission(
+                current,
+                requestId,
+                requestedArea,
+                requestedOwnerCount,
+                requestedUnitCount,
+                cmd.reason().trim(),
+                ctx);
         return getSettings(tenantId);
     }
 
@@ -163,8 +172,10 @@ public class CommunitySettingsService {
                     "仅 PENDING 状态可复核，当前：" + request.status());
         }
         Long tenantId = resolveTenantId(ctx, request.tenantId());
+        TenantCommunity current = loadCommunity(tenantId);
         String status = cmd.approved() ? "APPROVED" : "REJECTED";
         repository.reviewDenominatorRequest(requestId, status, ctx.userId(), cmd.reviewComment());
+        Long statisticsVersion = null;
         if (cmd.approved()) {
             CommunityLedgerStats stats = new CommunityLedgerStats(
                     request.requestedTotalArea(),
@@ -173,11 +184,17 @@ public class CommunitySettingsService {
                     request.requestedUnitCount());
             long version = repository.updateStatistics(
                     tenantId, stats.totalArea(), stats.ownerCount(), stats.unitCount(), ctx.userId());
+            statisticsVersion = version;
             insertStatisticsSnapshot(
                     tenantId, version, stats, "GOV_REVIEW_APPROVED", requestId, ctx.userId());
         }
-        audit(tenantId, "REVIEW_DENOMINATOR_REQUEST",
-                Map.of("requestId", requestId, "approved", cmd.approved()), ctx.userId());
+        auditService.recordReviewDecision(
+                current,
+                request,
+                cmd.approved(),
+                cmd.reviewComment(),
+                statisticsVersion,
+                ctx);
         return getSettings(tenantId);
     }
 
@@ -191,10 +208,26 @@ public class CommunitySettingsService {
                 repository.listBuildingDirectory(community.tenantId()),
                 repository.listDenominatorBreakdown(community.tenantId()),
                 repository.listPendingDenominatorRequests(community.tenantId()),
-                repository.listAuditLogs(community.tenantId(), 20),
+                auditService.toView(repository.listAuditLogs(
+                        community.tenantId(), visibleAuditOperationCodes(permissions), 20)),
                 permissions,
                 daysUntilDisclosureDeadline(community.quarterlyDisclosureDeadlineDay())
         );
+    }
+
+    private List<String> visibleAuditOperationCodes(CommunitySettingsView.Permissions permissions) {
+        List<String> operations = new ArrayList<>(List.of(
+                CommunitySettingsOperation.UPDATE_ASSET_LEDGER.code(),
+                CommunitySettingsOperation.RECALCULATE_DENOMINATOR.code(),
+                CommunitySettingsOperation.SUBMIT_DENOMINATOR_REVIEW.code(),
+                CommunitySettingsOperation.REVIEW_DENOMINATOR_REQUEST.code()));
+        if (permissions.canViewOrganization()) {
+            operations.add(CommunitySettingsOperation.UPDATE_ORGANIZATION.code());
+        }
+        if (permissions.canViewRules()) {
+            operations.add(CommunitySettingsOperation.UPDATE_RULES.code());
+        }
+        return List.copyOf(operations);
     }
 
     private CommunitySettingsView.Permissions permissions(UserContext ctx, TenantCommunity community) {
@@ -437,16 +470,6 @@ public class CommunitySettingsService {
             throw new CommunitySettingsApplicationException(
                     CommunitySettingsApplicationException.Reason.COMMUNITY_NOT_FOUND,
                     "社区设置不存在：tenantId=" + tenantId);
-        }
-    }
-
-    private void audit(Long tenantId, String operationType, Object payload, Long operatorUserId) {
-        try {
-            repository.insertAudit(tenantId, operationType, objectMapper.writeValueAsString(payload), operatorUserId);
-        } catch (JsonProcessingException e) {
-            throw new CommunitySettingsApplicationException(
-                    CommunitySettingsApplicationException.Reason.PARAM_INVALID,
-                    "审计载荷序列化失败", e);
         }
     }
 

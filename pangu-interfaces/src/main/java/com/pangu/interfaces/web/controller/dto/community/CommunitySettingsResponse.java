@@ -1,9 +1,9 @@
+// 关联业务：向管理端输出社区法权配置、权限和可读的变更审计详情。
 package com.pangu.interfaces.web.controller.dto.community;
 
 import com.pangu.application.community.CommunitySettingsView;
 import com.pangu.domain.model.community.CommunityLedgerStats;
 import com.pangu.domain.model.community.CommunityBuilding;
-import com.pangu.domain.model.community.CommunitySettingsAudit;
 import com.pangu.domain.model.community.DenominatorBreakdown;
 import com.pangu.domain.model.community.DenominatorReviewRequest;
 import com.pangu.domain.model.community.GovernancePolicy;
@@ -241,11 +241,45 @@ public record CommunitySettingsResponse(
     public record AuditLog(
             Long auditId,
             String operationType,
+            String operationLabel,
+            String sectionCode,
+            String summary,
+            List<AuditChange> changes,
+            String reason,
+            Long operatorAccountId,
             Long operatorUserId,
+            String operatorName,
+            String operatorRoleKey,
+            String operatorRoleName,
             Instant createTime
     ) {
-        private static AuditLog from(CommunitySettingsAudit audit) {
-            return new AuditLog(audit.auditId(), audit.operationType(), audit.operatorUserId(), audit.createTime());
+        private static AuditLog from(CommunitySettingsView.AuditLog audit) {
+            return new AuditLog(
+                    audit.auditId(),
+                    audit.operationType(),
+                    audit.operationLabel(),
+                    audit.sectionCode(),
+                    audit.summary(),
+                    audit.changes().stream().map(AuditChange::from).toList(),
+                    audit.reason(),
+                    audit.operatorAccountId(),
+                    audit.operatorUserId(),
+                    audit.operatorName(),
+                    audit.operatorRoleKey(),
+                    audit.operatorRoleName(),
+                    audit.createTime());
+        }
+    }
+
+    public record AuditChange(
+            String fieldCode,
+            String fieldLabel,
+            String beforeValue,
+            String afterValue
+    ) {
+        private static AuditChange from(CommunitySettingsView.AuditChange change) {
+            return new AuditChange(
+                    change.fieldCode(), change.fieldLabel(), change.beforeValue(), change.afterValue());
         }
     }
 

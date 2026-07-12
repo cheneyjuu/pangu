@@ -1,3 +1,4 @@
+// 关联业务：实现社区设置、计票基数和变更审计的数据库访问适配。
 package com.pangu.infrastructure.repository;
 
 import com.pangu.domain.model.community.CommunityLedgerStats;
@@ -101,8 +102,8 @@ public class CommunitySettingsRepositoryImpl implements CommunitySettingsReposit
     }
 
     @Override
-    public List<CommunitySettingsAudit> listAuditLogs(Long tenantId, int limit) {
-        return mapper.selectAuditLogs(tenantId, limit).stream()
+    public List<CommunitySettingsAudit> listAuditLogs(Long tenantId, List<String> operationTypes, int limit) {
+        return mapper.selectAuditLogs(tenantId, operationTypes, limit).stream()
                 .map(this::toAudit).toList();
     }
 
@@ -261,7 +262,8 @@ public class CommunitySettingsRepositoryImpl implements CommunitySettingsReposit
     private CommunitySettingsAudit toAudit(CommunitySettingsAuditRow r) {
         return new CommunitySettingsAudit(
                 r.getAuditId(), r.getTenantId(), r.getOperationType(),
-                r.getOperatorUserId(), r.getCreateTime());
+                r.getPayloadJson(), r.getOperatorAccountId(), r.getOperatorUserId(),
+                r.getOperatorName(), r.getOperatorRoleName(), r.getCreateTime());
     }
 
     private int intVal(Integer v) {

@@ -1,3 +1,4 @@
+// 关联业务：定义社区法权配置、法定计票基数和变更审计的持久化端口。
 package com.pangu.domain.repository;
 
 import com.pangu.domain.model.community.CommunityLedgerStats;
@@ -37,7 +38,7 @@ public interface CommunitySettingsRepository {
 
     Optional<DenominatorReviewRequest> findDenominatorReviewRequest(Long requestId);
 
-    List<CommunitySettingsAudit> listAuditLogs(Long tenantId, int limit);
+    List<CommunitySettingsAudit> listAuditLogs(Long tenantId, List<String> operationTypes, int limit);
 
     int updateOrganization(TenantCommunity community);
 

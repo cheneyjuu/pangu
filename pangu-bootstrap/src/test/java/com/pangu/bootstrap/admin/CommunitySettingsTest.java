@@ -1,3 +1,4 @@
+// 关联业务：验证社区设置权限、计票基数流程和可读变更记录的管理端契约。
 package com.pangu.bootstrap.admin;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -19,6 +20,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.hamcrest.Matchers.is;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -69,10 +71,14 @@ public class CommunitySettingsTest {
                     operation_type IN ('SUBMIT_DENOMINATOR_REVIEW', 'RECALCULATE_DENOMINATOR')
                     OR (
                       operation_type = 'UPDATE_RULES'
-                      AND jsonb_exists(payload_json, 'buildingRepairDefaultDecisionChannel')
+                      AND (
+                        jsonb_exists(payload_json, 'buildingRepairDefaultDecisionChannel')
+                        OR payload_json ->> 'schemaVersion' = '1'
+                      )
                     )
+                    OR payload_json ->> 'testMarker' LIKE ?
                   )
-                """, TENANT_RUSHI);
+                """, TENANT_RUSHI, TEST_REASON_PREFIX + "%");
         jdbcTemplate.update("""
                 DELETE FROM t_tenant_denominator_review_request
                 WHERE tenant_id = ?
@@ -119,14 +125,36 @@ public class CommunitySettingsTest {
     public void propertyStaffCannotSeeOrganizationOrRules() throws Exception {
         String token = token(ACC_PROPERTY_STAFF, USR_PROPERTY_STAFF, TENANT_RUSHI);
 
-        mockMvc.perform(get("/api/v1/admin/community-settings")
+        jdbcTemplate.update("""
+                INSERT INTO t_tenant_community_settings_audit (
+                    tenant_id, operation_type, payload_json, operator_user_id
+                ) VALUES
+                    (?, 'UPDATE_ORGANIZATION', CAST(? AS JSONB), ?),
+                    (?, 'UPDATE_RULES', CAST(? AS JSONB), ?),
+                    (?, 'UPDATE_ASSET_LEDGER', CAST(? AS JSONB), ?)
+                """,
+                TENANT_RUSHI, "{\"testMarker\":\"" + TEST_REASON_PREFIX + "visibility\"}", USR_SUPER,
+                TENANT_RUSHI, "{\"testMarker\":\"" + TEST_REASON_PREFIX + "visibility\"}", USR_SUPER,
+                TENANT_RUSHI, "{\"testMarker\":\"" + TEST_REASON_PREFIX + "visibility\"}", USR_SUPER);
+
+        String response = mockMvc.perform(get("/api/v1/admin/community-settings")
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.organization").doesNotExist())
                 .andExpect(jsonPath("$.data.rules").doesNotExist())
                 .andExpect(jsonPath("$.data.assetLedger.propertyAreaName").isNotEmpty())
                 .andExpect(jsonPath("$.data.permissions.propertyRole", is(true)))
-                .andExpect(jsonPath("$.data.permissions.canViewRules", is(false)));
+                .andExpect(jsonPath("$.data.permissions.canViewRules", is(false)))
+                .andReturn()
+                .getResponse()
+                .getContentAsString(StandardCharsets.UTF_8);
+
+        JsonNode auditLogs = objectMapper.readTree(response).path("data").path("auditLogs");
+        List<String> operationTypes = new ArrayList<>();
+        auditLogs.forEach(log -> operationTypes.add(log.path("operationType").asText()));
+        assertTrue(operationTypes.contains("UPDATE_ASSET_LEDGER"));
+        assertFalse(operationTypes.contains("UPDATE_ORGANIZATION"));
+        assertFalse(operationTypes.contains("UPDATE_RULES"));
     }
 
     @Test
@@ -167,7 +195,19 @@ public class CommunitySettingsTest {
                         .content(objectMapper.writeValueAsString(Map.of(
                                 "buildingRepairDefaultDecisionChannel", "ONLINE"))))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.rules.buildingRepairDefaultDecisionChannel", is("ONLINE")));
+                .andExpect(jsonPath("$.data.rules.buildingRepairDefaultDecisionChannel", is("ONLINE")))
+                .andExpect(jsonPath("$.data.auditLogs[0].operationType", is("UPDATE_RULES")))
+                .andExpect(jsonPath("$.data.auditLogs[0].operationLabel", is("修改自治与财务规则")))
+                .andExpect(jsonPath("$.data.auditLogs[0].sectionCode", is("RULES")))
+                .andExpect(jsonPath("$.data.auditLogs[0].summary", is("已更新自治规则与财务控制配置")))
+                .andExpect(jsonPath("$.data.auditLogs[0].operatorAccountId", is((int) ACC_SUPER)))
+                .andExpect(jsonPath("$.data.auditLogs[0].operatorUserId", is((int) USR_SUPER)))
+                .andExpect(jsonPath("$.data.auditLogs[0].operatorName", is("王街道")))
+                .andExpect(jsonPath("$.data.auditLogs[0].operatorRoleKey", is("GOV_SUPER_ADMIN")))
+                .andExpect(jsonPath("$.data.auditLogs[0].changes[0].fieldCode", is("buildingRepairDefaultDecisionChannel")))
+                .andExpect(jsonPath("$.data.auditLogs[0].changes[0].fieldLabel", is("楼栋维修默认表决方式")))
+                .andExpect(jsonPath("$.data.auditLogs[0].changes[0].beforeValue", is("微信接龙")))
+                .andExpect(jsonPath("$.data.auditLogs[0].changes[0].afterValue", is("C 端在线表决")));
 
         mockMvc.perform(get("/api/v1/admin/community-settings")
                         .param("tenantId", String.valueOf(TENANT_RUSHI))
