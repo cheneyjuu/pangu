@@ -1,3 +1,4 @@
+// 关联业务：承载小区法权、财务与物业管理模式等运行时权威配置。
 package com.pangu.domain.model.community;
 
 import java.math.BigDecimal;
@@ -48,6 +49,7 @@ public record TenantCommunity(
         String sharedOwnershipStrategy,
         boolean repairEstimateRequired,
         String buildingRepairDefaultDecisionChannel,
+        PropertyManagementMode propertyManagementMode,
         boolean fundManagedEnabled,
         String financialControlConfigId,
         int quarterlyDisclosureDeadlineDay,

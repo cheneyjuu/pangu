@@ -205,19 +205,24 @@ public class CommunityRegistrationFlowTest {
         assertEquals(480, jdbcTemplate.queryForObject(
                 "SELECT planned_household_count FROM t_tenant_community WHERE tenant_id = ?",
                 Integer.class, tenantId));
+        assertEquals("TRUST", jdbcTemplate.queryForObject(
+                "SELECT property_mode FROM t_tenant_community WHERE tenant_id = ?",
+                String.class, tenantId));
         mockMvc.perform(get("/api/v1/auth/managed-communities")
                         .header("Authorization", "Bearer " + streetToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.communities[*].tenant_id", hasItem((int) tenantId)))
-                .andExpect(jsonPath("$.data.communities[*].tenant_name", hasItem("春申新苑")));
+                .andExpect(jsonPath("$.data.communities[*].tenant_name", hasItem("春申新苑")))
+                .andExpect(jsonPath("$.data.communities[*].property_mode", hasItem("TRUST")));
 
         String switchedCommunityJson = mockMvc.perform(post("/api/v1/auth/switch-managed-community")
-                        .header("Authorization", "Bearer " + streetToken)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(Map.of("targetTenantId", tenantId))))
+                .header("Authorization", "Bearer " + streetToken)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(Map.of("targetTenantId", tenantId))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.active_tenant_id", is((int) tenantId)))
                 .andExpect(jsonPath("$.data.user_info.tenant_id", is((int) tenantId)))
+                .andExpect(jsonPath("$.data.user_info.property_mode", is("TRUST")))
                 .andReturn().getResponse().getContentAsString();
         String switchedCommunityToken = objectMapper.readTree(switchedCommunityJson)
                 .path("data").path("new_access_token").asText();
@@ -248,7 +253,8 @@ public class CommunityRegistrationFlowTest {
                 .andExpect(jsonPath("$.data.user_info.active_identity_id", is((int) workUserId)))
                 .andExpect(jsonPath("$.data.user_info.role_key", is("COMMITTEE_DIRECTOR")))
                 .andExpect(jsonPath("$.data.user_info.tenant_id", is((int) tenantId)))
-                .andExpect(jsonPath("$.data.user_info.tenant_name", is("春申新苑")));
+                .andExpect(jsonPath("$.data.user_info.tenant_name", is("春申新苑")))
+                .andExpect(jsonPath("$.data.user_info.property_mode", is("TRUST")));
         String committeeToken = jwtTokenProvider.generateToken(
                 applicant.accountId(), "SYS_USER", workUserId, tenantId);
         mockMvc.perform(get("/api/v1/admin/property-roster/topology")
@@ -258,6 +264,51 @@ public class CommunityRegistrationFlowTest {
                 .andExpect(jsonPath("$.data.communityName", is("春申新苑")))
                 .andExpect(jsonPath("$.data.householdCount", is(0)))
                 .andExpect(jsonPath("$.data.buildings.length()", is(0)));
+
+        String modeChangeJson = mockMvc.perform(post("/api/v1/admin/property-management-mode-changes")
+                        .header("Authorization", "Bearer " + committeeToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "requestedPropertyMode", "FUND_RAISING",
+                                "ownersAssemblyResolutionReference", "OA-2026-春申-001",
+                                "changeReason", "业主大会已作出调整物业服务计费模式的有效决议"))))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.currentPropertyMode", is("TRUST")))
+                .andExpect(jsonPath("$.data.requestedPropertyMode", is("FUND_RAISING")))
+                .andExpect(jsonPath("$.data.status", is("DRAFT")))
+                .andExpect(jsonPath("$.data.version", is(0)))
+                .andReturn().getResponse().getContentAsString();
+        long modeChangeRequestId = objectMapper.readTree(modeChangeJson).path("data").path("requestId").asLong();
+        uploadPropertyManagementModeChangeMaterial(
+                committeeToken, modeChangeRequestId, "OWNERS_ASSEMBLY_RESOLUTION");
+
+        mockMvc.perform(post("/api/v1/admin/property-management-mode-changes/" + modeChangeRequestId + "/submit")
+                        .header("Authorization", "Bearer " + committeeToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\":0}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status", is("SUBMITTED")))
+                .andExpect(jsonPath("$.data.version", is(1)));
+
+        mockMvc.perform(post("/api/v1/admin/property-management-mode-changes/" + modeChangeRequestId + "/reviews")
+                        .header("Authorization", "Bearer " + switchedCommunityToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "decision", "EXECUTE",
+                                "reviewComment", "业主大会决议及材料核验通过",
+                                "expectedVersion", 1))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status", is("EXECUTED")))
+                .andExpect(jsonPath("$.data.effectivePropertyMode", is("FUND_RAISING")))
+                .andExpect(jsonPath("$.data.version", is(2)));
+        assertEquals("FUND_RAISING", jdbcTemplate.queryForObject(
+                "SELECT property_mode FROM t_tenant_community WHERE tenant_id = ?",
+                String.class, tenantId));
+        assertEquals(1, jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM t_property_management_mode_change_audit
+                WHERE request_id = ? AND event_type = 'MODE_EXECUTED'
+                """, Integer.class, modeChangeRequestId));
         assertEquals(2, jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM t_community_registration_review WHERE application_id = ?",
                 Integer.class, applicationId));
@@ -494,6 +545,21 @@ public class CommunityRegistrationFlowTest {
                 .andExpect(jsonPath("$.data.materialType", is(materialType)));
     }
 
+    private void uploadPropertyManagementModeChangeMaterial(
+            String token,
+            long requestId,
+            String materialType) throws Exception {
+        MockMultipartFile file = new MockMultipartFile(
+                "file", "owners-assembly-resolution.pdf", "application/pdf",
+                "%PDF-1.4 owners assembly resolution".getBytes(StandardCharsets.UTF_8));
+        mockMvc.perform(multipart("/api/v1/admin/property-management-mode-changes/" + requestId + "/materials")
+                        .file(file)
+                        .param("materialType", materialType)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.materialType", is(materialType)));
+    }
+
     private LoginSession ownerLogin(String phone) throws Exception {
         String response = mockMvc.perform(post("/api/v1/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -528,6 +594,7 @@ public class CommunityRegistrationFlowTest {
         payload.put("communityAddress", address);
         payload.put("declaredHouseholdCount", 480);
         payload.put("housingTags", List.of("COMMERCIAL_HOUSING", "SHOP"));
+        payload.put("declaredPropertyMode", "TRUST");
         if (expectedVersion != null) {
             payload.put("expectedVersion", expectedVersion);
         }
@@ -576,6 +643,23 @@ public class CommunityRegistrationFlowTest {
             jdbcTemplate.update("DELETE FROM t_community_onboarding_workspace WHERE application_id = ?", applicationId);
         }
         for (Long tenantId : tenantIds) {
+            jdbcTemplate.update("""
+                    DELETE FROM t_property_management_mode_change_audit
+                    WHERE request_id IN (
+                        SELECT request_id
+                        FROM t_property_management_mode_change_request
+                        WHERE tenant_id = ?
+                    )
+                    """, tenantId);
+            jdbcTemplate.update("""
+                    DELETE FROM t_property_management_mode_change_material
+                    WHERE request_id IN (
+                        SELECT request_id
+                        FROM t_property_management_mode_change_request
+                        WHERE tenant_id = ?
+                    )
+                    """, tenantId);
+            jdbcTemplate.update("DELETE FROM t_property_management_mode_change_request WHERE tenant_id = ?", tenantId);
             List<Long> enterpriseDeptIds = jdbcTemplate.queryForList("""
                     SELECT DISTINCT enterprise.enterprise_dept_id
                     FROM t_property_service_enterprise enterprise

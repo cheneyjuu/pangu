@@ -1,6 +1,8 @@
+// 关联业务：为街道办加载辖区小区清单及各小区后端确认的物业管理模式。
 package com.pangu.infrastructure.repository;
 
 import com.pangu.domain.model.community.GovernmentManagedCommunity;
+import com.pangu.domain.model.community.PropertyManagementMode;
 import com.pangu.domain.repository.GovernmentManagedCommunityRepository;
 import com.pangu.infrastructure.persistence.mapper.UserContextMapper;
 import lombok.RequiredArgsConstructor;
@@ -28,7 +30,8 @@ public class GovernmentManagedCommunityRepositoryImpl implements GovernmentManag
                         row.getTenantName(),
                         row.getPlannedHouseholdCount(),
                         row.getTotalExclusiveArea(),
-                        row.getGovernanceStatus()))
+                        row.getGovernanceStatus(),
+                        row.getPropertyMode() == null ? null : PropertyManagementMode.valueOf(row.getPropertyMode())))
                 .toList();
     }
 

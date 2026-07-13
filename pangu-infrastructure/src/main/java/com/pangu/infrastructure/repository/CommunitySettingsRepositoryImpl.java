@@ -7,6 +7,7 @@ import com.pangu.domain.model.community.CommunitySettingsAudit;
 import com.pangu.domain.model.community.DenominatorBreakdown;
 import com.pangu.domain.model.community.DenominatorReviewRequest;
 import com.pangu.domain.model.community.GovernancePolicy;
+import com.pangu.domain.model.community.PropertyManagementMode;
 import com.pangu.domain.model.community.TenantCommunity;
 import com.pangu.domain.repository.CommunitySettingsRepository;
 import com.pangu.infrastructure.persistence.entity.CommunityLedgerStatsRow;
@@ -186,6 +187,7 @@ public class CommunitySettingsRepositoryImpl implements CommunitySettingsReposit
                 r.getCurrentCommitteeTermName(), r.getTransitionOrgType(), r.getTransitionOrgStatus(),
                 r.getRuleConfigId(), r.getSharedOwnershipStrategy(), flag(r.getRepairEstimateRequired()),
                 r.getBuildingRepairDefaultDecisionChannel(),
+                r.getPropertyMode() == null ? null : PropertyManagementMode.valueOf(r.getPropertyMode()),
                 flag(r.getFundManagedEnabled()),
                 r.getFinancialControlConfigId(), intVal(r.getQuarterlyDisclosureDeadlineDay()),
                 r.getStatisticsVersion() == null ? 1 : r.getStatisticsVersion(), r.getStatisticsUpdatedAt(),
@@ -232,6 +234,7 @@ public class CommunitySettingsRepositoryImpl implements CommunitySettingsReposit
         r.setSharedOwnershipStrategy(c.sharedOwnershipStrategy());
         r.setRepairEstimateRequired(c.repairEstimateRequired() ? 1 : 0);
         r.setBuildingRepairDefaultDecisionChannel(c.buildingRepairDefaultDecisionChannel());
+        r.setPropertyMode(c.propertyManagementMode() == null ? null : c.propertyManagementMode().name());
         r.setFundManagedEnabled(c.fundManagedEnabled() ? 1 : 0);
         r.setFinancialControlConfigId(c.financialControlConfigId());
         r.setQuarterlyDisclosureDeadlineDay(c.quarterlyDisclosureDeadlineDay());

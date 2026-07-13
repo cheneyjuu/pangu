@@ -3,6 +3,7 @@ package com.pangu.application.registration.command;
 
 import com.pangu.domain.model.registration.CommunityApplicantIdentity;
 import com.pangu.domain.model.registration.CommunityHousingTag;
+import com.pangu.domain.model.community.PropertyManagementMode;
 
 import java.util.Set;
 
@@ -22,6 +23,7 @@ public record UpsertCommunityRegistrationCommand(
         String communityAddress,
         Integer declaredHouseholdCount,
         Set<CommunityHousingTag> housingTags,
+        PropertyManagementMode declaredPropertyMode,
         Integer expectedVersion
 ) {
 }

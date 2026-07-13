@@ -377,7 +377,7 @@ public class CommunitySettingsService {
                 str(cmd.transitionOrgType(), c.transitionOrgType()),
                 str(cmd.transitionOrgStatus(), c.transitionOrgStatus()),
                 c.ruleConfigId(), c.sharedOwnershipStrategy(), c.repairEstimateRequired(),
-                c.buildingRepairDefaultDecisionChannel(), c.fundManagedEnabled(),
+                c.buildingRepairDefaultDecisionChannel(), c.propertyManagementMode(), c.fundManagedEnabled(),
                 c.financialControlConfigId(), c.quarterlyDisclosureDeadlineDay(),
                 c.statisticsVersion(), c.statisticsUpdatedAt(), c.governanceStatus(), c.status(), c.updateTime());
     }
@@ -405,7 +405,7 @@ public class CommunitySettingsService {
                 c.ownersAssemblyEstablished(), c.committeeEstablished(), c.currentCommitteeTermName(),
                 c.transitionOrgType(), c.transitionOrgStatus(), c.ruleConfigId(), c.sharedOwnershipStrategy(),
                 c.repairEstimateRequired(), c.buildingRepairDefaultDecisionChannel(),
-                c.fundManagedEnabled(), c.financialControlConfigId(),
+                c.propertyManagementMode(), c.fundManagedEnabled(), c.financialControlConfigId(),
                 c.quarterlyDisclosureDeadlineDay(),
                 c.statisticsVersion(), c.statisticsUpdatedAt(), c.governanceStatus(), c.status(), c.updateTime());
     }
@@ -436,7 +436,7 @@ public class CommunitySettingsService {
                 c.transitionOrgType(), c.transitionOrgStatus(), val(cmd.ruleConfigId(), c.ruleConfigId()),
                 sharedStrategy, bool(cmd.repairEstimateRequired(), c.repairEstimateRequired()),
                 defaultDecisionChannel,
-                bool(cmd.fundManagedEnabled(), c.fundManagedEnabled()),
+                c.propertyManagementMode(), bool(cmd.fundManagedEnabled(), c.fundManagedEnabled()),
                 str(cmd.financialControlConfigId(), c.financialControlConfigId()),
                 nonNegative(cmd.quarterlyDisclosureDeadlineDay(), c.quarterlyDisclosureDeadlineDay(),
                         "quarterlyDisclosureDeadlineDay"),

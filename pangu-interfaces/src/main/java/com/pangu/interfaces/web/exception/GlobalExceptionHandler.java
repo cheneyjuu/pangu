@@ -6,6 +6,7 @@ import com.pangu.application.admin.RoleAdminApplicationException;
 import com.pangu.application.admin.WorkIdentityApplicationException;
 import com.pangu.application.assembly.OwnersAssemblyApplicationException;
 import com.pangu.application.community.CommunitySettingsApplicationException;
+import com.pangu.application.community.PropertyManagementModeChangeApplicationException;
 import com.pangu.application.registration.CommunityRegistrationApplicationException;
 import com.pangu.application.propertyservice.PropertyServiceOrganizationApplicationException;
 import com.pangu.application.disclosure.FinanceDisclosureApplicationException;
@@ -229,6 +230,26 @@ public class GlobalExceptionHandler {
         CommunityRegistrationErrorCode errorCode = CommunityRegistrationExceptionTranslator.translate(ex);
         response.setStatus(errorCode.getHttpStatus());
         log.info("CommunityRegistration business exception reason={} code={} msg={}",
+                ex.getReason(), errorCode.getCode(), ex.getMessage());
+        return Result.fail(
+                errorCode.getCode(),
+                ex.getMessage() != null ? ex.getMessage() : errorCode.getMessage(),
+                null,
+                errorCode.getErrorType(),
+                errorCode.isNeedRetry());
+    }
+
+    /**
+     * 物业管理模式变更申请、审核和执行异常翻译。
+     */
+    @ExceptionHandler(PropertyManagementModeChangeApplicationException.class)
+    public Result<Object> handlePropertyManagementModeChangeApplicationException(
+            PropertyManagementModeChangeApplicationException ex,
+            HttpServletResponse response) {
+        PropertyManagementModeChangeErrorCode errorCode =
+                PropertyManagementModeChangeExceptionTranslator.translate(ex);
+        response.setStatus(errorCode.getHttpStatus());
+        log.info("PropertyManagementModeChange business exception reason={} code={} msg={}",
                 ex.getReason(), errorCode.getCode(), ex.getMessage());
         return Result.fail(
                 errorCode.getCode(),

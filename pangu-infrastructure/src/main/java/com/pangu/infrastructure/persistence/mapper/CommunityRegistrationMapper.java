@@ -113,6 +113,7 @@ public interface CommunityRegistrationMapper {
         private String communityName;
         private String communityAddress;
         private Integer declaredHouseholdCount;
+        private String declaredPropertyMode;
         private String communityFingerprint;
         private String status;
         private String reviewMode;
@@ -210,6 +211,10 @@ public interface CommunityRegistrationMapper {
         private Long ruleConfigId;
         private String governanceStatus;
         private String registrationFingerprint;
+        private String propertyMode;
+        private Long registrationApplicationId;
+        private String reviewMode;
+        private Long reviewerUserId;
     }
 
     @Data

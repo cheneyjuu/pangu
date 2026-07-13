@@ -1,3 +1,4 @@
+// 关联业务：向街道办返回辖区小区及其已生效物业管理模式，支持受控切换租户上下文。
 package com.pangu.domain.model.community;
 
 import java.math.BigDecimal;
@@ -13,5 +14,6 @@ public record GovernmentManagedCommunity(
         String tenantName,
         Integer plannedHouseholdCount,
         BigDecimal totalExclusiveArea,
-        String governanceStatus) {
+        String governanceStatus,
+        PropertyManagementMode propertyManagementMode) {
 }

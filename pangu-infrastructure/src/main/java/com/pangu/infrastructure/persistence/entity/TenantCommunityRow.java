@@ -1,3 +1,4 @@
+// 关联业务：映射小区运行时权威配置，包括已生效的物业管理模式。
 package com.pangu.infrastructure.persistence.entity;
 
 import lombok.Data;
@@ -48,6 +49,7 @@ public class TenantCommunityRow {
     private String sharedOwnershipStrategy;
     private Integer repairEstimateRequired;
     private String buildingRepairDefaultDecisionChannel;
+    private String propertyMode;
     private Integer fundManagedEnabled;
     private String financialControlConfigId;
     private Integer quarterlyDisclosureDeadlineDay;

@@ -1,3 +1,4 @@
+// 关联业务：查询登录工作身份的租户、组织、权限和物业管理模式上下文。
 package com.pangu.infrastructure.persistence.mapper;
 
 import org.apache.ibatis.annotations.Mapper;
@@ -170,6 +171,7 @@ public interface UserContextMapper {
         private Integer plannedHouseholdCount;
         private BigDecimal totalExclusiveArea;
         private String governanceStatus;
+        private String propertyMode;
 
         public Long getTenantId() { return tenantId; }
         public void setTenantId(Long tenantId) { this.tenantId = tenantId; }
@@ -185,6 +187,8 @@ public interface UserContextMapper {
         }
         public String getGovernanceStatus() { return governanceStatus; }
         public void setGovernanceStatus(String governanceStatus) { this.governanceStatus = governanceStatus; }
+        public String getPropertyMode() { return propertyMode; }
+        public void setPropertyMode(String propertyMode) { this.propertyMode = propertyMode; }
     }
 
     /**

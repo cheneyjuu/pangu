@@ -2,6 +2,7 @@
 package com.pangu.interfaces.web.controller.dto.registration;
 
 import com.pangu.application.registration.command.UpsertCommunityRegistrationCommand;
+import com.pangu.domain.model.community.PropertyManagementMode;
 import com.pangu.domain.model.registration.CommunityApplicantIdentity;
 import com.pangu.domain.model.registration.CommunityHousingTag;
 import jakarta.validation.constraints.Max;
@@ -30,12 +31,13 @@ public record CommunityRegistrationRequest(
         @NotBlank @Size(min = 5, max = 256) String communityAddress,
         @NotNull @Min(1) @Max(1_000_000) Integer declaredHouseholdCount,
         @NotEmpty @Size(max = 4) Set<CommunityHousingTag> housingTags,
+        @NotNull PropertyManagementMode declaredPropertyMode,
         @Min(0) Integer expectedVersion
 ) {
     public UpsertCommunityRegistrationCommand toCommand() {
         return new UpsertCommunityRegistrationCommand(
                 applicantName, claimedIdentity, provinceCode, provinceName, cityCode, cityName,
                 districtCode, districtName, communityName, communityAddress,
-                declaredHouseholdCount, housingTags, expectedVersion);
+                declaredHouseholdCount, housingTags, declaredPropertyMode, expectedVersion);
     }
 }

@@ -23,6 +23,7 @@
         <result property="communityName" column="community_name"/>
         <result property="communityAddress" column="community_address"/>
         <result property="declaredHouseholdCount" column="declared_household_count"/>
+        <result property="declaredPropertyMode" column="declared_property_mode"/>
         <result property="communityFingerprint" column="community_fingerprint"/>
         <result property="status" column="status"/>
         <result property="reviewMode" column="review_mode"/>
@@ -43,7 +44,7 @@
         application_id, application_no, applicant_account_id, applicant_name, applicant_phone,
         claimed_identity, province_code, province_name, city_code, city_name, district_code,
         district_name, community_name, community_address, declared_household_count,
-        community_fingerprint, status, review_mode, reviewer_account_id, reviewer_user_id,
+        declared_property_mode, community_fingerprint, status, review_mode, reviewer_account_id, reviewer_user_id,
         reviewer_dept_id, review_comment, fallback_reason, provisioned_tenant_id, version,
         submitted_at, reviewed_at, create_time, update_time
     </sql>
@@ -55,13 +56,14 @@
             application_no, applicant_account_id, applicant_name, applicant_phone, claimed_identity,
             province_code, province_name, city_code, city_name, district_code, district_name,
             community_name, community_address, declared_household_count, community_fingerprint,
+            declared_property_mode,
             status, version, submitted_at, reviewed_at, create_time, update_time
         ) VALUES (
             #{applicationNo}, #{applicantAccountId},
             #{applicantName,typeHandler=com.pangu.infrastructure.persistence.handler.Sm4EncryptTypeHandler},
             #{applicantPhone}, #{claimedIdentity}, #{provinceCode}, #{provinceName}, #{cityCode}, #{cityName},
             #{districtCode}, #{districtName}, #{communityName}, #{communityAddress},
-            #{declaredHouseholdCount}, #{communityFingerprint}, #{status}, #{version},
+            #{declaredHouseholdCount}, #{communityFingerprint}, #{declaredPropertyMode}, #{status}, #{version},
             #{submittedAt}, #{reviewedAt}, #{createTime}, #{updateTime}
         )
     </insert>
@@ -79,6 +81,7 @@
             community_name = #{row.communityName},
             community_address = #{row.communityAddress},
             declared_household_count = #{row.declaredHouseholdCount},
+            declared_property_mode = #{row.declaredPropertyMode},
             community_fingerprint = #{row.communityFingerprint},
             status = #{row.status},
             review_mode = #{row.reviewMode},
@@ -287,12 +290,22 @@
             tenant_id, tenant_code, tenant_short_code, tenant_name, property_area_name,
             province_code, province_name, city_code, city_name, district_code, district_name,
             street_name, address, planned_household_count, owners_assembly_established,
-            committee_established, rule_config_id, governance_status, status, registration_fingerprint
+            committee_established, rule_config_id, governance_status, property_mode, property_mode_history,
+            status, registration_fingerprint
         ) VALUES (
             #{tenantId}, #{tenantCode}, #{tenantShortCode}, #{tenantName}, #{propertyAreaName},
             #{provinceCode}, #{provinceName}, #{cityCode}, #{cityName}, #{districtCode}, #{districtName},
             #{streetName}, #{address}, #{plannedHouseholdCount}, #{ownersAssemblyEstablished},
-            #{committeeEstablished}, #{ruleConfigId}, #{governanceStatus}, 'ACTIVE', #{registrationFingerprint}
+            #{committeeEstablished}, #{ruleConfigId}, #{governanceStatus}, #{propertyMode},
+            JSONB_BUILD_ARRAY(JSONB_BUILD_OBJECT(
+                'from', NULL,
+                'to', #{propertyMode},
+                'source', 'REGISTRATION_APPROVED',
+                'registrationApplicationId', #{registrationApplicationId},
+                'reviewMode', #{reviewMode},
+                'reviewerUserId', #{reviewerUserId},
+                'at', CURRENT_TIMESTAMP
+            )), 'ACTIVE', #{registrationFingerprint}
         )
     </insert>
 

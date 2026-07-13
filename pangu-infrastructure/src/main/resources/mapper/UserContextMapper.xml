@@ -236,7 +236,8 @@
             community.tenant_name AS tenantName,
             community.planned_household_count AS plannedHouseholdCount,
             community.total_exclusive_area AS totalExclusiveArea,
-            community.governance_status AS governanceStatus
+            community.governance_status AS governanceStatus,
+            community.property_mode AS propertyMode
         FROM t_tenant_community community
         JOIN (
             <include refid="GovernmentManagedTenantScope"/>

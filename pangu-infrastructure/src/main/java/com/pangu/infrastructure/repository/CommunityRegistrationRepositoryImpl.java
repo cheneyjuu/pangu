@@ -3,6 +3,7 @@ package com.pangu.infrastructure.repository;
 
 import com.pangu.domain.model.registration.CommunityApplicantIdentity;
 import com.pangu.domain.model.registration.CommunityHousingTag;
+import com.pangu.domain.model.community.PropertyManagementMode;
 import com.pangu.domain.model.registration.CommunityOnboardingWorkspace;
 import com.pangu.domain.model.registration.CommunityRegistrationApplication;
 import com.pangu.domain.model.registration.CommunityRegistrationDecision;
@@ -168,6 +169,8 @@ public class CommunityRegistrationRepositoryImpl implements CommunityRegistratio
                 row.getProvinceCode(), row.getProvinceName(), row.getCityCode(), row.getCityName(),
                 row.getDistrictCode(), row.getDistrictName(), row.getCommunityName(), row.getCommunityAddress(),
                 row.getDeclaredHouseholdCount() == null ? 0 : row.getDeclaredHouseholdCount(), tags,
+                row.getDeclaredPropertyMode() == null ? null
+                        : PropertyManagementMode.valueOf(row.getDeclaredPropertyMode()),
                 row.getCommunityFingerprint(), CommunityRegistrationStatus.valueOf(row.getStatus()),
                 row.getReviewMode() == null ? null : CommunityRegistrationReviewMode.valueOf(row.getReviewMode()),
                 row.getReviewerAccountId(), row.getReviewerUserId(), row.getReviewerDeptId(),
@@ -193,6 +196,8 @@ public class CommunityRegistrationRepositoryImpl implements CommunityRegistratio
         row.setCommunityName(application.communityName());
         row.setCommunityAddress(application.communityAddress());
         row.setDeclaredHouseholdCount(application.declaredHouseholdCount());
+        row.setDeclaredPropertyMode(application.declaredPropertyMode() == null
+                ? null : application.declaredPropertyMode().name());
         row.setCommunityFingerprint(application.communityFingerprint());
         row.setStatus(application.status().name());
         row.setReviewMode(application.reviewMode() == null ? null : application.reviewMode().name());

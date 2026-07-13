@@ -8,6 +8,7 @@ import com.pangu.application.registration.command.UploadCommunityRegistrationMat
 import com.pangu.application.registration.command.UpsertCommunityRegistrationCommand;
 import com.pangu.domain.context.UserContext;
 import com.pangu.domain.context.UserContextHolder;
+import com.pangu.domain.model.community.PropertyManagementMode;
 import com.pangu.domain.model.registration.CommunityApplicantIdentity;
 import com.pangu.domain.model.registration.CommunityHousingTag;
 import com.pangu.domain.model.registration.CommunityRegistrationApplication;
@@ -106,6 +107,7 @@ public class CommunityRegistrationApplicationService {
                 normalized.communityAddress(),
                 normalized.declaredHouseholdCount(),
                 normalized.housingTags(),
+                normalized.declaredPropertyMode(),
                 normalized.fingerprint(),
                 CommunityRegistrationStatus.DRAFT,
                 null, null, null, null, null, null, null,
@@ -119,7 +121,8 @@ public class CommunityRegistrationApplicationService {
         repository.insertAudit(application.applicationId(), actor.accountId(), actor.userId(), actor.deptId(),
                 "APPLICATION_CREATED", null, CommunityRegistrationStatus.DRAFT,
                 toJson(Map.of("applicationNo", application.applicationNo(),
-                        "claimedIdentity", application.claimedIdentity().name())));
+                        "claimedIdentity", application.claimedIdentity().name(),
+                        "declaredPropertyMode", application.declaredPropertyMode().name())));
         return details(application);
     }
 
@@ -142,6 +145,7 @@ public class CommunityRegistrationApplicationService {
                     normalized.districtCode(), normalized.districtName(),
                     normalized.communityName(), normalized.communityAddress(),
                     normalized.declaredHouseholdCount(), normalized.housingTags(),
+                    normalized.declaredPropertyMode(),
                     normalized.fingerprint(), Instant.now());
         } catch (IllegalStateException ex) {
             throw invalidStatus(ex);
@@ -158,6 +162,10 @@ public class CommunityRegistrationApplicationService {
         UserContext actor = requireAuthenticatedAccount();
         CommunityRegistrationApplication current = requireOwnedApplication(applicationId, actor.accountId());
         assertVersion(current, expectedVersion);
+        if (current.declaredPropertyMode() == null) {
+            throw new CommunityRegistrationApplicationException(
+                    PARAM_INVALID, "请先补充并保存物业管理模式后再提交审核");
+        }
         if (repository.countActiveMaterials(applicationId) < 1) {
             throw new CommunityRegistrationApplicationException(
                     MATERIAL_REQUIRED, "提交审核前至少上传一份小区或注册人证明材料");
@@ -167,7 +175,8 @@ public class CommunityRegistrationApplicationService {
                         current.applicantName(), current.claimedIdentity(), current.provinceCode(),
                         current.provinceName(), current.cityCode(), current.cityName(), current.districtCode(),
                         current.districtName(), current.communityName(), current.communityAddress(),
-                        current.declaredHouseholdCount(), current.housingTags(), current.communityFingerprint()));
+                        current.declaredHouseholdCount(), current.housingTags(), current.declaredPropertyMode(),
+                        current.communityFingerprint()));
         CommunityRegistrationApplication submitted;
         try {
             submitted = current.submit(Instant.now());
@@ -397,6 +406,10 @@ public class CommunityRegistrationApplicationService {
             String comment,
             String fallbackReason,
             Instant now) {
+        if (current.declaredPropertyMode() == null) {
+            throw new CommunityRegistrationApplicationException(
+                    PARAM_INVALID, "该申请未声明物业管理模式，请退回申请人补充后再审核");
+        }
         CommunityProvisioningRepository.ProvisioningResult provisioned =
                 provisioningRepository.provision(current, reviewer, mode);
         return current.approve(
@@ -534,8 +547,9 @@ public class CommunityRegistrationApplicationService {
     }
 
     private NormalizedRegistration normalize(UpsertCommunityRegistrationCommand command) {
-        if (command == null || command.claimedIdentity() == null) {
-            throw new CommunityRegistrationApplicationException(PARAM_INVALID, "注册信息和申报身份不能为空");
+        if (command == null || command.claimedIdentity() == null || command.declaredPropertyMode() == null) {
+            throw new CommunityRegistrationApplicationException(
+                    PARAM_INVALID, "注册信息、申报身份和物业管理模式不能为空");
         }
         String provinceCode = normalizeDivisionCode(command.provinceCode(), "省份代码");
         String cityCode = normalizeDivisionCode(command.cityCode(), "城市代码");
@@ -565,7 +579,7 @@ public class CommunityRegistrationApplicationService {
         return new NormalizedRegistration(
                 applicantName, command.claimedIdentity(), provinceCode, provinceName, cityCode, cityName,
                 districtCode, districtName, communityName, communityAddress,
-                command.declaredHouseholdCount(), tags, fingerprint);
+                command.declaredHouseholdCount(), tags, command.declaredPropertyMode(), fingerprint);
     }
 
     private String normalizeReviewComment(CommunityRegistrationDecision decision, String comment) {
@@ -722,6 +736,7 @@ public class CommunityRegistrationApplicationService {
             String communityAddress,
             int declaredHouseholdCount,
             Set<CommunityHousingTag> housingTags,
+            PropertyManagementMode declaredPropertyMode,
             String fingerprint) {
     }
 }

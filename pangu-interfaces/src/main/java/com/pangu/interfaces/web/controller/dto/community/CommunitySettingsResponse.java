@@ -46,13 +46,16 @@ public record CommunitySettingsResponse(
             String tenantShortCode,
             String tenantName,
             String governanceStatus,
+            String propertyManagementMode,
             long statisticsVersion,
             Instant statisticsUpdatedAt,
             Instant lastUpdatedAt
     ) {
         private static Header from(TenantCommunity c) {
             return new Header(c.tenantId(), c.tenantCode(), c.tenantShortCode(), c.tenantName(),
-                    c.governanceStatus(), c.statisticsVersion(), c.statisticsUpdatedAt(), c.updateTime());
+                    c.governanceStatus(), c.propertyManagementMode() == null
+                            ? null : c.propertyManagementMode().name(),
+                    c.statisticsVersion(), c.statisticsUpdatedAt(), c.updateTime());
         }
     }
 

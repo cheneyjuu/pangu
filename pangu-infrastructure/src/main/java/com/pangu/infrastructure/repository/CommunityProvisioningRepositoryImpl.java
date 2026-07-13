@@ -39,7 +39,7 @@ public class CommunityProvisioningRepositoryImpl implements CommunityProvisionin
         }
         try {
             Long tenantId = mapper.nextTenantId();
-            insertTenant(application, parent, reviewMode, tenantId);
+            insertTenant(application, parent, reviewer, reviewMode, tenantId);
             CommunityRegistrationMapper.DeptInsertRow initializationDept = insertDept(
                     parent.getDeptId(), childAncestors(parent.getAncestors(), parent.getDeptId()),
                     application.communityName() + "初始化工作区", INITIALIZATION_DEPT_TYPE, "G", tenantId, 1);
@@ -89,6 +89,7 @@ public class CommunityProvisioningRepositoryImpl implements CommunityProvisionin
     private void insertTenant(
             CommunityRegistrationApplication application,
             CommunityRegistrationMapper.DeptSourceRow parent,
+            UserContext reviewer,
             CommunityRegistrationReviewMode reviewMode,
             Long tenantId) {
         boolean committeeEstablished = isCommitteeIdentity(application.claimedIdentity());
@@ -112,6 +113,10 @@ public class CommunityProvisioningRepositoryImpl implements CommunityProvisionin
         tenant.setCommitteeEstablished(committeeEstablished ? 1 : 0);
         tenant.setRuleConfigId(mapper.selectDefaultGovernancePolicyId());
         tenant.setGovernanceStatus("HANDOVER_LOCK");
+        tenant.setPropertyMode(application.declaredPropertyMode().name());
+        tenant.setRegistrationApplicationId(application.applicationId());
+        tenant.setReviewMode(reviewMode.name());
+        tenant.setReviewerUserId(reviewer.userId());
         tenant.setRegistrationFingerprint(application.communityFingerprint());
         mapper.insertTenant(tenant);
     }

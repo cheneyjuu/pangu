@@ -1,6 +1,8 @@
 // 关联业务：承载小区注册申请状态机、申报信息与审核结果。
 package com.pangu.domain.model.registration;
 
+import com.pangu.domain.model.community.PropertyManagementMode;
+
 import java.time.Instant;
 import java.util.Set;
 
@@ -27,6 +29,7 @@ public record CommunityRegistrationApplication(
         String communityAddress,
         int declaredHouseholdCount,
         Set<CommunityHousingTag> housingTags,
+        PropertyManagementMode declaredPropertyMode,
         String communityFingerprint,
         CommunityRegistrationStatus status,
         CommunityRegistrationReviewMode reviewMode,
@@ -65,6 +68,7 @@ public record CommunityRegistrationApplication(
             String revisedCommunityAddress,
             int revisedHouseholdCount,
             Set<CommunityHousingTag> revisedTags,
+            PropertyManagementMode revisedPropertyMode,
             String revisedFingerprint,
             Instant now) {
         requireStatus(CommunityRegistrationStatus.DRAFT, CommunityRegistrationStatus.RETURNED);
@@ -72,7 +76,7 @@ public record CommunityRegistrationApplication(
                 applicationId, applicationNo, applicantAccountId, revisedApplicantName, applicantPhone,
                 revisedIdentity, revisedProvinceCode, revisedProvinceName, revisedCityCode, revisedCityName,
                 revisedDistrictCode, revisedDistrictName, revisedCommunityName, revisedCommunityAddress,
-                revisedHouseholdCount, revisedTags, revisedFingerprint, status, reviewMode,
+                revisedHouseholdCount, revisedTags, revisedPropertyMode, revisedFingerprint, status, reviewMode,
                 reviewerAccountId, reviewerUserId, reviewerDeptId, reviewComment, fallbackReason,
                 provisionedTenantId, version, submittedAt, reviewedAt, createdAt, now);
     }
@@ -145,7 +149,8 @@ public record CommunityRegistrationApplication(
         return new CommunityRegistrationApplication(
                 applicationId, applicationNo, applicantAccountId, applicantName, applicantPhone,
                 claimedIdentity, provinceCode, provinceName, cityCode, cityName, districtCode, districtName,
-                communityName, communityAddress, declaredHouseholdCount, housingTags, communityFingerprint,
+                communityName, communityAddress, declaredHouseholdCount, housingTags, declaredPropertyMode,
+                communityFingerprint,
                 nextStatus, nextReviewMode, nextReviewerAccountId, nextReviewerUserId, nextReviewerDeptId,
                 nextReviewComment, nextFallbackReason, nextProvisionedTenantId, nextVersion,
                 nextSubmittedAt, nextReviewedAt, createdAt, nextUpdatedAt);

@@ -8,6 +8,7 @@ import com.pangu.domain.gateway.identity.IdCardOcrGateway;
 import com.pangu.domain.model.identity.ChineseResidentId;
 import com.pangu.domain.model.asset.PropertyOwnership;
 import com.pangu.domain.model.community.GovernmentManagedCommunity;
+import com.pangu.domain.model.community.TenantCommunity;
 import com.pangu.domain.model.user.WorkIdentityShadow;
 import com.pangu.domain.repository.AuthAccountRepository;
 import com.pangu.domain.repository.CommunitySettingsRepository;
@@ -342,6 +343,7 @@ public class AuthService {
         result.put("new_access_token", newToken);
         result.put("active_tenant_id", ctx.tenantId());
         result.put("active_opid_list", activeOpidList);
+        result.put("user_info", buildUserInfo(ctx));
         return result;
     }
 
@@ -454,6 +456,8 @@ public class AuthService {
         info.put("planned_household_count", community.plannedHouseholdCount());
         info.put("total_exclusive_area", community.totalExclusiveArea());
         info.put("governance_status", community.governanceStatus());
+        info.put("property_mode", community.propertyManagementMode() == null
+                ? null : community.propertyManagementMode().name());
         return info;
     }
 
@@ -465,12 +469,13 @@ public class AuthService {
         userInfo.put("identity_type", ctx.identityType().name());
         userInfo.put("active_identity_id", ctx.activeIdentityId());
         userInfo.put("tenant_id", ctx.tenantId());
-        // 管理端外壳必须显示当前 JWT 所属租户，不能用前端演示小区替代真实租户名称。
-        userInfo.put("tenant_name", ctx.tenantId() == null
+        // 管理端外壳必须显示当前 JWT 所属租户，且模式只能来自已生效的租户事实。
+        TenantCommunity community = ctx.tenantId() == null
                 ? null
-                : communitySettingsRepository.findCommunity(ctx.tenantId())
-                        .map(community -> community.tenantName())
-                        .orElse(null));
+                : communitySettingsRepository.findCommunity(ctx.tenantId()).orElse(null);
+        userInfo.put("tenant_name", community == null ? null : community.tenantName());
+        userInfo.put("property_mode", community == null || community.propertyManagementMode() == null
+                ? null : community.propertyManagementMode().name());
         userInfo.put("dept_type", ctx.deptType());
         userInfo.put("auth_level", ctx.authLevel().getValue());
         userInfo.put("role_key", ctx.roleKey());
