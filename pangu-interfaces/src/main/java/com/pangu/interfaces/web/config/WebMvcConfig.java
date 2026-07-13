@@ -1,3 +1,4 @@
+// 关联业务：微信小程序手机号授权发生在建立租户会话之前，拦截器不应要求尚不存在的租户上下文。
 package com.pangu.interfaces.web.config;
 
 import com.pangu.interfaces.web.interceptor.TenantContextInterceptor;
@@ -20,6 +21,6 @@ public class WebMvcConfig implements WebMvcConfigurer {
         // 注册多租户上下文提取过滤器
         registry.addInterceptor(tenantContextInterceptor)
                 .addPathPatterns("/**")
-                .excludePathPatterns("/api/v1/auth/login");
+                .excludePathPatterns("/api/v1/auth/login", "/api/v1/auth/wechat-phone-login");
     }
 }

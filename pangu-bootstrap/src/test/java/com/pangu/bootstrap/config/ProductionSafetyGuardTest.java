@@ -1,3 +1,4 @@
+// 关联业务：验证生产环境不会在缺失微信小程序身份授权配置时启动，避免手机号授权服务以不安全配置运行。
 package com.pangu.bootstrap.config;
 
 import org.junit.jupiter.api.Test;
@@ -55,6 +56,14 @@ class ProductionSafetyGuardTest {
         assertThrows(IllegalStateException.class, () -> new ProductionSafetyGuard(environment).validate());
     }
 
+    @Test
+    void prodProfile_rejectsMissingWeChatMiniProgramCredentials() {
+        MockEnvironment environment = validProdEnvironment()
+                .withProperty("platform.identity.wechat-mini-program.app-secret", "");
+
+        assertThrows(IllegalStateException.class, () -> new ProductionSafetyGuard(environment).validate());
+    }
+
     private MockEnvironment validProdEnvironment() {
         MockEnvironment environment = new MockEnvironment();
         environment.setActiveProfiles("prod");
@@ -67,6 +76,8 @@ class ProductionSafetyGuardTest {
                 .withProperty("platform.identity.tencent.secret-id", "PROD_TENCENT_SECRET_ID")
                 .withProperty("platform.identity.tencent.secret-key", "PROD_TENCENT_SECRET_KEY")
                 .withProperty("platform.identity.face-auth.tencent.rule-id", "prod-face-rule-id")
+                .withProperty("platform.identity.wechat-mini-program.app-id", "wx-prod-mini-program")
+                .withProperty("platform.identity.wechat-mini-program.app-secret", "prod-mini-program-secret")
                 .withProperty("platform.security.jwt-secret", "prod-jwt-secret-with-enough-length")
                 .withProperty("platform.security.sm4-key-hex", "fedcba98765432100123456789abcdef")
                 .withProperty("platform.ali-oss.access-key-id", "PROD_KEY_ID")

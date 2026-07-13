@@ -1,3 +1,4 @@
+// 关联业务：统一保护管理端和业主端接口，仅放行无需既有会话的微信小程序手机号授权入口。
 package com.pangu.interfaces.web.config;
 
 import com.pangu.interfaces.security.JwtAuthenticationFilter;
@@ -33,7 +34,11 @@ public class SecurityConfig {
             // 请求授权配置
             .authorizeHttpRequests(authorize -> authorize
                 // 允许匿名公开登录接口
-                .requestMatchers("/api/v1/auth/login", "/api/v1/supplier-activation/activate").permitAll()
+                .requestMatchers(
+                        "/api/v1/auth/login",
+                        "/api/v1/auth/wechat-phone-login",
+                        "/api/v1/supplier-activation/activate")
+                .permitAll()
                 // 其他接口均需要经过 JWT 身份认证
                 .anyRequest().authenticated()
             )

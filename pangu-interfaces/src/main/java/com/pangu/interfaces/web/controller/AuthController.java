@@ -1,10 +1,14 @@
+// 关联业务：统一承接平台短信登录与微信小程序原生手机号授权，服务端负责身份交换和会话签发。
 package com.pangu.interfaces.web.controller;
 
 import com.pangu.interfaces.web.controller.dto.LoginRequest;
 import com.pangu.interfaces.web.controller.dto.NavMenuResponse;
 import com.pangu.interfaces.web.controller.dto.SwitchShadowRequest;
 import com.pangu.interfaces.web.controller.dto.SwitchTenantRequest;
+import com.pangu.interfaces.web.controller.dto.WeChatPhoneLoginRequest;
+import com.pangu.interfaces.web.controller.dto.WeChatProfileRequest;
 import com.pangu.interfaces.web.service.AuthService;
+import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
@@ -30,7 +34,26 @@ public class AuthController extends BaseController {
     }
 
     /**
-     * 2. 管理端工作分身列表
+     * 2. 小程序微信手机号授权登录。
+     * 微信临时凭证仅由服务端交换，客户端不持有 AppSecret、session_key 或原始 openid。
+     */
+    @PostMapping("/wechat-phone-login")
+    public Result<Map<String, Object>> weChatPhoneLogin(@Valid @RequestBody WeChatPhoneLoginRequest request) {
+        return success(authService.weChatPhoneLogin(request));
+    }
+
+    /**
+     * 3. 保存用户额外确认授权的微信昵称与头像；不作为实名或表决资格依据。
+     */
+    @PostMapping("/wechat-profile")
+    public Result<Map<String, Object>> updateWeChatProfile(
+            @RequestHeader("Authorization") String authHeader,
+            @Valid @RequestBody WeChatProfileRequest request) {
+        return success(authService.updateWeChatProfile(authHeader, request));
+    }
+
+    /**
+     * 4. 管理端工作分身列表
      */
     @GetMapping("/shadows")
     public Result<Map<String, Object>> listSysUserShadows(
@@ -39,7 +62,7 @@ public class AuthController extends BaseController {
     }
 
     /**
-     * 3. 当前身份可见管理端菜单
+     * 5. 当前身份可见管理端菜单
      */
     @GetMapping("/menus")
     public Result<List<NavMenuResponse>> listMenus(
@@ -48,7 +71,7 @@ public class AuthController extends BaseController {
     }
 
     /**
-     * 4. 管理端工作分身切换
+     * 6. 管理端工作分身切换
      */
     @PostMapping("/switch-shadow")
     public Result<Map<String, Object>> switchShadow(
@@ -58,7 +81,7 @@ public class AuthController extends BaseController {
     }
 
     /**
-     * 5. C端业主跨小区多租户切换接口
+     * 7. C端业主跨小区多租户切换接口
      */
     @PostMapping("/switch-tenant")
     public Result<Map<String, Object>> switchTenant(
@@ -68,7 +91,7 @@ public class AuthController extends BaseController {
     }
 
     /**
-     * 6. G 端街镇或平台根组织可监管小区列表。
+     * 8. G 端街镇或平台根组织可监管小区列表。
      */
     @GetMapping("/managed-communities")
     public Result<Map<String, Object>> listManagedCommunities(
@@ -77,7 +100,7 @@ public class AuthController extends BaseController {
     }
 
     /**
-     * 7. G 端辖区小区上下文切换，后端校验组织授权后重签 JWT。
+     * 9. G 端辖区小区上下文切换，后端校验组织授权后重签 JWT。
      */
     @PostMapping("/switch-managed-community")
     public Result<Map<String, Object>> switchManagedCommunity(

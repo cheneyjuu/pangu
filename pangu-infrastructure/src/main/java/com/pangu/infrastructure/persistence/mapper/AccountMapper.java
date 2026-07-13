@@ -1,3 +1,4 @@
+// 关联业务：自然人账户、C 端身份与微信小程序主体绑定的数据库访问，支撑小程序原生手机号授权。
 package com.pangu.infrastructure.persistence.mapper;
 
 import lombok.Data;
@@ -65,6 +66,27 @@ public interface AccountMapper {
     int updateCUserLastActiveTenant(@Param("uid") Long uid,
                                     @Param("tenantId") Long tenantId);
 
+    /** 微信主体散列反查已绑定自然人账户，禁止同一微信授权串绑多个账号。 */
+    Long selectAccountIdByWeChatSubjectHash(@Param("miniProgramAppId") String miniProgramAppId,
+                                            @Param("subjectHash") String subjectHash);
+
+    /** 查询当前账号在指定小程序下已授权的展示资料。 */
+    WeChatIdentityRow selectWeChatIdentity(@Param("accountId") Long accountId,
+                                            @Param("miniProgramAppId") String miniProgramAppId);
+
+    /** 首次绑定微信主体；唯一约束冲突时返回 0，由服务层复核归属。 */
+    int insertWeChatIdentity(WeChatIdentityInsertRow row);
+
+    /** 记录成功授权登录时间，不接收或暴露原始 openid。 */
+    int touchWeChatIdentityLogin(@Param("accountId") Long accountId,
+                                 @Param("miniProgramAppId") String miniProgramAppId);
+
+    /** 更新微信显式授权的昵称和头像，仅用于资料展示。 */
+    int updateWeChatProfile(@Param("accountId") Long accountId,
+                             @Param("miniProgramAppId") String miniProgramAppId,
+                             @Param("nickname") String nickname,
+                             @Param("avatarUrl") String avatarUrl);
+
     @Data
     class AccountInsertRow {
         private Long accountId;
@@ -102,5 +124,21 @@ public interface AccountMapper {
         private String realNameCipher;
         private Integer realNameVerified;
         private Integer status;
+    }
+
+    @Data
+    class WeChatIdentityInsertRow {
+        private Long accountId;
+        private String miniProgramAppId;
+        private String subjectHash;
+    }
+
+    @Data
+    class WeChatIdentityRow {
+        private Long accountId;
+        private String miniProgramAppId;
+        private String subjectHash;
+        private String nickname;
+        private String avatarUrl;
     }
 }

@@ -1,3 +1,4 @@
+// 关联业务：实现自然人账户及微信小程序主体绑定的持久化访问，保证授权手机号不会串绑到其他账号。
 package com.pangu.infrastructure.repository;
 
 import com.pangu.domain.context.UserContext;
@@ -72,6 +73,44 @@ public class AuthAccountRepositoryImpl implements AuthAccountRepository {
     @Override
     public int updateCUserLastActiveTenant(Long uid, Long tenantId) {
         return accountMapper.updateCUserLastActiveTenant(uid, tenantId);
+    }
+
+    @Override
+    public Long findAccountIdByWeChatSubjectHash(String miniProgramAppId, String subjectHash) {
+        return accountMapper.selectAccountIdByWeChatSubjectHash(miniProgramAppId, subjectHash);
+    }
+
+    @Override
+    public WeChatIdentitySnapshot findWeChatIdentity(Long accountId, String miniProgramAppId) {
+        AccountMapper.WeChatIdentityRow row = accountMapper.selectWeChatIdentity(accountId, miniProgramAppId);
+        if (row == null) {
+            return null;
+        }
+        return new WeChatIdentitySnapshot(
+                row.getAccountId(),
+                row.getMiniProgramAppId(),
+                row.getSubjectHash(),
+                row.getNickname(),
+                row.getAvatarUrl());
+    }
+
+    @Override
+    public int bindWeChatIdentity(WeChatIdentityBinding binding) {
+        AccountMapper.WeChatIdentityInsertRow row = new AccountMapper.WeChatIdentityInsertRow();
+        row.setAccountId(binding.accountId());
+        row.setMiniProgramAppId(binding.miniProgramAppId());
+        row.setSubjectHash(binding.subjectHash());
+        return accountMapper.insertWeChatIdentity(row);
+    }
+
+    @Override
+    public int touchWeChatIdentityLogin(Long accountId, String miniProgramAppId) {
+        return accountMapper.touchWeChatIdentityLogin(accountId, miniProgramAppId);
+    }
+
+    @Override
+    public int updateWeChatProfile(Long accountId, String miniProgramAppId, String nickname, String avatarUrl) {
+        return accountMapper.updateWeChatProfile(accountId, miniProgramAppId, nickname, avatarUrl);
     }
 
     private AccountSnapshot toSnapshot(AccountMapper.AccountRow row) {

@@ -1,3 +1,4 @@
+// 关联业务：生产环境仅在微信小程序身份授权等关键外部服务完成安全配置后启动，防止以开发默认值处理个人信息。
 package com.pangu.bootstrap.config;
 
 import jakarta.annotation.PostConstruct;
@@ -41,6 +42,8 @@ public class ProductionSafetyGuard {
         requireText("platform.identity.tencent.secret-id", "生产环境必须配置腾讯云身份核验 secret-id");
         requireText("platform.identity.tencent.secret-key", "生产环境必须配置腾讯云身份核验 secret-key");
         requireText("platform.identity.face-auth.tencent.rule-id", "生产环境必须配置腾讯云实名核身 rule-id");
+        requireText("platform.identity.wechat-mini-program.app-id", "生产环境必须配置微信小程序 app-id");
+        requireText("platform.identity.wechat-mini-program.app-secret", "生产环境必须配置微信小程序 app-secret");
         rejectValue("platform.security.jwt-secret", DEV_JWT_SECRET,
                 "生产环境禁止使用默认 JWT secret");
         rejectValue("platform.security.sm4-key-hex", DEV_SM4_KEY,

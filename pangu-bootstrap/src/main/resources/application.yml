@@ -91,6 +91,11 @@ platform:
       timeout-seconds: ${PANGU_EXCEL_PREVIEW_TIMEOUT_SECONDS:45}
       cjk-font-family: ${PANGU_EXCEL_PREVIEW_CJK_FONT:Noto Sans CJK SC}
   identity:
+    # 微信小程序原生手机号授权；生产环境必须通过环境变量提供真实主体凭据。
+    wechat-mini-program:
+      app-id: ${PANGU_WECHAT_MINI_PROGRAM_APP_ID:}
+      app-secret: ${PANGU_WECHAT_MINI_PROGRAM_APP_SECRET:}
+      request-timeout-millis: ${PANGU_WECHAT_MINI_PROGRAM_REQUEST_TIMEOUT_MILLIS:5000}
     tencent:
       region: ap-guangzhou
       secret-id:

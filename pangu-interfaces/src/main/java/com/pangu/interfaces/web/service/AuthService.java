@@ -5,6 +5,7 @@ import com.pangu.domain.context.UserContext;
 import com.pangu.domain.context.UserContextLoader;
 import com.pangu.domain.gateway.PropertyGateway;
 import com.pangu.domain.gateway.identity.IdCardOcrGateway;
+import com.pangu.domain.gateway.identity.WeChatMiniProgramGateway;
 import com.pangu.domain.model.identity.ChineseResidentId;
 import com.pangu.domain.model.asset.PropertyOwnership;
 import com.pangu.domain.model.community.GovernmentManagedCommunity;
@@ -23,6 +24,8 @@ import com.pangu.interfaces.web.controller.dto.NavMenuResponse;
 import com.pangu.interfaces.web.controller.dto.NavPageResponse;
 import com.pangu.interfaces.web.controller.dto.SwitchShadowRequest;
 import com.pangu.interfaces.web.controller.dto.SwitchTenantRequest;
+import com.pangu.interfaces.web.controller.dto.WeChatPhoneLoginRequest;
+import com.pangu.interfaces.web.controller.dto.WeChatProfileRequest;
 import com.pangu.interfaces.web.controller.dto.owner.IdCardOcrRequest;
 import com.pangu.interfaces.web.controller.dto.owner.IdCardOcrResponse;
 import com.pangu.interfaces.web.exception.AppException;
@@ -70,6 +73,7 @@ public class AuthService {
     private final OwnerIdentityVerificationRepository ownerIdentityVerificationRepository;
     private final IdCardOcrGateway idCardOcrGateway;
     private final NameDecryptor nameDecryptor;
+    private final WeChatMiniProgramGateway weChatMiniProgramGateway;
 
     /**
      * 双端统一登录：手机号 + 短信验证码 → 默认身份 → JWT。
@@ -97,40 +101,88 @@ public class AuthService {
             }
             account = createColdStartOwnerAccount(phone);
         }
-        if (account.status() == null || account.status() != 1) {
-            throw new AppException(CommonErrorCode.UNAUTHORIZED, "账号已被禁用或注销，请联系管理员");
+        return createSessionForAccount(account);
+    }
+
+    /**
+     * 小程序登录：微信原生授权手机号由服务端交换后，绑定到唯一自然人账号并签发原有会话。
+     *
+     * <p>昵称、头像不会随手机号授权自动读取；它们必须由用户之后单独确认授权，且只用于资料页展示。</p>
+     */
+    @Transactional
+    public Map<String, Object> weChatPhoneLogin(WeChatPhoneLoginRequest request) {
+        if (request == null) {
+            throw new AppException(CommonErrorCode.PARAM_ERROR, "微信登录请求不能为空");
         }
 
-        // 选择默认身份：last_active_identity_* 优先；为空时允许 C 端已有 c_user 身份兜底。
-        UserContext.IdentityType defaultType = resolveDefaultIdentityType(account);
-        Long defaultIdentityId = account.lastActiveIdentityId();
-        if (defaultIdentityId == null) {
-            Long uid = authAccountRepository.findCUserUidByAccountId(account.accountId());
-            if (uid == null) {
-                throw new AppException(CommonErrorCode.USER_NOT_REGISTERED,
-                        "账号尚未绑定可用身份，请前往居委会完成实名登记");
-            }
-            defaultType = UserContext.IdentityType.C_USER;
-            defaultIdentityId = uid;
+        WeChatMiniProgramGateway.WeChatPhoneIdentity phoneIdentity;
+        try {
+            phoneIdentity = weChatMiniProgramGateway.exchangePhoneAuthorization(request.loginCode(), request.phoneCode());
+        } catch (WeChatMiniProgramGateway.WeChatAuthorizationException e) {
+            throw translateWeChatAuthorizationException(e);
         }
 
-        // 用 UserContextLoader 加载默认身份；这一步同时校验该身份在 DB 中确实存在并启用
-        UserContext ctx = userContextLoader.load(account.accountId(), defaultType, defaultIdentityId, null);
+        String phone = normalizePhone(phoneIdentity.phoneNumber());
+        if (phone == null || !phone.matches("^1\\d{10}$")) {
+            throw new AppException(CommonErrorCode.SYSTEM_ERROR, "微信手机号授权结果异常，请稍后再试");
+        }
+        String miniProgramAppId = requireWeChatMiniProgramAppId();
+
+        Long boundAccountId = authAccountRepository.findAccountIdByWeChatSubjectHash(
+                miniProgramAppId, phoneIdentity.subjectHash());
+        AuthAccountRepository.AccountSnapshot account = boundAccountId == null
+                ? authAccountRepository.findByPhone(phone)
+                : authAccountRepository.findById(boundAccountId);
+        if (account == null && boundAccountId != null) {
+            throw new AppException(CommonErrorCode.SYSTEM_ERROR, "微信授权账号数据异常，请联系管理员");
+        }
+        if (account == null) {
+            account = createColdStartOwnerAccount(phone);
+        }
+        if (!phone.equals(account.phone())) {
+            throw new AppException(CommonErrorCode.FORBIDDEN,
+                    "微信授权手机号与已绑定账号不一致，请联系社区管理员处理手机号变更");
+        }
+
+        bindWeChatIdentity(account.accountId(), miniProgramAppId, phoneIdentity.subjectHash());
+        authAccountRepository.touchWeChatIdentityLogin(account.accountId(), miniProgramAppId);
+        return createSessionForAccount(account);
+    }
+
+    /**
+     * 保存用户单独确认授权的微信昵称和头像。
+     * 资料仅用于本人页面显示，不能替代实名、产权或投票资格核验。
+     */
+    @Transactional
+    public Map<String, Object> updateWeChatProfile(String authHeader, WeChatProfileRequest request) {
+        if (request == null) {
+            throw new AppException(CommonErrorCode.PARAM_ERROR, "微信资料请求不能为空");
+        }
+        String nickname = trimToNull(request.nickname());
+        String avatarUrl = trimToNull(request.avatarUrl());
+        if (nickname == null && avatarUrl == null) {
+            throw new AppException(CommonErrorCode.PARAM_ERROR, "请提供微信昵称或头像");
+        }
+        if (nickname != null && nickname.length() > 64) {
+            throw new AppException(CommonErrorCode.PARAM_ERROR, "微信昵称长度不能超过 64 个字符");
+        }
+        if (avatarUrl != null && avatarUrl.length() > 512) {
+            throw new AppException(CommonErrorCode.PARAM_ERROR, "微信头像地址长度不能超过 512 个字符");
+        }
+
+        UserContext ctx = loadContextFromToken(authHeader);
         if (ctx == null) {
-            throw new AppException(CommonErrorCode.USER_NOT_REGISTERED,
-                    "账号无可用身份，请前往居委会完成实名登记");
+            throw new AppException(CommonErrorCode.UNAUTHORIZED, "认证失效，请重新登录");
         }
-
-        // 回填 last_active_identity（首次登录的账户使用）
-        authAccountRepository.updateLastActiveIdentity(account.accountId(),
-                ctx.activeIdentityId(), ctx.identityType().name());
-
-        String token = jwtTokenProvider.generateToken(
-                ctx.accountId(), ctx.identityType().name(), ctx.activeIdentityId(), ctx.tenantId());
+        String miniProgramAppId = requireWeChatMiniProgramAppId();
+        if (authAccountRepository.findWeChatIdentity(ctx.accountId(), miniProgramAppId) == null) {
+            throw new AppException(CommonErrorCode.FORBIDDEN, "当前账号尚未完成微信手机号授权");
+        }
+        if (authAccountRepository.updateWeChatProfile(ctx.accountId(), miniProgramAppId, nickname, avatarUrl) != 1) {
+            throw new AppException(CommonErrorCode.SYSTEM_ERROR, "微信资料保存失败，请稍后再试");
+        }
 
         Map<String, Object> result = new LinkedHashMap<>();
-        result.put("access_token", token);
-        result.put("expires_in", 7200);
         result.put("user_info", buildUserInfo(ctx));
         return result;
     }
@@ -461,10 +513,102 @@ public class AuthService {
         return info;
     }
 
+    /**
+     * 基于已确认的自然人账户装配默认身份并创建平台会话。
+     * 微信和短信登录共用该流程，避免两条入口产生不同的身份兜底或 JWT 内容。
+     */
+    private Map<String, Object> createSessionForAccount(AuthAccountRepository.AccountSnapshot account) {
+        if (account.status() == null || account.status() != 1) {
+            throw new AppException(CommonErrorCode.UNAUTHORIZED, "账号已被禁用或注销，请联系管理员");
+        }
+
+        // 选择默认身份：last_active_identity_* 优先；为空时允许 C 端已有 c_user 身份兜底。
+        UserContext.IdentityType defaultType = resolveDefaultIdentityType(account);
+        Long defaultIdentityId = account.lastActiveIdentityId();
+        if (defaultIdentityId == null) {
+            Long uid = authAccountRepository.findCUserUidByAccountId(account.accountId());
+            if (uid == null) {
+                throw new AppException(CommonErrorCode.USER_NOT_REGISTERED,
+                        "账号尚未绑定可用身份，请前往居委会完成实名登记");
+            }
+            defaultType = UserContext.IdentityType.C_USER;
+            defaultIdentityId = uid;
+        }
+
+        // 用 UserContextLoader 加载默认身份；这一步同时校验该身份在数据库中确实存在并启用。
+        UserContext ctx = userContextLoader.load(account.accountId(), defaultType, defaultIdentityId, null);
+        if (ctx == null) {
+            throw new AppException(CommonErrorCode.USER_NOT_REGISTERED,
+                    "账号无可用身份，请前往居委会完成实名登记");
+        }
+
+        // 回填 last_active_identity（首次登录的账户使用）。
+        authAccountRepository.updateLastActiveIdentity(account.accountId(),
+                ctx.activeIdentityId(), ctx.identityType().name());
+
+        String token = jwtTokenProvider.generateToken(
+                ctx.accountId(), ctx.identityType().name(), ctx.activeIdentityId(), ctx.tenantId());
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("access_token", token);
+        result.put("expires_in", 7200);
+        result.put("user_info", buildUserInfo(ctx));
+        return result;
+    }
+
+    /**
+     * 绑定微信小程序主体散列，确保同一微信主体不能绑定多个自然人账户。
+     */
+    private void bindWeChatIdentity(Long accountId, String miniProgramAppId, String subjectHash) {
+        AuthAccountRepository.WeChatIdentitySnapshot existing =
+                authAccountRepository.findWeChatIdentity(accountId, miniProgramAppId);
+        if (existing != null) {
+            if (!Objects.equals(existing.subjectHash(), subjectHash)) {
+                throw new AppException(CommonErrorCode.FORBIDDEN,
+                        "当前账号已绑定其他微信主体，请联系社区管理员处理账号变更");
+            }
+            return;
+        }
+
+        if (authAccountRepository.bindWeChatIdentity(
+                new AuthAccountRepository.WeChatIdentityBinding(accountId, miniProgramAppId, subjectHash)) == 1) {
+            return;
+        }
+        Long existingAccountId = authAccountRepository.findAccountIdByWeChatSubjectHash(miniProgramAppId, subjectHash);
+        if (!Objects.equals(existingAccountId, accountId)) {
+            throw new AppException(CommonErrorCode.FORBIDDEN,
+                    "当前微信已绑定其他账号，请使用原账号登录或联系社区管理员");
+        }
+    }
+
+    private AppException translateWeChatAuthorizationException(
+            WeChatMiniProgramGateway.WeChatAuthorizationException exception) {
+        return switch (exception.failureType()) {
+            case CONFIGURATION -> new AppException(CommonErrorCode.SYSTEM_CONFIG_ERROR,
+                    "微信小程序登录服务未配置", exception);
+            case INVALID_AUTHORIZATION -> new AppException(CommonErrorCode.UNAUTHORIZED,
+                    "微信授权已失效，请重新授权", exception);
+            case TEMPORARILY_UNAVAILABLE -> new AppException(CommonErrorCode.SYSTEM_ERROR,
+                    "微信授权服务暂不可用，请稍后再试", exception);
+        };
+    }
+
+    private String requireWeChatMiniProgramAppId() {
+        String appId = trimToNull(weChatMiniProgramGateway.miniProgramAppId());
+        if (appId == null) {
+            throw new AppException(CommonErrorCode.SYSTEM_CONFIG_ERROR, "微信小程序登录服务未配置");
+        }
+        return appId;
+    }
+
     private Map<String, Object> buildUserInfo(UserContext ctx) {
         Map<String, Object> userInfo = new LinkedHashMap<>();
         AuthAccountRepository.AccountIdentitySnapshot identity =
                 authAccountRepository.findIdentityByAccountId(ctx.accountId());
+        String miniProgramAppId = trimToNull(weChatMiniProgramGateway.miniProgramAppId());
+        AuthAccountRepository.WeChatIdentitySnapshot weChatIdentity = miniProgramAppId == null
+                ? null
+                : authAccountRepository.findWeChatIdentity(ctx.accountId(), miniProgramAppId);
         userInfo.put("account_id", ctx.accountId());
         userInfo.put("identity_type", ctx.identityType().name());
         userInfo.put("active_identity_id", ctx.activeIdentityId());
@@ -486,6 +630,9 @@ public class AuthService {
                 ? trimToNull(nameDecryptor.safeDecrypt(identity.realNameCipher()))
                 : null);
         userInfo.put("phone", identity == null ? null : identity.phone());
+        // 头像与昵称来自用户另行确认的微信资料授权，仅供 C 端个人资料展示。
+        userInfo.put("wechat_nickname", weChatIdentity == null ? null : weChatIdentity.nickname());
+        userInfo.put("wechat_avatar_url", weChatIdentity == null ? null : weChatIdentity.avatarUrl());
         return userInfo;
     }
 

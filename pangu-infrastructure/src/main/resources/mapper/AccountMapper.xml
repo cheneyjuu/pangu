@@ -3,6 +3,8 @@
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.pangu.infrastructure.persistence.mapper.AccountMapper">
 
+    <!-- 关联业务：微信小程序手机号授权仅保存不可逆主体散列，昵称和头像仅作资料展示。 -->
+
     <resultMap id="AccountRowMap" type="com.pangu.infrastructure.persistence.mapper.AccountMapper$AccountRow">
         <id property="accountId" column="account_id"/>
         <result property="phone" column="phone"/>
@@ -17,6 +19,14 @@
         <result property="realNameCipher" column="real_name_cipher"/>
         <result property="realNameVerified" column="real_name_verified"/>
         <result property="status" column="status"/>
+    </resultMap>
+
+    <resultMap id="WeChatIdentityRowMap" type="com.pangu.infrastructure.persistence.mapper.AccountMapper$WeChatIdentityRow">
+        <id property="accountId" column="account_id"/>
+        <result property="miniProgramAppId" column="mini_program_app_id"/>
+        <result property="subjectHash" column="subject_hash"/>
+        <result property="nickname" column="nickname"/>
+        <result property="avatarUrl" column="avatar_url"/>
     </resultMap>
 
     <select id="selectByPhone" resultMap="AccountRowMap">
@@ -95,6 +105,46 @@
         SET last_active_tenant_id = #{tenantId},
             update_time = CURRENT_TIMESTAMP
         WHERE uid = #{uid}
+    </update>
+
+    <select id="selectAccountIdByWeChatSubjectHash" resultType="java.lang.Long">
+        SELECT account_id
+        FROM t_account_wechat_identity
+        WHERE mini_program_app_id = #{miniProgramAppId}
+          AND subject_hash = #{subjectHash}
+        LIMIT 1
+    </select>
+
+    <select id="selectWeChatIdentity" resultMap="WeChatIdentityRowMap">
+        SELECT account_id, mini_program_app_id, subject_hash, nickname, avatar_url
+        FROM t_account_wechat_identity
+        WHERE account_id = #{accountId}
+          AND mini_program_app_id = #{miniProgramAppId}
+        LIMIT 1
+    </select>
+
+    <insert id="insertWeChatIdentity"
+            parameterType="com.pangu.infrastructure.persistence.mapper.AccountMapper$WeChatIdentityInsertRow">
+        INSERT INTO t_account_wechat_identity (account_id, mini_program_app_id, subject_hash, last_login_time)
+        VALUES (#{accountId}, #{miniProgramAppId}, #{subjectHash}, CURRENT_TIMESTAMP)
+        ON CONFLICT DO NOTHING
+    </insert>
+
+    <update id="touchWeChatIdentityLogin">
+        UPDATE t_account_wechat_identity
+        SET last_login_time = CURRENT_TIMESTAMP,
+            update_time = CURRENT_TIMESTAMP
+        WHERE account_id = #{accountId}
+          AND mini_program_app_id = #{miniProgramAppId}
+    </update>
+
+    <update id="updateWeChatProfile">
+        UPDATE t_account_wechat_identity
+        SET nickname = #{nickname},
+            avatar_url = #{avatarUrl},
+            update_time = CURRENT_TIMESTAMP
+        WHERE account_id = #{accountId}
+          AND mini_program_app_id = #{miniProgramAppId}
     </update>
 
 </mapper>
