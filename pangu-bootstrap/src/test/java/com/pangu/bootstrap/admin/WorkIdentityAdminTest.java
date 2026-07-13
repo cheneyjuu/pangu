@@ -386,6 +386,25 @@ public class WorkIdentityAdminTest {
                 .andExpect(jsonPath("$.data.shadows[?(@.roleKey=='GOV_OPERATOR')]").exists())
                 .andExpect(jsonPath("$.data.shadows[?(@.roleKey=='GRID_MEMBER')]").exists());
 
+        Integer activeIdentityRows = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM t_account
+                WHERE account_id = ?
+                  AND last_active_identity_id = ?
+                  AND last_active_identity_type = 'SYS_USER'
+                """, Integer.class, ACC_WU, gridUserId);
+        assertEquals(1, activeIdentityRows);
+
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "username", "13800000005",
+                                "smsCode", "123456",
+                                "clientPortal", "G"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.user_info.role_key", is("GRID_MEMBER")))
+                .andExpect(jsonPath("$.data.user_info.active_identity_id", is((int) gridUserId)));
+
         String wuToken = token(ACC_WU, USR_WU_GOV);
         mockMvc.perform(get("/api/v1/auth/shadows")
                         .header("Authorization", "Bearer " + wuToken))

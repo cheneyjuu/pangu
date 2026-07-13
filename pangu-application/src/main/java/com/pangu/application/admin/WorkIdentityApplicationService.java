@@ -24,7 +24,8 @@ import java.util.regex.Pattern;
  * 工作身份授权写侧编排。
  *
  * <p>一个 {@code sys_user} 仍只绑定一个 RBAC 角色；同一自然人需要承担多个职责时，
- * 创建多个工作身份并通过登录分身切换使用。OWNER_GROUP 类职责在同一事务内补足
+ * 创建多个工作身份并通过登录分身切换使用。新分配的工作身份会成为该账号下次登录的
+ * 默认身份，避免授权完成后仍落入旧身份。OWNER_GROUP 类职责在同一事务内补足
  * 楼栋 ABAC 范围，满足数据库 deferred trigger。
  */
 @Slf4j
@@ -129,6 +130,10 @@ public class WorkIdentityApplicationService {
                 .orElseThrow(() -> new WorkIdentityApplicationException(
                         WorkIdentityApplicationException.Reason.ACCOUNT_NOT_FOUND,
                         "工作身份创建后未能回读：userId=" + userId));
+        // 分配角色即完成当前工作身份切换；否则已有 C 端或旧管理端身份的账号会在下次登录时
+        // 继续使用 last_active_identity，造成已授权角色和实际会话角色不一致。
+        repository.updateLastActiveIdentity(
+                cmd.accountId(), created.userId(), UserContext.IdentityType.SYS_USER.name());
         log.info("WorkIdentity created account={} user={} role={} dept={} by={}",
                 cmd.accountId(), userId, role.roleKey(), cmd.deptId(), ctx.userId());
         return created;
