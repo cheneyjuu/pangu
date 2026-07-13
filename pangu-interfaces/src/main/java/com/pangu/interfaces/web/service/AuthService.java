@@ -10,6 +10,7 @@ import com.pangu.domain.model.asset.PropertyOwnership;
 import com.pangu.domain.model.community.GovernmentManagedCommunity;
 import com.pangu.domain.model.user.WorkIdentityShadow;
 import com.pangu.domain.repository.AuthAccountRepository;
+import com.pangu.domain.repository.CommunitySettingsRepository;
 import com.pangu.domain.repository.GovernmentManagedCommunityRepository;
 import com.pangu.domain.repository.IdentityShadowRepository;
 import com.pangu.domain.repository.NavigationMenuRepository;
@@ -58,6 +59,7 @@ public class AuthService {
 
     private final JwtTokenProvider jwtTokenProvider;
     private final AuthAccountRepository authAccountRepository;
+    private final CommunitySettingsRepository communitySettingsRepository;
     private final IdentityShadowRepository identityShadowRepository;
     private final NavigationMenuRepository navigationMenuRepository;
     private final GovernmentManagedCommunityRepository governmentManagedCommunityRepository;
@@ -463,6 +465,12 @@ public class AuthService {
         userInfo.put("identity_type", ctx.identityType().name());
         userInfo.put("active_identity_id", ctx.activeIdentityId());
         userInfo.put("tenant_id", ctx.tenantId());
+        // 管理端外壳必须显示当前 JWT 所属租户，不能用前端演示小区替代真实租户名称。
+        userInfo.put("tenant_name", ctx.tenantId() == null
+                ? null
+                : communitySettingsRepository.findCommunity(ctx.tenantId())
+                        .map(community -> community.tenantName())
+                        .orElse(null));
         userInfo.put("dept_type", ctx.deptType());
         userInfo.put("auth_level", ctx.authLevel().getValue());
         userInfo.put("role_key", ctx.roleKey());

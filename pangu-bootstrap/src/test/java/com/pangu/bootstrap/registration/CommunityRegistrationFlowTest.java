@@ -246,7 +246,9 @@ public class CommunityRegistrationFlowTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.user_info.identity_type", is("SYS_USER")))
                 .andExpect(jsonPath("$.data.user_info.active_identity_id", is((int) workUserId)))
-                .andExpect(jsonPath("$.data.user_info.role_key", is("COMMITTEE_DIRECTOR")));
+                .andExpect(jsonPath("$.data.user_info.role_key", is("COMMITTEE_DIRECTOR")))
+                .andExpect(jsonPath("$.data.user_info.tenant_id", is((int) tenantId)))
+                .andExpect(jsonPath("$.data.user_info.tenant_name", is("春申新苑")));
         String committeeToken = jwtTokenProvider.generateToken(
                 applicant.accountId(), "SYS_USER", workUserId, tenantId);
         mockMvc.perform(get("/api/v1/admin/property-roster/topology")
