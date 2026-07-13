@@ -48,6 +48,7 @@ public class SwitchTenantMatrixTest {
 
     private static final long ACC_LISI = 999913L, UID_LISI = 70002L;
     private static final long ACC_GRID = 999804L, USR_GRID = 800004L;  // 陈网格员 SYS_USER
+    private static final long ACC_STREET = 999801L, USR_STREET = 800001L; // 王街道 GOV_SUPER_ADMIN
 
     @Test
     public void cUserSwitchToValidTenant_succeeds() throws Exception {
@@ -84,6 +85,45 @@ public class SwitchTenantMatrixTest {
         String token = jwtTokenProvider.generateToken(ACC_GRID, "SYS_USER", USR_GRID, TENANT_RUSHI);
         Map<String, Object> body = Map.of("targetTenantId", TENANT_RUSHI);
         mockMvc.perform(post("/api/v1/auth/switch-tenant")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(body)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code", is(403)));
+    }
+
+    @Test
+    public void governmentRootCanSwitchManagedCommunityContext() throws Exception {
+        String token = jwtTokenProvider.generateToken(ACC_STREET, "SYS_USER", USR_STREET, TENANT_RUSHI);
+        Map<String, Object> body = Map.of("targetTenantId", TENANT_RUSHI);
+        mockMvc.perform(post("/api/v1/auth/switch-managed-community")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(body)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code", is(200)))
+                .andExpect(jsonPath("$.data.new_access_token", notNullValue()))
+                .andExpect(jsonPath("$.data.active_tenant_id", is((int) TENANT_RUSHI)))
+                .andExpect(jsonPath("$.data.user_info.tenant_id", is((int) TENANT_RUSHI)));
+    }
+
+    @Test
+    public void nonGovernmentSysUserCannotSwitchManagedCommunityContext_403() throws Exception {
+        String token = jwtTokenProvider.generateToken(ACC_GRID, "SYS_USER", USR_GRID, TENANT_RUSHI);
+        Map<String, Object> body = Map.of("targetTenantId", TENANT_RUSHI);
+        mockMvc.perform(post("/api/v1/auth/switch-managed-community")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(body)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code", is(403)));
+    }
+
+    @Test
+    public void governmentRootCannotSwitchOutsideManagedCommunity_403() throws Exception {
+        String token = jwtTokenProvider.generateToken(ACC_STREET, "SYS_USER", USR_STREET, TENANT_RUSHI);
+        Map<String, Object> body = Map.of("targetTenantId", TENANT_NONEXISTENT);
+        mockMvc.perform(post("/api/v1/auth/switch-managed-community")
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(body)))

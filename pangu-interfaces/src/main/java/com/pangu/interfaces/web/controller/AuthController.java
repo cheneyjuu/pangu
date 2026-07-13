@@ -66,4 +66,23 @@ public class AuthController extends BaseController {
             @RequestBody SwitchTenantRequest request) {
         return success("切换成功", authService.switchTenant(authHeader, request));
     }
+
+    /**
+     * 6. G 端街镇或平台根组织可监管小区列表。
+     */
+    @GetMapping("/managed-communities")
+    public Result<Map<String, Object>> listManagedCommunities(
+            @RequestHeader("Authorization") String authHeader) {
+        return success(authService.listManagedCommunities(authHeader));
+    }
+
+    /**
+     * 7. G 端辖区小区上下文切换，后端校验组织授权后重签 JWT。
+     */
+    @PostMapping("/switch-managed-community")
+    public Result<Map<String, Object>> switchManagedCommunity(
+            @RequestHeader("Authorization") String authHeader,
+            @RequestBody SwitchTenantRequest request) {
+        return success("切换成功", authService.switchManagedCommunity(authHeader, request));
+    }
 }

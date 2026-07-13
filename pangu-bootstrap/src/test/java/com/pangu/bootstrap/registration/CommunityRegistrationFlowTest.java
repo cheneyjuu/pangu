@@ -204,6 +204,27 @@ public class CommunityRegistrationFlowTest {
         assertEquals(480, jdbcTemplate.queryForObject(
                 "SELECT planned_household_count FROM t_tenant_community WHERE tenant_id = ?",
                 Integer.class, tenantId));
+        mockMvc.perform(get("/api/v1/auth/managed-communities")
+                        .header("Authorization", "Bearer " + streetToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.communities[*].tenant_id", hasItem((int) tenantId)))
+                .andExpect(jsonPath("$.data.communities[*].tenant_name", hasItem("春申新苑")));
+
+        String switchedCommunityJson = mockMvc.perform(post("/api/v1/auth/switch-managed-community")
+                        .header("Authorization", "Bearer " + streetToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("targetTenantId", tenantId))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.active_tenant_id", is((int) tenantId)))
+                .andExpect(jsonPath("$.data.user_info.tenant_id", is((int) tenantId)))
+                .andReturn().getResponse().getContentAsString();
+        String switchedCommunityToken = objectMapper.readTree(switchedCommunityJson)
+                .path("data").path("new_access_token").asText();
+        mockMvc.perform(get("/api/v1/admin/property-roster/topology")
+                        .header("Authorization", "Bearer " + switchedCommunityToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.tenantId", is((int) tenantId)))
+                .andExpect(jsonPath("$.data.communityName", is("春申新苑")));
         assertEquals("COMMITTEE_DIRECTOR", jdbcTemplate.queryForObject("""
                 SELECT role.role_key
                 FROM sys_user_role user_role

@@ -7,8 +7,10 @@ import com.pangu.domain.gateway.PropertyGateway;
 import com.pangu.domain.gateway.identity.IdCardOcrGateway;
 import com.pangu.domain.model.identity.ChineseResidentId;
 import com.pangu.domain.model.asset.PropertyOwnership;
+import com.pangu.domain.model.community.GovernmentManagedCommunity;
 import com.pangu.domain.model.user.WorkIdentityShadow;
 import com.pangu.domain.repository.AuthAccountRepository;
+import com.pangu.domain.repository.GovernmentManagedCommunityRepository;
 import com.pangu.domain.repository.IdentityShadowRepository;
 import com.pangu.domain.repository.NavigationMenuRepository;
 import com.pangu.domain.repository.OwnerIdentityVerificationRepository;
@@ -30,6 +32,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 /**
@@ -42,6 +45,8 @@ import java.util.stream.Collectors;
  *       前端可在拿到 token 后调用 {@code switch-identity} 切换其他身份（M2 引入）。</li>
  *   <li>{@link #switchTenant} —— 仅 C 端业主（identityType=C_USER）可用；校验 {@code uid}
  *       在目标小区是否拥有房产绑定关系，重新签发 token。</li>
+ *   <li>{@link #switchManagedCommunity} —— G 端根组织仅能在后端确认的辖区小区之间切换，
+ *       重新签发带目标 tenant 上下文的 token。</li>
  * </ol>
  *
  * <p>JWT 不嵌 roles / permissions：每次请求由 {@code JwtAuthenticationFilter} → {@code UserContextLoader}
@@ -55,6 +60,7 @@ public class AuthService {
     private final AuthAccountRepository authAccountRepository;
     private final IdentityShadowRepository identityShadowRepository;
     private final NavigationMenuRepository navigationMenuRepository;
+    private final GovernmentManagedCommunityRepository governmentManagedCommunityRepository;
     private final UserContextLoader userContextLoader;
     private final PropertyGateway propertyGateway;
     private final SmsVerificationStrategy smsVerificationStrategy;
@@ -338,6 +344,59 @@ public class AuthService {
     }
 
     /**
+     * 返回当前街镇或平台根组织可监管的小区列表。
+     *
+     * <p>列表由组织树和 {@code sys_dept_tenant_scope} 共同决定，不能由前端静态配置或
+     * 请求参数替代。
+     */
+    public Map<String, Object> listManagedCommunities(String authHeader) {
+        UserContext ctx = requireGovernmentCommunitySwitcher(authHeader);
+        List<Map<String, Object>> communities = governmentManagedCommunityRepository
+                .listManagedCommunities(ctx.deptId())
+                .stream()
+                .map(this::buildManagedCommunityInfo)
+                .toList();
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("active_tenant_id", ctx.tenantId());
+        result.put("communities", communities);
+        return result;
+    }
+
+    /**
+     * G 端辖区小区上下文切换。
+     *
+     * <p>不复用 C 端 {@link #switchTenant}：两种切换的合法性来源不同。业主依据房产绑定，
+     * 政府组织依据组织树和有效监管范围。
+     */
+    public Map<String, Object> switchManagedCommunity(String authHeader, SwitchTenantRequest request) {
+        UserContext current = requireGovernmentCommunitySwitcher(authHeader);
+        Long targetTenantId = request == null ? null : request.getTargetTenantId();
+        if (targetTenantId == null) {
+            throw new AppException(CommonErrorCode.PARAM_ERROR, "targetTenantId 不能为空");
+        }
+        if (!governmentManagedCommunityRepository.canManageCommunity(current.deptId(), targetTenantId)) {
+            throw new AppException(CommonErrorCode.FORBIDDEN, "目标小区不在当前监管范围内");
+        }
+
+        UserContext target = userContextLoader.load(
+                current.accountId(), UserContext.IdentityType.SYS_USER,
+                current.activeIdentityId(), targetTenantId);
+        if (target == null || !Objects.equals(targetTenantId, target.tenantId())) {
+            throw new AppException(CommonErrorCode.FORBIDDEN, "目标小区会话上下文不可用");
+        }
+
+        String newToken = jwtTokenProvider.generateToken(
+                target.accountId(), target.identityType().name(), target.activeIdentityId(), target.tenantId());
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("new_access_token", newToken);
+        result.put("expires_in", 7200);
+        result.put("active_tenant_id", target.tenantId());
+        result.put("user_info", buildUserInfo(target));
+        return result;
+    }
+
+    /**
      * 选择默认身份类型。{@code last_active_identity_type} 为空时返回 {@code SYS_USER} 作为默认（多数账号都先发管理端身份）。
      * UserContextLoader 内部会再做一次 SYS_USER → C_USER 兜底。
      */
@@ -371,6 +430,29 @@ public class AuthService {
                 UserContext.IdentityType.valueOf(identityType),
                 activeIdentityId,
                 tenantId);
+    }
+
+    private UserContext requireGovernmentCommunitySwitcher(String authHeader) {
+        UserContext ctx = loadContextFromToken(authHeader);
+        boolean eligible = ctx != null
+                && ctx.isSysUser()
+                && ctx.deptCategory() == UserContext.DeptCategory.G
+                && Integer.valueOf(1).equals(ctx.deptType())
+                && ctx.deptId() != null;
+        if (!eligible) {
+            throw new AppException(CommonErrorCode.FORBIDDEN, "当前工作身份无权切换辖区小区");
+        }
+        return ctx;
+    }
+
+    private Map<String, Object> buildManagedCommunityInfo(GovernmentManagedCommunity community) {
+        Map<String, Object> info = new LinkedHashMap<>();
+        info.put("tenant_id", community.tenantId());
+        info.put("tenant_name", community.tenantName());
+        info.put("planned_household_count", community.plannedHouseholdCount());
+        info.put("total_exclusive_area", community.totalExclusiveArea());
+        info.put("governance_status", community.governanceStatus());
+        return info;
     }
 
     private Map<String, Object> buildUserInfo(UserContext ctx) {

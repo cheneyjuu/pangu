@@ -185,39 +185,77 @@
     </select>
 
     <!--
-        跨租户 G 端根节点的默认管理小区。
-        优先取组织树下居委会配置的管辖 tenant，其次取组织树下部门自身 tenant。
+        街镇或平台根组织可监管小区范围。
+        管辖范围既可能显式配置在 G 端居委会节点，也可能由审核通过后创建的子组织 tenant_id 直接产生。
+        该 SQL 片段同时服务默认上下文、切换授权与小区选择器，避免三处范围判定发生漂移。
     -->
+    <sql id="GovernmentManagedTenantScope">
+        SELECT dts.tenant_id
+        FROM sys_dept_tenant_scope dts
+        JOIN sys_dept d ON d.dept_id = dts.dept_id
+        WHERE dts.status = 1
+          AND d.status = '0'
+          AND (
+              d.dept_id = #{deptId}
+              OR d.ancestors = CAST(#{deptId} AS VARCHAR)
+              OR d.ancestors LIKE CAST(#{deptId} AS VARCHAR) || ',%'
+              OR d.ancestors LIKE '%,' || CAST(#{deptId} AS VARCHAR)
+              OR d.ancestors LIKE '%,' || CAST(#{deptId} AS VARCHAR) || ',%'
+          )
+        UNION
+        SELECT d.tenant_id
+        FROM sys_dept d
+        WHERE d.tenant_id IS NOT NULL
+          AND d.status = '0'
+          AND (
+              d.dept_id = #{deptId}
+              OR d.ancestors = CAST(#{deptId} AS VARCHAR)
+              OR d.ancestors LIKE CAST(#{deptId} AS VARCHAR) || ',%'
+              OR d.ancestors LIKE '%,' || CAST(#{deptId} AS VARCHAR)
+              OR d.ancestors LIKE '%,' || CAST(#{deptId} AS VARCHAR) || ',%'
+          )
+    </sql>
+
+    <!-- 跨租户 G 端根节点首次登录时，取其有效监管范围内的第一个小区作为默认上下文。 -->
     <select id="selectDefaultTenantByGovernmentDept" resultType="java.lang.Long">
-        SELECT tenant_id
+        SELECT scoped.tenant_id
         FROM (
-            SELECT dts.tenant_id
-            FROM sys_dept_tenant_scope dts
-            JOIN sys_dept d ON d.dept_id = dts.dept_id
-            WHERE dts.status = 1
-              AND d.status = '0'
-              AND (
-                  d.dept_id = #{deptId}
-                  OR d.ancestors = CAST(#{deptId} AS VARCHAR)
-                  OR d.ancestors LIKE CAST(#{deptId} AS VARCHAR) || ',%'
-                  OR d.ancestors LIKE '%,' || CAST(#{deptId} AS VARCHAR)
-                  OR d.ancestors LIKE '%,' || CAST(#{deptId} AS VARCHAR) || ',%'
-              )
-            UNION
-            SELECT d.tenant_id
-            FROM sys_dept d
-            WHERE d.tenant_id IS NOT NULL
-              AND d.status = '0'
-              AND (
-                  d.dept_id = #{deptId}
-                  OR d.ancestors = CAST(#{deptId} AS VARCHAR)
-                  OR d.ancestors LIKE CAST(#{deptId} AS VARCHAR) || ',%'
-                  OR d.ancestors LIKE '%,' || CAST(#{deptId} AS VARCHAR)
-                  OR d.ancestors LIKE '%,' || CAST(#{deptId} AS VARCHAR) || ',%'
-              )
+            <include refid="GovernmentManagedTenantScope"/>
         ) scoped
-        ORDER BY tenant_id ASC
+        JOIN t_tenant_community community ON community.tenant_id = scoped.tenant_id
+        WHERE community.status = 'ACTIVE'
+        ORDER BY scoped.tenant_id ASC
         LIMIT 1
+    </select>
+
+    <!-- 返回登录身份所属政府组织可切换的全部已启用小区。 -->
+    <select id="selectManagedCommunitiesByGovernmentDept"
+            resultType="com.pangu.infrastructure.persistence.mapper.UserContextMapper$GovernmentManagedCommunityRow">
+        SELECT DISTINCT
+            community.tenant_id AS tenantId,
+            community.tenant_name AS tenantName,
+            community.planned_household_count AS plannedHouseholdCount,
+            community.total_exclusive_area AS totalExclusiveArea,
+            community.governance_status AS governanceStatus
+        FROM t_tenant_community community
+        JOIN (
+            <include refid="GovernmentManagedTenantScope"/>
+        ) scoped ON scoped.tenant_id = community.tenant_id
+        WHERE community.status = 'ACTIVE'
+        ORDER BY community.tenant_name ASC, community.tenant_id ASC
+    </select>
+
+    <!-- JWT 中的政府组织小区上下文必须持续落在当前有效授权范围内。 -->
+    <select id="existsManagedCommunityByGovernmentDept" resultType="boolean">
+        SELECT EXISTS (
+            SELECT 1
+            FROM t_tenant_community community
+            JOIN (
+                <include refid="GovernmentManagedTenantScope"/>
+            ) scoped ON scoped.tenant_id = community.tenant_id
+            WHERE community.status = 'ACTIVE'
+              AND community.tenant_id = #{tenantId}
+        )
     </select>
 
 </mapper>

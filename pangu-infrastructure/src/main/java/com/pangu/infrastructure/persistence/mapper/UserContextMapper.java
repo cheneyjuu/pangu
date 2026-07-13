@@ -3,6 +3,7 @@ package com.pangu.infrastructure.persistence.mapper;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 /**
@@ -69,6 +70,18 @@ public interface UserContextMapper {
      * 取其组织树下第一个可管辖 tenant 作为本次会话的默认小区上下文。
      */
     Long selectDefaultTenantByGovernmentDept(@Param("deptId") Long deptId);
+
+    /**
+     * 查询街镇或平台根组织当前可切换监管的已启用小区。
+     */
+    List<GovernmentManagedCommunityRow> selectManagedCommunitiesByGovernmentDept(
+            @Param("deptId") Long deptId);
+
+    /**
+     * 校验目标小区是否仍在街镇或平台根组织的有效监管范围内。
+     */
+    boolean existsManagedCommunityByGovernmentDept(@Param("deptId") Long deptId,
+                                                   @Param("tenantId") Long tenantId);
 
     /**
      * 给定 role_id 反查其所有 permission_key。
@@ -146,6 +159,32 @@ public interface UserContextMapper {
         public void setAccountId(Long accountId) { this.accountId = accountId; }
         public Integer getAuthLevel() { return authLevel; }
         public void setAuthLevel(Integer authLevel) { this.authLevel = authLevel; }
+    }
+
+    /**
+     * 政府组织可监管小区的扁平摘要，供会话上下文切换与左上角小区选择器共同使用。
+     */
+    class GovernmentManagedCommunityRow {
+        private Long tenantId;
+        private String tenantName;
+        private Integer plannedHouseholdCount;
+        private BigDecimal totalExclusiveArea;
+        private String governanceStatus;
+
+        public Long getTenantId() { return tenantId; }
+        public void setTenantId(Long tenantId) { this.tenantId = tenantId; }
+        public String getTenantName() { return tenantName; }
+        public void setTenantName(String tenantName) { this.tenantName = tenantName; }
+        public Integer getPlannedHouseholdCount() { return plannedHouseholdCount; }
+        public void setPlannedHouseholdCount(Integer plannedHouseholdCount) {
+            this.plannedHouseholdCount = plannedHouseholdCount;
+        }
+        public BigDecimal getTotalExclusiveArea() { return totalExclusiveArea; }
+        public void setTotalExclusiveArea(BigDecimal totalExclusiveArea) {
+            this.totalExclusiveArea = totalExclusiveArea;
+        }
+        public String getGovernanceStatus() { return governanceStatus; }
+        public void setGovernanceStatus(String governanceStatus) { this.governanceStatus = governanceStatus; }
     }
 
     /**

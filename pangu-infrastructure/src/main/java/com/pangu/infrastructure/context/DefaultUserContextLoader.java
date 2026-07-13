@@ -49,6 +49,14 @@ public class DefaultUserContextLoader implements UserContextLoader {
             log.warn("SYS_USER context load miss: userId={}", userId);
             return null;
         }
+        // G 端根组织的 tenantId 来自可切换会话令牌。每次装配都回查当前辖区授权，
+        // 防止授权撤销后旧令牌在有效期内仍能穿透到已移出范围的小区。
+        if (requiresGovernmentScopeValidation(row, tenantIdHint)
+                && !userContextMapper.existsManagedCommunityByGovernmentDept(row.getDeptId(), tenantIdHint)) {
+            log.warn("SYS_USER tenant context out of government scope: userId={}, deptId={}, tenantId={}",
+                    userId, row.getDeptId(), tenantIdHint);
+            return null;
+        }
         DataScopeType scope = DataScopeType.of(row.getEffectiveDataScope());
         UserContext.DeptCategory deptCategory = parseDeptCategory(row.getDeptCategory());
 
@@ -111,6 +119,14 @@ public class DefaultUserContextLoader implements UserContextLoader {
             return null;
         }
         return userContextMapper.selectDefaultTenantByGovernmentDept(row.getDeptId());
+    }
+
+    private boolean requiresGovernmentScopeValidation(UserContextMapper.SysUserContextRow row, Long tenantIdHint) {
+        return tenantIdHint != null
+                && row.getDeptTenantId() == null
+                && row.getDeptId() != null
+                && "G".equals(row.getDeptCategory())
+                && Integer.valueOf(1).equals(row.getDeptType());
     }
 
     private UserContext loadCUser(Long accountId, Long uid, Long tenantIdHint) {
