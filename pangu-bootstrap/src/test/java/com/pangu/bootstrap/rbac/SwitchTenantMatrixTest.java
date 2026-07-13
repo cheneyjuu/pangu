@@ -1,3 +1,4 @@
+// 关联业务：验证业主跨小区候选房产只能来自本人产权，并通过租户切换重新签发会话。
 package com.pangu.bootstrap.rbac;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -11,8 +12,10 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.Map;
 
+import static org.hamcrest.Matchers.hasItems;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.notNullValue;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -49,6 +52,18 @@ public class SwitchTenantMatrixTest {
     private static final long ACC_LISI = 999913L, UID_LISI = 70002L;
     private static final long ACC_GRID = 999804L, USR_GRID = 800004L;  // 陈网格员 SYS_USER
     private static final long ACC_STREET = 999801L, USR_STREET = 800001L; // 王街道 GOV_SUPER_ADMIN
+
+    @Test
+    public void cUserPropertyPortfolio_listsEveryOwnedCommunity() throws Exception {
+        String token = jwtTokenProvider.generateToken(ACC_LISI, "C_USER", UID_LISI, TENANT_RUSHI);
+
+        mockMvc.perform(get("/api/v1/me/property-portfolio")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[*].tenantId", hasItems(10001, 10002, 10003)))
+                .andExpect(jsonPath("$.data[*].communityName", hasItems(
+                        "求是花园物业管理区域", "求是东区物业管理区域", "求是西区物业管理区域")));
+    }
 
     @Test
     public void cUserSwitchToValidTenant_succeeds() throws Exception {

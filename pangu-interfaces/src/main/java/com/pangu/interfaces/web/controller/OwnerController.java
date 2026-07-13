@@ -1,3 +1,4 @@
+// 关联业务：提供业主名册查询，并向业主本人返回当前小区及跨小区房产组合。
 package com.pangu.interfaces.web.controller;
 
 import com.pangu.application.owner.OwnerDetailView;
@@ -94,6 +95,26 @@ public class OwnerController extends BaseController {
         }
         Long tenantId = SecurityUtils.getTenantId();
         List<OwnerPropertyDetail> properties = ownerQueryService.listOwnerProperties(uid, tenantId);
+        return success(properties.stream()
+                .map(p -> MyOwnerPropertyResponse.from(p, uid))
+                .toList());
+    }
+
+    /**
+     * 当前自然人名下的全部有效房产。
+     *
+     * <p>与 {@code /me/properties} 的当前租户视图不同，本接口仅按 token 中的 uid 查询，
+     * 用于生成跨小区切换候选。目标租户切换仍必须通过 {@code /auth/switch-tenant}
+     * 再次校验产权关系并重签 JWT，前端不能仅凭该列表改变租户上下文。
+     */
+    @GetMapping("/me/property-portfolio")
+    @PreAuthorize("isAuthenticated()")
+    public Result<List<MyOwnerPropertyResponse>> myPropertyPortfolio() {
+        Long uid = SecurityUtils.getUid();
+        if (uid == null) {
+            throw new AppException(CommonErrorCode.FORBIDDEN, "未识别到业主身份，禁止访问名下房产组合");
+        }
+        List<OwnerPropertyDetail> properties = ownerQueryService.listOwnerProperties(uid, null);
         return success(properties.stream()
                 .map(p -> MyOwnerPropertyResponse.from(p, uid))
                 .toList());
