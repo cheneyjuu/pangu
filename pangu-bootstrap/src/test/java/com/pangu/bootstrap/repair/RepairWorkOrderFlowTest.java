@@ -506,6 +506,37 @@ public class RepairWorkOrderFlowTest {
     }
 
     @Test
+    public void ownerUploadsAndBindsReportPhotosAfterCreatingRepair() throws Exception {
+        String ownerToken = token(ACC_OWNER, "C_USER", UID_OWNER);
+        long opid = jdbcTemplate.queryForObject("""
+                SELECT opid FROM c_owner_property
+                WHERE uid = ? AND tenant_id = ?
+                ORDER BY opid LIMIT 1
+                """, Long.class, UID_OWNER, TENANT);
+        long id = createPrivate(ownerToken, opid, "IT-报修-业主现场照片-" + System.nanoTime());
+
+        MockMultipartFile file = new MockMultipartFile(
+                "file", "业主现场.jpg", "image/jpeg", new byte[1024]);
+        String uploadResponse = mockMvc.perform(multipart("/api/v1/me/repairs/" + id + "/attachments")
+                        .file(file)
+                        .param("contentType", "image/jpeg")
+                        .header("Authorization", "Bearer " + ownerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.attachmentKind", is("OWNER_REPORT_IMAGE")))
+                .andExpect(jsonPath("$.data.status", is("BOUND")))
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+        long attachmentId = objectMapper.readTree(uploadResponse).path("data").path("attachmentId").asLong();
+
+        assertEquals(1, jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM t_repair_attachment
+                WHERE attachment_id = ?
+                  AND attachment_kind = 'OWNER_REPORT_IMAGE'
+                  AND status = 'BOUND'
+                  AND bound_action = 'OWNER_SUBMIT_EVIDENCE'
+                """, Integer.class, attachmentId));
+    }
+
+    @Test
     public void propertyStaffSubmitsInspectionFromSubmittedWithOneBusinessAction() throws Exception {
         String staffToken = token(ACC_PROPERTY_STAFF, "SYS_USER", USR_PROPERTY_STAFF);
         String created = mockMvc.perform(post("/api/v1/admin/repair-work-orders")
