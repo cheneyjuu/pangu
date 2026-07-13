@@ -1,3 +1,4 @@
+// 关联业务：提供管理端角色分配时按小区隔离的组织、人员与楼栋范围查询能力。
 package com.pangu.domain.repository;
 
 import com.pangu.domain.model.user.WorkIdentityDeptOption;
@@ -60,6 +61,11 @@ public interface WorkIdentityRepository {
     List<WorkIdentityBuildingScope> listDeptBuildingScopes(Long deptId);
 
     List<WorkIdentityDeptOption> listDeptOptions(String deptCategory, Long tenantId);
+
+    /**
+     * 查询只属于当前小区的组织，避免物业角色落到跨小区企业根组织。
+     */
+    List<WorkIdentityDeptOption> listTenantDeptOptions(String deptCategory, Long tenantId);
 
     List<WorkIdentityDeptOption> listGridChildren(Long communityDeptId);
 

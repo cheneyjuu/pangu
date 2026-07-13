@@ -1,3 +1,4 @@
+// 关联业务：查询和维护管理端工作身份、组织选项及权限范围。
 package com.pangu.infrastructure.persistence.mapper;
 
 import lombok.Data;
@@ -63,6 +64,9 @@ public interface WorkIdentityMapper {
 
     List<DeptOptionRow> selectDeptOptions(@Param("deptCategory") String deptCategory,
                                           @Param("tenantId") Long tenantId);
+
+    List<DeptOptionRow> selectTenantDeptOptions(@Param("deptCategory") String deptCategory,
+                                                @Param("tenantId") Long tenantId);
 
     List<DeptOptionRow> selectGridChildren(@Param("communityDeptId") Long communityDeptId);
 

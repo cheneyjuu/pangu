@@ -34,8 +34,8 @@ public class MockAliyunEnterpriseVerificationProvider implements EnterpriseVerif
 
     @Override
     public VerificationResult verify(VerificationRequest request) {
-        if (!request.supplierAuthorizationConfirmed()) {
-            throw new IllegalArgumentException("供应商未确认授权企业要素核验");
+        if (!request.subjectAuthorizationConfirmed()) {
+            throw new IllegalArgumentException("企业主体未确认授权企业要素核验");
         }
         if (request.legalName() == null || request.legalName().isBlank()
                 || request.unifiedSocialCreditCode() == null

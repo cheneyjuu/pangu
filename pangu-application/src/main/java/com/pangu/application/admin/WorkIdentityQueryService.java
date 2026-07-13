@@ -1,3 +1,4 @@
+// 关联业务：按当前小区数据范围查询可授权的自然人、组织和楼栋选项。
 package com.pangu.application.admin;
 
 import com.pangu.domain.context.UserContext;
@@ -133,7 +134,10 @@ public class WorkIdentityQueryService {
         SysRole role = roleByKey(roleKey);
         UserContext ctx = userContextHolder.current();
         Long tenantId = ctx == null ? null : ctx.tenantId();
-        return repository.listDeptOptions(role.allowedDeptCategory(), tenantId).stream()
+        List<WorkIdentityDeptOption> options = WorkIdentityRoleRules.isPropertyServiceRole(role.roleKey())
+                ? repository.listTenantDeptOptions(role.allowedDeptCategory(), tenantId)
+                : repository.listDeptOptions(role.allowedDeptCategory(), tenantId);
+        return options.stream()
                 .filter(dept -> WorkIdentityRoleRules.matchesDeptType(role.roleKey(), dept.deptType()))
                 .toList();
     }

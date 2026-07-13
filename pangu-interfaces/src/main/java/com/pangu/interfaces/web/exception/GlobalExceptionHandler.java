@@ -1,3 +1,4 @@
+// 关联业务：统一翻译社区治理管理端和业主端流程的应用异常，防止技术细节外泄。
 package com.pangu.interfaces.web.exception;
 
 import com.pangu.application.admin.BuildingAssignmentApplicationException;
@@ -6,6 +7,7 @@ import com.pangu.application.admin.WorkIdentityApplicationException;
 import com.pangu.application.assembly.OwnersAssemblyApplicationException;
 import com.pangu.application.community.CommunitySettingsApplicationException;
 import com.pangu.application.registration.CommunityRegistrationApplicationException;
+import com.pangu.application.propertyservice.PropertyServiceOrganizationApplicationException;
 import com.pangu.application.disclosure.FinanceDisclosureApplicationException;
 import com.pangu.application.dispute.DisputeApplicationException;
 import com.pangu.application.lock.GovernanceLockApplicationException;
@@ -227,6 +229,26 @@ public class GlobalExceptionHandler {
         CommunityRegistrationErrorCode errorCode = CommunityRegistrationExceptionTranslator.translate(ex);
         response.setStatus(errorCode.getHttpStatus());
         log.info("CommunityRegistration business exception reason={} code={} msg={}",
+                ex.getReason(), errorCode.getCode(), ex.getMessage());
+        return Result.fail(
+                errorCode.getCode(),
+                ex.getMessage() != null ? ex.getMessage() : errorCode.getMessage(),
+                null,
+                errorCode.getErrorType(),
+                errorCode.isNeedRetry());
+    }
+
+    /**
+     * 物业服务组织登记、企业核验和项目部启用异常翻译。
+     */
+    @ExceptionHandler(PropertyServiceOrganizationApplicationException.class)
+    public Result<Object> handlePropertyServiceOrganizationApplicationException(
+            PropertyServiceOrganizationApplicationException ex,
+            HttpServletResponse response) {
+        PropertyServiceOrganizationErrorCode errorCode =
+                PropertyServiceOrganizationExceptionTranslator.translate(ex);
+        response.setStatus(errorCode.getHttpStatus());
+        log.info("PropertyServiceOrganization business exception reason={} code={} msg={}",
                 ex.getReason(), errorCode.getCode(), ex.getMessage());
         return Result.fail(
                 errorCode.getCode(),

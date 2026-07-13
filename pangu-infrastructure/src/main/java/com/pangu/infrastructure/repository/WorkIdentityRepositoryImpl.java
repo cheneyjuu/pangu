@@ -1,3 +1,4 @@
+// 关联业务：实现管理端工作身份、组织范围和楼栋责任田的持久化查询与写入。
 package com.pangu.infrastructure.repository;
 
 import com.pangu.domain.model.user.WorkIdentityBuildingScope;
@@ -135,6 +136,16 @@ public class WorkIdentityRepositoryImpl implements WorkIdentityRepository {
     @Override
     public List<WorkIdentityDeptOption> listDeptOptions(String deptCategory, Long tenantId) {
         return mapper.selectDeptOptions(deptCategory, tenantId).stream()
+                .map(this::toDeptOption)
+                .toList();
+    }
+
+    @Override
+    public List<WorkIdentityDeptOption> listTenantDeptOptions(String deptCategory, Long tenantId) {
+        if (tenantId == null) {
+            return List.of();
+        }
+        return mapper.selectTenantDeptOptions(deptCategory, tenantId).stream()
                 .map(this::toDeptOption)
                 .toList();
     }

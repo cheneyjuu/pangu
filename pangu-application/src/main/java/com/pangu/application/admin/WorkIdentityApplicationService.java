@@ -1,3 +1,4 @@
+// 关联业务：创建和维护管理端工作身份，并把角色绑定到当前小区的真实组织节点。
 package com.pangu.application.admin;
 
 import com.pangu.application.admin.command.CreateWorkIdentityCommand;
@@ -66,7 +67,7 @@ public class WorkIdentityApplicationService {
                 .orElseThrow(() -> new WorkIdentityApplicationException(
                         WorkIdentityApplicationException.Reason.DEPT_NOT_FOUND,
                         "部门不存在或已停用：deptId=" + cmd.deptId()));
-        validateRoleDept(role, dept);
+        validateRoleDept(ctx, role, dept);
         if (repository.accountHasDept(cmd.accountId(), cmd.deptId())) {
             throw new WorkIdentityApplicationException(
                     WorkIdentityApplicationException.Reason.DUPLICATE_IDENTITY,
@@ -624,7 +625,7 @@ public class WorkIdentityApplicationService {
         return Set.copyOf(tenantIds);
     }
 
-    private void validateRoleDept(SysRole role, WorkIdentityDeptOption dept) {
+    private void validateRoleDept(UserContext context, SysRole role, WorkIdentityDeptOption dept) {
         if (!role.allowedDeptCategory().equals(dept.deptCategory())) {
             throw new WorkIdentityApplicationException(
                     WorkIdentityApplicationException.Reason.ROLE_DEPT_MISMATCH,
@@ -636,6 +637,13 @@ public class WorkIdentityApplicationService {
                     WorkIdentityApplicationException.Reason.ROLE_DEPT_MISMATCH,
                     "角色 " + role.roleKey() + " 与部门类型 deptType=" + dept.deptType()
                             + " 不匹配");
+        }
+        if (WorkIdentityRoleRules.isPropertyServiceRole(role.roleKey())
+                && (context.tenantId() == null || dept.tenantId() == null
+                || !context.tenantId().equals(dept.tenantId()))) {
+            throw new WorkIdentityApplicationException(
+                    WorkIdentityApplicationException.Reason.ROLE_DEPT_MISMATCH,
+                    "物业角色必须绑定当前小区已核验启用的物业服务项目部");
         }
     }
 

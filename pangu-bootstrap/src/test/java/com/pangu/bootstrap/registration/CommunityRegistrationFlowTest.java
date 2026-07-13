@@ -48,6 +48,7 @@ public class CommunityRegistrationFlowTest {
 
     private static final String DIRECTOR_PHONE = "13900007301";
     private static final String OWNER_PHONE = "13900007302";
+    private static final String PROPERTY_SERVICE_DIRECTOR_PHONE = "13900007303";
     private static final long STREET_ACCOUNT_ID = 999801L;
     private static final long STREET_USER_ID = 800001L;
     private static final long PLATFORM_ACCOUNT_ID = 991500L;
@@ -328,6 +329,127 @@ public class CommunityRegistrationFlowTest {
                 """, String.class, applicationId));
     }
 
+    @Test
+    public void newCommunity_propertyServiceOrganizationVerificationEnablesTenantProjectDepartment() throws Exception {
+        LoginSession applicant = ownerLogin(PROPERTY_SERVICE_DIRECTOR_PHONE);
+        String streetToken = jwtTokenProvider.generateToken(
+                STREET_ACCOUNT_ID, "SYS_USER", STREET_USER_ID, null);
+
+        String registrationJson = mockMvc.perform(post("/api/v1/community-registrations")
+                        .header("Authorization", "Bearer " + applicant.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(registrationPayload(
+                                "物业张主任", "COMMITTEE_DIRECTOR", "春申物业服务苑", "上海市闵行区春申路 300 弄", null))))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        long applicationId = objectMapper.readTree(registrationJson).path("data").path("applicationId").asLong();
+        uploadMaterial(applicant.token(), applicationId, "COMMITTEE_FILING");
+        mockMvc.perform(post("/api/v1/community-registrations/" + applicationId + "/submit")
+                        .header("Authorization", "Bearer " + applicant.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\":0}"))
+                .andExpect(status().isOk());
+
+        String approvedJson = mockMvc.perform(post(
+                        "/api/v1/admin/community-registrations/" + applicationId + "/reviews")
+                        .header("Authorization", "Bearer " + streetToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "decision", "APPROVE",
+                                "reviewMode", "STREET",
+                                "reviewComment", "新小区业委会备案材料核验通过",
+                                "expectedVersion", 1))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status", is("APPROVED")))
+                .andReturn().getResponse().getContentAsString();
+        JsonNode approved = objectMapper.readTree(approvedJson).path("data");
+        long tenantId = approved.path("provisionedTenantId").asLong();
+        long committeeUserId = approved.path("onboarding").path("applicantWorkUserId").asLong();
+        String committeeToken = jwtTokenProvider.generateToken(
+                applicant.accountId(), "SYS_USER", committeeUserId, tenantId);
+
+        String streetCommunityJson = mockMvc.perform(post("/api/v1/auth/switch-managed-community")
+                        .header("Authorization", "Bearer " + streetToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("targetTenantId", tenantId))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        String streetCommunityToken = objectMapper.readTree(streetCommunityJson)
+                .path("data").path("new_access_token").asText();
+
+        mockMvc.perform(get("/api/v1/admin/work-identities/dept-options?roleKey=PROPERTY_MANAGER")
+                        .header("Authorization", "Bearer " + streetCommunityToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()", is(0)));
+
+        String organizationJson = mockMvc.perform(post("/api/v1/admin/property-service-organizations")
+                        .header("Authorization", "Bearer " + committeeToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "legalName", "上海春申物业服务有限公司",
+                                "unifiedSocialCreditCode", "91310112MA1G0ABCD1",
+                                "projectDeptName", "春申物业服务苑项目部",
+                                "serviceContactName", "王经理",
+                                "serviceContactPhone", "13900007311",
+                                "serviceBasis", "PRELIMINARY_PROPERTY_SERVICE",
+                                "serviceStartDate", "2026-07-13"))))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.status", is("DRAFT")))
+                .andReturn().getResponse().getContentAsString();
+        long organizationId = objectMapper.readTree(organizationJson).path("data").path("organizationId").asLong();
+        uploadPropertyServiceMaterial(committeeToken, organizationId, "BUSINESS_LICENSE");
+        uploadPropertyServiceMaterial(committeeToken, organizationId, "PROPERTY_SERVICE_CONTRACT");
+
+        mockMvc.perform(post("/api/v1/admin/property-service-organizations/" + organizationId + "/submit")
+                        .header("Authorization", "Bearer " + committeeToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"expectedVersion\":0}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status", is("PENDING_VERIFICATION")));
+
+        String verifiedJson = mockMvc.perform(post("/api/v1/admin/property-service-organizations/" + organizationId
+                                + "/verifications/manual")
+                        .header("Authorization", "Bearer " + streetCommunityToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "sourceCode", "GSXT_WEB",
+                                "verificationResult", "PASSED",
+                                "evidenceReference", "GSXT-20260713-0001",
+                                "remark", "企业名称与统一社会信用代码核验一致"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status", is("ACTIVE")))
+                .andExpect(jsonPath("$.data.verifications[0].verificationMethod", is("PROPERTY_MANUAL")))
+                .andReturn().getResponse().getContentAsString();
+        long projectDeptId = objectMapper.readTree(verifiedJson).path("data").path("projectDeptId").asLong();
+
+        mockMvc.perform(get("/api/v1/admin/work-identities/dept-options?roleKey=PROPERTY_MANAGER")
+                        .header("Authorization", "Bearer " + streetCommunityToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[*].deptId", hasItem((int) projectDeptId)))
+                .andExpect(jsonPath("$.data[*].tenantId", hasItem((int) tenantId)));
+
+        mockMvc.perform(post("/api/v1/admin/work-identities/accounts/" + applicant.accountId() + "/shadows")
+                        .header("Authorization", "Bearer " + streetCommunityToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "deptId", projectDeptId,
+                                "roleKey", "PROPERTY_MANAGER",
+                                "nickName", "王经理",
+                                "buildingIds", List.of(),
+                                "forceBuildingTransfer", false))))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.deptId", is((int) projectDeptId)))
+                .andExpect(jsonPath("$.data.roleKey", is("PROPERTY_MANAGER")));
+        assertEquals(1, jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM sys_dept
+                WHERE dept_id = ?
+                  AND tenant_id = ?
+                  AND dept_type = 3
+                  AND dept_category = 'S'
+                """, Integer.class, projectDeptId, tenantId));
+    }
+
     private long createAndSubmitOwnerApplication(LoginSession applicant) throws Exception {
         String createdJson = mockMvc.perform(post("/api/v1/community-registrations")
                         .header("Authorization", "Bearer " + applicant.token())
@@ -351,6 +473,18 @@ public class CommunityRegistrationFlowTest {
                 "file", "registration-proof.pdf", "application/pdf",
                 "%PDF-1.4 test registration proof".getBytes(StandardCharsets.UTF_8));
         mockMvc.perform(multipart("/api/v1/community-registrations/" + applicationId + "/materials")
+                        .file(file)
+                        .param("materialType", materialType)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.materialType", is(materialType)));
+    }
+
+    private void uploadPropertyServiceMaterial(String token, long organizationId, String materialType) throws Exception {
+        MockMultipartFile file = new MockMultipartFile(
+                "file", "property-service-proof.pdf", "application/pdf",
+                "%PDF-1.4 property service proof".getBytes(StandardCharsets.UTF_8));
+        mockMvc.perform(multipart("/api/v1/admin/property-service-organizations/" + organizationId + "/materials")
                         .file(file)
                         .param("materialType", materialType)
                         .header("Authorization", "Bearer " + token))
@@ -421,8 +555,8 @@ public class CommunityRegistrationFlowTest {
         List<Long> applicationIds = jdbcTemplate.queryForList("""
                 SELECT application_id
                 FROM t_community_registration_application
-                WHERE applicant_phone IN (?, ?)
-                """, Long.class, DIRECTOR_PHONE, OWNER_PHONE);
+                WHERE applicant_phone IN (?, ?, ?)
+                """, Long.class, DIRECTOR_PHONE, OWNER_PHONE, PROPERTY_SERVICE_DIRECTOR_PHONE);
         List<Long> tenantIds = applicationIds.stream()
                 .map(applicationId -> jdbcTemplate.queryForObject("""
                         SELECT provisioned_tenant_id
@@ -440,6 +574,50 @@ public class CommunityRegistrationFlowTest {
             jdbcTemplate.update("DELETE FROM t_community_onboarding_workspace WHERE application_id = ?", applicationId);
         }
         for (Long tenantId : tenantIds) {
+            List<Long> enterpriseDeptIds = jdbcTemplate.queryForList("""
+                    SELECT DISTINCT enterprise.enterprise_dept_id
+                    FROM t_property_service_enterprise enterprise
+                    JOIN t_property_service_organization organization
+                      ON organization.enterprise_id = enterprise.enterprise_id
+                    WHERE organization.tenant_id = ?
+                      AND enterprise.enterprise_dept_id IS NOT NULL
+                    """, Long.class, tenantId);
+            jdbcTemplate.update("""
+                    DELETE FROM t_property_service_organization_audit
+                    WHERE organization_id IN (
+                        SELECT organization_id
+                        FROM t_property_service_organization
+                        WHERE tenant_id = ?
+                    )
+                    """, tenantId);
+            jdbcTemplate.update("""
+                    DELETE FROM t_property_service_organization_verification
+                    WHERE organization_id IN (
+                        SELECT organization_id
+                        FROM t_property_service_organization
+                        WHERE tenant_id = ?
+                    )
+                    """, tenantId);
+            jdbcTemplate.update("""
+                    DELETE FROM t_property_service_organization_material
+                    WHERE organization_id IN (
+                        SELECT organization_id
+                        FROM t_property_service_organization
+                        WHERE tenant_id = ?
+                    )
+                    """, tenantId);
+            jdbcTemplate.update("DELETE FROM t_property_service_organization WHERE tenant_id = ?", tenantId);
+            for (Long enterpriseDeptId : enterpriseDeptIds) {
+                jdbcTemplate.update("""
+                        DELETE FROM t_property_service_enterprise
+                        WHERE enterprise_dept_id = ?
+                          AND NOT EXISTS (
+                              SELECT 1
+                              FROM t_property_service_organization
+                              WHERE enterprise_id = t_property_service_enterprise.enterprise_id
+                          )
+                        """, enterpriseDeptId);
+            }
             jdbcTemplate.update("DELETE FROM t_committee_member_position WHERE tenant_id = ?", tenantId);
             jdbcTemplate.update("""
                     DELETE FROM sys_user_role
@@ -455,6 +633,9 @@ public class CommunityRegistrationFlowTest {
                     WHERE dept_id IN (SELECT dept_id FROM sys_dept WHERE tenant_id = ?)
                     """, tenantId);
             jdbcTemplate.update("DELETE FROM sys_dept WHERE tenant_id = ?", tenantId);
+            for (Long enterpriseDeptId : enterpriseDeptIds) {
+                jdbcTemplate.update("DELETE FROM sys_dept WHERE dept_id = ?", enterpriseDeptId);
+            }
         }
         for (Long applicationId : applicationIds) {
             jdbcTemplate.update("DELETE FROM t_community_registration_application WHERE application_id = ?", applicationId);
@@ -462,9 +643,10 @@ public class CommunityRegistrationFlowTest {
         for (Long tenantId : tenantIds) {
             jdbcTemplate.update("DELETE FROM t_tenant_community WHERE tenant_id = ?", tenantId);
         }
-        jdbcTemplate.update("DELETE FROM c_user WHERE account_id IN (SELECT account_id FROM t_account WHERE phone IN (?, ?))",
-                DIRECTOR_PHONE, OWNER_PHONE);
-        jdbcTemplate.update("DELETE FROM t_account WHERE phone IN (?, ?)", DIRECTOR_PHONE, OWNER_PHONE);
+        jdbcTemplate.update("DELETE FROM c_user WHERE account_id IN (SELECT account_id FROM t_account WHERE phone IN (?, ?, ?))",
+                DIRECTOR_PHONE, OWNER_PHONE, PROPERTY_SERVICE_DIRECTOR_PHONE);
+        jdbcTemplate.update("DELETE FROM t_account WHERE phone IN (?, ?, ?)",
+                DIRECTOR_PHONE, OWNER_PHONE, PROPERTY_SERVICE_DIRECTOR_PHONE);
 
         jdbcTemplate.update("DELETE FROM sys_user_role WHERE user_id = ?", PLATFORM_USER_ID);
         jdbcTemplate.update("DELETE FROM sys_user WHERE user_id = ?", PLATFORM_USER_ID);

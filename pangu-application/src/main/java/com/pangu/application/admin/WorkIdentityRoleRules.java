@@ -1,4 +1,5 @@
 // 关联业务：约束管理端预置角色与真实组织类型的合法绑定关系。
+// 关联业务：约束管理端预置角色与真实组织类型的合法绑定关系。
 package com.pangu.application.admin;
 
 import java.util.Map;
@@ -14,6 +15,9 @@ final class WorkIdentityRoleRules {
 
     static final Set<String> BUILDING_SCOPED_ROLES =
             Set.of(GRID_MEMBER, "VOLUNTEER", "OWNER_REPRESENTATIVE");
+
+    static final Set<String> PROPERTY_SERVICE_ROLES =
+            Set.of("PROPERTY_MANAGER", "PROPERTY_STAFF");
 
     private static final Map<String, Set<Integer>> ROLE_DEPT_TYPES = Map.ofEntries(
             Map.entry("GOV_SUPER_ADMIN", Set.of(1)),
@@ -41,6 +45,10 @@ final class WorkIdentityRoleRules {
 
     static boolean isGridMember(String roleKey) {
         return GRID_MEMBER.equals(roleKey);
+    }
+
+    static boolean isPropertyServiceRole(String roleKey) {
+        return PROPERTY_SERVICE_ROLES.contains(roleKey);
     }
 
     static boolean matchesDeptType(String roleKey, Integer deptType) {

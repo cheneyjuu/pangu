@@ -361,6 +361,15 @@
         ORDER BY tenant_id NULLS FIRST, dept_type ASC, dept_id ASC
     </select>
 
+    <select id="selectTenantDeptOptions" resultMap="DeptOptionMap">
+        SELECT dept_id, parent_id, ancestors, dept_name, dept_type, dept_category, tenant_id
+        FROM sys_dept
+        WHERE status = '0'
+          AND dept_category = #{deptCategory}
+          AND tenant_id = #{tenantId}
+        ORDER BY dept_type ASC, dept_id ASC
+    </select>
+
     <select id="selectGridChildren" resultMap="DeptOptionMap">
         SELECT dept_id, parent_id, ancestors, dept_name, dept_type, dept_category, tenant_id
         FROM sys_dept
