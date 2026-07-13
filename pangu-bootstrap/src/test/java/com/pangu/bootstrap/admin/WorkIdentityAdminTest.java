@@ -60,6 +60,7 @@ public class WorkIdentityAdminTest {
     private static final long USR_DIRECTOR = 800101L;
     private static final long ACC_WU = 999805L;
     private static final long USR_WU_GOV = 800005L;
+    private static final long USR_GRID = 800004L;
     private static final long DEPT_COMMUNITY = 101L;
     private static final long DEPT_GRID = 104L;
     private static final long BUILDING_30005 = 30005L;
@@ -282,6 +283,42 @@ public class WorkIdentityAdminTest {
                         .header("Authorization", "Bearer " + communityToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data", hasSize(0)));
+    }
+
+    @Test
+    public void selectedCommunityOnlyExposesItsOwnAccountsAndWorkIdentities() throws Exception {
+        grantCrossTenantToCommunity();
+        String eastCommunityToken = token(ACC_SUPER, USR_SUPER, TENANT_CROSS);
+
+        // 999913 owns properties in tenant 10002; 999804 is a 10001-only grid worker.
+        mockMvc.perform(get("/api/v1/admin/work-identities/accounts")
+                        .header("Authorization", "Bearer " + eastCommunityToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[?(@.accountId==999913)]").exists())
+                .andExpect(jsonPath("$.data[?(@.accountId==999804)]").doesNotExist());
+
+        mockMvc.perform(get("/api/v1/admin/work-identities/accounts/search")
+                        .param("keyword", "13800000004")
+                        .header("Authorization", "Bearer " + eastCommunityToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data", hasSize(0)));
+
+        mockMvc.perform(get("/api/v1/admin/work-identities/accounts/999804")
+                        .header("Authorization", "Bearer " + eastCommunityToken))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code", is(42503)));
+
+        mockMvc.perform(get("/api/v1/admin/work-identities/users/" + USR_GRID + "/grid-nodes")
+                        .header("Authorization", "Bearer " + eastCommunityToken))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code", is(42502)));
+
+        mockMvc.perform(put("/api/v1/admin/work-identities/users/" + USR_GRID + "/grid-nodes")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"gridDeptIds\":[" + DEPT_GRID + "]}")
+                        .header("Authorization", "Bearer " + eastCommunityToken))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code", is(42502)));
     }
 
     @Test

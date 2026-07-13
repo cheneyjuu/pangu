@@ -42,15 +42,17 @@ public class WorkIdentityQueryService {
 
     @Transactional(readOnly = true)
     public List<WorkIdentityAccount> listAccounts(String roleKey) {
+        Long tenantId = requireCurrentTenantId();
         String normalizedRoleKey = normalizeOptionalRoleKey(roleKey);
-        return listAccountNameSearchPool(normalizedRoleKey, SEARCH_LIMIT).stream()
+        return listAccountNameSearchPool(normalizedRoleKey, tenantId, SEARCH_LIMIT).stream()
                 .limit(SEARCH_LIMIT)
-                .map(this::toAccount)
+                .map(row -> toAccount(row, tenantId))
                 .toList();
     }
 
     @Transactional(readOnly = true)
     public List<WorkIdentityAccount> searchAccounts(String keyword, String roleKey) {
+        Long tenantId = requireCurrentTenantId();
         if (keyword == null) {
             return List.of();
         }
@@ -64,22 +66,22 @@ public class WorkIdentityQueryService {
             if (k.length() < MIN_PHONE_FRAGMENT_LENGTH) {
                 return List.of();
             }
-            searchCandidates(k, normalizedRoleKey, SEARCH_LIMIT)
+            searchCandidates(k, normalizedRoleKey, tenantId, SEARCH_LIMIT)
                     .forEach(row -> candidates.putIfAbsent(row.accountId(), row));
         } else {
             if (k.length() < MIN_NAME_KEYWORD_LENGTH) {
                 return List.of();
             }
-            searchCandidates(k, normalizedRoleKey, SEARCH_LIMIT)
+            searchCandidates(k, normalizedRoleKey, tenantId, SEARCH_LIMIT)
                     .forEach(row -> candidates.putIfAbsent(row.accountId(), row));
-            listAccountNameSearchPool(normalizedRoleKey, NAME_SEARCH_POOL_LIMIT).stream()
+            listAccountNameSearchPool(normalizedRoleKey, tenantId, NAME_SEARCH_POOL_LIMIT).stream()
                     .filter(row -> decrypt(row.realNameCipher()).contains(k))
                     .limit(SEARCH_LIMIT)
                     .forEach(row -> candidates.putIfAbsent(row.accountId(), row));
         }
         return candidates.values().stream()
                 .limit(SEARCH_LIMIT)
-                .map(this::toAccount)
+                .map(row -> toAccount(row, tenantId))
                 .toList();
     }
 
@@ -95,18 +97,20 @@ public class WorkIdentityQueryService {
     private List<WorkIdentityRepository.AccountCandidate> searchCandidates(
             String keyword,
             String roleKey,
+            Long tenantId,
             int limit) {
         if (roleKey == null) {
-            return repository.searchAccountCandidates(keyword, limit);
+            return repository.searchAccountCandidatesInTenant(keyword, tenantId, limit);
         }
-        return repository.searchAccountCandidatesByRole(keyword, roleKey, limit);
+        return repository.searchAccountCandidatesByRoleInTenant(keyword, roleKey, tenantId, limit);
     }
 
-    private List<WorkIdentityRepository.AccountCandidate> listAccountNameSearchPool(String roleKey, int limit) {
+    private List<WorkIdentityRepository.AccountCandidate> listAccountNameSearchPool(
+            String roleKey, Long tenantId, int limit) {
         if (roleKey == null) {
-            return repository.listAccountNameSearchPool(limit);
+            return repository.listAccountNameSearchPoolInTenant(tenantId, limit);
         }
-        return repository.listAccountNameSearchPoolByRole(roleKey, limit);
+        return repository.listAccountNameSearchPoolByRoleInTenant(roleKey, tenantId, limit);
     }
 
     @Transactional(readOnly = true)
@@ -116,8 +120,9 @@ public class WorkIdentityQueryService {
                     WorkIdentityApplicationException.Reason.PARAM_INVALID,
                     "accountId 必填");
         }
-        return repository.findAccount(accountId)
-                .map(this::toAccount)
+        Long tenantId = requireCurrentTenantId();
+        return repository.findAccountInTenant(accountId, tenantId)
+                .map(row -> toAccount(row, tenantId))
                 .orElseThrow(() -> new WorkIdentityApplicationException(
                         WorkIdentityApplicationException.Reason.ACCOUNT_NOT_FOUND,
                         "自然人账号不存在：accountId=" + accountId));
@@ -167,10 +172,16 @@ public class WorkIdentityQueryService {
                     WorkIdentityApplicationException.Reason.PARAM_INVALID,
                     "userId 必填");
         }
+        Long tenantId = requireCurrentTenantId();
         WorkIdentityShadow shadow = repository.findShadowByUserId(userId)
                 .orElseThrow(() -> new WorkIdentityApplicationException(
                         WorkIdentityApplicationException.Reason.ACCOUNT_NOT_FOUND,
                         "工作身份不存在或已停用：userId=" + userId));
+        if (!tenantId.equals(shadow.tenantId())) {
+            throw new WorkIdentityApplicationException(
+                    WorkIdentityApplicationException.Reason.FORBIDDEN,
+                    "工作身份不在当前小区数据范围内：userId=" + userId);
+        }
         if (!WorkIdentityRoleRules.isGridMember(shadow.roleKey())) {
             throw new WorkIdentityApplicationException(
                     WorkIdentityApplicationException.Reason.ROLE_DEPT_MISMATCH,
@@ -246,14 +257,24 @@ public class WorkIdentityQueryService {
                         "角色不存在：roleKey=" + roleKey));
     }
 
-    WorkIdentityAccount toAccount(WorkIdentityRepository.AccountCandidate row) {
+    private Long requireCurrentTenantId() {
+        UserContext ctx = userContextHolder.current();
+        if (ctx == null || ctx.tenantId() == null) {
+            throw new WorkIdentityApplicationException(
+                    WorkIdentityApplicationException.Reason.FORBIDDEN,
+                    "当前工作身份未绑定小区，无法读取小区用户");
+        }
+        return ctx.tenantId();
+    }
+
+    private WorkIdentityAccount toAccount(WorkIdentityRepository.AccountCandidate row, Long tenantId) {
         return new WorkIdentityAccount(
                 row.accountId(),
                 row.phone(),
                 decrypt(row.realNameCipher()),
                 row.realNameVerified(),
                 row.status(),
-                repository.listShadows(row.accountId()).stream()
+                repository.listShadowsInTenant(row.accountId(), tenantId).stream()
                         .map(this::withBuildings)
                         .toList());
     }

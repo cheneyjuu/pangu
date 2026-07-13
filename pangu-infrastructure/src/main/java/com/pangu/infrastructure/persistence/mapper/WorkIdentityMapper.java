@@ -24,11 +24,33 @@ public interface WorkIdentityMapper {
     List<AccountCandidateRow> listAccountNameSearchPoolByRole(@Param("roleKey") String roleKey,
                                                               @Param("limit") int limit);
 
+    List<AccountCandidateRow> searchAccountCandidatesInTenant(@Param("keyword") String keyword,
+                                                              @Param("tenantId") Long tenantId,
+                                                              @Param("limit") int limit);
+
+    List<AccountCandidateRow> searchAccountCandidatesByRoleInTenant(@Param("keyword") String keyword,
+                                                                    @Param("roleKey") String roleKey,
+                                                                    @Param("tenantId") Long tenantId,
+                                                                    @Param("limit") int limit);
+
+    List<AccountCandidateRow> listAccountNameSearchPoolInTenant(@Param("tenantId") Long tenantId,
+                                                                @Param("limit") int limit);
+
+    List<AccountCandidateRow> listAccountNameSearchPoolByRoleInTenant(@Param("roleKey") String roleKey,
+                                                                      @Param("tenantId") Long tenantId,
+                                                                      @Param("limit") int limit);
+
     AccountCandidateRow selectAccount(@Param("accountId") Long accountId);
+
+    AccountCandidateRow selectAccountInTenant(@Param("accountId") Long accountId,
+                                               @Param("tenantId") Long tenantId);
 
     AccountCandidateRow selectAccountByPhone(@Param("phone") String phone);
 
     List<ShadowRow> selectShadowsByAccount(@Param("accountId") Long accountId);
+
+    List<ShadowRow> selectShadowsByAccountInTenant(@Param("accountId") Long accountId,
+                                                    @Param("tenantId") Long tenantId);
 
     ShadowRow selectShadow(@Param("accountId") Long accountId,
                            @Param("userId") Long userId);

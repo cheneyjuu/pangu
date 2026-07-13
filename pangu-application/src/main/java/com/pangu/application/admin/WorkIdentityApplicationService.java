@@ -42,8 +42,19 @@ public class WorkIdentityApplicationService {
     @Transactional
     public WorkIdentityShadow create(CreateWorkIdentityCommand cmd) {
         validateCommand(cmd);
-        UserContext ctx = requireOperator();
         WorkIdentityAccount account = queryService.getAccount(cmd.accountId());
+        return createForAccount(cmd, account);
+    }
+
+    /**
+     * 在已确认属于当前小区的自然人账号上创建管理端工作身份。
+     *
+     * <p>新建自然人账号在首个身份落库前尚未有小区归属，因此由
+     * {@link #createAccountWithIdentity(String, String, CreateWorkIdentityCommand)} 直接传入刚创建的账号；
+     * 其他入口必须先经 {@link WorkIdentityQueryService#getAccount(Long)} 做小区范围校验。
+     */
+    private WorkIdentityShadow createForAccount(CreateWorkIdentityCommand cmd, WorkIdentityAccount account) {
+        UserContext ctx = requireOperator();
         if (account.status() != 1) {
             throw new WorkIdentityApplicationException(
                     WorkIdentityApplicationException.Reason.ACCOUNT_NOT_FOUND,
@@ -146,13 +157,23 @@ public class WorkIdentityApplicationService {
                     WorkIdentityApplicationException.Reason.DUPLICATE_IDENTITY,
                     "手机号已存在，请搜索该自然人后编辑工作身份：" + normalizedPhone, e);
         }
-        WorkIdentityShadow shadow = create(new CreateWorkIdentityCommand(
+        WorkIdentityAccount account = new WorkIdentityAccount(
+                accountId,
+                normalizedPhone,
+                normalizedRealName,
+                0,
+                1,
+                List.of());
+        CreateWorkIdentityCommand createCommand = new CreateWorkIdentityCommand(
                 accountId,
                 identityCommand.deptId(),
                 identityCommand.roleKey(),
                 identityCommand.nickName(),
                 identityCommand.buildingIds(),
-                identityCommand.forceBuildingTransfer()));
+                identityCommand.forceBuildingTransfer());
+        // 新建账号的请求体不携带 accountId，生成账号后再复用统一的身份参数校验。
+        validateCommand(createCommand);
+        WorkIdentityShadow shadow = createForAccount(createCommand, account);
         repository.updateLastActiveIdentity(accountId, shadow.userId(), UserContext.IdentityType.SYS_USER.name());
         return queryService.getAccount(accountId);
     }
@@ -320,6 +341,7 @@ public class WorkIdentityApplicationService {
                 .orElseThrow(() -> new WorkIdentityApplicationException(
                         WorkIdentityApplicationException.Reason.ACCOUNT_NOT_FOUND,
                         "工作身份不存在或已停用：userId=" + userId));
+        requireCurrentTenantScope(ctx, shadow);
         if (!WorkIdentityRoleRules.isGridMember(shadow.roleKey())) {
             throw new WorkIdentityApplicationException(
                     WorkIdentityApplicationException.Reason.ROLE_DEPT_MISMATCH,
@@ -464,6 +486,18 @@ public class WorkIdentityApplicationService {
             throw new WorkIdentityApplicationException(
                     WorkIdentityApplicationException.Reason.FORBIDDEN,
                     "网格节点不在当前居委会数据范围内：deptId=" + gridDept.deptId());
+        }
+    }
+
+    /**
+     * 网格分配是小区内权限操作，不能通过直接提交其他小区的 userId 跨越当前工作身份范围。
+     */
+    private void requireCurrentTenantScope(UserContext ctx, WorkIdentityShadow shadow) {
+        if (ctx.tenantId() == null || shadow.tenantId() == null
+                || !ctx.tenantId().equals(shadow.tenantId())) {
+            throw new WorkIdentityApplicationException(
+                    WorkIdentityApplicationException.Reason.FORBIDDEN,
+                    "工作身份不在当前小区数据范围内：userId=" + shadow.userId());
         }
     }
 

@@ -51,8 +51,44 @@ public class WorkIdentityRepositoryImpl implements WorkIdentityRepository {
     }
 
     @Override
+    public List<AccountCandidate> searchAccountCandidatesInTenant(String keyword, Long tenantId, int limit) {
+        return mapper.searchAccountCandidatesInTenant(keyword, tenantId, limit).stream()
+                .map(this::toAccountCandidate)
+                .toList();
+    }
+
+    @Override
+    public List<AccountCandidate> searchAccountCandidatesByRoleInTenant(
+            String keyword, String roleKey, Long tenantId, int limit) {
+        return mapper.searchAccountCandidatesByRoleInTenant(keyword, roleKey, tenantId, limit).stream()
+                .map(this::toAccountCandidate)
+                .toList();
+    }
+
+    @Override
+    public List<AccountCandidate> listAccountNameSearchPoolInTenant(Long tenantId, int limit) {
+        return mapper.listAccountNameSearchPoolInTenant(tenantId, limit).stream()
+                .map(this::toAccountCandidate)
+                .toList();
+    }
+
+    @Override
+    public List<AccountCandidate> listAccountNameSearchPoolByRoleInTenant(
+            String roleKey, Long tenantId, int limit) {
+        return mapper.listAccountNameSearchPoolByRoleInTenant(roleKey, tenantId, limit).stream()
+                .map(this::toAccountCandidate)
+                .toList();
+    }
+
+    @Override
     public Optional<AccountCandidate> findAccount(Long accountId) {
         return Optional.ofNullable(mapper.selectAccount(accountId)).map(this::toAccountCandidate);
+    }
+
+    @Override
+    public Optional<AccountCandidate> findAccountInTenant(Long accountId, Long tenantId) {
+        return Optional.ofNullable(mapper.selectAccountInTenant(accountId, tenantId))
+                .map(this::toAccountCandidate);
     }
 
     @Override
@@ -63,6 +99,13 @@ public class WorkIdentityRepositoryImpl implements WorkIdentityRepository {
     @Override
     public List<WorkIdentityShadow> listShadows(Long accountId) {
         return mapper.selectShadowsByAccount(accountId).stream()
+                .map(this::toShadow)
+                .toList();
+    }
+
+    @Override
+    public List<WorkIdentityShadow> listShadowsInTenant(Long accountId, Long tenantId) {
+        return mapper.selectShadowsByAccountInTenant(accountId, tenantId).stream()
                 .map(this::toShadow)
                 .toList();
     }

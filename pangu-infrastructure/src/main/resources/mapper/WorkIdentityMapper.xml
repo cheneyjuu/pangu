@@ -54,6 +54,67 @@
         a.status
     </sql>
 
+    <!--
+      角色分配只可读取当前小区内的自然人：已在本小区承担工作身份，或已绑定本小区有效房产。
+      该边界在数据库查询层执行，避免切换小区后泄露其他小区的账号与工作身份。
+    -->
+    <sql id="AccountAssociatedWithTenant">
+        (
+            EXISTS (
+                SELECT 1
+                FROM sys_user tenant_user
+                JOIN sys_dept tenant_dept ON tenant_dept.dept_id = tenant_user.dept_id
+                WHERE tenant_user.account_id = a.account_id
+                  AND tenant_user.status = '0'
+                  AND tenant_dept.status = '0'
+                  AND tenant_dept.tenant_id = #{tenantId}
+            )
+            OR EXISTS (
+                SELECT 1
+                FROM c_user owner_user
+                JOIN c_owner_property owner_property ON owner_property.uid = owner_user.uid
+                WHERE owner_user.account_id = a.account_id
+                  AND owner_property.tenant_id = #{tenantId}
+                  AND owner_property.account_status = 1
+            )
+        )
+    </sql>
+
+    <sql id="AccountMatchesKeywordWithinTenant">
+        (
+            a.phone LIKE CONCAT('%', #{keyword}, '%')
+            OR a.real_name ILIKE CONCAT('%', #{keyword}, '%')
+            OR EXISTS (
+                SELECT 1
+                FROM sys_user tenant_user
+                JOIN sys_dept tenant_dept ON tenant_dept.dept_id = tenant_user.dept_id
+                WHERE tenant_user.account_id = a.account_id
+                  AND tenant_user.status = '0'
+                  AND tenant_dept.status = '0'
+                  AND tenant_dept.tenant_id = #{tenantId}
+                  AND (
+                      tenant_user.nick_name ILIKE CONCAT('%', #{keyword}, '%')
+                      OR tenant_user.user_name ILIKE CONCAT('%', #{keyword}, '%')
+                  )
+            )
+        )
+    </sql>
+
+    <sql id="AccountHasRoleInTenant">
+        EXISTS (
+            SELECT 1
+            FROM sys_user role_user
+            JOIN sys_dept role_dept ON role_dept.dept_id = role_user.dept_id
+            JOIN sys_user_role role_binding ON role_binding.user_id = role_user.user_id
+            JOIN sys_role role ON role.role_id = role_binding.role_id AND role.status = '0'
+            WHERE role_user.account_id = a.account_id
+              AND role_user.status = '0'
+              AND role_dept.status = '0'
+              AND role_dept.tenant_id = #{tenantId}
+              AND role.role_key = #{roleKey}
+        )
+    </sql>
+
     <select id="searchAccountCandidates" resultMap="AccountCandidateMap">
         SELECT DISTINCT
             <include refid="AccountColumns"/>
@@ -111,11 +172,62 @@
         LIMIT #{limit}
     </select>
 
+    <select id="searchAccountCandidatesInTenant" resultMap="AccountCandidateMap">
+        SELECT
+            <include refid="AccountColumns"/>
+        FROM t_account a
+        WHERE a.status = 1
+          AND <include refid="AccountAssociatedWithTenant"/>
+          AND <include refid="AccountMatchesKeywordWithinTenant"/>
+        ORDER BY a.account_id ASC
+        LIMIT #{limit}
+    </select>
+
+    <select id="searchAccountCandidatesByRoleInTenant" resultMap="AccountCandidateMap">
+        SELECT
+            <include refid="AccountColumns"/>
+        FROM t_account a
+        WHERE a.status = 1
+          AND <include refid="AccountHasRoleInTenant"/>
+          AND <include refid="AccountMatchesKeywordWithinTenant"/>
+        ORDER BY a.account_id ASC
+        LIMIT #{limit}
+    </select>
+
+    <select id="listAccountNameSearchPoolInTenant" resultMap="AccountCandidateMap">
+        SELECT
+            <include refid="AccountColumns"/>
+        FROM t_account a
+        WHERE a.status = 1
+          AND <include refid="AccountAssociatedWithTenant"/>
+        ORDER BY a.account_id DESC
+        LIMIT #{limit}
+    </select>
+
+    <select id="listAccountNameSearchPoolByRoleInTenant" resultMap="AccountCandidateMap">
+        SELECT
+            <include refid="AccountColumns"/>
+        FROM t_account a
+        WHERE a.status = 1
+          AND <include refid="AccountHasRoleInTenant"/>
+        ORDER BY a.account_id DESC
+        LIMIT #{limit}
+    </select>
+
     <select id="selectAccount" resultMap="AccountCandidateMap">
         SELECT
             <include refid="AccountColumns"/>
         FROM t_account a
         WHERE a.account_id = #{accountId}
+        LIMIT 1
+    </select>
+
+    <select id="selectAccountInTenant" resultMap="AccountCandidateMap">
+        SELECT
+            <include refid="AccountColumns"/>
+        FROM t_account a
+        WHERE a.account_id = #{accountId}
+          AND <include refid="AccountAssociatedWithTenant"/>
         LIMIT 1
     </select>
 
@@ -152,6 +264,20 @@
         LEFT JOIN sys_role r ON r.role_id = ur.role_id AND r.status = '0'
         WHERE u.account_id = #{accountId}
           AND u.status = '0'
+        ORDER BY u.user_id ASC
+    </select>
+
+    <select id="selectShadowsByAccountInTenant" resultMap="ShadowMap">
+        SELECT
+            <include refid="ShadowColumns"/>
+        FROM sys_user u
+        JOIN sys_dept d ON d.dept_id = u.dept_id
+        LEFT JOIN sys_user_role ur ON ur.user_id = u.user_id
+        LEFT JOIN sys_role r ON r.role_id = ur.role_id AND r.status = '0'
+        WHERE u.account_id = #{accountId}
+          AND u.status = '0'
+          AND d.status = '0'
+          AND d.tenant_id = #{tenantId}
         ORDER BY u.user_id ASC
     </select>
 

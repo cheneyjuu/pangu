@@ -23,11 +23,33 @@ public interface WorkIdentityRepository {
 
     List<AccountCandidate> listAccountNameSearchPoolByRole(String roleKey, int limit);
 
+    /**
+     * 查询当前小区可分配工作身份的自然人。
+     *
+     * <p>账号必须在该小区拥有有效管理端工作身份，或已绑定有效业主房产，避免跨小区
+     * 自然人进入角色分配范围。
+     */
+    List<AccountCandidate> searchAccountCandidatesInTenant(String keyword, Long tenantId, int limit);
+
+    List<AccountCandidate> searchAccountCandidatesByRoleInTenant(
+            String keyword, String roleKey, Long tenantId, int limit);
+
+    List<AccountCandidate> listAccountNameSearchPoolInTenant(Long tenantId, int limit);
+
+    List<AccountCandidate> listAccountNameSearchPoolByRoleInTenant(String roleKey, Long tenantId, int limit);
+
     Optional<AccountCandidate> findAccount(Long accountId);
+
+    Optional<AccountCandidate> findAccountInTenant(Long accountId, Long tenantId);
 
     Optional<AccountCandidate> findAccountByPhone(String phone);
 
     List<WorkIdentityShadow> listShadows(Long accountId);
+
+    /**
+     * 仅回读当前小区的工作身份，防止同一自然人的其他小区身份泄露到管理端。
+     */
+    List<WorkIdentityShadow> listShadowsInTenant(Long accountId, Long tenantId);
 
     Optional<WorkIdentityShadow> findShadow(Long accountId, Long userId);
 
