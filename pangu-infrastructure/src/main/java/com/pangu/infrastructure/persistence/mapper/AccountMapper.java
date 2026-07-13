@@ -37,6 +37,11 @@ public interface AccountMapper {
     int insertCUser(CUserInsertRow row);
 
     /**
+     * 为既有自然人账号补齐 C 端基础身份；同一账号重复调用时不产生重复记录。
+     */
+    int insertCUserIfAbsent(CUserInsertRow row);
+
+    /**
      * 根据 account_id 查询 C 端 uid。
      */
     Long selectCUserUidByAccountId(@Param("accountId") Long accountId);

@@ -9,6 +9,13 @@ public interface AuthAccountRepository {
 
     AccountSnapshot createColdStartOwnerAccount(String phone);
 
+    /**
+     * 确保自然人账号具备 C 端基础身份。
+     *
+     * <p>微信手机号授权可以创建基础账户，但不得据此推定产权、租户归属或表决资格。</p>
+     */
+    Long ensureCUserIdentity(Long accountId);
+
     Long findCUserUidByAccountId(Long accountId);
 
     AccountIdentitySnapshot findIdentityByAccountId(Long accountId);

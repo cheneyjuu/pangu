@@ -65,6 +65,13 @@
         VALUES (#{accountId}, #{authLevel})
     </insert>
 
+    <insert id="insertCUserIfAbsent"
+            parameterType="com.pangu.infrastructure.persistence.mapper.AccountMapper$CUserInsertRow">
+        INSERT INTO c_user (account_id, auth_level)
+        VALUES (#{accountId}, #{authLevel})
+        ON CONFLICT (account_id) DO NOTHING
+    </insert>
+
     <select id="selectCUserUidByAccountId" resultType="java.lang.Long">
         SELECT uid
         FROM c_user

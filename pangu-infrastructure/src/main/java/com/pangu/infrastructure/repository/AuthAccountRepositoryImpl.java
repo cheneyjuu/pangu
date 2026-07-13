@@ -42,6 +42,21 @@ public class AuthAccountRepositoryImpl implements AuthAccountRepository {
     }
 
     @Override
+    public Long ensureCUserIdentity(Long accountId) {
+        Long uid = accountMapper.selectCUserUidByAccountId(accountId);
+        if (uid != null) {
+            return uid;
+        }
+
+        // 仅补齐 L1 C 端身份，不建立房产、租户或表决权关系。
+        AccountMapper.CUserInsertRow cUserRow = new AccountMapper.CUserInsertRow();
+        cUserRow.setAccountId(accountId);
+        cUserRow.setAuthLevel(1);
+        accountMapper.insertCUserIfAbsent(cUserRow);
+        return accountMapper.selectCUserUidByAccountId(accountId);
+    }
+
+    @Override
     public Long findCUserUidByAccountId(Long accountId) {
         return accountMapper.selectCUserUidByAccountId(accountId);
     }

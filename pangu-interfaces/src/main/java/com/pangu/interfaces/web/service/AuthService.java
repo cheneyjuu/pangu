@@ -105,9 +105,10 @@ public class AuthService {
     }
 
     /**
-     * 小程序登录：微信原生授权手机号由服务端交换后，绑定到唯一自然人账号并签发原有会话。
+     * 小程序登录：微信原生授权手机号由服务端交换后，绑定到唯一自然人账号并签发 C 端会话。
      *
-     * <p>昵称、头像不会随手机号授权自动读取；它们必须由用户之后单独确认授权，且只用于资料页展示。</p>
+     * <p>没有房产登记的手机号也会建立 L1 C 端基础身份，但不会自动绑定房产、租户或表决资格。
+     * 昵称、头像不会随手机号授权自动读取；它们必须由用户之后单独确认授权，且只用于资料页展示。</p>
      */
     @Transactional
     public Map<String, Object> weChatPhoneLogin(WeChatPhoneLoginRequest request) {
@@ -146,7 +147,7 @@ public class AuthService {
 
         bindWeChatIdentity(account.accountId(), miniProgramAppId, phoneIdentity.subjectHash());
         authAccountRepository.touchWeChatIdentityLogin(account.accountId(), miniProgramAppId);
-        return createSessionForAccount(account);
+        return createOwnerSessionForAccount(account);
     }
 
     /**
@@ -518,9 +519,7 @@ public class AuthService {
      * 微信和短信登录共用该流程，避免两条入口产生不同的身份兜底或 JWT 内容。
      */
     private Map<String, Object> createSessionForAccount(AuthAccountRepository.AccountSnapshot account) {
-        if (account.status() == null || account.status() != 1) {
-            throw new AppException(CommonErrorCode.UNAUTHORIZED, "账号已被禁用或注销，请联系管理员");
-        }
+        requireActiveAccount(account);
 
         // 选择默认身份：last_active_identity_* 优先；为空时允许 C 端已有 c_user 身份兜底。
         UserContext.IdentityType defaultType = resolveDefaultIdentityType(account);
@@ -545,7 +544,38 @@ public class AuthService {
         // 回填 last_active_identity（首次登录的账户使用）。
         authAccountRepository.updateLastActiveIdentity(account.accountId(),
                 ctx.activeIdentityId(), ctx.identityType().name());
+        return issueSession(ctx);
+    }
 
+    /**
+     * 微信小程序固定使用 C 端身份完成社区服务授权。
+     *
+     * <p>基础身份的创建不关联房产；也不覆盖该自然人在管理端的最近工作身份，避免小程序授权影响
+     * PC 端工作身份的默认登录。</p>
+     */
+    private Map<String, Object> createOwnerSessionForAccount(AuthAccountRepository.AccountSnapshot account) {
+        requireActiveAccount(account);
+
+        Long uid = authAccountRepository.ensureCUserIdentity(account.accountId());
+        if (uid == null) {
+            throw new AppException(CommonErrorCode.SYSTEM_ERROR, "业主端基础账户创建失败，请稍后重试");
+        }
+
+        UserContext ctx = userContextLoader.load(
+                account.accountId(), UserContext.IdentityType.C_USER, uid, null);
+        if (ctx == null) {
+            throw new AppException(CommonErrorCode.SYSTEM_ERROR, "业主端基础账户不可用，请稍后重试");
+        }
+        return issueSession(ctx);
+    }
+
+    private void requireActiveAccount(AuthAccountRepository.AccountSnapshot account) {
+        if (account == null || account.status() == null || account.status() != 1) {
+            throw new AppException(CommonErrorCode.UNAUTHORIZED, "账号已被禁用或注销，请联系管理员");
+        }
+    }
+
+    private Map<String, Object> issueSession(UserContext ctx) {
         String token = jwtTokenProvider.generateToken(
                 ctx.accountId(), ctx.identityType().name(), ctx.activeIdentityId(), ctx.tenantId());
 

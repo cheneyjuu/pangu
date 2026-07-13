@@ -31,9 +31,11 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /** 微信授权会话服务的单元测试。 */
@@ -103,6 +105,7 @@ class AuthServiceWeChatLoginTest {
         when(authAccountRepository.findByPhone(PHONE)).thenReturn(account);
         when(authAccountRepository.findWeChatIdentity(ACCOUNT_ID, APP_ID)).thenReturn(null);
         when(authAccountRepository.bindWeChatIdentity(any())).thenReturn(1);
+        when(authAccountRepository.ensureCUserIdentity(ACCOUNT_ID)).thenReturn(UID);
         when(userContextLoader.load(ACCOUNT_ID, UserContext.IdentityType.C_USER, UID, null)).thenReturn(context);
         when(jwtTokenProvider.generateToken(ACCOUNT_ID, "C_USER", UID, TENANT_ID)).thenReturn("owner-token");
         when(authAccountRepository.findIdentityByAccountId(ACCOUNT_ID)).thenReturn(
@@ -121,6 +124,65 @@ class AuthServiceWeChatLoginTest {
         verify(authAccountRepository).bindWeChatIdentity(new AuthAccountRepository.WeChatIdentityBinding(
                 ACCOUNT_ID, APP_ID, SUBJECT_HASH));
         verify(authAccountRepository).touchWeChatIdentityLogin(ACCOUNT_ID, APP_ID);
+    }
+
+    @Test
+    void weChatPhoneLogin_createsBaseOwnerIdentityForExistingAccountWithoutProperty() {
+        AuthAccountRepository.AccountSnapshot account = new AuthAccountRepository.AccountSnapshot(
+                ACCOUNT_ID, PHONE, 1, 800001L, UserContext.IdentityType.SYS_USER.name());
+        UserContext context = ownerContextWithoutProperty();
+        when(weChatMiniProgramGateway.miniProgramAppId()).thenReturn(APP_ID);
+        when(weChatMiniProgramGateway.exchangePhoneAuthorization("login-code", "phone-code"))
+                .thenReturn(new WeChatMiniProgramGateway.WeChatPhoneIdentity(PHONE, SUBJECT_HASH));
+        when(authAccountRepository.findAccountIdByWeChatSubjectHash(APP_ID, SUBJECT_HASH)).thenReturn(null);
+        when(authAccountRepository.findByPhone(PHONE)).thenReturn(account);
+        when(authAccountRepository.findWeChatIdentity(ACCOUNT_ID, APP_ID)).thenReturn(null);
+        when(authAccountRepository.bindWeChatIdentity(any())).thenReturn(1);
+        when(authAccountRepository.ensureCUserIdentity(ACCOUNT_ID)).thenReturn(UID);
+        when(userContextLoader.load(ACCOUNT_ID, UserContext.IdentityType.C_USER, UID, null)).thenReturn(context);
+        when(jwtTokenProvider.generateToken(ACCOUNT_ID, "C_USER", UID, null)).thenReturn("base-owner-token");
+        when(authAccountRepository.findIdentityByAccountId(ACCOUNT_ID)).thenReturn(
+                new AuthAccountRepository.AccountIdentitySnapshot(ACCOUNT_ID, PHONE, null, 0, 1));
+
+        Map<String, Object> result = service().weChatPhoneLogin(
+                new WeChatPhoneLoginRequest("login-code", "phone-code"));
+
+        assertEquals("base-owner-token", result.get("access_token"));
+        @SuppressWarnings("unchecked")
+        Map<String, Object> userInfo = (Map<String, Object>) result.get("user_info");
+        assertEquals("C_USER", userInfo.get("identity_type"));
+        assertNull(userInfo.get("tenant_id"));
+        verify(authAccountRepository).ensureCUserIdentity(ACCOUNT_ID);
+        verify(userContextLoader).load(ACCOUNT_ID, UserContext.IdentityType.C_USER, UID, null);
+        verifyNoInteractions(propertyGateway);
+    }
+
+    @Test
+    void weChatPhoneLogin_autoRegistersNewPhoneBeforeIssuingOwnerSession() {
+        AuthAccountRepository.AccountSnapshot account = new AuthAccountRepository.AccountSnapshot(
+                ACCOUNT_ID, PHONE, 1, UID, UserContext.IdentityType.C_USER.name());
+        UserContext context = ownerContextWithoutProperty();
+        when(weChatMiniProgramGateway.miniProgramAppId()).thenReturn(APP_ID);
+        when(weChatMiniProgramGateway.exchangePhoneAuthorization("login-code", "phone-code"))
+                .thenReturn(new WeChatMiniProgramGateway.WeChatPhoneIdentity(PHONE, SUBJECT_HASH));
+        when(authAccountRepository.findAccountIdByWeChatSubjectHash(APP_ID, SUBJECT_HASH)).thenReturn(null);
+        when(authAccountRepository.findByPhone(PHONE)).thenReturn(null);
+        when(authAccountRepository.createColdStartOwnerAccount(PHONE)).thenReturn(account);
+        when(authAccountRepository.findWeChatIdentity(ACCOUNT_ID, APP_ID)).thenReturn(null);
+        when(authAccountRepository.bindWeChatIdentity(any())).thenReturn(1);
+        when(authAccountRepository.ensureCUserIdentity(ACCOUNT_ID)).thenReturn(UID);
+        when(userContextLoader.load(ACCOUNT_ID, UserContext.IdentityType.C_USER, UID, null)).thenReturn(context);
+        when(jwtTokenProvider.generateToken(ACCOUNT_ID, "C_USER", UID, null)).thenReturn("new-owner-token");
+        when(authAccountRepository.findIdentityByAccountId(ACCOUNT_ID)).thenReturn(
+                new AuthAccountRepository.AccountIdentitySnapshot(ACCOUNT_ID, PHONE, null, 0, 1));
+
+        Map<String, Object> result = service().weChatPhoneLogin(
+                new WeChatPhoneLoginRequest("login-code", "phone-code"));
+
+        assertEquals("new-owner-token", result.get("access_token"));
+        verify(authAccountRepository).createColdStartOwnerAccount(PHONE);
+        verify(authAccountRepository).ensureCUserIdentity(ACCOUNT_ID);
+        verifyNoInteractions(propertyGateway);
     }
 
     @Test
@@ -161,6 +223,23 @@ class AuthServiceWeChatLoginTest {
                 UserContext.IdentityType.C_USER,
                 UID,
                 TENANT_ID,
+                null,
+                null,
+                null,
+                DataScopeType.OWNER_GROUP,
+                AuthenticationLevel.L1,
+                null,
+                Set.of(),
+                Set.of(),
+                Set.of());
+    }
+
+    private UserContext ownerContextWithoutProperty() {
+        return new UserContext(
+                ACCOUNT_ID,
+                UserContext.IdentityType.C_USER,
+                UID,
+                null,
                 null,
                 null,
                 null,
