@@ -19,6 +19,9 @@ logs/
 
 # Local secrets
 .env.local
+docs/certificate/
+outputs
+
 
 # OS temporary files
 .DS_Store
