@@ -8,6 +8,7 @@ import com.pangu.domain.gateway.identity.IdCardOcrGateway;
 import com.pangu.domain.gateway.identity.WeChatMiniProgramGateway;
 import com.pangu.domain.model.user.AuthenticationLevel;
 import com.pangu.domain.model.user.DataScopeType;
+import com.pangu.domain.model.user.WorkIdentityShadow;
 import com.pangu.domain.repository.AuthAccountRepository;
 import com.pangu.domain.repository.CommunitySettingsRepository;
 import com.pangu.domain.repository.GovernmentManagedCommunityRepository;
@@ -16,6 +17,7 @@ import com.pangu.domain.repository.NavigationMenuRepository;
 import com.pangu.domain.repository.OwnerIdentityVerificationRepository;
 import com.pangu.domain.security.NameDecryptor;
 import com.pangu.interfaces.security.JwtTokenProvider;
+import com.pangu.interfaces.web.controller.dto.LoginRequest;
 import com.pangu.interfaces.web.controller.dto.WeChatPhoneLoginRequest;
 import com.pangu.interfaces.web.controller.dto.WeChatProfileRequest;
 import com.pangu.interfaces.web.service.AuthService;
@@ -25,6 +27,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -36,6 +39,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.when;
 
 /** 微信授权会话服务的单元测试。 */
@@ -186,6 +190,42 @@ class AuthServiceWeChatLoginTest {
     }
 
     @Test
+    void managementLogin_usesWorkIdentityWhenOwnerIdentityWasLastActive() {
+        Long propertyStaffUserId = 920001L;
+        AuthAccountRepository.AccountSnapshot account = new AuthAccountRepository.AccountSnapshot(
+                ACCOUNT_ID, PHONE, 1, UID, UserContext.IdentityType.C_USER.name());
+        UserContext context = managementContext(propertyStaffUserId);
+        LoginRequest request = new LoginRequest();
+        request.setUsername(PHONE);
+        request.setSmsCode("123456");
+        request.setClientPortal("B");
+        when(authAccountRepository.findByPhone(PHONE)).thenReturn(account);
+        when(identityShadowRepository.listSysUserShadows(ACCOUNT_ID)).thenReturn(List.of(
+                new WorkIdentityShadow(propertyStaffUserId, ACCOUNT_ID, 930001L, TENANT_ID,
+                        "物业员工", null, 4, "S", "求是花园项目部", 940001L,
+                        "PROPERTY_STAFF", "物业员工", "ORG_ONLY", List.of(), List.of())));
+        when(userContextLoader.load(ACCOUNT_ID, UserContext.IdentityType.SYS_USER, propertyStaffUserId, null))
+                .thenReturn(context);
+        when(jwtTokenProvider.generateToken(ACCOUNT_ID, "SYS_USER", propertyStaffUserId, TENANT_ID))
+                .thenReturn("management-token");
+        when(authAccountRepository.findIdentityByAccountId(ACCOUNT_ID)).thenReturn(
+                new AuthAccountRepository.AccountIdentitySnapshot(ACCOUNT_ID, PHONE, null, 0, 1));
+        when(communitySettingsRepository.findCommunity(TENANT_ID)).thenReturn(Optional.empty());
+        when(navigationMenuRepository.findGrantedMenusByUserId(propertyStaffUserId)).thenReturn(List.of());
+
+        Map<String, Object> result = service().login(request);
+
+        assertEquals("management-token", result.get("access_token"));
+        @SuppressWarnings("unchecked")
+        Map<String, Object> userInfo = (Map<String, Object>) result.get("user_info");
+        assertEquals("SYS_USER", userInfo.get("identity_type"));
+        assertEquals("PROPERTY_STAFF", userInfo.get("role_key"));
+        verify(userContextLoader, never()).load(ACCOUNT_ID, UserContext.IdentityType.C_USER, UID, null);
+        verify(authAccountRepository).updateLastActiveIdentity(
+                ACCOUNT_ID, propertyStaffUserId, UserContext.IdentityType.SYS_USER.name());
+    }
+
+    @Test
     void updateWeChatProfile_saves_explicit_display_data_after_wechat_phone_authorization() {
         UserContext context = ownerContext();
         AuthAccountRepository.WeChatIdentitySnapshot identity =
@@ -247,6 +287,23 @@ class AuthServiceWeChatLoginTest {
                 AuthenticationLevel.L1,
                 null,
                 Set.of(),
+                Set.of(),
+                Set.of());
+    }
+
+    private UserContext managementContext(Long userId) {
+        return new UserContext(
+                ACCOUNT_ID,
+                UserContext.IdentityType.SYS_USER,
+                userId,
+                TENANT_ID,
+                930001L,
+                UserContext.DeptCategory.S,
+                4,
+                DataScopeType.ORG_ONLY,
+                AuthenticationLevel.L1,
+                "PROPERTY_STAFF",
+                Set.of("repair:workorder:read"),
                 Set.of(),
                 Set.of());
     }

@@ -76,7 +76,7 @@ public class AuthService {
     private final WeChatMiniProgramGateway weChatMiniProgramGateway;
 
     /**
-     * 双端统一登录：手机号 + 短信验证码 → 默认身份 → JWT。
+     * 双端统一登录：手机号 + 短信验证码 → 按客户端选择身份 → JWT。
      *
      * <p>失败语义：
      * <ul>
@@ -101,7 +101,10 @@ public class AuthService {
             }
             account = createColdStartOwnerAccount(phone);
         }
-        return createSessionForAccount(account);
+        // C 端只能签发业主身份；B/G 管理端只能签发已授权的工作身份，不能被 C 端最近活动身份覆盖。
+        return isColdStartOwnerPortal(request.getClientPortal())
+                ? createOwnerSessionForAccount(account)
+                : createManagementSessionForAccount(account);
     }
 
     /**
@@ -253,7 +256,6 @@ public class AuthService {
         }
         authAccountRepository.updateIdentity(accountId, normalizedName, normalizedId);
         ownerIdentityVerificationRepository.upgradeCUserAuthLevel(uid, accountId, 2);
-        authAccountRepository.updateLastActiveIdentity(accountId, uid, UserContext.IdentityType.C_USER.name());
         UserContext ctx = userContextLoader.load(accountId, UserContext.IdentityType.C_USER, uid, null);
         if (ctx == null) {
             throw new AppException(CommonErrorCode.FORBIDDEN, "业主身份不可用");
@@ -453,18 +455,6 @@ public class AuthService {
         return result;
     }
 
-    /**
-     * 选择默认身份类型。{@code last_active_identity_type} 为空时返回 {@code SYS_USER} 作为默认（多数账号都先发管理端身份）。
-     * UserContextLoader 内部会再做一次 SYS_USER → C_USER 兜底。
-     */
-    private UserContext.IdentityType resolveDefaultIdentityType(AuthAccountRepository.AccountSnapshot account) {
-        String tag = account.lastActiveIdentityType();
-        if (UserContext.IdentityType.C_USER.name().equals(tag)) {
-            return UserContext.IdentityType.C_USER;
-        }
-        return UserContext.IdentityType.SYS_USER;
-    }
-
     private String extractValidToken(String authHeader) {
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
             throw new AppException(CommonErrorCode.TOKEN_MISSING);
@@ -515,36 +505,49 @@ public class AuthService {
     }
 
     /**
-     * 基于已确认的自然人账户装配默认身份并创建平台会话。
-     * 微信和短信登录共用该流程，避免两条入口产生不同的身份兜底或 JWT 内容。
+     * 管理端登录固定签发 SYS_USER 工作身份。
+     *
+     * <p>C 端实名认证、房产绑定等操作不能改写管理端默认身份。对于历史上已写入 C_USER 的账号，
+     * 按最新创建的有效工作身份恢复一次管理端默认值，避免管理端误进入业主端无菜单会话。</p>
      */
-    private Map<String, Object> createSessionForAccount(AuthAccountRepository.AccountSnapshot account) {
+    private Map<String, Object> createManagementSessionForAccount(AuthAccountRepository.AccountSnapshot account) {
         requireActiveAccount(account);
 
-        // 选择默认身份：last_active_identity_* 优先；为空时允许 C 端已有 c_user 身份兜底。
-        UserContext.IdentityType defaultType = resolveDefaultIdentityType(account);
-        Long defaultIdentityId = account.lastActiveIdentityId();
-        if (defaultIdentityId == null) {
-            Long uid = authAccountRepository.findCUserUidByAccountId(account.accountId());
-            if (uid == null) {
-                throw new AppException(CommonErrorCode.USER_NOT_REGISTERED,
-                        "账号尚未绑定可用身份，请前往居委会完成实名登记");
-            }
-            defaultType = UserContext.IdentityType.C_USER;
-            defaultIdentityId = uid;
+        UserContext ctx = loadLastManagementContext(account);
+        if (ctx == null) {
+            ctx = loadFallbackManagementContext(account);
         }
-
-        // 用 UserContextLoader 加载默认身份；这一步同时校验该身份在数据库中确实存在并启用。
-        UserContext ctx = userContextLoader.load(account.accountId(), defaultType, defaultIdentityId, null);
         if (ctx == null) {
             throw new AppException(CommonErrorCode.USER_NOT_REGISTERED,
-                    "账号无可用身份，请前往居委会完成实名登记");
+                    "账号未分配管理端工作身份，请由管理员授予角色");
         }
 
-        // 回填 last_active_identity（首次登录的账户使用）。
+        // 管理端会话成功后才回填工作身份，保证后续 B/G 登录的默认身份稳定。
         authAccountRepository.updateLastActiveIdentity(account.accountId(),
                 ctx.activeIdentityId(), ctx.identityType().name());
         return issueSession(ctx);
+    }
+
+    private UserContext loadLastManagementContext(AuthAccountRepository.AccountSnapshot account) {
+        if (!UserContext.IdentityType.SYS_USER.name().equals(account.lastActiveIdentityType())
+                || account.lastActiveIdentityId() == null) {
+            return null;
+        }
+        return userContextLoader.load(account.accountId(), UserContext.IdentityType.SYS_USER,
+                account.lastActiveIdentityId(), null);
+    }
+
+    private UserContext loadFallbackManagementContext(AuthAccountRepository.AccountSnapshot account) {
+        WorkIdentityShadow fallback = identityShadowRepository.listSysUserShadows(account.accountId()).stream()
+                .filter(shadow -> shadow.userId() != null && shadow.roleKey() != null)
+                // sys_user ID 单调递增；历史 C 端会话污染后使用最近授予的有效工作身份恢复默认值。
+                .max((left, right) -> Long.compare(left.userId(), right.userId()))
+                .orElse(null);
+        if (fallback == null) {
+            return null;
+        }
+        return userContextLoader.load(account.accountId(), UserContext.IdentityType.SYS_USER,
+                fallback.userId(), null);
     }
 
     /**
