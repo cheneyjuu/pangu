@@ -325,7 +325,7 @@ public class ControllerIntegrationTest {
     }
 
     @Test
-    public void testOwnerFaceAuthUpgradesCurrentCUserToL3() throws Exception {
+    public void testOwnerFaceAuthMockRecordsTestCaptureWithoutUpgradingCUser() throws Exception {
         String providerRequestId = "mock-face-biz-token-controller-test-70002";
         jdbcTemplate.update("DELETE FROM t_owner_face_auth_attestation WHERE provider = ? AND provider_request_id = ?",
                 "TENCENT_FACEID", providerRequestId);
@@ -349,9 +349,11 @@ public class ControllerIntegrationTest {
                             .content(objectMapper.writeValueAsString(request)))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code", is(200)))
-                    .andExpect(jsonPath("$.data.verified", is(true)))
+                    .andExpect(jsonPath("$.data.verified", is(false)))
+                    .andExpect(jsonPath("$.data.testOnly", is(true)))
                     .andExpect(jsonPath("$.data.attestationId", is("TENCENT_FACEID:" + providerRequestId)))
-                    .andExpect(jsonPath("$.data.newAuthLevel", is(3)));
+                    .andExpect(jsonPath("$.data.newAuthLevel", is(2)))
+                    .andExpect(jsonPath("$.data.message", containsString("测试摄像头采集")));
 
             Integer authLevel = jdbcTemplate.queryForObject(
                     "SELECT auth_level FROM c_user WHERE uid = 70002", Integer.class);
@@ -361,10 +363,10 @@ public class ControllerIntegrationTest {
                     WHERE uid = 70002
                       AND provider = 'TENCENT_FACEID'
                       AND provider_request_id = ?
-                      AND verified = 1
-                      AND auth_level_after = 3
+                      AND verified = 0
+                      AND auth_level_after = 2
                     """, Integer.class, providerRequestId);
-            assert authLevel != null && authLevel == 3;
+            assert authLevel != null && authLevel == 2;
             assert attestationCount != null && attestationCount == 1;
         } finally {
             jdbcTemplate.update("UPDATE c_user SET auth_level = 2 WHERE uid = 70002");

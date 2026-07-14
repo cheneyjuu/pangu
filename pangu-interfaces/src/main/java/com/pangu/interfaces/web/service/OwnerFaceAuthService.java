@@ -88,11 +88,40 @@ public class OwnerFaceAuthService {
 
         String attestationProvider = firstText(verification.provider(), provider);
         String providerRequestId = firstText(verification.providerRequestId(), bizToken);
-        return transactionTemplate.execute(status -> persistVerifiedFaceAuth(
-                ctx,
-                attestationProvider,
-                providerRequestId,
-                trimToNull(verification.providerResult())));
+        return transactionTemplate.execute(status -> faceAuthGateway.isTestOnly()
+                ? persistTestCapture(ctx, attestationProvider, providerRequestId)
+                : persistVerifiedFaceAuth(
+                        ctx,
+                        attestationProvider,
+                        providerRequestId,
+                        trimToNull(verification.providerResult())));
+    }
+
+    /**
+     * 体验环境只记录客户端摄像头采集链路的测试回执，不升级认证等级，不能取得 L3 权益。
+     */
+    private FaceAuthResponse persistTestCapture(UserContext ctx,
+                                                 String attestationProvider,
+                                                 String providerRequestId) {
+        int currentAuthLevel = ctx.authLevel().getValue();
+        try {
+            ownerIdentityVerificationRepository.insertFaceAuthAttestation(
+                    ctx.uid(),
+                    ctx.accountId(),
+                    attestationProvider,
+                    providerRequestId,
+                    "{\"testOnly\":true,\"purpose\":\"client_camera_capture\"}",
+                    0,
+                    currentAuthLevel);
+        } catch (DuplicateKeyException e) {
+            throw new AppException(CommonErrorCode.BAD_REQUEST, "该测试摄像头采集流水已提交", e);
+        }
+        return new FaceAuthResponse(
+                false,
+                attestationProvider + ":" + providerRequestId,
+                currentAuthLevel,
+                true,
+                "已记录测试摄像头采集，未升级 L3 认证");
     }
 
     private FaceAuthResponse persistVerifiedFaceAuth(UserContext ctx,
@@ -118,7 +147,12 @@ public class OwnerFaceAuthService {
         }
         ownerIdentityVerificationRepository.markAccountRealNameVerified(ctx.accountId());
 
-        return new FaceAuthResponse(true, attestationProvider + ":" + providerRequestId, FACE_AUTH_LEVEL);
+        return new FaceAuthResponse(
+                true,
+                attestationProvider + ":" + providerRequestId,
+                FACE_AUTH_LEVEL,
+                false,
+                "人脸核身已通过");
     }
 
     private UserContext requireCUserContext() {

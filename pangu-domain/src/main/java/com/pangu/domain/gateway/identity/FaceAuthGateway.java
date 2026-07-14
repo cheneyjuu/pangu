@@ -8,6 +8,15 @@ public interface FaceAuthGateway {
 
     FaceAuthVerificationResult verify(FaceAuthVerificationRequest request);
 
+    /**
+     * 是否仅用于开发或体验环境的测试采集。
+     *
+     * <p>测试网关可以验证客户端的交互链路，但不得据此提升业主实名认证等级。
+     */
+    default boolean isTestOnly() {
+        return false;
+    }
+
     record FaceAuthSessionRequest(String realName, String idCardNumber, String extra) {
     }
 

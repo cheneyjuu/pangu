@@ -10,6 +10,14 @@ import org.springframework.util.StringUtils;
 @ConditionalOnProperty(name = "platform.identity.face-auth.provider-mode", havingValue = "mock", matchIfMissing = true)
 public class MockFaceAuthGateway implements FaceAuthGateway {
 
+    /**
+     * Mock 网关仅供开发、体验环境验证摄像头采集及回执链路，不能作为活体核验结果。
+     */
+    @Override
+    public boolean isTestOnly() {
+        return true;
+    }
+
     @Override
     public FaceAuthSession createSession(FaceAuthSessionRequest request) {
         String tokenSeed = Math.abs((request.realName() + ":" + request.idCardNumber()).hashCode()) + "";
