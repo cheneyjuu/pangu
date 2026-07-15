@@ -204,6 +204,7 @@ class RepairProjectExecutionFlowTest {
                 DELETE FROM sys_user
                 WHERE dept_id IN (SELECT dept_id FROM sys_dept WHERE dept_name LIKE ?)
                 """, SUPPLIER_PREFIX + "%");
+        jdbcTemplate.update("DELETE FROM t_account WHERE phone LIKE '13988%'");
         jdbcTemplate.update("""
                 DELETE FROM t_supplier_tenant_relation
                 WHERE supplier_dept_id IN (SELECT dept_id FROM sys_dept WHERE dept_name LIKE ?)
@@ -243,6 +244,14 @@ class RepairProjectExecutionFlowTest {
                                 signature("SUPPLIER", "施工单位负责人", null, supplierSignature))))));
         assertEquals("BUILDING_MAINTENANCE_FUND", contract.path("fundSource").asText());
         assertEquals("OFFLINE", contract.path("signingMethod").asText());
+        String supplierToken = createSupplierIdentity(supplierDeptId);
+        JsonNode assignedProjects = data(getOk("/api/v1/supplier/repair-projects", supplierToken));
+        assertEquals(locked.projectId(), assignedProjects.get(0).path("project").path("projectId").asLong());
+        JsonNode supplierProject = data(getOk(
+                "/api/v1/supplier/repair-projects/" + locked.projectId(), supplierToken));
+        assertEquals(locked.itemId(), supplierProject.path("items").get(0).path("itemId").asLong());
+        assertEquals(supplierDeptId, supplierProject.path("contract").path("supplierDeptId").asLong());
+        assertEquals(true, supplierProject.path("currentPlanAllocationRooms").isMissingNode());
 
         postBadRequest(projectPath(locked.projectId(), "/payment-requests"), propertyToken,
                 Map.of("milestoneType", "ADVANCE", "requestedAmount", 301,
@@ -258,10 +267,10 @@ class RepairProjectExecutionFlowTest {
         for (String stage : List.of(
                 "BEFORE_CONSTRUCTION", "MATERIAL_ENTRY", "DURING_CONSTRUCTION",
                 "CONCEALED_WORK", "COMPLETION")) {
-            long attachmentId = upload(locked.projectId(), stage + ".jpg", stage);
+            long attachmentId = upload(locked.projectId(), stage + ".jpg", stage, supplierToken);
             stageFiles.put(stage, attachmentId);
             JsonNode record = data(postOk(projectPath(locked.projectId(), "/execution-records"),
-                    propertyToken, Map.of(
+                    supplierToken, Map.of(
                             "itemId", locked.itemId(), "stage", stage,
                             "description", stage + " 现场原始记录",
                             "occurredAt", LocalDateTime.now().minusMinutes(1),
@@ -271,8 +280,10 @@ class RepairProjectExecutionFlowTest {
                     propertyToken, Map.of("status", "VERIFIED", "opinion", "现场核验一致"));
         }
 
-        long materialCertificate = upload(locked.projectId(), "材料合格证明.pdf", "certificate");
-        long materialPhoto = upload(locked.projectId(), "材料进场照片.jpg", "material");
+        long materialCertificate = upload(
+                locked.projectId(), "材料合格证明.pdf", "certificate", supplierToken);
+        long materialPhoto = upload(
+                locked.projectId(), "材料进场照片.jpg", "material", supplierToken);
         Map<String, Object> incompleteMaterial = new LinkedHashMap<>();
         incompleteMaterial.put("itemId", locked.itemId());
         incompleteMaterial.put("materialName", "防水涂料");
@@ -284,20 +295,21 @@ class RepairProjectExecutionFlowTest {
         incompleteMaterial.put("qualificationAttachmentId", materialCertificate);
         incompleteMaterial.put("photoAttachmentIds", List.of(materialPhoto));
         mockMvc.perform(post(projectPath(locked.projectId(), "/material-inspections"))
-                        .header("Authorization", bearer(propertyToken))
+                        .header("Authorization", bearer(supplierToken))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(incompleteMaterial)))
                 .andExpect(status().isBadRequest());
 
         incompleteMaterial.put("brand", "测试品牌");
         JsonNode material = data(postOk(projectPath(locked.projectId(), "/material-inspections"),
-                propertyToken, incompleteMaterial));
+                supplierToken, incompleteMaterial));
         postOk(projectPath(locked.projectId(), "/material-inspections/"
                         + material.path("inspectionId").asLong() + "/verification"),
                 propertyToken, Map.of("status", "VERIFIED", "opinion", "品牌规格数量与证明一致"));
 
-        long settlementFile = upload(locked.projectId(), "竣工结算单.pdf", "settlement");
-        data(postOk(projectPath(locked.projectId(), "/settlement"), propertyToken,
+        long settlementFile = upload(
+                locked.projectId(), "竣工结算单.pdf", "settlement", supplierToken);
+        data(postOk(projectPath(locked.projectId(), "/settlement"), supplierToken,
                 Map.of("settlementAttachmentId", settlementFile,
                         "items", List.of(Map.of(
                                 "projectItemId", locked.itemId(),
@@ -451,6 +463,28 @@ class RepairProjectExecutionFlowTest {
         return supplierDeptId;
     }
 
+    private String createSupplierIdentity(long supplierDeptId) {
+        String phone = "13988" + String.format("%06d", supplierDeptId % 1_000_000);
+        long accountId = jdbcTemplate.queryForObject("""
+                INSERT INTO t_account (
+                    phone, real_name, real_name_verified, status,
+                    last_active_identity_type
+                ) VALUES (?, '测试施工单位经办人', 1, 1, 'SYS_USER')
+                RETURNING account_id
+                """, Long.class, phone);
+        long userId = jdbcTemplate.queryForObject("""
+                INSERT INTO sys_user (account_id, dept_id, user_name, nick_name, status)
+                VALUES (?, ?, ?, '测试施工单位经办人', '0')
+                RETURNING user_id
+                """, Long.class, accountId, supplierDeptId, "supplier-project-" + supplierDeptId);
+        jdbcTemplate.update("""
+                INSERT INTO sys_user_role (user_id, role_id, effective_data_scope, granted_by)
+                SELECT ?, role_id, 'ORG_ONLY', ?
+                FROM sys_role WHERE role_key = 'SERVICE_PROVIDER_STAFF'
+                """, userId, USER_PROPERTY_MANAGER);
+        return token(accountId, "SYS_USER", userId);
+    }
+
     private List<Map<String, Object>> evidenceRequirements() {
         List<Map<String, Object>> result = new ArrayList<>();
         for (String stage : List.of(
@@ -492,13 +526,17 @@ class RepairProjectExecutionFlowTest {
     }
 
     private long upload(long projectId, String fileName, String content) throws Exception {
+        return upload(projectId, fileName, content, propertyToken);
+    }
+
+    private long upload(long projectId, String fileName, String content, String token) throws Exception {
         String contentType = fileName.endsWith(".jpg") ? "image/jpeg" : "application/pdf";
         MockMultipartFile file = new MockMultipartFile(
                 "file", fileName, contentType, content.getBytes(StandardCharsets.UTF_8));
         String response = mockMvc.perform(multipart(
                         "/api/v1/admin/repair-projects/" + projectId + "/attachments")
                         .file(file)
-                        .header("Authorization", bearer(propertyToken)))
+                        .header("Authorization", bearer(token)))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
         return objectMapper.readTree(response).path("data").path("attachmentId").asLong();

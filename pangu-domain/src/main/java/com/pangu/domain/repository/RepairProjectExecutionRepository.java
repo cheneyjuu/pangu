@@ -32,6 +32,8 @@ public interface RepairProjectExecutionRepository {
 
     Optional<Contract> findContract(Long projectId, Long tenantId);
 
+    List<Long> listSupplierProjectIds(Long tenantId, Long supplierDeptId);
+
     List<ContractSignature> listContractSignatures(Long contractId);
 
     ExecutionRecord insertExecutionRecord(ExecutionRecord record);
