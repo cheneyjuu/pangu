@@ -323,6 +323,26 @@
         ORDER BY room_id
     </select>
 
+    <!-- C 端只发现本人位于锁定受影响范围且当前正在收集意见的楼栋验收任务。 -->
+    <select id="listOpenAcceptanceProjectIds" resultType="long">
+        SELECT DISTINCT p.project_id
+        FROM t_repair_project p
+        JOIN t_repair_acceptance a
+          ON a.project_id = p.project_id
+         AND a.status = 'COLLECTING'
+        JOIN t_repair_acceptance_policy_snapshot aps
+          ON aps.policy_id = a.policy_id
+         AND aps.status = 'ACTIVE'
+        JOIN t_repair_acceptance_affected_owner ao
+          ON ao.policy_id = aps.policy_id
+         AND ao.tenant_id = aps.tenant_id
+        WHERE p.tenant_id = #{tenantId}
+          AND p.workflow_type = 'BUILDING_REPAIR'
+          AND p.status = 'PENDING_ACCEPTANCE'
+          AND ao.owner_uid = #{ownerUid}
+        ORDER BY p.project_id DESC
+    </select>
+
     <insert id="insertAcceptanceParty" useGeneratedKeys="true"
             keyProperty="row.partyId" keyColumn="party_id">
         INSERT INTO t_repair_acceptance_party (

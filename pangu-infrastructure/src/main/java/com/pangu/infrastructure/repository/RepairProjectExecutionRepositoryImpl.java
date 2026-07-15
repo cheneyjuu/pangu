@@ -258,6 +258,11 @@ public class RepairProjectExecutionRepositoryImpl implements RepairProjectExecut
     }
 
     @Override
+    public List<Long> listOpenAcceptanceProjectIds(Long tenantId, Long ownerUid) {
+        return mapper.listOpenAcceptanceProjectIds(tenantId, ownerUid);
+    }
+
+    @Override
     public void insertAcceptanceParty(Long tenantId, AcceptanceParty party) {
         mapper.insertAcceptanceParty(acceptancePartyRow(party), tenantId);
     }

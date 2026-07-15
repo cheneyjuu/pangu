@@ -60,6 +60,18 @@ public class RepairProjectAcceptanceService {
     @Transactional(readOnly = true)
     public OwnerAcceptanceTask ownerTask(Long projectId) {
         UserContext actor = support.requireOwnerActor();
+        return ownerTask(projectId, actor);
+    }
+
+    @Transactional(readOnly = true)
+    public List<OwnerAcceptanceTask> listOwnerTasks() {
+        UserContext actor = support.requireOwnerActor();
+        return executionRepository.listOpenAcceptanceProjectIds(actor.tenantId(), actor.uid()).stream()
+                .map(projectId -> ownerTask(projectId, actor))
+                .toList();
+    }
+
+    private OwnerAcceptanceTask ownerTask(Long projectId, UserContext actor) {
         Context context = support.load(projectId, actor.tenantId());
         if (context.project().workflowType() != RepairWorkflowType.BUILDING_REPAIR
                 || context.project().status() != Status.PENDING_ACCEPTANCE) {

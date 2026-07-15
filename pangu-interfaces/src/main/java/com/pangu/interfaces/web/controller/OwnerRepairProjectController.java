@@ -15,20 +15,28 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
+
 @RestController
-@RequestMapping("/api/v1/me/repair-projects/{projectId}/acceptance")
+@RequestMapping("/api/v1/me/repair-projects")
 @RequiredArgsConstructor
 public class OwnerRepairProjectController extends BaseController {
 
     private final RepairProjectAcceptanceService acceptanceService;
 
-    @GetMapping
+    @GetMapping("/acceptance-tasks")
+    @PreAuthorize("isAuthenticated()")
+    public Result<List<OwnerAcceptanceTask>> tasks() {
+        return success(acceptanceService.listOwnerTasks());
+    }
+
+    @GetMapping("/{projectId}/acceptance")
     @PreAuthorize("isAuthenticated()")
     public Result<OwnerAcceptanceTask> task(@PathVariable("projectId") Long projectId) {
         return success(acceptanceService.ownerTask(projectId));
     }
 
-    @PostMapping
+    @PostMapping("/{projectId}/acceptance")
     @PreAuthorize("isAuthenticated()")
     public Result<AcceptanceParty> submit(
             @PathVariable("projectId") Long projectId,

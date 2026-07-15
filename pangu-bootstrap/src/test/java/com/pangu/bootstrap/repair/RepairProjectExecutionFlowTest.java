@@ -322,6 +322,9 @@ class RepairProjectExecutionFlowTest {
                         "resultAttachmentId", acceptanceResult),
                 "受影响业主未达到方案锁定的最低有效验收人数");
 
+        JsonNode ownerTasks = data(getOk(
+                "/api/v1/me/repair-projects/acceptance-tasks", ownerToken));
+        assertEquals(locked.projectId(), ownerTasks.get(0).path("projectId").asLong());
         JsonNode ownerTask = data(getOk(
                 "/api/v1/me/repair-projects/" + locked.projectId() + "/acceptance", ownerToken));
         long affectedRoomId = ownerTask.path("affectedRoomIds").get(0).asLong();

@@ -90,6 +90,8 @@ public interface RepairProjectExecutionRepository {
 
     List<Long> listAffectedOwnerRoomIds(Long policyId, Long tenantId, Long ownerUid);
 
+    List<Long> listOpenAcceptanceProjectIds(Long tenantId, Long ownerUid);
+
     void insertAcceptanceParty(Long tenantId, AcceptanceParty party);
 
     List<AcceptanceParty> listAcceptanceParties(Long acceptanceId, Long tenantId);

@@ -151,6 +151,10 @@ public interface RepairProjectExecutionMapper {
             @Param("tenantId") Long tenantId,
             @Param("ownerUid") Long ownerUid);
 
+    List<Long> listOpenAcceptanceProjectIds(
+            @Param("tenantId") Long tenantId,
+            @Param("ownerUid") Long ownerUid);
+
     int insertAcceptanceParty(@Param("row") AcceptancePartyRow row, @Param("tenantId") Long tenantId);
 
     List<AcceptancePartyRow> listAcceptanceParties(
