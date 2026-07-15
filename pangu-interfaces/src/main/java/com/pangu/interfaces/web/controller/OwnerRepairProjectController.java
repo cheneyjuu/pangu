@@ -2,9 +2,13 @@
 package com.pangu.interfaces.web.controller;
 
 import com.pangu.application.repair.RepairProjectAcceptanceService;
+import com.pangu.application.repair.OwnerRepairProjectDisclosure;
+import com.pangu.application.repair.OwnerRepairProjectQueryService;
+import com.pangu.application.repair.RepairProjectAttachmentService;
 import com.pangu.domain.model.repair.RepairProjectExecution.AcceptanceParty;
 import com.pangu.domain.model.repair.RepairProjectExecution.OwnerAcceptanceTask;
 import com.pangu.interfaces.web.controller.dto.repair.RepairProjectExecutionRequests.OwnerAcceptanceRequest;
+import com.pangu.interfaces.web.controller.dto.repair.RepairAttachmentDownloadTicketResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -23,6 +27,24 @@ import java.util.List;
 public class OwnerRepairProjectController extends BaseController {
 
     private final RepairProjectAcceptanceService acceptanceService;
+    private final OwnerRepairProjectQueryService queryService;
+    private final RepairProjectAttachmentService attachmentService;
+
+    @GetMapping("/by-work-order/{workOrderId}")
+    @PreAuthorize("isAuthenticated()")
+    public Result<OwnerRepairProjectDisclosure> disclosure(
+            @PathVariable("workOrderId") Long workOrderId) {
+        return success(queryService.findPublishedByWorkOrder(workOrderId).orElse(null));
+    }
+
+    @GetMapping("/by-work-order/{workOrderId}/attachments/{attachmentId}/download-ticket")
+    @PreAuthorize("isAuthenticated()")
+    public Result<RepairAttachmentDownloadTicketResponse> attachmentTicket(
+            @PathVariable("workOrderId") Long workOrderId,
+            @PathVariable("attachmentId") Long attachmentId) {
+        return success(RepairAttachmentDownloadTicketResponse.from(
+                attachmentService.createOwnerDownloadTicket(workOrderId, attachmentId)));
+    }
 
     @GetMapping("/acceptance-tasks")
     @PreAuthorize("isAuthenticated()")

@@ -19,6 +19,9 @@ public interface RepairProjectMapper {
 
     RepairProjectRow findProject(@Param("projectId") Long projectId, @Param("tenantId") Long tenantId);
 
+    RepairProjectRow findProjectByActivePlanWorkOrder(@Param("workOrderId") Long workOrderId,
+                                                      @Param("tenantId") Long tenantId);
+
     RepairProjectRow findProjectForUpdate(@Param("projectId") Long projectId, @Param("tenantId") Long tenantId);
 
     List<RepairProjectRow> listProjects(@Param("tenantId") Long tenantId,

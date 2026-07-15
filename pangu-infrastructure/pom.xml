@@ -85,6 +85,12 @@
             <artifactId>pdfbox</artifactId>
         </dependency>
 
+        <!-- 业主端披露正文必须在服务端按可信标签白名单清洗。 -->
+        <dependency>
+            <groupId>org.jsoup</groupId>
+            <artifactId>jsoup</artifactId>
+        </dependency>
+
         <!-- Spring Boot Security Starter (For SecurityContextHolder in DataScopeInterceptor) -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

@@ -55,6 +55,7 @@ class RepairProjectFlowTest {
     @MockBean private RepairEvidenceObjectStorage objectStorage;
 
     private String token;
+    private String ownerToken;
     private long buildingId;
 
     @BeforeEach
@@ -71,6 +72,19 @@ class RepairProjectFlowTest {
                 ORDER BY COUNT(DISTINCT op.room_id) DESC, op.building_id
                 LIMIT 1
                 """, Long.class, TENANT);
+        Map<String, Object> owner = jdbcTemplate.queryForMap("""
+                SELECT owner.account_id, owner.uid
+                FROM c_owner_property property
+                JOIN c_user owner ON owner.uid = property.uid
+                WHERE property.tenant_id = ?
+                  AND property.building_id = ?
+                  AND property.account_status = 1
+                ORDER BY property.opid
+                LIMIT 1
+                """, TENANT, buildingId);
+        ownerToken = jwtTokenProvider.generateToken(
+                ((Number) owner.get("account_id")).longValue(), "C_USER",
+                ((Number) owner.get("uid")).longValue(), TENANT);
         when(objectStorage.put(anyString(), any(byte[].class), anyString(), anyString()))
                 .thenAnswer(invocation -> new RepairEvidenceObjectStorage.StoredObjectMetadata(
                         ((byte[]) invocation.getArgument(1)).length,
@@ -208,6 +222,71 @@ class RepairProjectFlowTest {
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.project.projectId", is((int) projectId)));
+    }
+
+    @Test
+    void ownerReadsOnlySanitizedLockedPlanThroughVisibleWorkOrder() throws Exception {
+        long workOrderId = createBuildingRepairCase();
+        Map<String, Object> request = buildingProjectRequest(workOrderId, "OWNER-VIEW");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> plan = (Map<String, Object>) request.get("plan");
+        plan.put("problemCause", "<h3>现场原因</h3><script>alert(1)</script>"
+                + "<p onclick=\"steal()\">外墙渗水<strong>严重</strong></p><img src=\"x\">");
+
+        JsonNode created = createProject(request);
+        long projectId = created.path("project").path("projectId").asLong();
+        long planId = created.path("plans").get(0).path("planId").asLong();
+
+        mockMvc.perform(get("/api/v1/me/repair-projects/by-work-order/" + workOrderId)
+                        .header("Authorization", "Bearer " + ownerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data").doesNotExist());
+
+        long quoteAttachmentId = upload(projectId, "业主端报价.pdf", "application/pdf", "quote");
+        long photoAttachmentId = upload(projectId, "业主端现场.jpg", "image/jpeg", "photo");
+        link(projectId, planId, quoteAttachmentId, "ORIGINAL_QUOTE");
+        link(projectId, planId, photoAttachmentId, "SITE_PHOTO");
+        mockMvc.perform(post("/api/v1/admin/repair-projects/" + projectId
+                        + "/plans/" + planId + "/lock")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("expectedProjectVersion", 0))))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/v1/me/repair-projects/by-work-order/" + workOrderId)
+                        .header("Authorization", "Bearer " + ownerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.projectId", is((int) projectId)))
+                .andExpect(jsonPath("$.data.plan.problemCause", is(
+                        "<h3>现场原因</h3><p>外墙渗水<strong>严重</strong></p>")))
+                .andExpect(jsonPath("$.data.plan.items", hasSize(1)))
+                .andExpect(jsonPath("$.data.plan.allocationSummary.roomCount").isNumber())
+                .andExpect(jsonPath("$.data.plan.attachments", hasSize(2)))
+                .andExpect(jsonPath("$.data.plan.lockedAt").isString());
+
+        mockMvc.perform(get("/api/v1/me/repair-projects/by-work-order/" + workOrderId
+                        + "/attachments/" + quoteAttachmentId + "/download-ticket")
+                        .header("Authorization", "Bearer " + ownerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.attachmentId", is((int) quoteAttachmentId)))
+                .andExpect(jsonPath("$.data.downloadUrl", is(
+                        "https://oss.example.test/repair-project")));
+    }
+
+    @Test
+    void planRejectsRichTextWithoutVisibleContent() throws Exception {
+        long workOrderId = createBuildingRepairCase();
+        Map<String, Object> request = buildingProjectRequest(workOrderId, "EMPTY-RICH-TEXT");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> plan = (Map<String, Object>) request.get("plan");
+        plan.put("problemCause", "<script>alert('only script')</script>");
+
+        mockMvc.perform(post("/api/v1/admin/repair-projects")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(request)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.msg", is("problemCause 必填")));
     }
 
     private JsonNode createProject(Map<String, Object> request) throws Exception {

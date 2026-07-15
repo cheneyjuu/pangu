@@ -53,6 +53,7 @@ public class RepairProjectAttachmentService {
     private final RepairEvidenceObjectStorage objectStorage;
     private final UserContextHolder userContextHolder;
     private final ObjectMapper objectMapper;
+    private final OwnerRepairProjectQueryService ownerProjectQueryService;
 
     @Transactional
     public Attachment upload(Long projectId, UploadRepairProjectAttachmentCommand command) {
@@ -98,10 +99,32 @@ public class RepairProjectAttachmentService {
         assertProjectAccess(actor, project, false);
         Attachment attachment = projectRepository.findAttachment(attachmentId, projectId, actor.tenantId())
                 .orElseThrow(() -> new RepairWorkOrderApplicationException(NOT_FOUND, "维修工程附件不存在"));
+        return createTicket(attachment);
+    }
+
+    @Transactional(readOnly = true)
+    public RepairAttachmentDownloadTicket createOwnerDownloadTicket(Long workOrderId, Long attachmentId) {
+        OwnerRepairProjectDisclosure disclosure = ownerProjectQueryService.findPublishedByWorkOrder(workOrderId)
+                .orElseThrow(() -> new RepairWorkOrderApplicationException(
+                        NOT_FOUND, "关联维修工程尚无可披露的锁定方案"));
+        boolean published = disclosure.plan().attachments().stream()
+                .anyMatch(attachment -> attachment.attachmentId().equals(attachmentId));
+        if (!published) {
+            throw new RepairWorkOrderApplicationException(NOT_FOUND, "维修工程附件不在当前披露方案中");
+        }
+        UserContext owner = userContextHolder.current();
+        Attachment attachment = projectRepository.findAttachment(
+                        attachmentId, disclosure.projectId(), owner.tenantId())
+                .orElseThrow(() -> new RepairWorkOrderApplicationException(
+                        NOT_FOUND, "维修工程附件不存在"));
+        return createTicket(attachment);
+    }
+
+    private RepairAttachmentDownloadTicket createTicket(Attachment attachment) {
         Instant expiresAt = Instant.now().plus(DOWNLOAD_URL_VALIDITY);
         try {
             return new RepairAttachmentDownloadTicket(
-                    attachmentId,
+                    attachment.attachmentId(),
                     objectStorage.createDownloadUrl(attachment.objectKey(), DOWNLOAD_URL_VALIDITY).toString(),
                     expiresAt);
         } catch (RuntimeException ex) {

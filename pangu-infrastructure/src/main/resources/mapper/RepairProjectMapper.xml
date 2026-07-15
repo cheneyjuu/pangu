@@ -40,6 +40,28 @@
         WHERE project_id = #{projectId} AND tenant_id = #{tenantId}
     </select>
 
+    <select id="findProjectByActivePlanWorkOrder"
+            resultType="com.pangu.infrastructure.persistence.entity.RepairProjectRow">
+        SELECT DISTINCT
+               project.project_id, project.project_no, project.tenant_id, project.project_name,
+               project.workflow_type, project.scope_type, project.building_id, project.unit_name,
+               project.fund_source, project.governance_path, project.status, project.active_plan_id,
+               project.version, project.created_by_account_id, project.created_by_user_id,
+               project.create_time, project.update_time
+        FROM t_repair_project project
+        JOIN t_repair_project_item item
+          ON item.project_id = project.project_id
+         AND item.plan_id = project.active_plan_id
+         AND item.tenant_id = project.tenant_id
+        JOIN t_repair_project_item_case item_case
+          ON item_case.item_id = item.item_id
+         AND item_case.tenant_id = project.tenant_id
+        WHERE item_case.work_order_id = #{workOrderId}
+          AND project.tenant_id = #{tenantId}
+        ORDER BY project.update_time DESC, project.project_id DESC
+        LIMIT 1
+    </select>
+
     <select id="findProjectForUpdate" resultType="com.pangu.infrastructure.persistence.entity.RepairProjectRow">
         SELECT <include refid="projectColumns"/>
         FROM t_repair_project

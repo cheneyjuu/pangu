@@ -9,6 +9,7 @@ import com.pangu.application.repair.command.RepairPlanDraftCommand;
 import com.pangu.domain.common.Page;
 import com.pangu.domain.context.UserContext;
 import com.pangu.domain.context.UserContextHolder;
+import com.pangu.domain.gateway.RichTextSanitizer;
 import com.pangu.domain.model.repair.RepairProject;
 import com.pangu.domain.model.repair.RepairProject.AllocationRoom;
 import com.pangu.domain.model.repair.RepairProject.AttachmentPurpose;
@@ -83,6 +84,7 @@ public class RepairProjectService {
     private final RepairCaseLifecyclePolicy caseLifecyclePolicy;
     private final UserContextHolder userContextHolder;
     private final ObjectMapper objectMapper;
+    private final RichTextSanitizer richTextSanitizer;
 
     @Transactional
     public RepairProject.Details createProject(CreateRepairProjectCommand command) {
@@ -231,16 +233,20 @@ public class RepairProjectService {
 
     private PlanVersion insertPlan(
             RepairProject project, RepairPlanDraftCommand draft, int versionNo, UserContext actor) {
+        if (draft == null) {
+            throw invalid("plan 必填");
+        }
+        // 先清洗再持久化和计算快照，保证管理端预览、业主端披露与锁定哈希使用同一正文。
+        PlanNarratives narratives = sanitizeNarratives(draft);
         validateDraft(project, draft);
         PlanVersion plan = projectRepository.insertPlan(new PlanVersion(
                 null, project.projectId(), project.tenantId(), versionNo,
-                requireText(draft.problemCause(), "problemCause"),
-                requireText(draft.implementationScope(), "implementationScope"),
+                narratives.problemCause(), narratives.implementationScope(),
                 draft.budgetTotal(), project.fundSource(), draft.allocationRuleType(),
                 trim(draft.allocationRuleDescription()), draft.supplierSelectionMethod(),
                 requireText(draft.supplierSelectionReason(), "supplierSelectionReason"),
-                requireText(draft.constructionManagementRequirements(), "constructionManagementRequirements"),
-                draft.evidenceRequirements(), requireText(draft.safetyRequirements(), "safetyRequirements"),
+                narratives.constructionManagementRequirements(), draft.evidenceRequirements(),
+                narratives.safetyRequirements(),
                 requireText(draft.acceptanceMethod(), "acceptanceMethod"), acceptanceRoles(project.workflowType()),
                 trim(draft.affectedOwnerScopeDescription()), draft.minimumAffectedOwnerAcceptors(),
                 draft.affectedOwnerPassRule(), draft.affectedOwnerApprovalRatio(), draft.settlementMethod(),
@@ -315,19 +321,12 @@ public class RepairProjectService {
     }
 
     private void validateDraft(RepairProject project, RepairPlanDraftCommand draft) {
-        if (draft == null) {
-            throw invalid("plan 必填");
-        }
-        requireText(draft.problemCause(), "problemCause");
-        requireText(draft.implementationScope(), "implementationScope");
         requirePositive(draft.budgetTotal(), "budgetTotal");
         if (draft.allocationRuleType() == null || draft.supplierSelectionMethod() == null
                 || draft.settlementMethod() == null) {
             throw invalid("allocationRuleType、supplierSelectionMethod、settlementMethod 均为必填项");
         }
         requireText(draft.supplierSelectionReason(), "supplierSelectionReason");
-        requireText(draft.constructionManagementRequirements(), "constructionManagementRequirements");
-        requireText(draft.safetyRequirements(), "safetyRequirements");
         requireText(draft.acceptanceMethod(), "acceptanceMethod");
         if (draft.plannedStartDate() == null || draft.plannedCompletionDate() == null
                 || draft.plannedCompletionDate().isBefore(draft.plannedStartDate())) {
@@ -721,6 +720,31 @@ public class RepairProjectService {
             throw invalid(field + " 必填");
         }
         return normalized;
+    }
+
+    private PlanNarratives sanitizeNarratives(RepairPlanDraftCommand draft) {
+        return new PlanNarratives(
+                requireRichText(draft.problemCause(), "problemCause"),
+                requireRichText(draft.implementationScope(), "implementationScope"),
+                requireRichText(
+                        draft.constructionManagementRequirements(),
+                        "constructionManagementRequirements"),
+                requireRichText(draft.safetyRequirements(), "safetyRequirements"));
+    }
+
+    private String requireRichText(String value, String field) {
+        RichTextSanitizer.SanitizedRichText sanitized = richTextSanitizer.sanitize(value);
+        if (sanitized.isBlank()) {
+            throw invalid(field + " 必填");
+        }
+        return sanitized.html();
+    }
+
+    private record PlanNarratives(
+            String problemCause,
+            String implementationScope,
+            String constructionManagementRequirements,
+            String safetyRequirements) {
     }
 
     private void requirePositive(BigDecimal value, String field) {

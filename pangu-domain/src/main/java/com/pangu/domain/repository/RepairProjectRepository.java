@@ -29,6 +29,9 @@ public interface RepairProjectRepository {
 
     Optional<RepairProject> findProject(Long projectId, Long tenantId);
 
+    /** 查找当前锁定方案中仍关联指定报修事项的工程项目。 */
+    Optional<RepairProject> findProjectByActivePlanWorkOrder(Long workOrderId, Long tenantId);
+
     Optional<RepairProject> findProjectForUpdate(Long projectId, Long tenantId);
 
     List<RepairProject> listProjects(Long tenantId, Status status, String keyword, int offset, int limit);

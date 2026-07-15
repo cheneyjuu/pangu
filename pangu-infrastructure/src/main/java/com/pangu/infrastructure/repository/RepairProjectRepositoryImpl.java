@@ -92,6 +92,12 @@ public class RepairProjectRepositoryImpl implements RepairProjectRepository {
     }
 
     @Override
+    public Optional<RepairProject> findProjectByActivePlanWorkOrder(Long workOrderId, Long tenantId) {
+        return Optional.ofNullable(mapper.findProjectByActivePlanWorkOrder(workOrderId, tenantId))
+                .map(this::toDomain);
+    }
+
+    @Override
     public Optional<RepairProject> findProjectForUpdate(Long projectId, Long tenantId) {
         return Optional.ofNullable(mapper.findProjectForUpdate(projectId, tenantId)).map(this::toDomain);
     }
