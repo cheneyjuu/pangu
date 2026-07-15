@@ -20,13 +20,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * V2.7 财务公示 4 个 endpoint 的 {@code @PreAuthorize} 矩阵。
+ * V2.7 财务公示 5 个 endpoint 的 {@code @PreAuthorize} 矩阵。
  *
- * <p>用 V1.1 求是小区 seed 用户对 4 条权限通路反复打靶：
+ * <p>用 V1.1 求是小区 seed 用户对 5 条权限通路反复打靶：
  * <ul>
  *     <li>陈网格员（GRID_MEMBER） —— 三条带 hasAuthority 的全 403；</li>
  *     <li>李四（C_USER，无 sys_role） —— compose / publish / audit 全 403，
- *         GET 单期通过 {@code isAuthenticated()} 但 service 层因 snapshotId 不存在抛 404；</li>
+ *         GET 单期和首页最近一期摘要均可通过 {@code isAuthenticated()}；</li>
  *     <li>刘主任（COMMUNITY_ADMIN） —— compose / audit 通过；publish 应 403；</li>
  *     <li>周主任（COMMITTEE_DIRECTOR） —— compose / publish 通过到 service 层；audit 应 403；</li>
  *     <li>正向通路：周主任带 disclosure:publish 调 publish endpoint 命中不存在 snapshotId
@@ -122,6 +122,16 @@ public class DisclosurePreAuthorizeMatrixTest {
                                 "disclosureType", "MAINTENANCE_FUND"))))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code", is(403)));
+    }
+
+    @Test
+    public void cUserCanGetLatestMaintenanceFundSummary_200() throws Exception {
+        // 首页摘要是业主可读接口，但 service 仍会把数据限定在 JWT 当前 tenant 中。
+        String token = jwtTokenProvider.generateToken(ACC_LISI, "C_USER", UID_LISI, TENANT_RUSHI);
+        mockMvc.perform(get("/api/v1/disclosures/maintenance-fund/latest")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code", is(200)));
     }
 
     // ===== 正向通路：authority 通过 → service 层抛 SNAPSHOT_NOT_FOUND =====

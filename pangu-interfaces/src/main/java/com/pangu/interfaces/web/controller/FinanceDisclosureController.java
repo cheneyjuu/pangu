@@ -10,6 +10,7 @@ import com.pangu.domain.model.disclosure.FinanceDisclosureSnapshot;
 import com.pangu.interfaces.security.SecurityUtils;
 import com.pangu.interfaces.web.controller.dto.disclosure.CompareResponse;
 import com.pangu.interfaces.web.controller.dto.disclosure.ComposeRequest;
+import com.pangu.interfaces.web.controller.dto.disclosure.MaintenanceFundSummaryResponse;
 import com.pangu.interfaces.web.controller.dto.disclosure.SnapshotResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -30,6 +31,7 @@ import org.springframework.web.bind.annotation.RestController;
  * <ul>
  *   <li>{@code POST /api/v1/disclosures/compose}                          —— 物业 / 业委会聚合 DRAFT；</li>
  *   <li>{@code POST /api/v1/disclosures/{snapshotId}/publish}             —— 业委会主任锁 + 发布；</li>
+ *   <li>{@code GET  /api/v1/disclosures/maintenance-fund/latest}          —— 业主首页取最近一期已公示维修资金摘要；</li>
  *   <li>{@code GET  /api/v1/disclosures/{snapshotId}}                     —— 业主侧拉单期，service 校验 tenant + status=PUBLISHED；</li>
  *   <li>{@code POST /api/v1/disclosures/{currId}/compare/{prevId}}        —— G 端审计差分。</li>
  * </ul>
@@ -38,6 +40,7 @@ import org.springframework.web.bind.annotation.RestController;
  * <ul>
  *   <li>{@code compose} —— {@code disclosure:compose}（GB / redline=0）；</li>
  *   <li>{@code publish} —— {@code disclosure:publish}（B / redline=1，仅 COMMITTEE_DIRECTOR）；</li>
+ *   <li>{@code GET 最近一期摘要} —— {@code @PreAuthorize("isAuthenticated()")}，仅取当前 tenant 的 PUBLISHED 快照；</li>
  *   <li>{@code GET 单期} —— {@code @PreAuthorize("isAuthenticated()")}，service 层做 tenant + 状态校验；</li>
  *   <li>{@code compare} —— {@code disclosure:audit}（G / redline=0，GOV_SUPER_ADMIN / COMMUNITY_ADMIN）。</li>
  * </ul>
@@ -82,6 +85,21 @@ public class FinanceDisclosureController extends BaseController {
         FinanceDisclosureSnapshot snapshot = disclosureApplicationService
                 .getReadablePublishedSnapshot(snapshotId, requireTenantId());
         return success(SnapshotResponse.from(snapshot));
+    }
+
+    /**
+     * 业主首页读取最近一期已公示的专项维修资金本期入账、支出。
+     *
+     * <p>当前小区尚无已公示快照时返回成功空数据，前端据此显示“暂无已公示数据”，不以实时账目补位。
+     */
+    @GetMapping("/maintenance-fund/latest")
+    @PreAuthorize("isAuthenticated()")
+    public Result<MaintenanceFundSummaryResponse> getLatestMaintenanceFundSummary() {
+        MaintenanceFundSummaryResponse response = disclosureApplicationService
+                .getLatestPublishedMaintenanceFundSummary(requireTenantId())
+                .map(MaintenanceFundSummaryResponse::from)
+                .orElse(null);
+        return success(response);
     }
 
     /** compare：W/R/N 差分审计 + 落 audit 表。 */

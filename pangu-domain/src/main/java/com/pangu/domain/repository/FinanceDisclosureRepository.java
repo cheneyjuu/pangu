@@ -31,6 +31,14 @@ public interface FinanceDisclosureRepository {
             Long tenantId, DisclosureType disclosureType, String period);
 
     /**
+     * 查询当前租户指定类型最近一次已发布的快照。
+     *
+     * <p>业主首页只能读取已公示的数据；草稿、锁定和修订中的快照不得作为首页财务事实返回。
+     */
+    Optional<FinanceDisclosureSnapshot> findLatestPublished(
+            Long tenantId, DisclosureType disclosureType);
+
+    /**
      * 新增快照。返回带数据库主键的聚合。
      *
      * @throws DuplicateSnapshotException 触发 {@code uk_disc_period} / {@code uidx_disc_latest} 冲突
