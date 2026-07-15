@@ -21,6 +21,9 @@ public class WebMvcConfig implements WebMvcConfigurer {
         // 注册多租户上下文提取过滤器
         registry.addInterceptor(tenantContextInterceptor)
                 .addPathPatterns("/**")
-                .excludePathPatterns("/api/v1/auth/login", "/api/v1/auth/wechat-phone-login");
+                .excludePathPatterns(
+                        "/api/v1/auth/login",
+                        "/api/v1/auth/wechat-phone-login",
+                        "/api/v1/auth/refresh");
     }
 }

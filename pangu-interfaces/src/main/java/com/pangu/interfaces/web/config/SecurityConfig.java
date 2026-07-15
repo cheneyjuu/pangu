@@ -37,6 +37,7 @@ public class SecurityConfig {
                 .requestMatchers(
                         "/api/v1/auth/login",
                         "/api/v1/auth/wechat-phone-login",
+                        "/api/v1/auth/refresh",
                         "/api/v1/supplier-activation/activate")
                 .permitAll()
                 // 其他接口均需要经过 JWT 身份认证

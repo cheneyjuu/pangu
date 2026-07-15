@@ -3,6 +3,7 @@ package com.pangu.interfaces.web.controller;
 
 import com.pangu.interfaces.web.controller.dto.LoginRequest;
 import com.pangu.interfaces.web.controller.dto.NavMenuResponse;
+import com.pangu.interfaces.web.controller.dto.RefreshTokenRequest;
 import com.pangu.interfaces.web.controller.dto.SwitchShadowRequest;
 import com.pangu.interfaces.web.controller.dto.SwitchTenantRequest;
 import com.pangu.interfaces.web.controller.dto.WeChatPhoneLoginRequest;
@@ -43,7 +44,18 @@ public class AuthController extends BaseController {
     }
 
     /**
-     * 3. 保存用户额外确认授权的微信昵称与头像；不作为实名或表决资格依据。
+     * 3. 使用一次性刷新凭证续期访问 JWT。
+     *
+     * <p>刷新凭证不会携带在 Authorization 中，服务端消费后立即轮换，避免访问 JWT 过期时
+     * 前端直接丢失已登录状态。</p>
+     */
+    @PostMapping("/refresh")
+    public Result<Map<String, Object>> refresh(@Valid @RequestBody RefreshTokenRequest request) {
+        return success(authService.refreshSession(request));
+    }
+
+    /**
+     * 4. 保存用户额外确认授权的微信昵称与头像；不作为实名或表决资格依据。
      */
     @PostMapping("/wechat-profile")
     public Result<Map<String, Object>> updateWeChatProfile(
@@ -53,7 +65,7 @@ public class AuthController extends BaseController {
     }
 
     /**
-     * 4. 管理端工作分身列表
+     * 5. 管理端工作分身列表
      */
     @GetMapping("/shadows")
     public Result<Map<String, Object>> listSysUserShadows(
@@ -62,7 +74,7 @@ public class AuthController extends BaseController {
     }
 
     /**
-     * 5. 当前身份可见管理端菜单
+     * 6. 当前身份可见管理端菜单
      */
     @GetMapping("/menus")
     public Result<List<NavMenuResponse>> listMenus(
@@ -71,7 +83,7 @@ public class AuthController extends BaseController {
     }
 
     /**
-     * 6. 管理端工作分身切换
+     * 7. 管理端工作分身切换
      */
     @PostMapping("/switch-shadow")
     public Result<Map<String, Object>> switchShadow(
@@ -81,7 +93,7 @@ public class AuthController extends BaseController {
     }
 
     /**
-     * 7. C端业主跨小区多租户切换接口
+     * 8. C端业主跨小区多租户切换接口
      */
     @PostMapping("/switch-tenant")
     public Result<Map<String, Object>> switchTenant(
@@ -91,7 +103,7 @@ public class AuthController extends BaseController {
     }
 
     /**
-     * 8. G 端街镇或平台根组织可监管小区列表。
+     * 9. G 端街镇或平台根组织可监管小区列表。
      */
     @GetMapping("/managed-communities")
     public Result<Map<String, Object>> listManagedCommunities(
@@ -100,7 +112,7 @@ public class AuthController extends BaseController {
     }
 
     /**
-     * 9. G 端辖区小区上下文切换，后端校验组织授权后重签 JWT。
+     * 10. G 端辖区小区上下文切换，后端校验组织授权后重签 JWT。
      */
     @PostMapping("/switch-managed-community")
     public Result<Map<String, Object>> switchManagedCommunity(

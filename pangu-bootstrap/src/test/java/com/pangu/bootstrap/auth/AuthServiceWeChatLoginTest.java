@@ -15,9 +15,12 @@ import com.pangu.domain.repository.GovernmentManagedCommunityRepository;
 import com.pangu.domain.repository.IdentityShadowRepository;
 import com.pangu.domain.repository.NavigationMenuRepository;
 import com.pangu.domain.repository.OwnerIdentityVerificationRepository;
+import com.pangu.domain.repository.RefreshSessionRepository;
 import com.pangu.domain.security.NameDecryptor;
 import com.pangu.interfaces.security.JwtTokenProvider;
+import com.pangu.interfaces.security.RefreshTokenService;
 import com.pangu.interfaces.web.controller.dto.LoginRequest;
+import com.pangu.interfaces.web.controller.dto.RefreshTokenRequest;
 import com.pangu.interfaces.web.controller.dto.WeChatPhoneLoginRequest;
 import com.pangu.interfaces.web.controller.dto.WeChatProfileRequest;
 import com.pangu.interfaces.web.service.AuthService;
@@ -79,6 +82,8 @@ class AuthServiceWeChatLoginTest {
     private NameDecryptor nameDecryptor;
     @Mock
     private WeChatMiniProgramGateway weChatMiniProgramGateway;
+    @Mock
+    private RefreshTokenService refreshTokenService;
 
     private AuthService service() {
         return new AuthService(
@@ -94,7 +99,15 @@ class AuthServiceWeChatLoginTest {
                 ownerIdentityVerificationRepository,
                 idCardOcrGateway,
                 nameDecryptor,
-                weChatMiniProgramGateway);
+                weChatMiniProgramGateway,
+                refreshTokenService);
+    }
+
+    /** 为签发会话的用例提供同一份可断言的刷新凭证。 */
+    private void stubSessionIssuance() {
+        when(jwtTokenProvider.getExpirationInSeconds()).thenReturn(7_200L);
+        when(refreshTokenService.issue(any())).thenReturn(
+                new RefreshTokenService.IssuedRefreshToken("refresh-token-for-test", 1_209_600L));
     }
 
     @Test
@@ -115,6 +128,7 @@ class AuthServiceWeChatLoginTest {
         when(authAccountRepository.findIdentityByAccountId(ACCOUNT_ID)).thenReturn(
                 new AuthAccountRepository.AccountIdentitySnapshot(ACCOUNT_ID, PHONE, null, 0, 1));
         when(communitySettingsRepository.findCommunity(TENANT_ID)).thenReturn(Optional.empty());
+        stubSessionIssuance();
 
         Map<String, Object> result = service().weChatPhoneLogin(
                 new WeChatPhoneLoginRequest("login-code", "phone-code"));
@@ -128,6 +142,33 @@ class AuthServiceWeChatLoginTest {
         verify(authAccountRepository).bindWeChatIdentity(new AuthAccountRepository.WeChatIdentityBinding(
                 ACCOUNT_ID, APP_ID, SUBJECT_HASH));
         verify(authAccountRepository).touchWeChatIdentityLogin(ACCOUNT_ID, APP_ID);
+    }
+
+    @Test
+    void refreshSession_rotatesTokenAndReloadsCurrentIdentity() {
+        UserContext context = ownerContext();
+        AuthAccountRepository.AccountSnapshot account = new AuthAccountRepository.AccountSnapshot(
+                ACCOUNT_ID, PHONE, 1, UID, UserContext.IdentityType.C_USER.name());
+        when(refreshTokenService.consume("previous-refresh-token")).thenReturn(
+                new RefreshSessionRepository.RefreshSession(
+                        ACCOUNT_ID, UserContext.IdentityType.C_USER.name(), UID, TENANT_ID));
+        when(authAccountRepository.findById(ACCOUNT_ID)).thenReturn(account);
+        when(userContextLoader.load(ACCOUNT_ID, UserContext.IdentityType.C_USER, UID, TENANT_ID))
+                .thenReturn(context);
+        when(jwtTokenProvider.generateToken(ACCOUNT_ID, "C_USER", UID, TENANT_ID))
+                .thenReturn("rotated-access-token");
+        when(authAccountRepository.findIdentityByAccountId(ACCOUNT_ID)).thenReturn(
+                new AuthAccountRepository.AccountIdentitySnapshot(ACCOUNT_ID, PHONE, null, 0, 1));
+        when(communitySettingsRepository.findCommunity(TENANT_ID)).thenReturn(Optional.empty());
+        stubSessionIssuance();
+
+        Map<String, Object> result = service().refreshSession(new RefreshTokenRequest("previous-refresh-token"));
+
+        assertEquals("rotated-access-token", result.get("access_token"));
+        assertEquals("refresh-token-for-test", result.get("refresh_token"));
+        assertEquals(7_200L, result.get("expires_in"));
+        verify(refreshTokenService).consume("previous-refresh-token");
+        verify(refreshTokenService).issue(context);
     }
 
     @Test
@@ -147,6 +188,7 @@ class AuthServiceWeChatLoginTest {
         when(jwtTokenProvider.generateToken(ACCOUNT_ID, "C_USER", UID, null)).thenReturn("base-owner-token");
         when(authAccountRepository.findIdentityByAccountId(ACCOUNT_ID)).thenReturn(
                 new AuthAccountRepository.AccountIdentitySnapshot(ACCOUNT_ID, PHONE, null, 0, 1));
+        stubSessionIssuance();
 
         Map<String, Object> result = service().weChatPhoneLogin(
                 new WeChatPhoneLoginRequest("login-code", "phone-code"));
@@ -179,6 +221,7 @@ class AuthServiceWeChatLoginTest {
         when(jwtTokenProvider.generateToken(ACCOUNT_ID, "C_USER", UID, null)).thenReturn("new-owner-token");
         when(authAccountRepository.findIdentityByAccountId(ACCOUNT_ID)).thenReturn(
                 new AuthAccountRepository.AccountIdentitySnapshot(ACCOUNT_ID, PHONE, null, 0, 1));
+        stubSessionIssuance();
 
         Map<String, Object> result = service().weChatPhoneLogin(
                 new WeChatPhoneLoginRequest("login-code", "phone-code"));
@@ -212,6 +255,7 @@ class AuthServiceWeChatLoginTest {
                 new AuthAccountRepository.AccountIdentitySnapshot(ACCOUNT_ID, PHONE, null, 0, 1));
         when(communitySettingsRepository.findCommunity(TENANT_ID)).thenReturn(Optional.empty());
         when(navigationMenuRepository.findGrantedMenusByUserId(propertyStaffUserId)).thenReturn(List.of());
+        stubSessionIssuance();
 
         Map<String, Object> result = service().login(request);
 

@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pangu.infrastructure.persistence.mapper.RefreshSessionMapper">
+
+    <!-- 关联业务：原始刷新凭证不落库；UPDATE ... RETURNING 保证凭证只可消费一次。 -->
+
+    <resultMap id="RefreshSessionRowMap"
+               type="com.pangu.infrastructure.persistence.mapper.RefreshSessionMapper$RefreshSessionRow">
+        <result property="accountId" column="account_id"/>
+        <result property="identityType" column="identity_type"/>
+        <result property="activeIdentityId" column="active_identity_id"/>
+        <result property="tenantId" column="tenant_id"/>
+    </resultMap>
+
+    <insert id="insert"
+            parameterType="com.pangu.infrastructure.persistence.mapper.RefreshSessionMapper$NewRefreshSessionRow">
+        INSERT INTO t_auth_refresh_session (
+            token_hash,
+            account_id,
+            identity_type,
+            active_identity_id,
+            tenant_id,
+            expires_at
+        ) VALUES (
+            #{tokenHash},
+            #{accountId},
+            #{identityType},
+            #{activeIdentityId},
+            #{tenantId},
+            CURRENT_TIMESTAMP + (#{expiresInSeconds} * INTERVAL '1 second')
+        )
+    </insert>
+
+    <select id="consume" resultMap="RefreshSessionRowMap" flushCache="true">
+        UPDATE t_auth_refresh_session
+        SET revoked_at = CURRENT_TIMESTAMP,
+            update_time = CURRENT_TIMESTAMP
+        WHERE token_hash = #{tokenHash}
+          AND revoked_at IS NULL
+          AND expires_at &gt; CURRENT_TIMESTAMP
+        RETURNING account_id, identity_type, active_identity_id, tenant_id
+    </select>
+</mapper>

@@ -17,10 +17,13 @@ import com.pangu.domain.repository.GovernmentManagedCommunityRepository;
 import com.pangu.domain.repository.IdentityShadowRepository;
 import com.pangu.domain.repository.NavigationMenuRepository;
 import com.pangu.domain.repository.OwnerIdentityVerificationRepository;
+import com.pangu.domain.repository.RefreshSessionRepository;
 import com.pangu.domain.security.NameDecryptor;
 import com.pangu.interfaces.security.JwtTokenProvider;
+import com.pangu.interfaces.security.RefreshTokenService;
 import com.pangu.interfaces.web.controller.dto.LoginRequest;
 import com.pangu.interfaces.web.controller.dto.NavMenuResponse;
+import com.pangu.interfaces.web.controller.dto.RefreshTokenRequest;
 import com.pangu.interfaces.web.controller.dto.NavPageResponse;
 import com.pangu.interfaces.web.controller.dto.SwitchShadowRequest;
 import com.pangu.interfaces.web.controller.dto.SwitchTenantRequest;
@@ -74,6 +77,7 @@ public class AuthService {
     private final IdCardOcrGateway idCardOcrGateway;
     private final NameDecryptor nameDecryptor;
     private final WeChatMiniProgramGateway weChatMiniProgramGateway;
+    private final RefreshTokenService refreshTokenService;
 
     /**
      * 双端统一登录：手机号 + 短信验证码 → 按客户端选择身份 → JWT。
@@ -151,6 +155,44 @@ public class AuthService {
         bindWeChatIdentity(account.accountId(), miniProgramAppId, phoneIdentity.subjectHash());
         authAccountRepository.touchWeChatIdentityLogin(account.accountId(), miniProgramAppId);
         return createOwnerSessionForAccount(account);
+    }
+
+    /**
+     * 使用服务端持久化的刷新凭证续期访问 JWT。
+     *
+     * <p>刷新凭证只能消费一次，身份、租户、权限仍由 {@link UserContextLoader} 实时装配，
+     * 因此账号禁用、身份撤销和权限变更不会被过期的客户端会话绕过。</p>
+     */
+    @Transactional
+    public Map<String, Object> refreshSession(RefreshTokenRequest request) {
+        String refreshToken = request == null ? null : trimToNull(request.refreshToken());
+        if (refreshToken == null) {
+            throw new AppException(CommonErrorCode.PARAM_ERROR, "refreshToken 不能为空");
+        }
+
+        RefreshSessionRepository.RefreshSession refreshSession = refreshTokenService.consume(refreshToken);
+        if (refreshSession == null) {
+            throw new AppException(CommonErrorCode.UNAUTHORIZED, "登录已过期，请重新登录");
+        }
+
+        AuthAccountRepository.AccountSnapshot account = authAccountRepository.findById(refreshSession.accountId());
+        requireActiveAccount(account);
+
+        UserContext.IdentityType identityType;
+        try {
+            identityType = UserContext.IdentityType.valueOf(refreshSession.identityType());
+        } catch (IllegalArgumentException exception) {
+            throw new AppException(CommonErrorCode.UNAUTHORIZED, "登录身份已失效，请重新登录");
+        }
+        UserContext context = userContextLoader.load(
+                refreshSession.accountId(),
+                identityType,
+                refreshSession.activeIdentityId(),
+                refreshSession.tenantId());
+        if (context == null) {
+            throw new AppException(CommonErrorCode.UNAUTHORIZED, "登录身份已失效，请重新登录");
+        }
+        return issueSession(context);
     }
 
     /**
@@ -327,6 +369,7 @@ public class AuthService {
     /**
      * 管理端工作分身切换：同一 {@code account_id} 名下的 {@code sys_user} 之间切换，并重发 JWT。
      */
+    @Transactional
     public Map<String, Object> switchShadow(String authHeader, SwitchShadowRequest request) {
         String token = extractValidToken(authHeader);
         Long accountId = jwtTokenProvider.getAccountIdFromToken(token);
@@ -352,13 +395,7 @@ public class AuthService {
         }
         authAccountRepository.updateLastActiveIdentity(accountId, ctx.activeIdentityId(), ctx.identityType().name());
 
-        String newToken = jwtTokenProvider.generateToken(
-                ctx.accountId(), ctx.identityType().name(), ctx.activeIdentityId(), ctx.tenantId());
-
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("new_access_token", newToken);
-        result.put("expires_in", 7200);
-        result.put("user_info", buildUserInfo(ctx));
+        Map<String, Object> result = issueSwitchedSession(ctx);
         result.put("active_shadow", buildShadowInfo(shadow, true));
         return result;
     }
@@ -367,6 +404,7 @@ public class AuthService {
      * C 端业主跨小区切换：仅当 token 内 {@code identityType=C_USER} 才允许。
      * 校验目标 tenant 下确有房产绑定，重新签发 token。
      */
+    @Transactional
     public Map<String, Object> switchTenant(String authHeader, SwitchTenantRequest request) {
         String token = extractValidToken(authHeader);
 
@@ -387,15 +425,15 @@ public class AuthService {
 
         // 用新 tenantId 重新装配 UserContext + 签发 token
         UserContext ctx = userContextLoader.load(accountId, UserContext.IdentityType.C_USER, uid, targetTenantId);
-        String newToken = jwtTokenProvider.generateToken(
-                ctx.accountId(), ctx.identityType().name(), ctx.activeIdentityId(), ctx.tenantId());
+        if (ctx == null || !Objects.equals(targetTenantId, ctx.tenantId())) {
+            throw new AppException(CommonErrorCode.FORBIDDEN, "目标小区会话上下文不可用");
+        }
 
         List<Long> activeOpidList = ownerships.stream()
                 .map(PropertyOwnership::getOpid)
                 .collect(Collectors.toList());
 
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("new_access_token", newToken);
+        Map<String, Object> result = issueSwitchedSession(ctx);
         result.put("active_tenant_id", ctx.tenantId());
         result.put("active_opid_list", activeOpidList);
         result.put("user_info", buildUserInfo(ctx));
@@ -428,6 +466,7 @@ public class AuthService {
      * <p>不复用 C 端 {@link #switchTenant}：两种切换的合法性来源不同。业主依据房产绑定，
      * 政府组织依据组织树和有效监管范围。
      */
+    @Transactional
     public Map<String, Object> switchManagedCommunity(String authHeader, SwitchTenantRequest request) {
         UserContext current = requireGovernmentCommunitySwitcher(authHeader);
         Long targetTenantId = request == null ? null : request.getTargetTenantId();
@@ -445,13 +484,8 @@ public class AuthService {
             throw new AppException(CommonErrorCode.FORBIDDEN, "目标小区会话上下文不可用");
         }
 
-        String newToken = jwtTokenProvider.generateToken(
-                target.accountId(), target.identityType().name(), target.activeIdentityId(), target.tenantId());
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("new_access_token", newToken);
-        result.put("expires_in", 7200);
+        Map<String, Object> result = issueSwitchedSession(target);
         result.put("active_tenant_id", target.tenantId());
-        result.put("user_info", buildUserInfo(target));
         return result;
     }
 
@@ -581,11 +615,21 @@ public class AuthService {
     private Map<String, Object> issueSession(UserContext ctx) {
         String token = jwtTokenProvider.generateToken(
                 ctx.accountId(), ctx.identityType().name(), ctx.activeIdentityId(), ctx.tenantId());
+        RefreshTokenService.IssuedRefreshToken refreshToken = refreshTokenService.issue(ctx);
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("access_token", token);
-        result.put("expires_in", 7200);
+        result.put("expires_in", jwtTokenProvider.getExpirationInSeconds());
+        result.put("refresh_token", refreshToken.token());
+        result.put("refresh_expires_in", refreshToken.expiresInSeconds());
         result.put("user_info", buildUserInfo(ctx));
+        return result;
+    }
+
+    /** 工作身份或小区切换后返回沿用既有接口字段名的新完整会话。 */
+    private Map<String, Object> issueSwitchedSession(UserContext ctx) {
+        Map<String, Object> result = issueSession(ctx);
+        result.put("new_access_token", result.remove("access_token"));
         return result;
     }
 

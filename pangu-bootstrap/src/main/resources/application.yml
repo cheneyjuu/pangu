@@ -76,6 +76,8 @@ platform:
     # JWT 秘钥（SM2 或 HMAC-SHA256 秘钥占位，开发环境使用默认，生产通过环境变量替换）
     jwt-secret: pangu-secure-jwt-token-secret-key-32-chars-minimum
     jwt-expiration-seconds: 7200
+    # 刷新凭证只保存 SHA-256 摘要，轮换后旧凭证立即失效；14 天内保持已登录状态。
+    refresh-token-expiration-seconds: 1209600
     # 国密 SM4 16字节(128位) 对称加解密密钥十六进制字符串
     sm4-key-hex: 0123456789abcdeffedcba9876543210
   ali-oss:

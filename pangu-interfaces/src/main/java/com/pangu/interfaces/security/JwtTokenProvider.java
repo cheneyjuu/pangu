@@ -98,4 +98,9 @@ public class JwtTokenProvider {
             return false;
         }
     }
+
+    /** 返回当前访问 JWT 的有效期，确保会话响应不再复制配置常量。 */
+    public long getExpirationInSeconds() {
+        return jwtExpirationInSeconds;
+    }
 }
