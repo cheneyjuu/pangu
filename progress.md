@@ -7,7 +7,8 @@
 - Shennong 提交 `7f848f6`：报修详情按问题与范围、工程项、资金分摊、实施要求、验收质保、结算付款和附件分章节展示锁定方案；草稿继续只显示“方案编制中”。
 - Pangu 全量测试通过（629 tests，0 failures，0 errors，1 skipped）；Yaochi 生产构建、Shennong TypeScript 检查和正式微信小程序构建通过。
 - Playwright 已完成 Yaochi 桌面与 390x844 视口验收，页面无横向溢出或控制台错误；微信开发者工具重新编译后原生模拟器正常渲染生产包。
-- 三端代码已经分仓提交，待完成生产发布和线上验证。
+- 三端代码已经分仓提交并完成生产发布：Pangu 新 JAR 的本地/现网 SHA-256 一致，Flyway 102 个迁移校验通过且版本保持 `3.86`；Yaochi 现网已切换到 `assets/index-BVQ2fsdT.js`；Shennong 体验版 `0.1.19` 上传成功。
+- 线上验收通过：`nginx`、`pangu` 均为 `active`，生产登录返回 HTTP/业务 `code=200`，新增业主维修方案路由经过身份校验后返回预期的业务错误语义而非路由缺失。
 
 ## Historical Progress
 
