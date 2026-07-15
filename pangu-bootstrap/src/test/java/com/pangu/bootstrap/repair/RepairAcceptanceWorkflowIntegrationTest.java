@@ -1,24 +1,36 @@
-// 关联业务：验证全小区公共维修必须完成业委会负责人在线同意、用印和专业共同签署。
+// 关联业务：验证全小区公共维修项目必须完成业委会负责人在线同意、用印和专业共同签署。
 package com.pangu.bootstrap.repair;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.pangu.domain.repository.RepairEvidenceObjectStorage;
 import com.pangu.interfaces.security.JwtTokenProvider;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.test.web.servlet.ResultActions;
 
-import java.math.BigDecimal;
+import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 import static org.hamcrest.Matchers.is;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -28,200 +40,324 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class RepairAcceptanceWorkflowIntegrationTest {
 
     private static final long TENANT = 10001L;
-    private static final long ACC_PROPERTY_STAFF = 999822L;
-    private static final long USR_PROPERTY_STAFF = 800202L;
-    private static final long ACC_PROPERTY_MANAGER = 999821L;
-    private static final long USR_PROPERTY_MANAGER = 800201L;
-    private static final long ACC_COMMITTEE_MEMBER = 999813L;
-    private static final long USR_COMMITTEE_MEMBER = 800103L;
+    private static final long ACCOUNT_PROPERTY_MANAGER = 999821L;
+    private static final long USER_PROPERTY_MANAGER = 800201L;
+    private static final long ACCOUNT_COMMITTEE_MEMBER = 999813L;
+    private static final long USER_COMMITTEE_MEMBER = 800103L;
+    private static final String PROJECT_PREFIX = "IT-验收维修项目-";
 
     @Autowired private MockMvc mockMvc;
     @Autowired private ObjectMapper objectMapper;
     @Autowired private JwtTokenProvider jwtTokenProvider;
     @Autowired private JdbcTemplate jdbcTemplate;
+    @MockBean private RepairEvidenceObjectStorage objectStorage;
+
+    private String propertyToken;
+    private String viceDirectorToken;
+
+    @BeforeEach
+    void setUp() throws Exception {
+        propertyToken = token(ACCOUNT_PROPERTY_MANAGER, USER_PROPERTY_MANAGER);
+        viceDirectorToken = token(ACCOUNT_COMMITTEE_MEMBER, USER_COMMITTEE_MEMBER);
+        jdbcTemplate.update("""
+                UPDATE t_committee_member_position
+                SET position = 'VICE_DIRECTOR', update_time = CURRENT_TIMESTAMP
+                WHERE tenant_id = ? AND user_id = ? AND status = 1
+                """, TENANT, USER_COMMITTEE_MEMBER);
+        when(objectStorage.put(anyString(), any(byte[].class), anyString(), anyString()))
+                .thenAnswer(invocation -> new RepairEvidenceObjectStorage.StoredObjectMetadata(
+                        ((byte[]) invocation.getArgument(1)).length,
+                        invocation.getArgument(2), "community-acceptance-etag"));
+        when(objectStorage.createDownloadUrl(anyString(), any()))
+                .thenReturn(URI.create("https://oss.example.test/community-acceptance").toURL());
+    }
 
     @AfterEach
     void clean() {
+        // 验收参与记录引用用印记录，先解除该引用，再清理项目聚合和测试用印数据。
         jdbcTemplate.update("""
                 DELETE FROM t_repair_acceptance_party
                 WHERE acceptance_id IN (
                     SELECT acceptance.acceptance_id
                     FROM t_repair_acceptance acceptance
-                    JOIN t_repair_work_order work_order ON work_order.work_order_id = acceptance.work_order_id
-                    WHERE work_order.title LIKE 'IT-验收-%'
+                    JOIN t_repair_project project ON project.project_id = acceptance.project_id
+                    WHERE project.project_name LIKE ?
                 )
-                """);
+                """, PROJECT_PREFIX + "%");
         jdbcTemplate.update("""
                 DELETE FROM t_committee_seal_usage
-                WHERE business_type = 'REPAIR_ACCEPTANCE'
+                WHERE business_type = 'REPAIR_PROJECT'
                   AND business_id IN (
-                    SELECT acceptance.acceptance_id
-                    FROM t_repair_acceptance acceptance
-                    JOIN t_repair_work_order work_order ON work_order.work_order_id = acceptance.work_order_id
-                    WHERE work_order.title LIKE 'IT-验收-%'
+                    SELECT project_id FROM t_repair_project WHERE project_name LIKE ?
                   )
-                """);
-        jdbcTemplate.update("DELETE FROM t_repair_work_order WHERE title LIKE 'IT-验收-%'");
+                """, PROJECT_PREFIX + "%");
+        jdbcTemplate.update("DELETE FROM t_repair_project WHERE project_name LIKE ?", PROJECT_PREFIX + "%");
         jdbcTemplate.update("""
                 UPDATE t_committee_member_position
                 SET position = 'MEMBER', update_time = CURRENT_TIMESTAMP
                 WHERE tenant_id = ? AND user_id = ? AND status = 1
-                """, TENANT, USR_COMMITTEE_MEMBER);
+                """, TENANT, USER_COMMITTEE_MEMBER);
     }
 
     @Test
-    void communityPublicRepairRequiresViceDirectorSealAndProfessionalCosign() throws Exception {
-        String staffToken = token(ACC_PROPERTY_STAFF, USR_PROPERTY_STAFF);
-        String managerToken = token(ACC_PROPERTY_MANAGER, USR_PROPERTY_MANAGER);
-        String viceDirectorToken = token(ACC_COMMITTEE_MEMBER, USR_COMMITTEE_MEMBER);
-        jdbcTemplate.update("""
-                UPDATE t_committee_member_position
-                SET position = 'VICE_DIRECTOR', update_time = CURRENT_TIMESTAMP
-                WHERE tenant_id = ? AND user_id = ? AND status = 1
-                """, TENANT, USR_COMMITTEE_MEMBER);
+    void communityProjectRequiresViceDirectorSealAndProfessionalCosign() throws Exception {
+        AcceptanceFixture fixture = createCommunityAcceptanceFixture();
 
-        String created = mockMvc.perform(post("/api/v1/admin/repair-work-orders")
-                        .header("Authorization", "Bearer " + staffToken)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(json(Map.of(
-                                "publicAreaScope", "COMMUNITY",
-                                "locationText", "小区主干道",
-                                "title", "IT-验收-全小区道路维修-" + System.nanoTime(),
-                                "description", "全体业主共同使用的道路维修",
-                                "category", "PUBLIC_FACILITY"))))
-                .andExpect(status().isCreated())
-                .andReturn().getResponse().getContentAsString();
-        long workOrderId = objectMapper.readTree(created).path("data").path("workOrderId").asLong();
+        postBadRequest(projectPath(fixture.projectId(), "/acceptance/finalization"), viceDirectorToken,
+                Map.of("expectedProjectVersion", projectVersion(fixture.projectId()),
+                        "resultAttachmentId", fixture.resultAttachmentId()),
+                "业委会主任或副主任尚未在线同意");
+        postBadRequest(projectPath(fixture.projectId(), "/acceptance/seal"), viceDirectorToken,
+                Map.of("sourceAttachmentId", fixture.sourceAttachmentId(),
+                        "sealedAttachmentId", fixture.sealedAttachmentId(),
+                        "remark", "错误尝试在负责人同意前用印"),
+                "业委会主任或副主任尚未在线同意，禁止办理验收用印");
 
-        long surveyImageId = readyAttachment(
-                workOrderId, "SURVEY_IMAGE", ACC_PROPERTY_STAFF, "survey-image-etag");
-        action(staffToken, workOrderId, "submit-inspection", Map.of(
-                "publicAreaScope", "COMMUNITY",
-                "locationText", "小区主干道",
-                "surveySummary", "道路破损，需整体翻修",
-                "riskLevel", "MEDIUM",
-                "evidenceImageAttachmentIds", List.of(surveyImageId),
-                "remark", "物业完成踏勘"))
-                .andExpect(jsonPath("$.data.status", is("SURVEY_COMPLETED")));
+        postOk(projectPath(fixture.projectId(), "/acceptance/committee-executive"), viceDirectorToken,
+                Map.of("conclusion", "PASSED", "participantName", "钱副主任",
+                        "opinion", "副主任在线同意验收"));
+        postOk(projectPath(fixture.projectId(), "/acceptance/property-technical"), propertyToken,
+                Map.of("conclusion", "PASSED", "participantName", "物业项目负责人",
+                        "participantOrganization", "测试物业服务企业",
+                        "opinion", "物业核对工程量并共同签署"));
+        postBadRequest(projectPath(fixture.projectId(), "/acceptance/finalization"), viceDirectorToken,
+                Map.of("expectedProjectVersion", projectVersion(fixture.projectId()),
+                        "resultAttachmentId", fixture.resultAttachmentId()),
+                "验收文件尚未完成业委会公章用印及登记");
 
-        action(staffToken, workOrderId, "submit-plan", Map.of(
-                "planBudget", new BigDecimal("120000.00"),
-                "publicCeilingPrice", new BigDecimal("118000.00"),
-                "fundSource", "COMMUNITY_MAINTENANCE_FUND",
-                "remark", "全小区维修方案确认"))
-                .andExpect(jsonPath("$.data.status", is("PLAN_SUBMITTED")));
-        assertEquals("COMMUNITY_PUBLIC_REPAIR", jdbcTemplate.queryForObject("""
-                SELECT workflow_type
-                FROM t_repair_acceptance_policy_snapshot
-                WHERE work_order_id = ? AND status = 'ACTIVE'
-                """, String.class, workOrderId));
-
-        // 本测试聚焦验收切片；合同与业主大会链路由各自流程测试覆盖。
-        jdbcTemplate.update("""
-                UPDATE t_repair_work_order
-                SET status = 'CONTRACT_EFFECTIVE', version = version + 1
-                WHERE work_order_id = ?
-                """, workOrderId);
-        action(staffToken, workOrderId, "start-work", Map.of("remark", "施工单位进场"))
-                .andExpect(jsonPath("$.data.status", is("IN_PROGRESS")));
-        action(staffToken, workOrderId, "submit-acceptance", Map.of("remark", "施工单位提交完工验收"))
-                .andExpect(jsonPath("$.data.status", is("PENDING_ACCEPTANCE")));
-
-        actionRaw(viceDirectorToken, workOrderId, "accept-completed", Map.of("remark", "缺少验收动作"))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.msg", is("业委会主任或副主任尚未在线同意")));
-
-        long sealedDocumentId = readyAttachment(
-                workOrderId, "ACCEPTANCE_SEALED_DOCUMENT", ACC_COMMITTEE_MEMBER,
-                "acceptance-sealed-etag");
-        actionRaw(viceDirectorToken, workOrderId, "acceptance-seal", Map.of(
-                "sealedAttachmentId", sealedDocumentId,
-                "remark", "错误尝试在负责人审批前用印"))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.msg", is("业委会主任或副主任尚未在线同意，禁止办理验收用印")));
-
-        action(viceDirectorToken, workOrderId, "acceptance-records", Map.of(
-                "participantType", "COMMITTEE_EXECUTIVE_APPROVER",
-                "participantName", "钱副主任",
-                "conclusion", "PASSED",
-                "remark", "副主任在线同意验收"));
-        actionRaw(viceDirectorToken, workOrderId, "accept-completed", Map.of("remark", "仍缺少用印"))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.msg", is("验收文件尚未完成业委会公章用印及登记")));
-
-        action(managerToken, workOrderId, "acceptance-records", Map.of(
-                "participantType", "PROPERTY_TECHNICAL_COSIGNER",
-                "participantName", "物业项目负责人",
-                "participantOrganization", "测试物业服务企业",
-                "conclusion", "PASSED",
-                "signatureHash", "property-acceptance-signature",
-                "remark", "物业核对工程量并共同签署"));
-        actionRaw(viceDirectorToken, workOrderId, "accept-completed", Map.of("remark", "仍缺少用印"))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.msg", is("验收文件尚未完成业委会公章用印及登记")));
-
-        action(viceDirectorToken, workOrderId, "acceptance-seal", Map.of(
-                "sealedAttachmentId", sealedDocumentId,
-                "remark", "业委会验收表用印登记"));
-
-        action(viceDirectorToken, workOrderId, "accept-completed", Map.of("remark", "三项条件全部满足"))
-                .andExpect(jsonPath("$.data.status", is("COMPLETED")));
-
+        postOk(projectPath(fixture.projectId(), "/acceptance/seal"), viceDirectorToken,
+                Map.of("sourceAttachmentId", fixture.sourceAttachmentId(),
+                        "sealedAttachmentId", fixture.sealedAttachmentId(),
+                        "remark", "业委会验收表用印登记"));
+        String finalized = postOk(
+                projectPath(fixture.projectId(), "/acceptance/finalization"), viceDirectorToken,
+                Map.of("expectedProjectVersion", projectVersion(fixture.projectId()),
+                        "resultAttachmentId", fixture.resultAttachmentId(),
+                        "remark", "三项条件全部满足"));
+        assertEquals("PASSED", objectMapper.readTree(finalized).path("data").path("status").asText());
+        assertEquals("COMPLETED", jdbcTemplate.queryForObject(
+                "SELECT status FROM t_repair_project WHERE project_id = ?",
+                String.class, fixture.projectId()));
         assertEquals(3, jdbcTemplate.queryForObject("""
                 SELECT COUNT(DISTINCT party_role)
                 FROM t_repair_acceptance_party party
                 JOIN t_repair_acceptance acceptance ON acceptance.acceptance_id = party.acceptance_id
-                WHERE acceptance.work_order_id = ?
+                WHERE acceptance.project_id = ?
                   AND party.party_role IN (
                     'COMMITTEE_EXECUTIVE_APPROVER', 'COMMITTEE_SEAL_OPERATOR',
                     'PROPERTY_TECHNICAL_COSIGNER'
                   )
-                """, Integer.class, workOrderId));
+                """, Integer.class, fixture.projectId()));
         assertEquals("VICE_DIRECTOR", jdbcTemplate.queryForObject("""
                 SELECT committee_position
                 FROM t_repair_acceptance_party party
                 JOIN t_repair_acceptance acceptance ON acceptance.acceptance_id = party.acceptance_id
-                WHERE acceptance.work_order_id = ?
+                WHERE acceptance.project_id = ?
                   AND party.party_role = 'COMMITTEE_EXECUTIVE_APPROVER'
                 ORDER BY party.party_id DESC LIMIT 1
-                """, String.class, workOrderId));
+                """, String.class, fixture.projectId()));
         assertEquals(1, jdbcTemplate.queryForObject("""
-                SELECT COUNT(*)
-                FROM t_committee_seal_usage usage
-                JOIN t_repair_acceptance acceptance ON acceptance.acceptance_id = usage.business_id
-                WHERE acceptance.work_order_id = ?
-                  AND usage.business_type = 'REPAIR_ACCEPTANCE'
-                """, Integer.class, workOrderId));
+                SELECT COUNT(*) FROM t_committee_seal_usage
+                WHERE business_type = 'REPAIR_PROJECT' AND business_id = ?
+                """, Integer.class, fixture.projectId()));
     }
 
-    private ResultActions action(String token, long workOrderId, String action, Object body) throws Exception {
-        return actionRaw(token, workOrderId, action, body).andExpect(status().isOk());
+    private AcceptanceFixture createCommunityAcceptanceFixture() throws Exception {
+        JsonNode created = responseData(postOk(
+                "/api/v1/admin/repair-projects", propertyToken, communityProjectRequest()));
+        long projectId = created.path("project").path("projectId").asLong();
+        long planId = created.path("plans").get(0).path("planId").asLong();
+        long quoteAttachmentId = upload(projectId, "道路维修报价.pdf", "quote");
+        long photoAttachmentId = upload(projectId, "道路现场.jpg", "photo");
+        link(projectId, planId, quoteAttachmentId, "ORIGINAL_QUOTE");
+        link(projectId, planId, photoAttachmentId, "SITE_PHOTO");
+        postOk(projectPath(projectId, "/plans/" + planId + "/lock"), propertyToken,
+                Map.of("expectedProjectVersion", 0));
+
+        long settlementAttachmentId = upload(projectId, "竣工结算单.pdf", "settlement");
+        long sourceAttachmentId = upload(projectId, "验收签前文件.pdf", "acceptance-source");
+        long sealedAttachmentId = upload(projectId, "验收盖章文件.pdf", "acceptance-sealed");
+        long resultAttachmentId = upload(projectId, "验收定案文件.pdf", "acceptance-result");
+
+        // 本测试只聚焦验收切片，合同、施工和结算的完整路径由工程执行流程测试覆盖。
+        long contractId = jdbcTemplate.queryForObject("""
+                INSERT INTO t_repair_contract (
+                    work_order_id, project_id, plan_id, tenant_id, supplier_dept_id,
+                    supplier_name, contract_amount, repair_scope_hash, fund_source,
+                    signing_method, contract_file_hash, status, created_by_user_id, effective_at
+                ) VALUES (
+                    NULL, ?, ?, ?, NULL, '测试施工单位', 1000.00,
+                    'community-acceptance-scope', 'COMMUNITY_MAINTENANCE_FUND',
+                    'OFFLINE', 'community-acceptance-contract', 'EFFECTIVE', ?, CURRENT_TIMESTAMP
+                ) RETURNING contract_id
+                """, Long.class, projectId, planId, TENANT, USER_PROPERTY_MANAGER);
+        long settlementId = jdbcTemplate.queryForObject("""
+                INSERT INTO t_repair_project_settlement (
+                    project_id, plan_id, contract_id, tenant_id, version_no, status,
+                    subtotal_amount, tax_amount, total_amount, settlement_attachment_id,
+                    submitted_by_user_id, verified_by_user_id, verification_opinion, verified_at
+                ) VALUES (?, ?, ?, ?, 1, 'VERIFIED', 1000.00, 0.00, 1000.00, ?, ?, ?,
+                          '实际工程量与结算一致', CURRENT_TIMESTAMP)
+                RETURNING settlement_id
+                """, Long.class, projectId, planId, contractId, TENANT, settlementAttachmentId,
+                USER_PROPERTY_MANAGER, USER_PROPERTY_MANAGER);
+        long policyId = jdbcTemplate.queryForObject("""
+                INSERT INTO t_repair_acceptance_policy_snapshot (
+                    work_order_id, project_id, plan_id, tenant_id, workflow_type, policy_hash,
+                    affected_owner_count, minimum_affected_owner_participants,
+                    minimum_affected_owner_approvals, affected_owner_pass_rule,
+                    affected_owner_approval_ratio, version, status, locked_by_user_id
+                ) VALUES (
+                    NULL, ?, ?, ?, 'COMMUNITY_PUBLIC_REPAIR', ?, 0, NULL, NULL, NULL, NULL,
+                    1, 'ACTIVE', ?
+                ) RETURNING policy_id
+                """, Long.class, projectId, planId, TENANT, "a".repeat(64), USER_PROPERTY_MANAGER);
+        jdbcTemplate.update("""
+                INSERT INTO t_repair_acceptance (
+                    work_order_id, project_id, settlement_id, tenant_id, policy_id,
+                    round_no, status, submitted_by_user_id
+                ) VALUES (NULL, ?, ?, ?, ?, 1, 'COLLECTING', ?)
+                """, projectId, settlementId, TENANT, policyId, USER_PROPERTY_MANAGER);
+        jdbcTemplate.update("""
+                UPDATE t_repair_project
+                SET status = 'PENDING_ACCEPTANCE', version = version + 1,
+                    update_time = CURRENT_TIMESTAMP
+                WHERE project_id = ?
+                """, projectId);
+        return new AcceptanceFixture(
+                projectId, sourceAttachmentId, sealedAttachmentId, resultAttachmentId);
     }
 
-    private ResultActions actionRaw(String token, long workOrderId, String action, Object body) throws Exception {
-        return mockMvc.perform(post("/api/v1/admin/repair-work-orders/" + workOrderId + "/" + action)
-                .header("Authorization", "Bearer " + token)
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(json(body)));
+    private Map<String, Object> communityProjectRequest() {
+        Map<String, Object> request = new LinkedHashMap<>();
+        request.put("projectName", PROJECT_PREFIX + System.nanoTime());
+        request.put("scopeType", "COMMUNITY");
+        request.put("fundSource", "COMMUNITY_MAINTENANCE_FUND");
+        request.put("governancePath", "COMMUNITY_ASSEMBLY_DECISION");
+        request.put("plan", communityPlan());
+        return request;
     }
 
-    private long readyAttachment(long workOrderId, String kind, long accountId, String etag) {
-        return jdbcTemplate.queryForObject("""
-                INSERT INTO t_repair_attachment (
-                    work_order_id, tenant_id, attachment_kind, object_key, original_file_name,
-                    content_type, declared_size, actual_size, etag, status, uploaded_by_account_id
-                ) VALUES (?, ?, ?, ?, ?, 'image/png', 1024, 1024, ?, 'READY', ?)
-                RETURNING attachment_id
-                """, Long.class, workOrderId, TENANT, kind,
-                "repair/test/" + workOrderId + "/" + kind + "/" + System.nanoTime(),
-                kind + ".png", etag, accountId);
+    private Map<String, Object> communityPlan() {
+        Map<String, Object> plan = new LinkedHashMap<>();
+        plan.put("problemCause", "小区道路破损原因及整体维修范围");
+        plan.put("implementationScope", "按工程项清单及锁定范围施工");
+        plan.put("budgetTotal", 1000);
+        plan.put("allocationRuleType", "BY_BUILDING_AREA");
+        plan.put("allocationRuleDescription", "按小区锁定房屋建筑面积分摊");
+        plan.put("supplierSelectionMethod", "COMPETITIVE_QUOTATION");
+        plan.put("supplierSelectionReason", "通过询价比较形成实施报价");
+        plan.put("constructionManagementRequirements", "物业项目负责人组织现场和工程量管理");
+        plan.put("evidenceRequirements", evidenceRequirements());
+        plan.put("safetyRequirements", "设置围挡并落实用电安全措施");
+        plan.put("acceptanceMethod", "主任或副主任在线同意、业委会用印并由专业人员共同签署");
+        plan.put("settlementMethod", "ACTUAL_QUANTITY");
+        plan.put("plannedStartDate", LocalDate.now().plusDays(10));
+        plan.put("plannedCompletionDate", LocalDate.now().plusDays(30));
+        plan.put("warrantyDays", 365);
+        plan.put("priceReviewRequired", true);
+        plan.put("paymentMilestones", paymentMilestones());
+        plan.put("attachments", List.of());
+        plan.put("items", List.of(Map.ofEntries(
+                Map.entry("itemNo", "ROAD-1"),
+                Map.entry("locationText", "小区主干道"),
+                Map.entry("workContent", "破损路面铣刨并重铺"),
+                Map.entry("quantity", 10),
+                Map.entry("unit", "平方米"),
+                Map.entry("estimatedUnitPrice", 100),
+                Map.entry("estimatedAmount", 1000),
+                Map.entry("linkedWorkOrderIds", List.of()))));
+        return plan;
+    }
+
+    private List<Map<String, Object>> evidenceRequirements() {
+        List<Map<String, Object>> requirements = new ArrayList<>();
+        for (String stage : List.of(
+                "BEFORE_CONSTRUCTION", "MATERIAL_ENTRY", "DURING_CONSTRUCTION",
+                "CONCEALED_WORK", "COMPLETION", "ACCEPTANCE")) {
+            requirements.add(Map.of(
+                    "stage", stage, "description", stage + " 原始证据", "required", true));
+        }
+        return requirements;
+    }
+
+    private List<Map<String, Object>> paymentMilestones() {
+        return List.of(
+                Map.of("type", "ADVANCE", "maximumContractRatio", 0.30,
+                        "requiredEvidenceCodes", List.of("SIGNED_CONTRACT")),
+                Map.of("type", "PROGRESS", "maximumContractRatio", 0.90,
+                        "requiredEvidenceCodes", List.of("PROGRESS_RECORD")),
+                Map.of("type", "COMPLETION", "maximumContractRatio", 1.00,
+                        "requiredEvidenceCodes", List.of("ACCEPTANCE", "SETTLEMENT")),
+                Map.of("type", "WARRANTY_RELEASE", "maximumContractRatio", 1.00,
+                        "requiredEvidenceCodes", List.of("WARRANTY_EXPIRED_CERTIFICATE")));
+    }
+
+    private void link(long projectId, long planId, long attachmentId, String purpose) throws Exception {
+        postOk(projectPath(projectId, "/plans/" + planId + "/attachments"), propertyToken,
+                Map.of("attachmentId", attachmentId, "purpose", purpose));
+    }
+
+    private long upload(long projectId, String fileName, String content) throws Exception {
+        String contentType = fileName.endsWith(".jpg") ? "image/jpeg" : "application/pdf";
+        MockMultipartFile file = new MockMultipartFile(
+                "file", fileName, contentType, content.getBytes(StandardCharsets.UTF_8));
+        String response = mockMvc.perform(multipart(
+                        "/api/v1/admin/repair-projects/" + projectId + "/attachments")
+                        .file(file)
+                        .header("Authorization", bearer(propertyToken)))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+        return objectMapper.readTree(response).path("data").path("attachmentId").asLong();
+    }
+
+    private String postOk(String path, String token, Object body) throws Exception {
+        return mockMvc.perform(post(path)
+                        .header("Authorization", bearer(token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(body)))
+                .andExpect(status().is2xxSuccessful())
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+    }
+
+    private void postBadRequest(String path, String token, Object body, String message) throws Exception {
+        mockMvc.perform(post(path)
+                        .header("Authorization", bearer(token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(body)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.msg", is(message)));
+    }
+
+    private JsonNode responseData(String response) throws Exception {
+        return objectMapper.readTree(response).path("data");
+    }
+
+    private int projectVersion(long projectId) {
+        return jdbcTemplate.queryForObject(
+                "SELECT version FROM t_repair_project WHERE project_id = ?", Integer.class, projectId);
     }
 
     private String token(long accountId, long userId) {
         return jwtTokenProvider.generateToken(accountId, "SYS_USER", userId, TENANT);
     }
 
+    private String bearer(String token) {
+        return "Bearer " + token;
+    }
+
+    private String projectPath(long projectId, String suffix) {
+        return "/api/v1/admin/repair-projects/" + projectId + suffix;
+    }
+
     private String json(Object value) throws Exception {
         return objectMapper.writeValueAsString(value);
+    }
+
+    private record AcceptanceFixture(
+            long projectId,
+            long sourceAttachmentId,
+            long sealedAttachmentId,
+            long resultAttachmentId) {
     }
 }
