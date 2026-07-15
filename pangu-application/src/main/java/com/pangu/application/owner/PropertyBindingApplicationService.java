@@ -38,10 +38,17 @@ public class PropertyBindingApplicationService {
     private final NameDecryptor nameDecryptor;
     private final ObjectMapper objectMapper;
 
-    public RosterOptionsResponse listRosterOptions(Long tenantId) {
-        List<PropertyBindingRepository.RosterOption> rows = repository.findRosterOptions(tenantId);
+    /**
+     * 返回 C 端可选房产，并标记已通过当前账号实名信息自动核验的名册记录。
+     *
+     * <p>标记只说明当前账号的已认证姓名和手机号与名册一致，不返回名册登记人信息，
+     * 避免在选房页面泄露其他住户个人信息。
+     */
+    public RosterOptionsResponse listRosterOptions(Long accountId, Long tenantId) {
+        RosterMatchIdentity identity = resolveRosterMatchIdentity(accountId);
+        List<PropertyBindingRepository.Roster> rows = repository.findActiveRostersForBindingOptions(tenantId);
         Map<Long, CommunityOption> communities = new LinkedHashMap<>();
-        for (PropertyBindingRepository.RosterOption row : rows) {
+        for (PropertyBindingRepository.Roster row : rows) {
             CommunityOption community = communities.computeIfAbsent(row.tenantId(), id ->
                     new CommunityOption(id, row.communityName(), new ArrayList<>()));
             BuildingOption building = community.buildings().stream()
@@ -61,7 +68,12 @@ public class PropertyBindingApplicationService {
                         building.units().add(created);
                         return created;
                     });
-            unit.rooms().add(new RoomOption(row.rosterId(), row.roomId(), row.roomName(), row.buildArea()));
+            unit.rooms().add(new RoomOption(
+                    row.rosterId(),
+                    row.roomId(),
+                    row.roomName(),
+                    row.buildArea(),
+                    isExactRosterMatch(identity, row.registeredOwnerName(), row.registeredOwnerPhone())));
         }
         return new RosterOptionsResponse(new ArrayList<>(communities.values()));
     }
@@ -194,9 +206,10 @@ public class PropertyBindingApplicationService {
                     PropertyBindingApplicationException.Reason.NOT_FOUND,
                     "房产名册记录不存在或已停用");
         }
-        boolean phoneMatched = Objects.equals(account.phone(), roster.registeredOwnerPhone());
-        boolean nameMatched = Objects.equals(realName, normalizeRealName(roster.registeredOwnerName()));
-        String matchResult = phoneMatched && nameMatched ? MATCH_EXACT : MATCH_MISMATCH;
+        RosterMatchIdentity identity = new RosterMatchIdentity(account.phone(), realName);
+        String matchResult = isExactRosterMatch(identity, roster.registeredOwnerName(), roster.registeredOwnerPhone())
+                ? MATCH_EXACT
+                : MATCH_MISMATCH;
         boolean joint = Boolean.TRUE.equals(command.jointOwnership());
         boolean delegate = command.votingDelegate() == null || Boolean.TRUE.equals(command.votingDelegate());
         String proofJson = proofJson(command.proofType(), command.proofImagesBase64());
@@ -213,7 +226,7 @@ public class PropertyBindingApplicationService {
 
         if (isBlank(command.proofType()) || command.proofImagesBase64() == null || command.proofImagesBase64().isEmpty()) {
             return new BindingSubmitResponse("NEED_EVIDENCE", null, null,
-                    "系统未查到您的登记信息，请补充物权证明材料进入人工审核");
+                    "该房屋已有基础名册，但当前登录手机号或实名认证姓名未与登记信息一致。请改选标注为可自动核验的房屋，或补充物权证明申请人工审核");
         }
         PropertyBindingRepository.ClaimDraft claim = toClaim(
                 accountId, uid, roster, realName, account.phone(), matchResult,
@@ -493,6 +506,38 @@ public class PropertyBindingApplicationService {
         return normalized.startsWith("MOCK_") ? normalized.substring("MOCK_".length()) : normalized;
     }
 
+    /**
+     * 业务关联：名册通常由 Excel 导入，手机号比较前只消除首尾及展示空白，
+     * 不放宽号码位数或变更数字，避免错误把不同自然人自动绑定为同一房产。
+     */
+    private String normalizePhone(String value) {
+        String trimmed = trimToNull(value);
+        return trimmed == null ? null : trimmed.replaceAll("[\\s\\u3000]+", "");
+    }
+
+    private RosterMatchIdentity resolveRosterMatchIdentity(Long accountId) {
+        if (accountId == null) {
+            return RosterMatchIdentity.NONE;
+        }
+        AuthAccountRepository.AccountIdentitySnapshot account = authAccountRepository.findIdentityByAccountId(accountId);
+        if (account == null || account.status() == null || account.status() != 1
+                || account.realNameVerified() == null || account.realNameVerified() != 1) {
+            return RosterMatchIdentity.NONE;
+        }
+        String realName = normalizeRealName(nameDecryptor.safeDecrypt(account.realNameCipher()));
+        String phone = normalizePhone(account.phone());
+        return realName == null || phone == null
+                ? RosterMatchIdentity.NONE
+                : new RosterMatchIdentity(phone, realName);
+    }
+
+    private boolean isExactRosterMatch(RosterMatchIdentity identity, String registeredOwnerName, String registeredOwnerPhone) {
+        return identity != null
+                && !identity.isEmpty()
+                && Objects.equals(identity.phone(), normalizePhone(registeredOwnerPhone))
+                && Objects.equals(identity.realName(), normalizeRealName(registeredOwnerName));
+    }
+
     private String required(String value, String field) {
         String trimmed = trimToNull(value);
         if (trimmed == null) {
@@ -577,7 +622,7 @@ public class PropertyBindingApplicationService {
     public record UnitOption(String unitName, List<RoomOption> rooms) {
     }
 
-    public record RoomOption(Long rosterId, Long roomId, String roomName, BigDecimal buildArea) {
+    public record RoomOption(Long rosterId, Long roomId, String roomName, BigDecimal buildArea, boolean identityMatched) {
     }
 
     public record ImportResult(String importBatchNo, int importedCount) {
@@ -628,5 +673,13 @@ public class PropertyBindingApplicationService {
     }
 
     private record RegisteredOwnerKey(String name, String phone) {
+    }
+
+    private record RosterMatchIdentity(String phone, String realName) {
+        private static final RosterMatchIdentity NONE = new RosterMatchIdentity(null, null);
+
+        private boolean isEmpty() {
+            return phone == null || realName == null;
+        }
     }
 }

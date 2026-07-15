@@ -86,6 +86,19 @@
         ORDER BY registered_owner_name, registered_owner_phone, building_name, unit_name, room_name
     </select>
 
+    <!-- C 端绑定候选：空 tenantId 表示由服务端计算跨小区的当前账号核验标记，绝不直接返回登记人身份字段。 -->
+    <select id="selectActiveRostersForBindingOptions" resultMap="RosterRowMap">
+        SELECT roster_id, tenant_id, community_name, building_id, building_name,
+               unit_name, room_id, room_name, build_area,
+               registered_owner_name, registered_owner_phone, status
+        FROM c_property_roster
+        WHERE status = 'ACTIVE'
+        <if test="tenantId != null">
+            AND tenant_id = #{tenantId}
+        </if>
+        ORDER BY community_name, building_id, unit_name, room_name
+    </select>
+
     <select id="selectTenantName" resultType="java.lang.String">
         SELECT tenant_name
         FROM t_tenant_community

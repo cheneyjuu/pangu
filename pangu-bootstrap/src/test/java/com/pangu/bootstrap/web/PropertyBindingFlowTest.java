@@ -58,6 +58,13 @@ class PropertyBindingFlowTest {
                  )
                 """);
         jdbcTemplate.update("DELETE FROM c_property_roster WHERE room_name IN ('冷启1101', '冷启1102', '冷启1103')");
+        // 登录会生成刷新会话；必须先清理其外键记录，再删除测试账号。
+        jdbcTemplate.update("""
+                DELETE FROM t_auth_refresh_session
+                 WHERE account_id IN (
+                     SELECT account_id FROM t_account WHERE phone IN (?, ?, ?)
+                 )
+                """, AUTO_PHONE, MANUAL_PHONE, REJECT_PHONE);
         jdbcTemplate.update("""
                 DELETE FROM c_user
                  WHERE account_id IN (
@@ -80,6 +87,12 @@ class PropertyBindingFlowTest {
         verifyL2(ownerToken, "冷 启业主", "310101199001011234");
 
         importRoster(adminToken, "冷启楼", "一单元", "冷启1101", "冷启业主", AUTO_PHONE);
+
+        mockMvc.perform(get("/api/v1/me/property-bindings/options")
+                        .header("Authorization", "Bearer " + ownerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.communities[*].buildings[*].units[*].rooms[?(@.roomName == '冷启1101')].identityMatched",
+                        hasItem(true)));
 
         mockMvc.perform(get("/api/v1/admin/property-roster/topology")
                         .header("Authorization", "Bearer " + adminToken))
@@ -126,6 +139,12 @@ class PropertyBindingFlowTest {
         String ownerToken = login(MANUAL_PHONE, "AUTO");
         verifyL2(ownerToken, "申报业主", "31010119900102123X");
         importRoster(adminToken, "冷启楼", "一单元", "冷启1102", "名册父母", "13900009998");
+
+        mockMvc.perform(get("/api/v1/me/property-bindings/options")
+                        .header("Authorization", "Bearer " + ownerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.communities[*].buildings[*].units[*].rooms[?(@.roomName == '冷启1102')].identityMatched",
+                        hasItem(false)));
 
         mockMvc.perform(post("/api/v1/me/property-bindings/claims")
                         .header("Authorization", "Bearer " + ownerToken)
@@ -258,14 +277,20 @@ class PropertyBindingFlowTest {
                 FROM sys_menu
                 WHERE route_id = 'property-roster-import'
                 """, Long.class);
-        Integer communitySpaceVisible = jdbcTemplate.queryForObject("""
-                SELECT visible
+        Integer communitySpaceCount = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
                 FROM sys_menu
                 WHERE route_id = 'community-space'
                 """, Integer.class);
+        Long propertyServiceOrganizationParent = jdbcTemplate.queryForObject("""
+                SELECT parent_id
+                FROM sys_menu
+                WHERE route_id = 'property-service-organization'
+                """, Long.class);
         org.junit.jupiter.api.Assertions.assertEquals(9000L, reviewParent);
         org.junit.jupiter.api.Assertions.assertEquals(9000L, rosterParent);
-        org.junit.jupiter.api.Assertions.assertEquals(0, communitySpaceVisible);
+        org.junit.jupiter.api.Assertions.assertEquals(0, communitySpaceCount);
+        org.junit.jupiter.api.Assertions.assertEquals(9000L, propertyServiceOrganizationParent);
     }
 
     private String login(String phone, String clientPortal) throws Exception {

@@ -18,6 +18,13 @@ public interface PropertyBindingRepository {
      */
     List<Roster> findActiveRosters(Long tenantId);
 
+    /**
+     * C 端房产绑定候选使用的活跃名册；tenantId 为空时仅供服务端计算当前账号的核验标记。
+     *
+     * <p>调用方不得将登记产权人姓名、手机号等名册身份信息直接返回给 C 端。
+     */
+    List<Roster> findActiveRostersForBindingOptions(Long tenantId);
+
     String findTenantName(Long tenantId);
 
     Roster findRosterById(Long rosterId);
