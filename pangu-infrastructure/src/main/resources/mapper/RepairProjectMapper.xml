@@ -256,6 +256,15 @@
           AND status IN ('DRAFT', 'PLAN_LOCKED')
     </update>
 
+    <update id="advanceStatus">
+        UPDATE t_repair_project
+        SET status = #{nextStatus}, version = version + 1, update_time = CURRENT_TIMESTAMP
+        WHERE project_id = #{projectId}
+          AND tenant_id = #{tenantId}
+          AND status = #{expectedStatus}
+          AND version = #{expectedVersion}
+    </update>
+
     <insert id="insertEvent">
         INSERT INTO t_repair_project_event (
             project_id, tenant_id, action, actor_account_id, actor_user_id, payload_json

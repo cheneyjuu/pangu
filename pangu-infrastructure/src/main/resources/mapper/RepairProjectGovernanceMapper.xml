@@ -1,0 +1,262 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 关联业务：持久化维修工程楼栋治理、业主大会事项关联、接龙明细和治理依据快照。 -->
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pangu.infrastructure.persistence.mapper.RepairProjectGovernanceMapper">
+
+    <insert id="insertPolicySnapshot" useGeneratedKeys="true"
+            keyProperty="policySnapshotId" keyColumn="policy_snapshot_id">
+        INSERT INTO t_repair_decision_policy_snapshot (
+            project_id, plan_id, tenant_id, rule_document_attachment_id, rule_version,
+            rule_hash, decision_channel, delivery_rule, non_response_rule,
+            status, created_by_user_id
+        ) VALUES (
+            #{projectId}, #{planId}, #{tenantId}, #{ruleDocumentAttachmentId}, #{ruleVersion},
+            #{ruleHash}, #{decisionChannel}, #{deliveryRule}, #{nonResponseRule},
+            #{status}, #{createdByUserId}
+        )
+    </insert>
+
+    <select id="findPolicySnapshot"
+            resultType="com.pangu.infrastructure.persistence.entity.RepairProjectGovernanceRows$PolicySnapshotRow">
+        SELECT policy_snapshot_id, project_id, plan_id, tenant_id, rule_document_attachment_id,
+               rule_version, rule_hash, decision_channel, delivery_rule, non_response_rule,
+               status, created_by_user_id, create_time
+        FROM t_repair_decision_policy_snapshot
+        WHERE policy_snapshot_id = #{policySnapshotId} AND tenant_id = #{tenantId}
+    </select>
+
+    <insert id="insertBuildingDecision" useGeneratedKeys="true"
+            keyProperty="decisionId" keyColumn="decision_id">
+        INSERT INTO t_repair_local_decision (
+            work_order_id, project_id, plan_id, tenant_id, building_id, scope_type,
+            decision_channel, unit_name, scope_label, total_owner_count, total_area, result
+        ) VALUES (
+            NULL, #{projectId}, #{planId}, #{tenantId}, #{buildingId}, #{scopeType},
+            #{decisionChannel}, #{unitName}, #{scopeLabel}, #{totalOwnerCount}, #{totalArea}, #{result}
+        )
+    </insert>
+
+    <select id="findBuildingDecision"
+            resultType="com.pangu.infrastructure.persistence.entity.RepairProjectGovernanceRows$BuildingDecisionRow">
+        SELECT decision_id, project_id, plan_id, tenant_id, building_id, scope_type,
+               decision_channel, unit_name, scope_label, total_owner_count, total_area,
+               participated_owner_count, participated_area, agree_owner_count, agree_area,
+               disagree_owner_count, disagree_area, abstain_owner_count, abstain_area,
+               invalid_owner_count, invalid_area, evidence_attachment_hash,
+               printed_and_attached, result, create_time, update_time
+        FROM t_repair_local_decision
+        WHERE decision_id = #{decisionId} AND tenant_id = #{tenantId} AND project_id IS NOT NULL
+    </select>
+
+    <insert id="insertDecisionEntry">
+        INSERT INTO t_repair_solitaire_entry (
+            decision_id, tenant_id, room_id, owner_uid, choice, build_area,
+            original_text, verification_status, verified_by_user_id,
+            submission_channel, submitted_by_account_id, revision_no
+        ) VALUES (
+            #{decisionId}, #{tenantId}, #{entry.roomId}, #{entry.ownerUid}, #{entry.choice},
+            #{entry.buildArea}, #{entry.originalText}, 'VERIFIED', #{verifiedByUserId},
+            'WECHAT', NULL, 1
+        )
+    </insert>
+
+    <insert id="insertDecisionEvidence">
+        INSERT INTO t_repair_solitaire_evidence (
+            decision_id, tenant_id, evidence_type, attachment_hash,
+            uploaded_by_account_id, uploaded_by_user_id
+        ) VALUES (
+            #{decisionId}, #{tenantId}, 'WECHAT_SCREENSHOT', #{attachmentHash},
+            #{uploadedByAccountId}, #{uploadedByUserId}
+        )
+    </insert>
+
+    <update id="completeBuildingDecision">
+        UPDATE t_repair_local_decision
+        SET participated_owner_count = #{participatedOwnerCount},
+            participated_area = #{participatedArea},
+            agree_owner_count = #{agreeOwnerCount},
+            agree_area = #{agreeArea},
+            disagree_owner_count = #{disagreeOwnerCount},
+            disagree_area = #{disagreeArea},
+            abstain_owner_count = #{abstainOwnerCount},
+            abstain_area = #{abstainArea},
+            invalid_owner_count = #{invalidOwnerCount},
+            invalid_area = #{invalidArea},
+            evidence_attachment_hash = #{evidenceAttachmentHash},
+            printed_and_attached = 1,
+            result = #{result},
+            update_time = CURRENT_TIMESTAMP
+        WHERE decision_id = #{decisionId}
+          AND tenant_id = #{tenantId}
+          AND project_id IS NOT NULL
+          AND result = 'COLLECTING'
+    </update>
+
+    <select id="listDecisionEntries"
+            resultType="com.pangu.infrastructure.persistence.entity.RepairProjectGovernanceRows$DecisionEntryRow">
+        SELECT room_id, owner_uid, choice, build_area, original_text
+        FROM t_repair_solitaire_entry
+        WHERE decision_id = #{decisionId} AND tenant_id = #{tenantId}
+        ORDER BY room_id
+    </select>
+
+    <insert id="insertBuildingProcess" useGeneratedKeys="true"
+            keyProperty="processId" keyColumn="process_id">
+        INSERT INTO t_repair_building_process (
+            project_id, plan_id, tenant_id, policy_snapshot_id, decision_id, status
+        ) VALUES (
+            #{projectId}, #{planId}, #{tenantId}, #{policySnapshotId}, #{decisionId}, #{status}
+        )
+    </insert>
+
+    <sql id="buildingProcessColumns">
+        process_id, project_id, plan_id, tenant_id, policy_snapshot_id, decision_id,
+        status, official_document_attachment_id, review_mode, reviewed_amount,
+        price_review_report_attachment_id, price_review_conclusion, price_review_opinion,
+        price_reviewed_by_user_id, price_reviewed_at, approved_by_user_id,
+        approver_position, approval_opinion, approved_at, seal_usage_id,
+        process_version, create_time, update_time
+    </sql>
+
+    <select id="findBuildingProcess"
+            resultType="com.pangu.infrastructure.persistence.entity.RepairProjectGovernanceRows$BuildingProcessRow">
+        SELECT <include refid="buildingProcessColumns"/>
+        FROM t_repair_building_process
+        WHERE project_id = #{projectId} AND plan_id = #{planId} AND tenant_id = #{tenantId}
+    </select>
+
+    <select id="findBuildingProcessForUpdate"
+            resultType="com.pangu.infrastructure.persistence.entity.RepairProjectGovernanceRows$BuildingProcessRow">
+        SELECT <include refid="buildingProcessColumns"/>
+        FROM t_repair_building_process
+        WHERE project_id = #{projectId} AND plan_id = #{planId} AND tenant_id = #{tenantId}
+        FOR UPDATE
+    </select>
+
+    <update id="updateBuildingProcessStatus">
+        UPDATE t_repair_building_process
+        SET status = #{nextStatus}, process_version = process_version + 1,
+            update_time = CURRENT_TIMESTAMP
+        WHERE process_id = #{processId}
+          AND tenant_id = #{tenantId}
+          AND status = #{expectedStatus}
+          AND process_version = #{expectedVersion}
+    </update>
+
+    <update id="attachOfficialDocument">
+        UPDATE t_repair_building_process
+        SET official_document_attachment_id = #{attachmentId},
+            status = 'OFFICIAL_DOCUMENT_READY',
+            process_version = process_version + 1,
+            update_time = CURRENT_TIMESTAMP
+        WHERE process_id = #{processId}
+          AND tenant_id = #{tenantId}
+          AND status = 'DECISION_PASSED'
+          AND process_version = #{expectedVersion}
+    </update>
+
+    <update id="recordPriceReview">
+        UPDATE t_repair_building_process
+        SET review_mode = #{reviewMode}, reviewed_amount = #{reviewedAmount},
+            price_review_report_attachment_id = #{reportAttachmentId},
+            price_review_conclusion = #{conclusion}, price_review_opinion = #{opinion},
+            price_reviewed_by_user_id = #{reviewedByUserId},
+            price_reviewed_at = CURRENT_TIMESTAMP,
+            status = CASE WHEN #{conclusion} = 'APPROVED'
+                          THEN 'PRICE_REVIEWED' ELSE 'PRICE_REVIEW_REJECTED' END,
+            process_version = process_version + 1,
+            update_time = CURRENT_TIMESTAMP
+        WHERE process_id = #{processId}
+          AND tenant_id = #{tenantId}
+          AND status = 'OFFICIAL_DOCUMENT_READY'
+          AND process_version = #{expectedVersion}
+    </update>
+
+    <update id="recordCommitteeApproval">
+        UPDATE t_repair_building_process
+        SET approved_by_user_id = #{approvedByUserId}, approver_position = #{approverPosition},
+            approval_opinion = #{opinion}, approved_at = CURRENT_TIMESTAMP,
+            status = 'COMMITTEE_APPROVED', process_version = process_version + 1,
+            update_time = CURRENT_TIMESTAMP
+        WHERE process_id = #{processId}
+          AND tenant_id = #{tenantId}
+          AND status = 'PRICE_REVIEWED'
+          AND price_review_conclusion = 'APPROVED'
+          AND process_version = #{expectedVersion}
+    </update>
+
+    <insert id="insertProjectSealUsage" useGeneratedKeys="true"
+            keyProperty="usageId" keyColumn="usage_id">
+        INSERT INTO t_committee_seal_usage (
+            tenant_id, electronic_seal_id, seal_name, business_type, business_id,
+            sealing_method, source_attachment_id, sealed_attachment_id,
+            project_source_attachment_id, project_sealed_attachment_id,
+            source_file_hash, sealed_file_hash, provider_transaction_id,
+            certificate_serial, verification_status, simulated, operator_user_id, remark
+        ) VALUES (
+            #{tenantId}, NULL, '业主委员会公章（上传件）', 'REPAIR_PROJECT', #{projectId},
+            'UPLOADED_PHYSICAL', NULL, NULL,
+            #{sourceAttachmentId}, #{sealedAttachmentId},
+            #{sourceHash}, #{sealedHash}, NULL,
+            NULL, 'PHYSICAL_STAMP_FILE_UPLOADED', 0, #{operatorUserId}, #{remark}
+        )
+    </insert>
+
+    <update id="authorizeBuildingProcess">
+        UPDATE t_repair_building_process
+        SET seal_usage_id = #{sealUsageId}, status = 'AUTHORIZED',
+            process_version = process_version + 1, update_time = CURRENT_TIMESTAMP
+        WHERE process_id = #{processId}
+          AND tenant_id = #{tenantId}
+          AND status = 'COMMITTEE_APPROVED'
+          AND process_version = #{expectedVersion}
+    </update>
+
+    <insert id="insertAssemblySubjectLink" useGeneratedKeys="true"
+            keyProperty="linkId" keyColumn="link_id">
+        INSERT INTO t_repair_assembly_subject_link (
+            project_id, plan_id, tenant_id, session_id, package_id, subject_id,
+            status, linked_by_user_id
+        ) VALUES (
+            #{projectId}, #{planId}, #{tenantId}, #{sessionId}, #{packageId}, #{subjectId},
+            #{status}, #{linkedByUserId}
+        )
+    </insert>
+
+    <sql id="assemblyLinkColumns">
+        link_id, project_id, plan_id, tenant_id, session_id, package_id, subject_id,
+        status, result, linked_by_user_id, settled_by_user_id, create_time, update_time
+    </sql>
+
+    <select id="findAssemblySubjectLink"
+            resultType="com.pangu.infrastructure.persistence.entity.RepairProjectGovernanceRows$AssemblySubjectLinkRow">
+        SELECT <include refid="assemblyLinkColumns"/>
+        FROM t_repair_assembly_subject_link
+        WHERE project_id = #{projectId} AND plan_id = #{planId} AND tenant_id = #{tenantId}
+    </select>
+
+    <select id="findAssemblySubjectLinkForUpdate"
+            resultType="com.pangu.infrastructure.persistence.entity.RepairProjectGovernanceRows$AssemblySubjectLinkRow">
+        SELECT <include refid="assemblyLinkColumns"/>
+        FROM t_repair_assembly_subject_link
+        WHERE project_id = #{projectId} AND plan_id = #{planId} AND tenant_id = #{tenantId}
+        FOR UPDATE
+    </select>
+
+    <update id="settleAssemblySubjectLink">
+        UPDATE t_repair_assembly_subject_link
+        SET status = 'SETTLED', result = #{result}, settled_by_user_id = #{settledByUserId},
+            update_time = CURRENT_TIMESTAMP
+        WHERE link_id = #{linkId} AND tenant_id = #{tenantId} AND status = 'LINKED'
+    </update>
+
+    <insert id="insertGovernanceBasis">
+        INSERT INTO t_repair_governance_basis (
+            project_id, plan_id, tenant_id, basis_type, reference_type,
+            reference_id, snapshot_hash, status, created_by_user_id
+        ) VALUES (
+            #{projectId}, #{planId}, #{tenantId}, #{basisType}, #{referenceType},
+            #{referenceId}, #{snapshotHash}, 'ACTIVE', #{createdByUserId}
+        )
+    </insert>
+</mapper>

@@ -57,6 +57,9 @@ public interface RepairProjectRepository {
 
     int activatePlan(Long projectId, Long tenantId, Long planId, Integer expectedVersion);
 
+    int advanceStatus(Long projectId, Long tenantId, Status expectedStatus,
+                      Status nextStatus, Integer expectedVersion);
+
     void insertEvent(Long projectId, Long tenantId, String action,
                      Long actorAccountId, Long actorUserId, String payloadJson);
 }

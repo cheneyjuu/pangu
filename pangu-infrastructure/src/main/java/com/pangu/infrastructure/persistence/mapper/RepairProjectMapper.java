@@ -90,6 +90,12 @@ public interface RepairProjectMapper {
                      @Param("planId") Long planId,
                      @Param("expectedVersion") Integer expectedVersion);
 
+    int advanceStatus(@Param("projectId") Long projectId,
+                      @Param("tenantId") Long tenantId,
+                      @Param("expectedStatus") String expectedStatus,
+                      @Param("nextStatus") String nextStatus,
+                      @Param("expectedVersion") Integer expectedVersion);
+
     int insertEvent(@Param("projectId") Long projectId,
                     @Param("tenantId") Long tenantId,
                     @Param("action") String action,

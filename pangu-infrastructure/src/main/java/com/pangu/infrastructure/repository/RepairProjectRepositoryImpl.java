@@ -171,6 +171,13 @@ public class RepairProjectRepositoryImpl implements RepairProjectRepository {
     }
 
     @Override
+    public int advanceStatus(Long projectId, Long tenantId, Status expectedStatus,
+                             Status nextStatus, Integer expectedVersion) {
+        return mapper.advanceStatus(
+                projectId, tenantId, expectedStatus.name(), nextStatus.name(), expectedVersion);
+    }
+
+    @Override
     public void insertEvent(Long projectId, Long tenantId, String action,
                             Long actorAccountId, Long actorUserId, String payloadJson) {
         mapper.insertEvent(projectId, tenantId, action, actorAccountId, actorUserId, payloadJson);
