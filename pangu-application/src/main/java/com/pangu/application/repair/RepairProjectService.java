@@ -23,7 +23,10 @@ import com.pangu.domain.model.repair.RepairProject.PlanVersion;
 import com.pangu.domain.model.repair.RepairProject.ScopeType;
 import com.pangu.domain.model.repair.RepairProject.Status;
 import com.pangu.domain.model.repair.RepairWorkOrder;
+import com.pangu.domain.model.repair.RepairWorkOrderEvent;
+import com.pangu.domain.model.repair.RepairWorkOrderStatus;
 import com.pangu.domain.model.repair.RepairWorkflowType;
+import com.pangu.domain.policy.RepairCaseLifecyclePolicy;
 import com.pangu.domain.policy.RepairWorkflowRoutingPolicy;
 import com.pangu.domain.policy.RepairWorkflowRoutingPolicy.RoutingDecision;
 import com.pangu.domain.policy.RepairWorkflowRoutingPolicy.RoutingInput;
@@ -77,6 +80,7 @@ public class RepairProjectService {
     private final RepairProjectRepository projectRepository;
     private final RepairWorkOrderRepository workOrderRepository;
     private final RepairWorkflowRoutingPolicy routingPolicy;
+    private final RepairCaseLifecyclePolicy caseLifecyclePolicy;
     private final UserContextHolder userContextHolder;
     private final ObjectMapper objectMapper;
 
@@ -243,7 +247,7 @@ public class RepairProjectService {
                 draft.plannedStartDate(), draft.plannedCompletionDate(), draft.warrantyDays(),
                 project.governancePath(), draft.priceReviewRequired(), draft.paymentMilestones(),
                 PlanStatus.DRAFT, null, actor.accountId(), actor.userId(), null, null, null));
-        insertItems(project, plan, draft.items());
+        insertItems(project, plan, draft.items(), actor);
         List<AllocationRoom> allocation = projectRepository.snapshotAllocationRooms(
                 plan.planId(), project.tenantId(), project.scopeType(), project.buildingId(), project.unitName());
         if (allocation.isEmpty()) {
@@ -253,9 +257,14 @@ public class RepairProjectService {
         return plan;
     }
 
-    private void insertItems(RepairProject project, PlanVersion plan, List<RepairPlanDraftCommand.ItemDraft> drafts) {
+    private void insertItems(
+            RepairProject project,
+            PlanVersion plan,
+            List<RepairPlanDraftCommand.ItemDraft> drafts,
+            UserContext actor) {
         int sortOrder = 0;
         Set<String> itemNumbers = new LinkedHashSet<>();
+        Map<Long, RepairWorkOrder> linkedWorkOrders = new LinkedHashMap<>();
         for (RepairPlanDraftCommand.ItemDraft draft : drafts) {
             sortOrder++;
             String itemNo = requireText(draft.itemNo(), "items.itemNo");
@@ -263,7 +272,13 @@ public class RepairProjectService {
                 throw invalid("工程项编号重复 itemNo=" + itemNo);
             }
             ItemLocation location = validateItemLocation(project, draft);
-            validateLinkedWorkOrders(project, draft.linkedWorkOrderIds());
+            for (Long workOrderId : new LinkedHashSet<>(draft.linkedWorkOrderIds())) {
+                if (workOrderId == null) {
+                    throw invalid("linkedWorkOrderIds 不能包含空值");
+                }
+                linkedWorkOrders.computeIfAbsent(
+                        workOrderId, ignored -> validateLinkedWorkOrder(project, workOrderId));
+            }
             Item item = projectRepository.insertItem(new Item(
                     null, project.projectId(), plan.planId(), project.tenantId(), itemNo,
                     location.buildingId(), location.unitName(), draft.roomId(),
@@ -275,6 +290,7 @@ public class RepairProjectService {
                 projectRepository.linkItemToWorkOrder(item.itemId(), workOrderId, project.tenantId());
             }
         }
+        markCasesLinked(project, plan, linkedWorkOrders.values(), actor);
     }
 
     private void linkInitialAttachments(
@@ -475,20 +491,62 @@ public class RepairProjectService {
         return new ItemLocation(buildingId, unitName);
     }
 
-    private void validateLinkedWorkOrders(RepairProject project, List<Long> workOrderIds) {
-        for (Long workOrderId : new LinkedHashSet<>(workOrderIds)) {
-            if (workOrderId == null) {
-                throw invalid("linkedWorkOrderIds 不能包含空值");
+    private RepairWorkOrder validateLinkedWorkOrder(RepairProject project, Long workOrderId) {
+        RepairWorkOrder workOrder = workOrderRepository.findById(workOrderId)
+                .orElseThrow(() -> notFound("关联报修事项不存在 workOrderId=" + workOrderId));
+        if (!project.tenantId().equals(workOrder.tenantId())) {
+            throw new RepairWorkOrderApplicationException(FORBIDDEN, "禁止跨小区关联报修事项");
+        }
+        RepairCaseLifecyclePolicy.Decision decision = caseLifecyclePolicy.assessProjectLink(
+                workOrder, project.workflowType(), project.buildingId());
+        if (!decision.allowed()) {
+            throw invalid(decision.reason() + " workOrderId=" + workOrderId);
+        }
+        return workOrder;
+    }
+
+    /** 项目与工程项创建在同一事务内，只有全部结构化方案校验通过后才交接报修事项状态。 */
+    private void markCasesLinked(
+            RepairProject project,
+            PlanVersion plan,
+            Iterable<RepairWorkOrder> workOrders,
+            UserContext actor) {
+        for (RepairWorkOrder workOrder : workOrders) {
+            if (workOrder.status() == RepairWorkOrderStatus.PROJECT_LINKED) {
+                continue;
             }
-            RepairWorkOrder workOrder = workOrderRepository.findById(workOrderId)
-                    .orElseThrow(() -> notFound("关联报修事项不存在 workOrderId=" + workOrderId));
-            if (!project.tenantId().equals(workOrder.tenantId())) {
-                throw new RepairWorkOrderApplicationException(FORBIDDEN, "禁止跨小区关联报修事项");
+            RepairWorkOrder linked = workOrder.withStatus(
+                    RepairWorkOrderStatus.PROJECT_LINKED, false, true, false);
+            if (workOrderRepository.update(linked) != 1) {
+                throw new RepairWorkOrderApplicationException(
+                        INVALID_STATUS, "报修事项状态已变化，请刷新后重新关联 workOrderId=" + workOrder.workOrderId());
             }
-            if (project.workflowType() == RepairWorkflowType.BUILDING_REPAIR
-                    && !project.buildingId().equals(workOrder.buildingId())) {
-                throw invalid("楼栋维修只能关联同一楼栋的报修事项 workOrderId=" + workOrderId);
-            }
+            workOrderRepository.insertEvent(new RepairWorkOrderEvent(
+                    null,
+                    workOrder.workOrderId(),
+                    workOrder.tenantId(),
+                    "LINK_PROJECT",
+                    workOrder.status(),
+                    RepairWorkOrderStatus.PROJECT_LINKED,
+                    actor.accountId(),
+                    actor.identityType().name(),
+                    actor.activeIdentityId(),
+                    "报修事项已交接维修工程项目",
+                    workOrderLinkPayload(project, plan),
+                    null));
+        }
+    }
+
+    private String workOrderLinkPayload(RepairProject project, PlanVersion plan) {
+        try {
+            return objectMapper.writeValueAsString(Map.of(
+                    "projectId", project.projectId(),
+                    "projectNo", project.projectNo(),
+                    "workflowType", project.workflowType().name(),
+                    "planId", plan.planId(),
+                    "planVersion", plan.versionNo()));
+        } catch (JsonProcessingException ex) {
+            throw new IllegalStateException("报修事项关联工程审计事件序列化失败", ex);
         }
     }
 

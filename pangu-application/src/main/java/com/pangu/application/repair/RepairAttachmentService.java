@@ -16,6 +16,7 @@ import com.pangu.domain.repository.RepairAttachmentRepository;
 import com.pangu.domain.repository.RepairDocumentPreviewConverter;
 import com.pangu.domain.repository.RepairEvidenceObjectStorage;
 import com.pangu.domain.repository.RepairWorkOrderRepository;
+import com.pangu.domain.policy.RepairCaseLifecyclePolicy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -71,6 +72,7 @@ public class RepairAttachmentService {
     private final RepairEvidenceObjectStorage objectStorage;
     private final RepairDocumentPreviewConverter documentPreviewConverter;
     private final UserContextHolder userContextHolder;
+    private final RepairCaseLifecyclePolicy caseLifecyclePolicy;
 
     @Transactional
     public RepairAttachment upload(Long workOrderId, UploadRepairAttachmentCommand command) {
@@ -84,6 +86,11 @@ public class RepairAttachmentService {
                                              RepairWorkOrder order,
                                              RepairAttachmentKind kind,
                                              UploadRepairAttachmentCommand command) {
+        RepairCaseLifecyclePolicy.Decision cutover =
+                caseLifecyclePolicy.assessLegacyAttachment(order, kind);
+        if (!cutover.allowed()) {
+            throw new RepairWorkOrderApplicationException(INVALID_STATUS, cutover.reason());
+        }
         assertUploadStatus(order, kind);
         String contentType = normalizeContentType(command.contentType());
         byte[] content = command.content() == null ? new byte[0] : command.content();

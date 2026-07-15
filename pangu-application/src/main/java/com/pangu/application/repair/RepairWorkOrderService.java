@@ -88,6 +88,7 @@ import com.pangu.domain.repository.RepairWorkOrderRepository;
 import com.pangu.domain.policy.repair.BuildingRepairAcceptanceAuthorityPolicy;
 import com.pangu.domain.policy.repair.CommunityRepairAcceptanceAuthorityPolicy;
 import com.pangu.domain.policy.repair.RepairAcceptanceAuthorityPolicy;
+import com.pangu.domain.policy.RepairCaseLifecyclePolicy;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -181,6 +182,7 @@ public class RepairWorkOrderService {
     private final CommitteeSealService committeeSealService;
     private final CommitteeSealRepository committeeSealRepository;
     private final RepairEvidenceObjectStorage objectStorage;
+    private final RepairCaseLifecyclePolicy caseLifecyclePolicy;
 
     @Transactional
     public RepairWorkOrder createPrivate(CreatePrivateRepairCommand command) {
@@ -606,6 +608,7 @@ public class RepairWorkOrderService {
     public RepairWorkOrder submitPlan(Long workOrderId, SubmitRepairPlanCommand command) {
         UserContext ctx = requireRole(FIELD_ROLES, "当前角色无权提交方案预算");
         RepairWorkOrder order = loadVisible(ctx, workOrderId);
+        requireLegacyWriteAllowed(order, RepairWorkOrderStatus.PLAN_SUBMITTED);
         if (!order.locationLocked()) {
             throw new RepairWorkOrderApplicationException(LOCATION_NOT_VERIFIED,
                     "未完成现场核验，禁止提交方案预算");
@@ -2359,6 +2362,7 @@ public class RepairWorkOrderService {
                                        String action,
                                        String remark,
                                        String payloadJson) {
+        requireLegacyWriteAllowed(before, after.status());
         int updated = repository.update(after);
         if (updated != 1) {
             throw new RepairWorkOrderApplicationException(INVALID_STATUS, "工单已被并发修改，请刷新后重试");
@@ -2383,6 +2387,7 @@ public class RepairWorkOrderService {
                        RepairWorkOrderStatus toStatus,
                        String remark,
                        String payloadJson) {
+        requireLegacyWriteAllowed(order, toStatus);
         UserContext ctx = userContextHolder.current();
         repository.insertEvent(new RepairWorkOrderEvent(
                 null,
@@ -2397,6 +2402,16 @@ public class RepairWorkOrderService {
                 remark,
                 trim(payloadJson) == null ? "{}" : payloadJson,
                 null));
+    }
+
+    private void requireLegacyWriteAllowed(
+            RepairWorkOrder order,
+            RepairWorkOrderStatus targetStatus) {
+        RepairCaseLifecyclePolicy.Decision decision =
+                caseLifecyclePolicy.assessLegacyTransition(order, targetStatus);
+        if (!decision.allowed()) {
+            throw new RepairWorkOrderApplicationException(INVALID_STATUS, decision.reason());
+        }
     }
 
     private String fieldEvidencePayload(String fieldSupplement, List<String> evidenceImagesBase64) {

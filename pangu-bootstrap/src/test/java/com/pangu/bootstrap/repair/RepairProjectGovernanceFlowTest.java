@@ -294,7 +294,18 @@ class RepairProjectGovernanceFlowTest {
                         "title", CASE_PREFIX + System.nanoTime(),
                         "description", "外墙渗水待形成工程项目",
                         "category", "WATERPROOFING")));
-        return created.path("workOrderId").asLong();
+        long workOrderId = created.path("workOrderId").asLong();
+        jdbcTemplate.update("""
+                UPDATE t_repair_work_order
+                SET status = 'SURVEY_COMPLETED',
+                    location_locked = 1,
+                    need_manual_location = 0,
+                    fund_gate_blocked = 0,
+                    survey_summary = '已完成现场勘验',
+                    risk_level = 'MEDIUM'
+                WHERE work_order_id = ?
+                """, workOrderId);
+        return workOrderId;
     }
 
     private Map<String, Object> buildingProjectRequest(long workOrderId) {

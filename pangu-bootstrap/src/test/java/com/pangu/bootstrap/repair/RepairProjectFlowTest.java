@@ -92,6 +92,24 @@ class RepairProjectFlowTest {
         JsonNode created = createProject(buildingProjectRequest(workOrderId, "1"));
         long projectId = created.path("project").path("projectId").asLong();
         long planId = created.path("plans").get(0).path("planId").asLong();
+        assertEquals("PROJECT_LINKED", jdbcTemplate.queryForObject(
+                "SELECT status FROM t_repair_work_order WHERE work_order_id = ?",
+                String.class, workOrderId));
+        assertEquals(1, jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM t_repair_work_order_event
+                WHERE work_order_id = ? AND action = 'LINK_PROJECT'
+                """, Integer.class, workOrderId));
+
+        mockMvc.perform(post("/api/v1/admin/repair-work-orders/" + workOrderId + "/submit-plan")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "planBudget", 1000,
+                                "fundSource", "BUILDING_MAINTENANCE_FUND"))))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.msg", is(
+                        "共有部分维修已切换到维修工程项目；勘验完成后请在工程项目台账关联本工单，旧工单项目级写接口仅保留历史只读")));
 
         long quoteAttachmentId = upload(projectId, "报价单.pdf", "application/pdf", "quote");
         long photoAttachmentId = upload(projectId, "现场照片.jpg", "image/jpeg", "photo");
@@ -215,7 +233,18 @@ class RepairProjectFlowTest {
                                 "category", "WATERPROOFING"))))
                 .andExpect(status().isCreated())
                 .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
-        return objectMapper.readTree(response).path("data").path("workOrderId").asLong();
+        long workOrderId = objectMapper.readTree(response).path("data").path("workOrderId").asLong();
+        jdbcTemplate.update("""
+                UPDATE t_repair_work_order
+                SET status = 'SURVEY_COMPLETED',
+                    location_locked = 1,
+                    need_manual_location = 0,
+                    fund_gate_blocked = 0,
+                    survey_summary = '已完成现场勘验',
+                    risk_level = 'MEDIUM'
+                WHERE work_order_id = ?
+                """, workOrderId);
+        return workOrderId;
     }
 
     private Map<String, Object> buildingProjectRequest(long workOrderId, String suffix) {
