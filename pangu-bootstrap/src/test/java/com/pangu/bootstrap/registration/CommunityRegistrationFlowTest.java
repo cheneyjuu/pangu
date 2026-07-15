@@ -729,11 +729,21 @@ public class CommunityRegistrationFlowTest {
         for (Long tenantId : tenantIds) {
             jdbcTemplate.update("DELETE FROM t_tenant_community WHERE tenant_id = ?", tenantId);
         }
+        // 申请人登录会签发刷新凭证；临时自然人账号必须按外键顺序清理。
+        jdbcTemplate.update("""
+                DELETE FROM t_auth_refresh_session
+                WHERE account_id IN (
+                    SELECT account_id
+                    FROM t_account
+                    WHERE phone IN (?, ?, ?)
+                )
+                """, DIRECTOR_PHONE, OWNER_PHONE, PROPERTY_SERVICE_DIRECTOR_PHONE);
         jdbcTemplate.update("DELETE FROM c_user WHERE account_id IN (SELECT account_id FROM t_account WHERE phone IN (?, ?, ?))",
                 DIRECTOR_PHONE, OWNER_PHONE, PROPERTY_SERVICE_DIRECTOR_PHONE);
         jdbcTemplate.update("DELETE FROM t_account WHERE phone IN (?, ?, ?)",
                 DIRECTOR_PHONE, OWNER_PHONE, PROPERTY_SERVICE_DIRECTOR_PHONE);
 
+        jdbcTemplate.update("DELETE FROM t_auth_refresh_session WHERE account_id = ?", PLATFORM_ACCOUNT_ID);
         jdbcTemplate.update("DELETE FROM sys_user_role WHERE user_id = ?", PLATFORM_USER_ID);
         jdbcTemplate.update("DELETE FROM sys_user WHERE user_id = ?", PLATFORM_USER_ID);
         jdbcTemplate.update("DELETE FROM t_account WHERE account_id = ?", PLATFORM_ACCOUNT_ID);

@@ -237,7 +237,8 @@ public class ControllerIntegrationTest {
         // V1.1 seed: 李四纯业主 phone=13800000113 / account_id=999913 / c_user.uid=70002（无 sys_user 分身）
         Map<String, Object> request = Map.of(
                 "username", "13800000113",
-                "smsCode", "123456"
+                "smsCode", "123456",
+                "clientPortal", "OWNER"
         );
 
         String responseJson = mockMvc.perform(post("/api/v1/auth/login")

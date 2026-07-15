@@ -91,6 +91,13 @@ public class WorkIdentityAdminTest {
                 SET last_active_identity_id = ?, last_active_identity_type = 'SYS_USER'
                 WHERE account_id = ?
                 """, USR_WU_GOV, ACC_WU);
+        // 网格员登录会签发刷新凭证；删除临时账号前先清理账户外键依赖。
+        jdbcTemplate.update("""
+                DELETE FROM t_auth_refresh_session
+                WHERE account_id IN (
+                    SELECT account_id FROM t_account WHERE phone = ?
+                )
+                """, NEW_GRID_MEMBER_PHONE);
         jdbcTemplate.update("""
                 DELETE FROM sys_user
                 WHERE account_id IN (
