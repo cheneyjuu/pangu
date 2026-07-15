@@ -102,4 +102,11 @@ public interface RepairProjectMapper {
                     @Param("actorAccountId") Long actorAccountId,
                     @Param("actorUserId") Long actorUserId,
                     @Param("payloadJson") String payloadJson);
+
+    int insertOwnerEvent(@Param("projectId") Long projectId,
+                         @Param("tenantId") Long tenantId,
+                         @Param("action") String action,
+                         @Param("actorAccountId") Long actorAccountId,
+                         @Param("actorOwnerUid") Long actorOwnerUid,
+                         @Param("payloadJson") String payloadJson);
 }

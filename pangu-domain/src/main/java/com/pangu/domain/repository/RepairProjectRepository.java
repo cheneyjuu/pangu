@@ -62,4 +62,7 @@ public interface RepairProjectRepository {
 
     void insertEvent(Long projectId, Long tenantId, String action,
                      Long actorAccountId, Long actorUserId, String payloadJson);
+
+    void insertOwnerEvent(Long projectId, Long tenantId, String action,
+                          Long actorAccountId, Long actorOwnerUid, String payloadJson);
 }

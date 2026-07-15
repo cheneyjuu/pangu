@@ -185,6 +185,14 @@ public class RepairProjectService {
             throw new RepairWorkOrderApplicationException(
                     INVALID_STATUS, "费用承担房屋快照为空，禁止锁定实施方案");
         }
+        if (project.workflowType() == RepairWorkflowType.BUILDING_REPAIR) {
+            long affectedOwnerCount = allocation.stream().map(AllocationRoom::ownerUid).distinct().count();
+            if (plan.minimumAffectedOwnerAcceptors() > affectedOwnerCount) {
+                throw new RepairWorkOrderApplicationException(
+                        INVALID_STATUS,
+                        "最低有效验收人数不能超过锁定范围内的受影响业主人数");
+            }
+        }
         String snapshotHash = snapshotHash(project, plan, items, allocation, attachments);
         if (projectRepository.lockPlan(planId, projectId, actor.tenantId(), snapshotHash, actor.userId()) != 1) {
             throw new RepairWorkOrderApplicationException(INVALID_STATUS, "实施方案锁定失败，请刷新后重试");
@@ -341,6 +349,11 @@ public class RepairProjectService {
     }
 
     private void validatePaymentMilestones(List<PaymentMilestone> milestones, boolean priceReviewRequired) {
+        Map<PaymentMilestoneType, Set<String>> mandatoryEvidence = Map.of(
+                PaymentMilestoneType.ADVANCE, Set.of("SIGNED_CONTRACT"),
+                PaymentMilestoneType.PROGRESS, Set.of("PROGRESS_RECORD"),
+                PaymentMilestoneType.COMPLETION, Set.of("ACCEPTANCE", "SETTLEMENT"),
+                PaymentMilestoneType.WARRANTY_RELEASE, Set.of("WARRANTY_EXPIRED_CERTIFICATE"));
         Map<PaymentMilestoneType, PaymentMilestone> byType = new EnumMap<>(PaymentMilestoneType.class);
         for (PaymentMilestone milestone : milestones) {
             if (milestone == null || milestone.type() == null) {
@@ -350,6 +363,16 @@ public class RepairProjectService {
             if (milestone.requiredEvidenceCodes().isEmpty()
                     || milestone.requiredEvidenceCodes().stream().anyMatch(this::isBlank)) {
                 throw invalid("每个付款节点必须配置结构化必需材料代码");
+            }
+            Set<String> evidenceCodes = new LinkedHashSet<>(milestone.requiredEvidenceCodes());
+            if (evidenceCodes.size() != milestone.requiredEvidenceCodes().size()) {
+                throw invalid("同一付款节点的必需材料代码不能重复");
+            }
+            if (evidenceCodes.stream().anyMatch(code -> !code.equals(code.trim().toUpperCase()))) {
+                throw invalid("付款材料代码必须使用大写英文标识");
+            }
+            if (!evidenceCodes.containsAll(mandatoryEvidence.get(milestone.type()))) {
+                throw invalid("付款节点缺少平台必需材料代码 type=" + milestone.type());
             }
             if (byType.put(milestone.type(), milestone) != null) {
                 throw invalid("付款节点重复 type=" + milestone.type());
@@ -368,6 +391,14 @@ public class RepairProjectService {
                 && byType.get(PaymentMilestoneType.PROGRESS).maximumContractRatio()
                 .compareTo(new BigDecimal("0.90")) > 0) {
             throw invalid("审价完成前累计进度款比例不得超过合同总价 90%");
+        }
+        BigDecimal previous = BigDecimal.ZERO;
+        for (PaymentMilestoneType type : PaymentMilestoneType.values()) {
+            BigDecimal current = byType.get(type).maximumContractRatio();
+            if (current.compareTo(previous) < 0) {
+                throw invalid("付款节点累计比例必须按业务顺序递增 type=" + type);
+            }
+            previous = current;
         }
     }
 

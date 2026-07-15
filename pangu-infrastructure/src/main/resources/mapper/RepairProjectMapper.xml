@@ -273,4 +273,14 @@
             CAST(#{payloadJson} AS JSONB)
         )
     </insert>
+
+    <insert id="insertOwnerEvent">
+        INSERT INTO t_repair_project_event (
+            project_id, tenant_id, action, actor_account_id, actor_user_id,
+            actor_owner_uid, payload_json
+        ) VALUES (
+            #{projectId}, #{tenantId}, #{action}, #{actorAccountId}, NULL,
+            #{actorOwnerUid}, CAST(#{payloadJson} AS JSONB)
+        )
+    </insert>
 </mapper>

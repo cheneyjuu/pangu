@@ -8,7 +8,9 @@ import com.pangu.domain.context.UserContext;
 import com.pangu.domain.context.UserContextHolder;
 import com.pangu.domain.model.repair.RepairProject;
 import com.pangu.domain.model.repair.RepairProject.Attachment;
+import com.pangu.domain.model.repair.RepairProject.Status;
 import com.pangu.domain.repository.RepairEvidenceObjectStorage;
+import com.pangu.domain.repository.RepairProjectExecutionRepository;
 import com.pangu.domain.repository.RepairProjectRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -47,6 +49,7 @@ public class RepairProjectAttachmentService {
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
 
     private final RepairProjectRepository projectRepository;
+    private final RepairProjectExecutionRepository executionRepository;
     private final RepairEvidenceObjectStorage objectStorage;
     private final UserContextHolder userContextHolder;
     private final ObjectMapper objectMapper;
@@ -56,6 +59,7 @@ public class RepairProjectAttachmentService {
         UserContext actor = requireActor();
         RepairProject project = projectRepository.findProject(projectId, actor.tenantId())
                 .orElseThrow(() -> new RepairWorkOrderApplicationException(NOT_FOUND, "维修工程项目不存在"));
+        assertProjectAccess(actor, project, true);
         if (command == null) {
             throw new RepairWorkOrderApplicationException(PARAM_INVALID, "附件不能为空");
         }
@@ -89,6 +93,9 @@ public class RepairProjectAttachmentService {
     @Transactional(readOnly = true)
     public RepairAttachmentDownloadTicket createDownloadTicket(Long projectId, Long attachmentId) {
         UserContext actor = requireActor();
+        RepairProject project = projectRepository.findProject(projectId, actor.tenantId())
+                .orElseThrow(() -> new RepairWorkOrderApplicationException(NOT_FOUND, "维修工程项目不存在"));
+        assertProjectAccess(actor, project, false);
         Attachment attachment = projectRepository.findAttachment(attachmentId, projectId, actor.tenantId())
                 .orElseThrow(() -> new RepairWorkOrderApplicationException(NOT_FOUND, "维修工程附件不存在"));
         Instant expiresAt = Instant.now().plus(DOWNLOAD_URL_VALIDITY);
@@ -199,6 +206,35 @@ public class RepairProjectAttachmentService {
             throw new RepairWorkOrderApplicationException(FORBIDDEN, "未识别到当前小区管理端工作身份");
         }
         return actor;
+    }
+
+    private void assertProjectAccess(UserContext actor, RepairProject project, boolean writing) {
+        String role = actor.roleKey();
+        if (Set.of("PROPERTY_MANAGER", "PROPERTY_STAFF", "COMMITTEE_DIRECTOR", "COMMITTEE_MEMBER")
+                .contains(role)) {
+            return;
+        }
+        if ("OWNER_REPRESENTATIVE".equals(role)) {
+            boolean ownsBuilding = project.buildingId() != null
+                    && (actor.authorizedBuildingIds().contains(project.buildingId())
+                    || actor.authorizedBuildingScopes().stream().anyMatch(scope ->
+                    scope.tenantId().equals(project.tenantId())
+                            && scope.buildingId().equals(project.buildingId())));
+            if (ownsBuilding) {
+                return;
+            }
+        }
+        if (Set.of("SERVICE_PROVIDER_MANAGER", "SERVICE_PROVIDER_STAFF").contains(role)) {
+            boolean contractSupplier = executionRepository.findContract(project.projectId(), project.tenantId())
+                    .map(contract -> actor.deptId() != null && actor.deptId().equals(contract.supplierDeptId()))
+                    .orElse(false);
+            boolean executionStage = project.status() == Status.IN_PROGRESS
+                    || (!writing && project.status() == Status.PENDING_ACCEPTANCE);
+            if (contractSupplier && executionStage) {
+                return;
+            }
+        }
+        throw new RepairWorkOrderApplicationException(FORBIDDEN, "当前工作身份无权访问该维修工程附件");
     }
 
     private String eventPayload(Long attachmentId) {

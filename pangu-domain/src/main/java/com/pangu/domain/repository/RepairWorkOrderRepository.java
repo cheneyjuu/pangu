@@ -246,6 +246,8 @@ public interface RepairWorkOrderRepository {
 
     Optional<String> findActiveCommitteePosition(Long tenantId, Long userId);
 
+    boolean activeUserBelongsToDept(Long userId, Long deptId);
+
     Long insertContract(Long workOrderId,
                         Long tenantId,
                         Long supplierDeptId,

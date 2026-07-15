@@ -582,6 +582,11 @@ public class RepairWorkOrderRepositoryImpl implements RepairWorkOrderRepository 
     }
 
     @Override
+    public boolean activeUserBelongsToDept(Long userId, Long deptId) {
+        return mapper.activeUserBelongsToDept(userId, deptId);
+    }
+
+    @Override
     public Long insertContract(Long workOrderId,
                                Long tenantId,
                                Long supplierDeptId,

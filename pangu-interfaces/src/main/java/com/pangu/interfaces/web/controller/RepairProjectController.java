@@ -89,7 +89,7 @@ public class RepairProjectController extends BaseController {
     }
 
     @PostMapping(value = "/{projectId}/attachments", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @PreAuthorize("hasAuthority('repair:workorder:manage')")
+    @PreAuthorize("hasAnyAuthority('repair:workorder:manage','repair:workorder:field','repair:workorder:governance','repair:workorder:local-decision','repair:workorder:supplier')")
     public Result<Attachment> uploadAttachment(
             @PathVariable("projectId") Long projectId,
             @RequestPart("file") MultipartFile file) {
@@ -104,7 +104,7 @@ public class RepairProjectController extends BaseController {
     }
 
     @GetMapping("/{projectId}/attachments/{attachmentId}/download-ticket")
-    @PreAuthorize("hasAuthority('repair:workorder:read')")
+    @PreAuthorize("hasAnyAuthority('repair:workorder:read','repair:workorder:supplier')")
     public Result<RepairAttachmentDownloadTicketResponse> downloadTicket(
             @PathVariable("projectId") Long projectId,
             @PathVariable("attachmentId") Long attachmentId) {

@@ -183,6 +183,13 @@ public class RepairProjectRepositoryImpl implements RepairProjectRepository {
         mapper.insertEvent(projectId, tenantId, action, actorAccountId, actorUserId, payloadJson);
     }
 
+    @Override
+    public void insertOwnerEvent(Long projectId, Long tenantId, String action,
+                                 Long actorAccountId, Long actorOwnerUid, String payloadJson) {
+        mapper.insertOwnerEvent(
+                projectId, tenantId, action, actorAccountId, actorOwnerUid, payloadJson);
+    }
+
     private RepairProject toDomain(RepairProjectRow row) {
         return new RepairProject(
                 row.getProjectId(), row.getProjectNo(), row.getTenantId(), row.getProjectName(),

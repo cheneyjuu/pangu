@@ -1425,6 +1425,14 @@
         LIMIT 1
     </select>
 
+    <select id="activeUserBelongsToDept" resultType="boolean">
+        SELECT EXISTS (
+            SELECT 1
+            FROM sys_user
+            WHERE user_id = #{userId} AND dept_id = #{deptId} AND status = '0'
+        )
+    </select>
+
     <insert id="insertContract">
         INSERT INTO t_repair_contract (
             work_order_id, tenant_id, supplier_dept_id, supplier_name, contract_amount,

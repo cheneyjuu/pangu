@@ -329,6 +329,9 @@ public interface RepairWorkOrderMapper {
     String findActiveCommitteePosition(@Param("tenantId") Long tenantId,
                                        @Param("userId") Long userId);
 
+    boolean activeUserBelongsToDept(@Param("userId") Long userId,
+                                    @Param("deptId") Long deptId);
+
     int insertContract(@Param("workOrderId") Long workOrderId,
                        @Param("tenantId") Long tenantId,
                        @Param("supplierDeptId") Long supplierDeptId,
