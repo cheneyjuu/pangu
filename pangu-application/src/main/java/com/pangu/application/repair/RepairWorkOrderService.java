@@ -20,9 +20,9 @@ import com.pangu.application.repair.command.InviteRepairSuppliersCommand;
 import com.pangu.application.repair.command.RecordRepairAcceptanceCommand;
 import com.pangu.application.repair.command.RepairActionCommand;
 import com.pangu.application.repair.command.SealRepairGovernanceCommand;
+import com.pangu.application.repair.command.SealRepairAcceptanceCommand;
 import com.pangu.application.repair.command.StartRepairAssemblyDecisionCommand;
 import com.pangu.application.repair.command.StartRepairLocalDecisionCommand;
-import com.pangu.application.repair.command.SetRepairAcceptanceScopeCommand;
 import com.pangu.application.repair.command.SubmitRepairApprovalPackageCommand;
 import com.pangu.application.repair.command.SubmitRepairSupplierQuoteCommand;
 import com.pangu.application.repair.command.SubmitRepairOnlineVoteCommand;
@@ -41,7 +41,13 @@ import com.pangu.domain.model.repair.RepairBuildingDecisionSnapshot;
 import com.pangu.domain.model.repair.RepairAttachment;
 import com.pangu.domain.model.repair.RepairAttachmentKind;
 import com.pangu.domain.model.repair.RepairAttachmentStatus;
-import com.pangu.domain.model.repair.RepairAcceptanceRecord;
+import com.pangu.domain.model.repair.RepairAcceptanceAffectedOwner;
+import com.pangu.domain.model.repair.RepairAcceptanceConclusion;
+import com.pangu.domain.model.repair.RepairAcceptanceDecision;
+import com.pangu.domain.model.repair.RepairAcceptanceParty;
+import com.pangu.domain.model.repair.RepairAcceptancePartyRole;
+import com.pangu.domain.model.repair.RepairAcceptancePolicySnapshot;
+import com.pangu.domain.model.repair.RepairAcceptanceRound;
 import com.pangu.domain.model.repair.RepairAcceptanceSummary;
 import com.pangu.domain.model.repair.RepairApprovalAttachment;
 import com.pangu.domain.model.repair.RepairContractSignature;
@@ -69,14 +75,19 @@ import com.pangu.domain.model.repair.RepairVoteChoice;
 import com.pangu.domain.model.repair.RepairWorkOrder;
 import com.pangu.domain.model.repair.RepairWorkOrderEvent;
 import com.pangu.domain.model.repair.RepairWorkOrderStatus;
+import com.pangu.domain.model.repair.RepairWorkflowType;
 import com.pangu.domain.model.user.WorkIdentityBuildingScope;
 import com.pangu.domain.repository.OwnersAssemblyRepository;
 import com.pangu.domain.repository.CommitteeSealRepository;
 import com.pangu.domain.repository.CommunitySettingsRepository;
 import com.pangu.domain.repository.ElectronicSealProvider;
 import com.pangu.domain.repository.RepairAttachmentRepository;
+import com.pangu.domain.repository.RepairAcceptanceRepository;
 import com.pangu.domain.repository.RepairEvidenceObjectStorage;
 import com.pangu.domain.repository.RepairWorkOrderRepository;
+import com.pangu.domain.policy.repair.BuildingRepairAcceptanceAuthorityPolicy;
+import com.pangu.domain.policy.repair.CommunityRepairAcceptanceAuthorityPolicy;
+import com.pangu.domain.policy.repair.RepairAcceptanceAuthorityPolicy;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -154,8 +165,12 @@ public class RepairWorkOrderService {
     private static final Set<String> ACCEPTANCE_ROLES = Set.of(
             "OWNER_REPRESENTATIVE", "PROPERTY_STAFF", "PROPERTY_MANAGER",
             "COMMITTEE_DIRECTOR", "COMMITTEE_MEMBER");
+    private static final Map<RepairWorkflowType, RepairAcceptanceAuthorityPolicy> ACCEPTANCE_POLICIES = Map.of(
+            RepairWorkflowType.BUILDING_REPAIR, new BuildingRepairAcceptanceAuthorityPolicy(),
+            RepairWorkflowType.COMMUNITY_PUBLIC_REPAIR, new CommunityRepairAcceptanceAuthorityPolicy());
 
     private final RepairWorkOrderRepository repository;
+    private final RepairAcceptanceRepository acceptanceRepository;
     private final RepairAttachmentRepository attachmentRepository;
     private final OwnersAssemblyRepository ownersAssemblyRepository;
     private final CommunitySettingsRepository communitySettingsRepository;
@@ -271,7 +286,7 @@ public class RepairWorkOrderService {
         if (!order.tenantId().equals(ctx.tenantId())) {
             throw new RepairWorkOrderApplicationException(NOT_FOUND, "工单不在当前小区");
         }
-        return repository.listOwnerAcceptanceRooms(order.workOrderId(), order.tenantId(), ctx.uid());
+        return acceptanceRepository.listOwnerRooms(order.workOrderId(), order.tenantId(), ctx.uid());
     }
 
     @Transactional(readOnly = true)
@@ -616,14 +631,21 @@ public class RepairWorkOrderService {
                     "物业包干维修不进入供应商邀价，不能设置公开最高限价");
         }
         boolean directPropertyExecution = FUND_PROPERTY_INTERNAL.equals(fundSource);
+        RepairAcceptancePolicySnapshot acceptancePolicy = lockAcceptancePolicy(
+                order, fundSource, command.acceptancePolicy(), ctx.userId());
         RepairWorkOrderStatus nextStatus = directPropertyExecution
                 ? RepairWorkOrderStatus.APPROVED
                 : RepairWorkOrderStatus.PLAN_SUBMITTED;
         RepairWorkOrder next = order.withPlan(command.planBudget(), command.publicCeilingPrice(),
                 fundSource, nextStatus);
-        return transition(order, next, "SUBMIT_PLAN", command.remark(), jsonPayload(Map.of(
-                "route", directPropertyExecution ? "DIRECT_PROPERTY_EXECUTION" : "SUPPLIER_SELECTION",
-                "fundSource", fundSource)));
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("route", directPropertyExecution ? "DIRECT_PROPERTY_EXECUTION" : "SUPPLIER_SELECTION");
+        payload.put("fundSource", fundSource);
+        if (acceptancePolicy != null) {
+            payload.put("workflowType", acceptancePolicy.workflowType().name());
+            payload.put("acceptancePolicyHash", acceptancePolicy.policyHash());
+        }
+        return transition(order, next, "SUBMIT_PLAN", command.remark(), jsonPayload(payload));
     }
 
     @Transactional
@@ -1674,81 +1696,36 @@ public class RepairWorkOrderService {
         UserContext ctx = requireRole(FIELD_ROLES, "当前角色无权提交验收");
         RepairWorkOrder order = loadVisible(ctx, workOrderId);
         requireStatus(order, RepairWorkOrderStatus.IN_PROGRESS, RepairWorkOrderStatus.RECTIFICATION_REQUIRED);
+        RepairAcceptancePolicySnapshot policy = acceptanceRepository
+                .findPolicy(order.workOrderId(), order.tenantId())
+                .orElse(null);
+        if (governedAcceptanceRequired(order) && policy == null) {
+            throw new RepairWorkOrderApplicationException(PARAM_INVALID,
+                    "维修方案未在征询前锁定验收规则，禁止提交完工验收");
+        }
+        RepairAcceptanceRound round = policy == null ? null : acceptanceRepository.startRound(
+                order.workOrderId(), order.tenantId(), policy.policyId(), ctx.userId());
+        String payload = round == null
+                ? "{}"
+                : jsonPayload(Map.of(
+                "acceptanceId", round.acceptanceId(),
+                "roundNo", round.roundNo(),
+                "workflowType", policy.workflowType().name(),
+                "acceptancePolicyHash", policy.policyHash()));
         return transition(order, order.withStatus(RepairWorkOrderStatus.PENDING_ACCEPTANCE, false, true, false),
-                "SUBMIT_ACCEPTANCE", command.remark());
-    }
-
-    @Transactional
-    public RepairWorkOrder setAcceptanceScope(Long workOrderId, SetRepairAcceptanceScopeCommand command) {
-        UserContext ctx = requireRole(PROPERTY_QUOTE_ROLES, "当前角色无权设置受影响房屋范围");
-        RepairWorkOrder order = loadVisible(ctx, workOrderId);
-        requireStatus(order, RepairWorkOrderStatus.PLAN_SUBMITTED, RepairWorkOrderStatus.QUOTE_COLLECTING,
-                RepairWorkOrderStatus.QUOTE_SUBMITTED, RepairWorkOrderStatus.SUPPLIER_RECOMMENDED,
-                RepairWorkOrderStatus.LOCAL_DECISION_PENDING, RepairWorkOrderStatus.LOCAL_DECISION_PASSED,
-                RepairWorkOrderStatus.PRICE_REVIEW_PENDING, RepairWorkOrderStatus.GOVERNANCE_PENDING,
-                RepairWorkOrderStatus.GOVERNANCE_CONFIRMED, RepairWorkOrderStatus.SEALED,
-                RepairWorkOrderStatus.CONTRACT_SIGNING, RepairWorkOrderStatus.CONTRACT_EFFECTIVE);
-        List<SetRepairAcceptanceScopeCommand.AffectedRoom> rooms = command.rooms() == null
-                ? List.of()
-                : List.copyOf(command.rooms());
-        if (rooms.isEmpty()) {
-            throw new RepairWorkOrderApplicationException(PARAM_INVALID, "至少选择一户受影响房屋");
-        }
-        Set<Long> uniqueRoomIds = new HashSet<>();
-        List<Long> roomIds = new ArrayList<>();
-        List<String> reasons = new ArrayList<>();
-        for (SetRepairAcceptanceScopeCommand.AffectedRoom room : rooms) {
-            if (room == null || room.roomId() == null || !uniqueRoomIds.add(room.roomId())) {
-                throw new RepairWorkOrderApplicationException(PARAM_INVALID, "受影响房屋不能为空或重复");
-            }
-            if (!repository.roomExists(order.tenantId(), order.buildingId(), room.roomId())) {
-                throw new RepairWorkOrderApplicationException(PARAM_INVALID,
-                        "受影响房屋不属于工单楼栋 roomId=" + room.roomId());
-            }
-            roomIds.add(room.roomId());
-            reasons.add(trim(room.affectedReason()));
-        }
-        repository.replaceAcceptanceScope(order.workOrderId(), order.tenantId(), ctx.userId(), roomIds, reasons);
-        event(order, "SET_ACCEPTANCE_SCOPE", order.status(), order.status(), command.remark(), jsonPayload(Map.of(
-                "affectedRoomCount", roomIds.size(),
-                "roomIds", roomIds)));
-        return order;
+                "SUBMIT_ACCEPTANCE", command.remark(), payload);
     }
 
     @Transactional
     public RepairWorkOrder recordAcceptance(Long workOrderId, RecordRepairAcceptanceCommand command) {
         UserContext ctx = requireRole(ACCEPTANCE_ROLES, "当前角色无权记录维修验收");
         RepairWorkOrder order = loadVisible(ctx, workOrderId);
-        requireStatus(order, RepairWorkOrderStatus.PENDING_ACCEPTANCE,
-                RepairWorkOrderStatus.ACCEPTANCE_EXCEPTION, RepairWorkOrderStatus.RECTIFICATION_REQUIRED);
-        String participantType = requireAllowed(command.participantType(), "participantType", Set.of(
-                "AFFECTED_OWNER", "OWNER_REPRESENTATIVE", "PROPERTY_REPRESENTATIVE", "COMMITTEE_REPRESENTATIVE"));
-        assertAcceptanceParticipantRole(ctx, participantType);
-        Long roomId = command.roomId();
-        if ("AFFECTED_OWNER".equals(participantType)) {
-            if (roomId == null || !repository.roomInAcceptanceScope(order.workOrderId(), order.tenantId(), roomId)) {
-                throw new RepairWorkOrderApplicationException(PARAM_INVALID, "受影响业主验收必须关联范围内房屋");
-            }
-        } else {
-            roomId = null;
-        }
-        String conclusion = requireAllowed(command.conclusion(), "conclusion",
-                Set.of("PASSED", "RECTIFICATION_REQUIRED", "UNREACHABLE", "AUTHORIZED"));
-        if ("RECTIFICATION_REQUIRED".equals(conclusion) && trim(command.opinion()) == null) {
-            throw new RepairWorkOrderApplicationException(PARAM_INVALID, "要求整改必须填写具体问题");
-        }
-        repository.insertAcceptanceRecord(order.workOrderId(), order.tenantId(), new RepairAcceptanceRecord(
-                roomId, participantType, null, ctx.userId(), requireText(command.participantName(), "participantName"),
-                conclusion, trim(command.opinion()), trim(command.signatureHash()), trim(command.evidenceHash()),
-                ctx.userId()));
-        RepairWorkOrderStatus nextStatus = "RECTIFICATION_REQUIRED".equals(conclusion)
-                ? RepairWorkOrderStatus.RECTIFICATION_REQUIRED
-                : order.status();
-        return transition(order, order.withStatus(nextStatus, false, true, false),
-                "RECORD_ACCEPTANCE", command.remark(), jsonPayload(Map.of(
-                        "participantType", participantType,
-                        "conclusion", conclusion,
-                        "roomId", roomId == null ? 0L : roomId)));
+        requireStatus(order, RepairWorkOrderStatus.PENDING_ACCEPTANCE);
+        RepairAcceptancePolicySnapshot policy = requireAcceptancePolicy(order);
+        RepairAcceptanceRound round = requireCollectingAcceptance(order);
+        RepairAcceptanceParty party = buildRecordedAcceptanceParty(ctx, order, policy, command);
+        acceptanceRepository.insertParty(round.acceptanceId(), order.tenantId(), party);
+        return afterAcceptancePartyRecorded(order, round, party, command.remark(), "RECORD_ACCEPTANCE");
     }
 
     @Transactional
@@ -1759,59 +1736,96 @@ public class RepairWorkOrderService {
         if (!order.tenantId().equals(ctx.tenantId())) {
             throw new RepairWorkOrderApplicationException(NOT_FOUND, "工单不在当前小区");
         }
-        requireStatus(order, RepairWorkOrderStatus.PENDING_ACCEPTANCE,
-                RepairWorkOrderStatus.ACCEPTANCE_EXCEPTION, RepairWorkOrderStatus.RECTIFICATION_REQUIRED);
+        requireStatus(order, RepairWorkOrderStatus.PENDING_ACCEPTANCE);
+        RepairAcceptancePolicySnapshot policy = requireAcceptancePolicy(order);
+        if (policy.workflowType() != RepairWorkflowType.BUILDING_REPAIR) {
+            throw new RepairWorkOrderApplicationException(FORBIDDEN,
+                    "全小区公共维修由业委会验收，楼栋业主不能代为签署");
+        }
         Long roomId = command.roomId();
-        if (roomId == null || !repository.ownerOwnsAcceptanceRoom(
-                order.workOrderId(), order.tenantId(), roomId, ctx.uid())) {
+        if (roomId == null || !acceptanceRepository.ownerIncluded(
+                policy.policyId(), order.tenantId(), roomId, ctx.uid())) {
             throw new RepairWorkOrderApplicationException(FORBIDDEN, "当前业主不是该受影响房屋的核验业主");
         }
-        String conclusion = requireAllowed(command.conclusion(), "conclusion",
-                Set.of("PASSED", "RECTIFICATION_REQUIRED", "AUTHORIZED"));
-        if ("RECTIFICATION_REQUIRED".equals(conclusion) && trim(command.opinion()) == null) {
+        RepairAcceptanceConclusion conclusion = parseAcceptanceConclusion(command.conclusion());
+        if (conclusion == RepairAcceptanceConclusion.RECTIFICATION_REQUIRED && trim(command.opinion()) == null) {
             throw new RepairWorkOrderApplicationException(PARAM_INVALID, "要求整改必须填写具体问题");
         }
-        repository.insertAcceptanceRecord(order.workOrderId(), order.tenantId(), new RepairAcceptanceRecord(
-                roomId, "AFFECTED_OWNER", ctx.accountId(), null,
-                requireText(command.participantName(), "participantName"), conclusion, trim(command.opinion()),
-                trim(command.signatureHash()), trim(command.evidenceHash()), null));
-        RepairWorkOrderStatus nextStatus = "RECTIFICATION_REQUIRED".equals(conclusion)
-                ? RepairWorkOrderStatus.RECTIFICATION_REQUIRED
-                : order.status();
-        return transition(order, order.withStatus(nextStatus, false, true, false),
-                "OWNER_RECORD_ACCEPTANCE", command.remark(), jsonPayload(Map.of(
-                        "roomId", roomId,
-                        "conclusion", conclusion)));
+        RepairAcceptanceParty party = new RepairAcceptanceParty(
+                "AFFECTED_OWNER:" + ctx.uid(), RepairAcceptancePartyRole.AFFECTED_OWNER,
+                roomId, ctx.uid(), ctx.accountId(), null,
+                requireText(command.participantName(), "participantName"), null, null,
+                conclusion, trim(command.opinion()), "ONLINE_SELF",
+                requireText(command.signatureHash(), "signatureHash"), trim(command.evidenceHash()),
+                null, null);
+        RepairAcceptanceRound round = requireCollectingAcceptance(order);
+        acceptanceRepository.insertParty(round.acceptanceId(), order.tenantId(), party);
+        return afterAcceptancePartyRecorded(
+                order, round, party, command.remark(), "OWNER_RECORD_ACCEPTANCE");
+    }
+
+    @Transactional
+    public RepairWorkOrder sealAcceptance(Long workOrderId, SealRepairAcceptanceCommand command) {
+        UserContext ctx = requireRole(SEAL_ROLES, "当前角色无权加盖业委会验收公章");
+        if (!ctx.hasPermission("committee:seal:use")) {
+            throw new RepairWorkOrderApplicationException(FORBIDDEN, "当前业委会成员未取得用印权限");
+        }
+        RepairWorkOrder order = loadVisible(ctx, workOrderId);
+        requireStatus(order, RepairWorkOrderStatus.PENDING_ACCEPTANCE);
+        RepairAcceptancePolicySnapshot policy = requireAcceptancePolicy(order);
+        if (policy.workflowType() != RepairWorkflowType.COMMUNITY_PUBLIC_REPAIR) {
+            throw new RepairWorkOrderApplicationException(FORBIDDEN, "楼栋维修不由业委会盖章完成业主侧验收");
+        }
+        RepairAcceptanceRound round = requireCollectingAcceptance(order);
+        RepairAcceptanceSummary summary = acceptanceRepository.summarize(round.acceptanceId(), order.tenantId());
+        if (!summary.committeeExecutivePassed()) {
+            throw new RepairWorkOrderApplicationException(PARAM_INVALID,
+                    "业委会主任或副主任尚未在线同意，禁止办理验收用印");
+        }
+        RepairAttachment sealedDocument = readyAttachments(
+                order, List.of(command.sealedAttachmentId()),
+                RepairAttachmentKind.ACCEPTANCE_SEALED_DOCUMENT, 1, 1).getFirst();
+        String sealedFileHash = attachmentHash(sealedDocument);
+        Long usageId = committeeSealRepository.insertUsage(new CommitteeSealUsageRecord(
+                null, order.tenantId(), null, "业主委员会实物印章",
+                "REPAIR_ACCEPTANCE", round.acceptanceId(), order.title() + "竣工验收",
+                SEAL_METHOD_UPLOADED_PHYSICAL, null, sealedDocument.attachmentId(),
+                null, sealedFileHash, null, null, "PHYSICAL_STAMP_FILE_UPLOADED",
+                false, ctx.userId(), null, trim(command.remark()), null));
+        bindAttachments(order, List.of(sealedDocument), "ACCEPTANCE_SEAL");
+        RepairAcceptanceParty party = new RepairAcceptanceParty(
+                "COMMITTEE_SEAL:" + usageId, RepairAcceptancePartyRole.COMMITTEE_SEAL_OPERATOR,
+                null, null, null, ctx.userId(), "业委会用印经办人", null, null,
+                RepairAcceptanceConclusion.PASSED, null, "SEAL_USAGE", null,
+                sealedFileHash, usageId, ctx.userId());
+        acceptanceRepository.insertParty(round.acceptanceId(), order.tenantId(), party);
+        return afterAcceptancePartyRecorded(order, round, party, command.remark(), "ACCEPTANCE_SEAL");
     }
 
     @Transactional
     public RepairWorkOrder acceptCompleted(Long workOrderId, RepairActionCommand command) {
-        UserContext ctx = requireRole(LOCAL_DECISION_ROLES, "当前角色无权完成验收定案");
+        UserContext ctx = requireSysContext();
         RepairWorkOrder order = loadVisible(ctx, workOrderId);
-        requireStatus(order, RepairWorkOrderStatus.PENDING_ACCEPTANCE, RepairWorkOrderStatus.ACCEPTANCE_EXCEPTION);
-        if (order.spaceScope() == RepairSpaceScope.PRIVATE) {
+        requireStatus(order, RepairWorkOrderStatus.PENDING_ACCEPTANCE);
+        if (!governedAcceptanceRequired(order)) {
+            requireRole(FIELD_ROLES, "仅物业人员可完成非共有资金维修验收");
             return transition(order, order.withStatus(RepairWorkOrderStatus.COMPLETED, false, true, false),
                     "ACCEPT_COMPLETED", command.remark());
         }
-        RepairAcceptanceSummary summary = repository.summarizeAcceptance(order.workOrderId(), order.tenantId());
-        if (summary.rectificationCount() > 0) {
+        RepairAcceptancePolicySnapshot policy = requireAcceptancePolicy(order);
+        assertAcceptanceFinalizer(ctx, policy, order);
+        RepairAcceptanceRound round = requireCollectingAcceptance(order);
+        RepairAcceptanceSummary summary = acceptanceRepository.summarize(round.acceptanceId(), order.tenantId());
+        RepairAcceptanceDecision decision = ACCEPTANCE_POLICIES.get(policy.workflowType()).evaluate(policy, summary);
+        if (decision.outcome() == RepairAcceptanceDecision.Outcome.INCOMPLETE) {
+            throw new RepairWorkOrderApplicationException(PARAM_INVALID, decision.reason());
+        }
+        if (decision.outcome() == RepairAcceptanceDecision.Outcome.RECTIFICATION_REQUIRED) {
+            completeAcceptanceRound(round, order, "RECTIFICATION_REQUIRED", ctx.userId(), command.remark());
             return transition(order, order.withStatus(RepairWorkOrderStatus.RECTIFICATION_REQUIRED, false, true, false),
                     "FINALIZE_ACCEPTANCE", command.remark(), acceptanceSummaryPayload(summary));
         }
-        if (summary.affectedRoomCount() == 0 || !summary.ownerRepresentativePassed()) {
-            throw new RepairWorkOrderApplicationException(PARAM_INVALID, "必须完成受影响房屋和楼组长验收");
-        }
-        if (summary.unreachableCount() > 0) {
-            if (!summary.propertyRepresentativePassed()) {
-                throw new RepairWorkOrderApplicationException(PARAM_INVALID,
-                        "存在失联业主时必须由物业代表补充现场证据并见证");
-            }
-            return transition(order, order.withStatus(RepairWorkOrderStatus.ACCEPTANCE_EXCEPTION, false, true, false),
-                    "FINALIZE_ACCEPTANCE_EXCEPTION", command.remark(), acceptanceSummaryPayload(summary));
-        }
-        if (summary.passedAffectedRoomCount() < summary.affectedRoomCount()) {
-            throw new RepairWorkOrderApplicationException(PARAM_INVALID, "仍有受影响房屋未完成验收");
-        }
+        completeAcceptanceRound(round, order, "PASSED", ctx.userId(), command.remark());
         return transition(order, order.withStatus(RepairWorkOrderStatus.COMPLETED, false, true, false),
                 "ACCEPT_COMPLETED", command.remark(), acceptanceSummaryPayload(summary));
     }
@@ -1821,6 +1835,10 @@ public class RepairWorkOrderService {
         UserContext ctx = requireRole(ACCEPTANCE_ROLES, "当前角色无权要求整改");
         RepairWorkOrder order = loadVisible(ctx, workOrderId);
         requireStatus(order, RepairWorkOrderStatus.PENDING_ACCEPTANCE);
+        if (governedAcceptanceRequired(order)) {
+            throw new RepairWorkOrderApplicationException(PARAM_INVALID,
+                    "共有维修必须由有权验收人提交带问题说明的整改结论");
+        }
         return transition(order, order.withStatus(RepairWorkOrderStatus.RECTIFICATION_REQUIRED, false, true, false),
                 "REQUEST_RECTIFICATION", command.remark());
     }
@@ -1983,25 +2001,329 @@ public class RepairWorkOrderService {
         }
     }
 
-    private void assertAcceptanceParticipantRole(UserContext ctx, String participantType) {
-        if ("OWNER_REPRESENTATIVE".equals(ctx.roleKey())
-                && !"OWNER_REPRESENTATIVE".equals(participantType)) {
-            throw new RepairWorkOrderApplicationException(FORBIDDEN, "楼组长只能提交本人的验收记录");
+    /**
+     * 验收规则属于实施方案的一部分。楼栋流程必须显式填写受影响业主及人数门槛；
+     * 全小区流程固定采用业委会三项验收条件，不接收楼栋人数参数。
+     */
+    private RepairAcceptancePolicySnapshot lockAcceptancePolicy(
+            RepairWorkOrder order,
+            String fundSource,
+            SubmitRepairPlanCommand.AcceptancePolicy input,
+            Long lockedByUserId) {
+        RepairWorkflowType workflowType = acceptanceWorkflow(order, fundSource);
+        if (workflowType == null) {
+            if (input != null) {
+                throw new RepairWorkOrderApplicationException(PARAM_INVALID,
+                        "非共有资金维修不能配置楼栋或全小区验收规则");
+            }
+            return null;
         }
-        if (("COMMITTEE_DIRECTOR".equals(ctx.roleKey()) || "COMMITTEE_MEMBER".equals(ctx.roleKey()))
-                && !"COMMITTEE_REPRESENTATIVE".equals(participantType)) {
-            throw new RepairWorkOrderApplicationException(FORBIDDEN, "业委会成员只能作为可选见证人验收");
+        if (workflowType == RepairWorkflowType.COMMUNITY_PUBLIC_REPAIR) {
+            if (input != null) {
+                throw new RepairWorkOrderApplicationException(PARAM_INVALID,
+                        "全小区公共维修固定由业委会验收，不能配置楼栋业主人数门槛");
+            }
+            String hash = sha256(String.join("|",
+                    order.workOrderId().toString(), workflowType.name(), fundSource,
+                    "COMMITTEE_EXECUTIVE", "COMMITTEE_SEAL", "PROPERTY_OR_THIRD_PARTY"));
+            return acceptanceRepository.lockPolicy(
+                    RepairAcceptancePolicySnapshot.community(
+                            null, order.workOrderId(), order.tenantId(), hash, lockedByUserId, null),
+                    List.of());
+        }
+        if (input == null || input.affectedOwners() == null || input.affectedOwners().isEmpty()) {
+            throw new RepairWorkOrderApplicationException(PARAM_INVALID,
+                    "楼栋维修方案必须填写受影响业主及验收人数门槛");
+        }
+        Set<Long> roomIds = new HashSet<>();
+        Set<Long> ownerUids = new HashSet<>();
+        List<RepairAcceptanceAffectedOwner> affectedOwners = new ArrayList<>();
+        for (SubmitRepairPlanCommand.AffectedOwner affectedOwner : input.affectedOwners()) {
+            if (affectedOwner == null || affectedOwner.roomId() == null || affectedOwner.ownerUid() == null
+                    || !roomIds.add(affectedOwner.roomId())) {
+                throw new RepairWorkOrderApplicationException(PARAM_INVALID,
+                        "受影响房屋和业主必须完整，且同一房屋不能重复");
+            }
+            if (!acceptanceRepository.ownerOwnsRoom(
+                    order.tenantId(), order.buildingId(), affectedOwner.roomId(), affectedOwner.ownerUid())) {
+                throw new RepairWorkOrderApplicationException(PARAM_INVALID,
+                        "受影响业主与工单楼栋房屋不匹配 roomId=" + affectedOwner.roomId());
+            }
+            ownerUids.add(affectedOwner.ownerUid());
+            affectedOwners.add(new RepairAcceptanceAffectedOwner(
+                    affectedOwner.roomId(), affectedOwner.ownerUid(), trim(affectedOwner.affectedReason())));
+        }
+        try {
+            String ownerSnapshot = affectedOwners.stream()
+                    .sorted(java.util.Comparator.comparing(RepairAcceptanceAffectedOwner::roomId))
+                    // 受影响原因属于锁定方案内容，必须进入哈希，避免名单相同但范围说明变化后仍复用旧证据。
+                    .map(item -> item.roomId() + ":" + item.ownerUid() + ":"
+                            + sha256(item.affectedReason() == null ? "" : item.affectedReason()))
+                    .collect(java.util.stream.Collectors.joining(","));
+            String hash = sha256(String.join("|",
+                    order.workOrderId().toString(), workflowType.name(), fundSource, ownerSnapshot,
+                    String.valueOf(input.minimumAffectedOwnerParticipants()),
+                    String.valueOf(input.minimumAffectedOwnerApprovals())));
+            RepairAcceptancePolicySnapshot snapshot = RepairAcceptancePolicySnapshot.building(
+                    null, order.workOrderId(), order.tenantId(), hash, ownerUids.size(),
+                    input.minimumAffectedOwnerParticipants(), input.minimumAffectedOwnerApprovals(),
+                    lockedByUserId, null);
+            return acceptanceRepository.lockPolicy(snapshot, affectedOwners);
+        } catch (IllegalArgumentException ex) {
+            throw new RepairWorkOrderApplicationException(PARAM_INVALID,
+                    "楼栋验收人数门槛必须显式填写，且不能超过受影响业主人数", ex);
+        }
+    }
+
+    private RepairWorkflowType acceptanceWorkflow(RepairWorkOrder order, String fundSource) {
+        if (FUND_BUILDING_MAINTENANCE.equals(fundSource)) {
+            if (order.spaceScope() != RepairSpaceScope.PUBLIC
+                    || order.publicAreaScope() != RepairPublicAreaScope.BUILDING
+                    || order.buildingId() == null) {
+                throw new RepairWorkOrderApplicationException(PARAM_INVALID,
+                        "楼栋维修资金只能用于已定位的楼栋/单元共有维修");
+            }
+            return RepairWorkflowType.BUILDING_REPAIR;
+        }
+        if (FUND_COMMUNITY_MAINTENANCE.equals(fundSource) || FUND_PUBLIC_REVENUE.equals(fundSource)) {
+            if (order.spaceScope() != RepairSpaceScope.PUBLIC
+                    || order.publicAreaScope() != RepairPublicAreaScope.COMMUNITY) {
+                throw new RepairWorkOrderApplicationException(PARAM_INVALID,
+                        "全小区公共资金只能用于全体共有区域维修");
+            }
+            return RepairWorkflowType.COMMUNITY_PUBLIC_REPAIR;
+        }
+        return null;
+    }
+
+    private boolean governedAcceptanceRequired(RepairWorkOrder order) {
+        return FUND_BUILDING_MAINTENANCE.equals(order.fundSource())
+                || FUND_COMMUNITY_MAINTENANCE.equals(order.fundSource())
+                || FUND_PUBLIC_REVENUE.equals(order.fundSource());
+    }
+
+    private RepairAcceptancePolicySnapshot requireAcceptancePolicy(RepairWorkOrder order) {
+        return acceptanceRepository.findPolicy(order.workOrderId(), order.tenantId())
+                .orElseThrow(() -> new RepairWorkOrderApplicationException(PARAM_INVALID,
+                        "维修方案未锁定验收规则"));
+    }
+
+    private RepairAcceptanceRound requireCollectingAcceptance(RepairWorkOrder order) {
+        return acceptanceRepository.findCollectingRound(order.workOrderId(), order.tenantId())
+                .orElseThrow(() -> new RepairWorkOrderApplicationException(INVALID_STATUS,
+                        "当前没有进行中的验收轮次"));
+    }
+
+    private RepairAcceptanceParty buildRecordedAcceptanceParty(
+            UserContext context,
+            RepairWorkOrder order,
+            RepairAcceptancePolicySnapshot policy,
+            RecordRepairAcceptanceCommand command) {
+        RepairAcceptancePartyRole role = parseEnum(
+                command.participantType(), RepairAcceptancePartyRole.class, null, "participantType");
+        if (role == null || role == RepairAcceptancePartyRole.COMMITTEE_SEAL_OPERATOR) {
+            throw new RepairWorkOrderApplicationException(PARAM_INVALID, "participantType 不是可直接签署的验收角色");
+        }
+        RepairAcceptanceConclusion conclusion = parseAcceptanceConclusion(command.conclusion());
+        String opinion = trim(command.opinion());
+        if (conclusion == RepairAcceptanceConclusion.RECTIFICATION_REQUIRED && opinion == null) {
+            throw new RepairWorkOrderApplicationException(PARAM_INVALID, "要求整改必须填写具体问题");
+        }
+        String participantName = requireText(command.participantName(), "participantName");
+        return switch (role) {
+            case AFFECTED_OWNER -> affectedOwnerParty(
+                    context, policy, command, participantName, conclusion, opinion);
+            case BUILDING_LEADER -> buildingLeaderParty(
+                    context, policy, command, participantName, conclusion, opinion);
+            case COMMITTEE_EXECUTIVE_APPROVER -> committeeExecutiveParty(
+                    context, order, policy, participantName, conclusion, opinion);
+            case PROPERTY_TECHNICAL_COSIGNER -> propertyTechnicalParty(
+                    context, policy, command, participantName, conclusion, opinion);
+            case THIRD_PARTY_TECHNICAL_COSIGNER -> thirdPartyTechnicalParty(
+                    context, policy, command, participantName, conclusion, opinion);
+            case COMMITTEE_SEAL_OPERATOR -> throw new RepairWorkOrderApplicationException(
+                    PARAM_INVALID, "业委会用印必须通过验收盖章动作登记");
+        };
+    }
+
+    private RepairAcceptanceParty affectedOwnerParty(
+            UserContext context,
+            RepairAcceptancePolicySnapshot policy,
+            RecordRepairAcceptanceCommand command,
+            String participantName,
+            RepairAcceptanceConclusion conclusion,
+            String opinion) {
+        requireAcceptanceWorkflow(policy, RepairWorkflowType.BUILDING_REPAIR,
+                "全小区公共维修不设置受影响业主验收人");
+        requireRoleKey(context, PROPERTY_QUOTE_ROLES, "仅物业可依据纸质原件代录受影响业主验收");
+        if (command.roomId() == null || command.ownerUid() == null
+                || !acceptanceRepository.ownerIncluded(
+                policy.policyId(), policy.tenantId(), command.roomId(), command.ownerUid())) {
+            throw new RepairWorkOrderApplicationException(PARAM_INVALID,
+                    "受影响业主及房屋不在锁定的验收范围内");
+        }
+        return new RepairAcceptanceParty(
+                "AFFECTED_OWNER:" + command.ownerUid(), RepairAcceptancePartyRole.AFFECTED_OWNER,
+                command.roomId(), command.ownerUid(), null, null, participantName, null, null,
+                conclusion, opinion, "OFFLINE_RECORDED",
+                requireText(command.signatureHash(), "signatureHash"), trim(command.evidenceHash()),
+                null, context.userId());
+    }
+
+    private RepairAcceptanceParty buildingLeaderParty(
+            UserContext context,
+            RepairAcceptancePolicySnapshot policy,
+            RecordRepairAcceptanceCommand command,
+            String participantName,
+            RepairAcceptanceConclusion conclusion,
+            String opinion) {
+        requireAcceptanceWorkflow(policy, RepairWorkflowType.BUILDING_REPAIR,
+                "全小区公共维修不由楼组长验收");
+        requireRoleKey(context, Set.of("OWNER_REPRESENTATIVE"), "仅本楼栋楼组长可提交楼组长验收");
+        return new RepairAcceptanceParty(
+                "BUILDING_LEADER:" + context.userId(), RepairAcceptancePartyRole.BUILDING_LEADER,
+                null, null, null, context.userId(), participantName, null, null,
+                conclusion, opinion, "ONLINE_SELF",
+                requireText(command.signatureHash(), "signatureHash"), trim(command.evidenceHash()),
+                null, context.userId());
+    }
+
+    private RepairAcceptanceParty committeeExecutiveParty(
+            UserContext context,
+            RepairWorkOrder order,
+            RepairAcceptancePolicySnapshot policy,
+            String participantName,
+            RepairAcceptanceConclusion conclusion,
+            String opinion) {
+        requireAcceptanceWorkflow(policy, RepairWorkflowType.COMMUNITY_PUBLIC_REPAIR,
+                "楼栋维修不由业委会主任或副主任代为验收");
+        String position = governanceConfirmPosition(context, order);
+        return new RepairAcceptanceParty(
+                "COMMITTEE_EXECUTIVE:" + context.userId(),
+                RepairAcceptancePartyRole.COMMITTEE_EXECUTIVE_APPROVER,
+                null, null, null, context.userId(), participantName, null, position,
+                conclusion, opinion, "ONLINE_SELF", null, null, null, context.userId());
+    }
+
+    private RepairAcceptanceParty propertyTechnicalParty(
+            UserContext context,
+            RepairAcceptancePolicySnapshot policy,
+            RecordRepairAcceptanceCommand command,
+            String participantName,
+            RepairAcceptanceConclusion conclusion,
+            String opinion) {
+        requireAcceptanceWorkflow(policy, RepairWorkflowType.COMMUNITY_PUBLIC_REPAIR,
+                "楼栋维修的物业人员不是业主侧验收人");
+        requireRoleKey(context, PROPERTY_QUOTE_ROLES, "仅物业项目负责人可提交物业专业共同签署");
+        return new RepairAcceptanceParty(
+                "PROPERTY_TECHNICAL:" + context.userId(),
+                RepairAcceptancePartyRole.PROPERTY_TECHNICAL_COSIGNER,
+                null, null, null, context.userId(), participantName,
+                trim(command.participantOrganization()), null, conclusion, opinion,
+                "ONLINE_SELF", requireText(command.signatureHash(), "signatureHash"),
+                trim(command.evidenceHash()), null, context.userId());
+    }
+
+    private RepairAcceptanceParty thirdPartyTechnicalParty(
+            UserContext context,
+            RepairAcceptancePolicySnapshot policy,
+            RecordRepairAcceptanceCommand command,
+            String participantName,
+            RepairAcceptanceConclusion conclusion,
+            String opinion) {
+        requireAcceptanceWorkflow(policy, RepairWorkflowType.COMMUNITY_PUBLIC_REPAIR,
+                "楼栋维修不使用全小区第三方专业共同签署规则");
+        requireRoleKey(context, Set.of("PROPERTY_MANAGER", "COMMITTEE_DIRECTOR", "COMMITTEE_MEMBER"),
+                "仅物业项目负责人或业委会可依据原件登记第三方专业签署");
+        String organization = requireText(command.participantOrganization(), "participantOrganization");
+        String signatureHash = requireText(command.signatureHash(), "signatureHash");
+        String evidenceHash = requireText(command.evidenceHash(), "evidenceHash");
+        return new RepairAcceptanceParty(
+                "THIRD_PARTY:" + sha256(participantName + "|" + organization),
+                RepairAcceptancePartyRole.THIRD_PARTY_TECHNICAL_COSIGNER,
+                null, null, null, null, participantName, organization, null,
+                conclusion, opinion, "OFFLINE_RECORDED", signatureHash, evidenceHash,
+                null, context.userId());
+    }
+
+    private RepairWorkOrder afterAcceptancePartyRecorded(
+            RepairWorkOrder order,
+            RepairAcceptanceRound round,
+            RepairAcceptanceParty party,
+            String remark,
+            String action) {
+        String payload = jsonPayload(Map.of(
+                "acceptanceId", round.acceptanceId(),
+                "participantType", party.partyRole().name(),
+                "conclusion", party.conclusion().name()));
+        if (party.conclusion() == RepairAcceptanceConclusion.RECTIFICATION_REQUIRED) {
+            completeAcceptanceRound(round, order, "RECTIFICATION_REQUIRED", party.submittedByUserId(), remark);
+            return transition(order,
+                    order.withStatus(RepairWorkOrderStatus.RECTIFICATION_REQUIRED, false, true, false),
+                    action, remark, payload);
+        }
+        return transition(order, order, action, remark, payload);
+    }
+
+    private void completeAcceptanceRound(
+            RepairAcceptanceRound round,
+            RepairWorkOrder order,
+            String status,
+            Long completedByUserId,
+            String remark) {
+        if (acceptanceRepository.completeRound(
+                round.acceptanceId(), order.tenantId(), status, completedByUserId, trim(remark)) != 1) {
+            throw new RepairWorkOrderApplicationException(INVALID_STATUS,
+                    "验收轮次已被其他人定案，请刷新后重试");
+        }
+    }
+
+    private void assertAcceptanceFinalizer(
+            UserContext context,
+            RepairAcceptancePolicySnapshot policy,
+            RepairWorkOrder order) {
+        if (policy.workflowType() == RepairWorkflowType.BUILDING_REPAIR) {
+            requireRoleKey(context, Set.of("OWNER_REPRESENTATIVE"), "仅本楼栋楼组长可完成楼栋验收定案");
+            return;
+        }
+        governanceConfirmPosition(context, order);
+    }
+
+    private RepairAcceptanceConclusion parseAcceptanceConclusion(String value) {
+        RepairAcceptanceConclusion conclusion = parseEnum(
+                value, RepairAcceptanceConclusion.class, null, "conclusion");
+        if (conclusion == null) {
+            throw new RepairWorkOrderApplicationException(PARAM_INVALID, "conclusion 必填");
+        }
+        return conclusion;
+    }
+
+    private void requireAcceptanceWorkflow(
+            RepairAcceptancePolicySnapshot policy,
+            RepairWorkflowType expected,
+            String message) {
+        if (policy.workflowType() != expected) {
+            throw new RepairWorkOrderApplicationException(FORBIDDEN, message);
+        }
+    }
+
+    private void requireRoleKey(UserContext context, Set<String> roles, String message) {
+        if (context == null || context.roleKey() == null || !roles.contains(context.roleKey())) {
+            throw new RepairWorkOrderApplicationException(FORBIDDEN, message);
         }
     }
 
     private String acceptanceSummaryPayload(RepairAcceptanceSummary summary) {
         return jsonPayload(Map.of(
-                "affectedRoomCount", summary.affectedRoomCount(),
-                "passedAffectedRoomCount", summary.passedAffectedRoomCount(),
+                "affectedOwnerCount", summary.affectedOwnerCount(),
+                "participatingAffectedOwnerCount", summary.participatingAffectedOwnerCount(),
+                "passedAffectedOwnerCount", summary.passedAffectedOwnerCount(),
                 "rectificationCount", summary.rectificationCount(),
-                "unreachableCount", summary.unreachableCount(),
-                "ownerRepresentativePassed", summary.ownerRepresentativePassed(),
-                "propertyRepresentativePassed", summary.propertyRepresentativePassed()));
+                "buildingLeaderPassed", summary.buildingLeaderPassed(),
+                "committeeExecutivePassed", summary.committeeExecutivePassed(),
+                "committeeSealApplied", summary.committeeSealApplied(),
+                "propertyTechnicalCosigned", summary.propertyTechnicalCosigned(),
+                "thirdPartyTechnicalCosigned", summary.thirdPartyTechnicalCosigned()));
     }
 
     private String governanceConfirmPosition(UserContext ctx, RepairWorkOrder order) {

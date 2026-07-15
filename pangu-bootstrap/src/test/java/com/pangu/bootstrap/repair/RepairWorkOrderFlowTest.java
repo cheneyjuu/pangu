@@ -121,6 +121,7 @@ public class RepairWorkOrderFlowTest {
         jdbcTemplate.update("DELETE FROM t_supplier_enterprise_verification WHERE supplier_dept_id IN (SELECT dept_id FROM sys_dept WHERE dept_name LIKE 'IT-供应商-%')");
         jdbcTemplate.update("DELETE FROM t_supplier_org_profile WHERE supplier_dept_id IN (SELECT dept_id FROM sys_dept WHERE dept_name LIKE 'IT-供应商-%')");
         jdbcTemplate.update("DELETE FROM sys_dept WHERE dept_name LIKE 'IT-供应商-%'");
+        jdbcTemplate.update("DELETE FROM t_auth_refresh_session WHERE account_id IN (SELECT account_id FROM t_account WHERE phone IN ('13800000931', '13800000932'))");
         jdbcTemplate.update("DELETE FROM t_account WHERE phone IN ('13800000931', '13800000932') AND NOT EXISTS (SELECT 1 FROM sys_user WHERE sys_user.account_id = t_account.account_id) AND NOT EXISTS (SELECT 1 FROM c_user WHERE c_user.account_id = t_account.account_id)");
         jdbcTemplate.update("""
                 DELETE FROM sys_dept_building_scope
@@ -300,6 +301,7 @@ public class RepairWorkOrderFlowTest {
         action(staffToken, workOrderId, "submit-plan", Map.of(
                 "planBudget", new BigDecimal("12000.00"),
                 "fundSource", "BUILDING_MAINTENANCE_FUND",
+                "acceptancePolicy", buildingAcceptancePolicy(30001L, 1, 1),
                 "remark", "根据表决意见提交修订方案"))
                 .andExpect(jsonPath("$.data.status", is("PLAN_SUBMITTED")));
 
@@ -820,10 +822,17 @@ public class RepairWorkOrderFlowTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.msg", is("当前社区要求填写物业内部估算金额")));
         jdbcTemplate.update("UPDATE t_tenant_community SET repair_estimate_required = 0 WHERE tenant_id = ?", TENANT);
+        actionRaw(staffToken, id, "submit-plan", Map.of(
+                "planBudget", new BigDecimal("9000.00"),
+                "fundSource", "BUILDING_MAINTENANCE_FUND",
+                "remark", "错误尝试使用平台默认验收人数"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.msg", is("楼栋维修方案必须填写受影响业主及验收人数门槛")));
         action(staffToken, id, "submit-plan", Map.of(
                 "planBudget", new BigDecimal("9000.00"),
                 "publicCeilingPrice", new BigDecimal("8500.00"),
                 "fundSource", "BUILDING_MAINTENANCE_FUND",
+                "acceptancePolicy", buildingAcceptancePolicy(30001L, 1, 1),
                 "remark", "维修范围及询价口径已确认"))
                 .andExpect(jsonPath("$.data.status", is("PLAN_SUBMITTED")))
                 .andExpect(jsonPath("$.data.planBudget", is(9000.0)))
@@ -1295,31 +1304,34 @@ public class RepairWorkOrderFlowTest {
                 "remark", "三方合同签署完成"))
                 .andExpect(jsonPath("$.data.status", is("CONTRACT_EFFECTIVE")));
 
-        Long affectedRoomId = jdbcTemplate.queryForObject("""
-                SELECT room_id FROM c_owner_property
-                WHERE tenant_id = ? AND building_id = 30001
-                ORDER BY room_id LIMIT 1
-                """, Long.class, TENANT);
-        action(managerToken, id, "acceptance-scope", Map.of(
-                "rooms", List.of(Map.of("roomId", affectedRoomId, "affectedReason", "本次修复该户渗水")),
-                "remark", "锁定受影响房屋"));
+        Map<String, Object> affectedOwner = firstAffectedOwner(30001L);
+        Long affectedRoomId = ((Number) affectedOwner.get("roomId")).longValue();
+        Long affectedOwnerUid = ((Number) affectedOwner.get("ownerUid")).longValue();
         action(staffToken, id, "start-work", Map.of("remark", "供应商进场维修"))
                 .andExpect(jsonPath("$.data.status", is("IN_PROGRESS")));
         action(staffToken, id, "submit-acceptance", Map.of("remark", "供应商完工并提交验收"))
                 .andExpect(jsonPath("$.data.status", is("PENDING_ACCEPTANCE")));
         action(staffToken, id, "acceptance-records", Map.of(
                 "roomId", affectedRoomId,
+                "ownerUid", affectedOwnerUid,
                 "participantType", "AFFECTED_OWNER",
                 "participantName", "受影响业主代表",
                 "conclusion", "PASSED",
                 "signatureHash", "affected-owner-signature-hash",
                 "remark", "物业代录纸质验收单"));
         action(ownerRepToken, id, "acceptance-records", Map.of(
-                "participantType", "OWNER_REPRESENTATIVE",
+                "participantType", "BUILDING_LEADER",
                 "participantName", "1号楼楼组长",
                 "conclusion", "PASSED",
                 "signatureHash", "owner-representative-signature-hash",
                 "remark", "楼组长验收通过"));
+        actionRaw(directorToken, id, "acceptance-records", Map.of(
+                "participantType", "COMMITTEE_EXECUTIVE_APPROVER",
+                "participantName", "业委会主任",
+                "conclusion", "PASSED",
+                "remark", "错误尝试替楼栋业主验收"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.msg", is("楼栋维修不由业委会主任或副主任代为验收")));
         action(ownerRepToken, id, "accept-completed", Map.of("remark", "受影响业主与楼组长均验收通过"))
                 .andExpect(jsonPath("$.data.status", is("COMPLETED")));
         action(managerToken, id, "payment-requests", Map.of(
@@ -1531,11 +1543,11 @@ public class RepairWorkOrderFlowTest {
     private long insertSupplierRecommendedBuildingRepair(String title) {
         return jdbcTemplate.queryForObject("""
                 INSERT INTO t_repair_work_order (
-                    tenant_id, title, description, source, space_scope, status,
+                    tenant_id, title, description, source, space_scope, public_area_scope, status,
                     reporter_account_id, reporter_user_id, building_id, location_text,
                     need_manual_location, location_locked, category, fund_source, fund_gate_blocked
                 ) VALUES (
-                    ?, ?, '楼栋公共区域维修', 'ADMIN_PC', 'PUBLIC', 'SUPPLIER_RECOMMENDED',
+                    ?, ?, '楼栋公共区域维修', 'ADMIN_PC', 'PUBLIC', 'BUILDING', 'SUPPLIER_RECOMMENDED',
                     ?, ?, 30001, '1号楼公共区域',
                     0, 1, 'PUBLIC_FACILITY', 'BUILDING_MAINTENANCE_FUND', 0
                 )
@@ -1599,6 +1611,27 @@ public class RepairWorkOrderFlowTest {
                 "signatureMethod", "PAPER_SCAN",
                 "signatureFileHash", partyType + "-signature-hash",
                 "signedAt", LocalDateTime.now().toString());
+    }
+
+    private Map<String, Object> buildingAcceptancePolicy(
+            long buildingId,
+            int minimumParticipants,
+            int minimumApprovals) {
+        return Map.of(
+                "affectedOwners", List.of(firstAffectedOwner(buildingId)),
+                "minimumAffectedOwnerParticipants", minimumParticipants,
+                "minimumAffectedOwnerApprovals", minimumApprovals);
+    }
+
+    private Map<String, Object> firstAffectedOwner(long buildingId) {
+        return jdbcTemplate.queryForMap("""
+                SELECT room_id AS "roomId", uid AS "ownerUid",
+                       '实施方案确认的直接受影响房屋' AS "affectedReason"
+                FROM c_owner_property
+                WHERE tenant_id = ? AND building_id = ? AND account_status = 1
+                ORDER BY room_id, uid
+                LIMIT 1
+                """, TENANT, buildingId);
     }
 
     private String token(long accountId, String identityType, long activeIdentityId) {

@@ -1,12 +1,15 @@
+// 关联业务：汇总维修验收参与人事实，供楼栋流程或全小区流程分别定案。
 package com.pangu.domain.model.repair;
 
-/** 验收定案所需的后端聚合事实。 */
 public record RepairAcceptanceSummary(
-        int affectedRoomCount,
-        int passedAffectedRoomCount,
+        int affectedOwnerCount,
+        int participatingAffectedOwnerCount,
+        int passedAffectedOwnerCount,
         int rectificationCount,
-        int unreachableCount,
-        boolean ownerRepresentativePassed,
-        boolean propertyRepresentativePassed
+        boolean buildingLeaderPassed,
+        boolean committeeExecutivePassed,
+        boolean committeeSealApplied,
+        boolean propertyTechnicalCosigned,
+        boolean thirdPartyTechnicalCosigned
 ) {
 }
