@@ -33,6 +33,12 @@
             <artifactId>postgresql</artifactId>
         </dependency>
 
+        <!-- 维修实施方案的 JSONB 字段通过结构化领域对象序列化，禁止手工拼接 JSON。 -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+
         <!-- Spring Boot Starter Data Redis -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
