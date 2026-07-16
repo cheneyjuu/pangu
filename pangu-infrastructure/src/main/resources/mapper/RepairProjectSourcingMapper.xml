@@ -1,0 +1,228 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 关联业务：持久化维修工程项目级邀价、报价修订和中选供应商快照。 -->
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pangu.infrastructure.persistence.mapper.RepairProjectSourcingMapper">
+
+    <insert id="insertInvitation" useGeneratedKeys="true" keyProperty="invitationId" keyColumn="invitation_id">
+        INSERT INTO t_repair_project_quote_invitation (
+            project_id, plan_id, tenant_id, supplier_dept_id, invited_by_user_id,
+            deadline, status, invitation_round, invitation_type, revision_reason
+        ) VALUES (
+            #{projectId}, #{planId}, #{tenantId}, #{supplierDeptId}, #{invitedByUserId},
+            #{deadline}, #{status}, #{invitationRound}, #{invitationType}, #{revisionReason}
+        )
+    </insert>
+
+    <sql id="invitationColumns">
+        invitation.invitation_id, invitation.project_id, invitation.plan_id, invitation.tenant_id,
+        invitation.supplier_dept_id, supplier.legal_name AS supplier_name,
+        invitation.invited_by_user_id, invitation.deadline, invitation.status,
+        invitation.invitation_round, invitation.invitation_type, invitation.revision_reason,
+        invitation.sent_at, invitation.responded_at
+    </sql>
+
+    <select id="listInvitations"
+            resultType="com.pangu.infrastructure.persistence.entity.RepairProjectSourcingRows$InvitationRow">
+        SELECT <include refid="invitationColumns"/>
+        FROM (
+            SELECT DISTINCT ON (supplier_dept_id) latest.*
+            FROM t_repair_project_quote_invitation latest
+            WHERE latest.project_id = #{projectId}
+              AND latest.plan_id = #{planId}
+              AND latest.tenant_id = #{tenantId}
+              AND latest.status &lt;&gt; 'CANCELLED'
+            ORDER BY supplier_dept_id, invitation_round DESC, invitation_id DESC
+        ) invitation
+        JOIN t_supplier_org_profile supplier
+          ON supplier.supplier_dept_id = invitation.supplier_dept_id
+        ORDER BY invitation.sent_at, invitation.invitation_id
+    </select>
+
+    <select id="listSupplierInvitations"
+            resultType="com.pangu.infrastructure.persistence.entity.RepairProjectSourcingRows$InvitationRow">
+        SELECT <include refid="invitationColumns"/>
+        FROM (
+            SELECT DISTINCT ON (project_id, plan_id) latest.*
+            FROM t_repair_project_quote_invitation latest
+            WHERE latest.tenant_id = #{tenantId}
+              AND latest.supplier_dept_id = #{supplierDeptId}
+              AND latest.status IN ('PENDING', 'SUBMITTED')
+            ORDER BY project_id, plan_id, invitation_round DESC, invitation_id DESC
+        ) invitation
+        JOIN t_repair_project project
+          ON project.project_id = invitation.project_id
+         AND project.tenant_id = invitation.tenant_id
+         AND project.status = 'DRAFT'
+        JOIN t_repair_plan_version plan
+          ON plan.plan_id = invitation.plan_id
+         AND plan.project_id = invitation.project_id
+         AND plan.status = 'DRAFT'
+        JOIN t_supplier_org_profile supplier
+          ON supplier.supplier_dept_id = invitation.supplier_dept_id
+        ORDER BY invitation.sent_at DESC, invitation.invitation_id DESC
+    </select>
+
+    <select id="findInvitation"
+            resultType="com.pangu.infrastructure.persistence.entity.RepairProjectSourcingRows$InvitationRow">
+        SELECT <include refid="invitationColumns"/>
+        FROM t_repair_project_quote_invitation invitation
+        JOIN t_supplier_org_profile supplier
+          ON supplier.supplier_dept_id = invitation.supplier_dept_id
+        WHERE invitation.invitation_id = #{invitationId}
+          AND invitation.project_id = #{projectId}
+          AND invitation.plan_id = #{planId}
+          AND invitation.tenant_id = #{tenantId}
+          AND invitation.supplier_dept_id = #{supplierDeptId}
+    </select>
+
+    <select id="supplierInvited" resultType="boolean">
+        SELECT EXISTS (
+            SELECT 1
+            FROM t_repair_project_quote_invitation
+            WHERE project_id = #{projectId}
+              AND plan_id = #{planId}
+              AND tenant_id = #{tenantId}
+              AND supplier_dept_id = #{supplierDeptId}
+              AND invitation_type = 'INITIAL'
+              AND status &lt;&gt; 'CANCELLED'
+        )
+    </select>
+
+    <select id="nextInvitationRound" resultType="int">
+        SELECT COALESCE(MAX(invitation_round), 0) + 1
+        FROM t_repair_project_quote_invitation
+        WHERE project_id = #{projectId}
+          AND plan_id = #{planId}
+          AND tenant_id = #{tenantId}
+          AND supplier_dept_id = #{supplierDeptId}
+    </select>
+
+    <update id="markInvitationSubmitted">
+        UPDATE t_repair_project_quote_invitation
+        SET status = 'SUBMITTED', responded_at = CURRENT_TIMESTAMP
+        WHERE invitation_id = #{invitationId}
+          AND tenant_id = #{tenantId}
+          AND status = 'PENDING'
+    </update>
+
+    <insert id="insertQuote" useGeneratedKeys="true" keyProperty="quoteId" keyColumn="quote_id">
+        INSERT INTO t_repair_project_supplier_quote (
+            project_id, plan_id, tenant_id, supplier_dept_id, supplier_name,
+            quote_amount, quote_summary, attachment_id, attachment_hash,
+            submitted_by_user_id, submitted_by_role_key, submission_source,
+            confirmation_status, original_source, quote_status, revision_no
+        ) VALUES (
+            #{projectId}, #{planId}, #{tenantId}, #{supplierDeptId}, #{supplierName},
+            #{quoteAmount}, #{quoteSummary}, #{attachmentId}, #{attachmentHash},
+            #{submittedByUserId}, #{submittedByRoleKey}, #{submissionSource},
+            #{confirmationStatus}, #{originalSource}, #{quoteStatus}, #{revisionNo}
+        )
+    </insert>
+
+    <sql id="quoteColumns">
+        quote_id, project_id, plan_id, tenant_id, supplier_dept_id, supplier_name,
+        quote_amount, quote_summary, attachment_id, attachment_hash,
+        submitted_by_user_id, submitted_by_role_key, submission_source,
+        confirmation_status, original_source, quote_status, revision_no,
+        superseded_by_quote_id, create_time
+    </sql>
+
+    <select id="findQuote"
+            resultType="com.pangu.infrastructure.persistence.entity.RepairProjectSourcingRows$QuoteRow">
+        SELECT <include refid="quoteColumns"/>
+        FROM t_repair_project_supplier_quote
+        WHERE quote_id = #{quoteId}
+          AND project_id = #{projectId}
+          AND plan_id = #{planId}
+          AND tenant_id = #{tenantId}
+    </select>
+
+    <select id="findLatestSupplierQuote"
+            resultType="com.pangu.infrastructure.persistence.entity.RepairProjectSourcingRows$QuoteRow">
+        SELECT <include refid="quoteColumns"/>
+        FROM t_repair_project_supplier_quote
+        WHERE project_id = #{projectId}
+          AND plan_id = #{planId}
+          AND tenant_id = #{tenantId}
+          AND supplier_dept_id = #{supplierDeptId}
+        ORDER BY revision_no DESC, quote_id DESC
+        LIMIT 1
+    </select>
+
+    <select id="listQuotes"
+            resultType="com.pangu.infrastructure.persistence.entity.RepairProjectSourcingRows$QuoteRow">
+        SELECT <include refid="quoteColumns"/>
+        FROM t_repair_project_supplier_quote
+        WHERE project_id = #{projectId}
+          AND plan_id = #{planId}
+          AND tenant_id = #{tenantId}
+        ORDER BY supplier_name, revision_no DESC, quote_id DESC
+    </select>
+
+    <update id="supersedeQuote">
+        UPDATE t_repair_project_supplier_quote
+        SET quote_status = 'SUPERSEDED', superseded_by_quote_id = #{supersededByQuoteId}
+        WHERE quote_id = #{quoteId}
+          AND quote_status IN ('ACTIVE', 'REVISION_REQUESTED', 'SUPERSEDED')
+    </update>
+
+    <update id="requestQuoteRevision">
+        UPDATE t_repair_project_supplier_quote
+        SET quote_status = 'REVISION_REQUESTED'
+        WHERE quote_id = #{quoteId} AND quote_status = 'ACTIVE'
+    </update>
+
+    <select id="countInitialInvitedSuppliers" resultType="int">
+        SELECT COUNT(DISTINCT supplier_dept_id)
+        FROM t_repair_project_quote_invitation
+        WHERE project_id = #{projectId}
+          AND plan_id = #{planId}
+          AND tenant_id = #{tenantId}
+          AND invitation_type = 'INITIAL'
+          AND status &lt;&gt; 'CANCELLED'
+    </select>
+
+    <select id="countActiveConfirmedQuotes" resultType="int">
+        SELECT COUNT(DISTINCT supplier_dept_id)
+        FROM t_repair_project_supplier_quote
+        WHERE project_id = #{projectId}
+          AND plan_id = #{planId}
+          AND tenant_id = #{tenantId}
+          AND quote_status = 'ACTIVE'
+          AND confirmation_status IN ('ONLINE_CONFIRMED', 'OFFLINE_EVIDENCE_VERIFIED', 'CONTRACT_CONFIRMED')
+    </select>
+
+    <insert id="insertSelection" useGeneratedKeys="true" keyProperty="selectionId" keyColumn="selection_id">
+        INSERT INTO t_repair_project_supplier_selection (
+            project_id, plan_id, tenant_id, quote_id, supplier_dept_id, supplier_name,
+            quote_amount, selection_method, recommendation_reason, insufficient_quote_reason,
+            framework_relation_id, recommended_by_user_id
+        ) VALUES (
+            #{projectId}, #{planId}, #{tenantId}, #{quoteId}, #{supplierDeptId}, #{supplierName},
+            #{quoteAmount}, #{selectionMethod}, #{recommendationReason}, #{insufficientQuoteReason},
+            #{frameworkRelationId}, #{recommendedByUserId}
+        )
+    </insert>
+
+    <select id="findCurrentSelection"
+            resultType="com.pangu.infrastructure.persistence.entity.RepairProjectSourcingRows$SelectionRow">
+        SELECT selection.selection_id, selection.project_id, selection.plan_id, selection.tenant_id,
+               selection.quote_id, selection.supplier_dept_id, selection.supplier_name,
+               selection.quote_amount, selection.selection_method, selection.recommendation_reason,
+               selection.insufficient_quote_reason, selection.framework_relation_id,
+               selection.recommended_by_user_id, selection.create_time
+        FROM t_repair_project_supplier_selection selection
+        JOIN t_repair_project_supplier_quote quote
+          ON quote.quote_id = selection.quote_id
+         AND quote.project_id = selection.project_id
+         AND quote.plan_id = selection.plan_id
+         AND quote.tenant_id = selection.tenant_id
+        WHERE selection.project_id = #{projectId}
+          AND selection.plan_id = #{planId}
+          AND selection.tenant_id = #{tenantId}
+          AND quote.quote_status = 'ACTIVE'
+          AND quote.confirmation_status IN ('ONLINE_CONFIRMED', 'OFFLINE_EVIDENCE_VERIFIED', 'CONTRACT_CONFIRMED')
+        ORDER BY selection.create_time DESC, selection.selection_id DESC
+        LIMIT 1
+    </select>
+</mapper>

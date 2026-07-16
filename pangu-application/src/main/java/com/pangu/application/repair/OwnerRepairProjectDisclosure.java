@@ -44,6 +44,7 @@ public record OwnerRepairProjectDisclosure(
             String allocationRuleDescription,
             RepairSupplierSelectionMethod supplierSelectionMethod,
             String supplierSelectionReason,
+            PublishedSupplierSelection selectedSupplier,
             String constructionManagementRequirements,
             List<EvidenceRequirement> evidenceRequirements,
             String safetyRequirements,
@@ -69,6 +70,19 @@ public record OwnerRepairProjectDisclosure(
             items = List.copyOf(items);
             attachments = List.copyOf(attachments);
         }
+    }
+
+    public record PublishedSupplierSelection(
+            Long quoteId,
+            Long supplierDeptId,
+            String supplierName,
+            BigDecimal quoteAmount,
+            String quoteSummary,
+            Long quoteAttachmentId,
+            RepairSupplierSelectionMethod selectionMethod,
+            String recommendationReason,
+            String insufficientQuoteReason
+    ) {
     }
 
     public record PublishedItem(

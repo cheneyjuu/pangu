@@ -48,6 +48,7 @@ class RepairProjectGovernanceFlowTest {
     private static final String PROJECT_PREFIX = "IT-治理维修工程-";
     private static final String CASE_PREFIX = "IT-治理维修报修-";
     private static final String ASSEMBLY_PREFIX = "IT-治理维修业主大会-";
+    private static final String SUPPLIER_PREFIX = "IT-治理维修供应商-";
 
     @Autowired private MockMvc mockMvc;
     @Autowired private ObjectMapper objectMapper;
@@ -99,6 +100,7 @@ class RepairProjectGovernanceFlowTest {
                   )
                 """, PROJECT_PREFIX + "%");
         jdbcTemplate.update("DELETE FROM t_repair_project WHERE project_name LIKE ?", PROJECT_PREFIX + "%");
+        RepairProjectSourcingTestSupport.cleanSuppliers(jdbcTemplate, SUPPLIER_PREFIX);
         jdbcTemplate.update("DELETE FROM t_repair_work_order WHERE title LIKE ?", CASE_PREFIX + "%");
         jdbcTemplate.update("""
                 DELETE FROM t_voting_result
@@ -273,9 +275,9 @@ class RepairProjectGovernanceFlowTest {
                 "/api/v1/admin/repair-projects", propertyToken, request));
         long projectId = created.path("project").path("projectId").asLong();
         long planId = created.path("plans").get(0).path("planId").asLong();
-        long quoteAttachmentId = upload(projectId, "原始报价.pdf", "quote");
+        RepairProjectSourcingTestSupport.completeCompetitiveSourcing(
+                mockMvc, objectMapper, propertyToken, SUPPLIER_PREFIX, projectId, 1000);
         long photoAttachmentId = upload(projectId, "现场照片.jpg", "photo");
-        link(projectId, planId, quoteAttachmentId, "ORIGINAL_QUOTE");
         link(projectId, planId, photoAttachmentId, "SITE_PHOTO");
         JsonNode locked = responseData(postJson(
                 projectPath(projectId, "/plans/" + planId + "/lock"),

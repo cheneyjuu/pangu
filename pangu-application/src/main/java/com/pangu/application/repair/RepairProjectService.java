@@ -26,6 +26,7 @@ import com.pangu.domain.model.repair.RepairProject.PlanStatus;
 import com.pangu.domain.model.repair.RepairProject.PlanVersion;
 import com.pangu.domain.model.repair.RepairProject.ScopeType;
 import com.pangu.domain.model.repair.RepairProject.Status;
+import com.pangu.domain.model.repair.RepairProjectSourcing.Selection;
 import com.pangu.domain.model.repair.RepairWorkOrder;
 import com.pangu.domain.model.repair.RepairWorkOrderEvent;
 import com.pangu.domain.model.repair.RepairWorkOrderStatus;
@@ -38,6 +39,7 @@ import com.pangu.domain.policy.RepairWorkflowRoutingPolicy;
 import com.pangu.domain.policy.RepairWorkflowRoutingPolicy.RoutingDecision;
 import com.pangu.domain.policy.RepairWorkflowRoutingPolicy.RoutingInput;
 import com.pangu.domain.repository.RepairProjectRepository;
+import com.pangu.domain.repository.RepairProjectSourcingRepository;
 import com.pangu.domain.repository.RepairWorkOrderRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -85,6 +87,7 @@ public class RepairProjectService {
             EvidenceStage.ACCEPTANCE);
 
     private final RepairProjectRepository projectRepository;
+    private final RepairProjectSourcingRepository sourcingRepository;
     private final RepairWorkOrderRepository workOrderRepository;
     private final RepairWorkflowRoutingPolicy routingPolicy;
     private final RepairAllocationPolicy allocationPolicy;
@@ -197,6 +200,13 @@ public class RepairProjectService {
         List<Item> items = projectRepository.listItems(planId, actor.tenantId());
         List<AllocationRoom> allocation = projectRepository.listAllocationRooms(planId, actor.tenantId());
         List<PlanAttachment> attachments = projectRepository.listPlanAttachments(planId, actor.tenantId());
+        Selection selection = sourcingRepository.findCurrentSelection(projectId, planId, actor.tenantId())
+                .orElseThrow(() -> new RepairWorkOrderApplicationException(
+                        INVALID_STATUS, "锁定实施方案前必须完成供应商报价、比价和定商"));
+        if (selection.selectionMethod() != plan.supplierSelectionMethod()) {
+            throw new RepairWorkOrderApplicationException(
+                    INVALID_STATUS, "中选供应商方式与当前实施方案不一致，请重新定商");
+        }
         validateLockEvidence(attachments);
         validateBudget(plan.budgetTotal(), items);
         if (allocation.isEmpty()) {
@@ -211,7 +221,7 @@ public class RepairProjectService {
                         "最低有效验收人数不能超过锁定范围内的受影响业主人数");
             }
         }
-        String snapshotHash = snapshotHash(project, plan, items, allocation, attachments);
+        String snapshotHash = snapshotHash(project, plan, items, allocation, attachments, selection);
         if (projectRepository.lockPlan(planId, projectId, actor.tenantId(), snapshotHash, actor.userId()) != 1) {
             throw new RepairWorkOrderApplicationException(INVALID_STATUS, "实施方案锁定失败，请刷新后重试");
         }
@@ -221,7 +231,9 @@ public class RepairProjectService {
             throw new RepairWorkOrderApplicationException(INVALID_STATUS, "项目状态已变化，请刷新后重试");
         }
         event(project, actor, "PLAN_LOCKED", Map.of(
-                "planId", planId, "planVersion", plan.versionNo(), "snapshotHash", snapshotHash));
+                "planId", planId, "planVersion", plan.versionNo(), "snapshotHash", snapshotHash,
+                "selectionId", selection.selectionId(), "quoteId", selection.quoteId(),
+                "supplierDeptId", selection.supplierDeptId()));
         return details(projectId, actor.tenantId());
     }
 
@@ -645,10 +657,9 @@ public class RepairProjectService {
         Set<AttachmentPurpose> purposes = attachments.stream()
                 .map(PlanAttachment::purpose)
                 .collect(java.util.stream.Collectors.toSet());
-        if (!purposes.contains(AttachmentPurpose.ORIGINAL_QUOTE)
-                || !purposes.contains(AttachmentPurpose.SITE_PHOTO)) {
+        if (!purposes.contains(AttachmentPurpose.SITE_PHOTO)) {
             throw new RepairWorkOrderApplicationException(
-                    INVALID_STATUS, "锁定实施方案前必须关联报价原件和现场照片");
+                    INVALID_STATUS, "锁定实施方案前必须关联现场照片");
         }
     }
 
@@ -657,7 +668,8 @@ public class RepairProjectService {
             PlanVersion plan,
             List<Item> items,
             List<AllocationRoom> allocation,
-            List<PlanAttachment> attachments) {
+            List<PlanAttachment> attachments,
+            Selection selection) {
         Map<String, Object> snapshot = new LinkedHashMap<>();
         snapshot.put("projectId", project.projectId());
         snapshot.put("workflowType", project.workflowType());
@@ -670,6 +682,7 @@ public class RepairProjectService {
         snapshot.put("items", items.stream().sorted(Comparator.comparing(Item::sortOrder)).toList());
         snapshot.put("allocation", allocation.stream().sorted(Comparator.comparing(AllocationRoom::roomId)).toList());
         snapshot.put("attachments", attachments.stream().sorted(Comparator.comparing(PlanAttachment::sortOrder)).toList());
+        snapshot.put("supplierSelection", selection);
         try {
             byte[] canonical = objectMapper.writeValueAsString(snapshot).getBytes(StandardCharsets.UTF_8);
             return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(canonical));

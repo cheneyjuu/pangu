@@ -45,6 +45,7 @@ class RepairAcceptanceWorkflowIntegrationTest {
     private static final long ACCOUNT_COMMITTEE_MEMBER = 999813L;
     private static final long USER_COMMITTEE_MEMBER = 800103L;
     private static final String PROJECT_PREFIX = "IT-验收维修项目-";
+    private static final String SUPPLIER_PREFIX = "IT-验收维修供应商-";
 
     @Autowired private MockMvc mockMvc;
     @Autowired private ObjectMapper objectMapper;
@@ -92,6 +93,7 @@ class RepairAcceptanceWorkflowIntegrationTest {
                   )
                 """, PROJECT_PREFIX + "%");
         jdbcTemplate.update("DELETE FROM t_repair_project WHERE project_name LIKE ?", PROJECT_PREFIX + "%");
+        RepairProjectSourcingTestSupport.cleanSuppliers(jdbcTemplate, SUPPLIER_PREFIX);
         jdbcTemplate.update("""
                 UPDATE t_committee_member_position
                 SET position = 'MEMBER', update_time = CURRENT_TIMESTAMP
@@ -167,9 +169,10 @@ class RepairAcceptanceWorkflowIntegrationTest {
                 "/api/v1/admin/repair-projects", propertyToken, communityProjectRequest()));
         long projectId = created.path("project").path("projectId").asLong();
         long planId = created.path("plans").get(0).path("planId").asLong();
-        long quoteAttachmentId = upload(projectId, "道路维修报价.pdf", "quote");
+        RepairProjectSourcingTestSupport.SelectedSupplier selectedSupplier =
+                RepairProjectSourcingTestSupport.completeCompetitiveSourcing(
+                        mockMvc, objectMapper, propertyToken, SUPPLIER_PREFIX, projectId, 1000);
         long photoAttachmentId = upload(projectId, "道路现场.jpg", "photo");
-        link(projectId, planId, quoteAttachmentId, "ORIGINAL_QUOTE");
         link(projectId, planId, photoAttachmentId, "SITE_PHOTO");
         postOk(projectPath(projectId, "/plans/" + planId + "/lock"), propertyToken,
                 Map.of("expectedProjectVersion", 0));
@@ -178,6 +181,9 @@ class RepairAcceptanceWorkflowIntegrationTest {
         long sourceAttachmentId = upload(projectId, "验收签前文件.pdf", "acceptance-source");
         long sealedAttachmentId = upload(projectId, "验收盖章文件.pdf", "acceptance-sealed");
         long resultAttachmentId = upload(projectId, "验收定案文件.pdf", "acceptance-result");
+        String supplierName = jdbcTemplate.queryForObject(
+                "SELECT dept_name FROM sys_dept WHERE dept_id = ?",
+                String.class, selectedSupplier.supplierDeptId());
 
         // 本测试只聚焦验收切片，合同、施工和结算的完整路径由工程执行流程测试覆盖。
         long contractId = jdbcTemplate.queryForObject("""
@@ -186,11 +192,12 @@ class RepairAcceptanceWorkflowIntegrationTest {
                     supplier_name, contract_amount, repair_scope_hash, fund_source,
                     signing_method, contract_file_hash, status, created_by_user_id, effective_at
                 ) VALUES (
-                    NULL, ?, ?, ?, NULL, '测试施工单位', 1000.00,
+                    NULL, ?, ?, ?, ?, ?, 1000.00,
                     'community-acceptance-scope', 'COMMUNITY_MAINTENANCE_FUND',
                     'OFFLINE', 'community-acceptance-contract', 'EFFECTIVE', ?, CURRENT_TIMESTAMP
                 ) RETURNING contract_id
-                """, Long.class, projectId, planId, TENANT, USER_PROPERTY_MANAGER);
+                """, Long.class, projectId, planId, TENANT,
+                selectedSupplier.supplierDeptId(), supplierName, USER_PROPERTY_MANAGER);
         long settlementId = jdbcTemplate.queryForObject("""
                 INSERT INTO t_repair_project_settlement (
                     project_id, plan_id, contract_id, tenant_id, version_no, status,

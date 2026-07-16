@@ -8,13 +8,17 @@ import com.pangu.domain.model.repair.RepairProject.Item;
 import com.pangu.domain.model.repair.RepairProject.PlanAttachment;
 import com.pangu.domain.model.repair.RepairProject.PlanStatus;
 import com.pangu.domain.model.repair.RepairProject.PlanVersion;
+import com.pangu.domain.model.repair.RepairProjectSourcing.Quote;
+import com.pangu.domain.model.repair.RepairProjectSourcing.Selection;
 import com.pangu.domain.repository.RepairProjectRepository;
+import com.pangu.domain.repository.RepairProjectSourcingRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.Comparator;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -27,6 +31,7 @@ public class OwnerRepairProjectQueryService {
 
     private final RepairWorkOrderService workOrderService;
     private final RepairProjectRepository projectRepository;
+    private final RepairProjectSourcingRepository sourcingRepository;
     private final RepairNarrativeImageService narrativeImageService;
 
     @Transactional(readOnly = true)
@@ -57,13 +62,26 @@ public class OwnerRepairProjectQueryService {
                 .listAttachments(project.projectId(), project.tenantId())
                 .stream()
                 .collect(Collectors.toMap(Attachment::attachmentId, Function.identity()));
-        List<OwnerRepairProjectDisclosure.PublishedAttachment> attachments = projectRepository
+        List<OwnerRepairProjectDisclosure.PublishedAttachment> attachments = new ArrayList<>(projectRepository
                 .listPlanAttachments(plan.planId(), project.tenantId())
                 .stream()
                 .sorted(Comparator.comparing(PlanAttachment::sortOrder))
                 .map(reference -> toAttachment(reference, attachmentsById.get(reference.attachmentId())))
                 .flatMap(Optional::stream)
-                .toList();
+                .toList());
+        Selection selection = sourcingRepository.findCurrentSelection(
+                project.projectId(), plan.planId(), project.tenantId()).orElse(null);
+        Quote selectedQuote = selection == null ? null : sourcingRepository.findQuote(
+                selection.quoteId(), project.projectId(), plan.planId(), project.tenantId()).orElse(null);
+        if (selectedQuote != null && attachments.stream().noneMatch(
+                attachment -> attachment.attachmentId().equals(selectedQuote.attachmentId()))) {
+            Attachment quoteAttachment = attachmentsById.get(selectedQuote.attachmentId());
+            if (quoteAttachment != null) {
+                attachments.add(new OwnerRepairProjectDisclosure.PublishedAttachment(
+                        quoteAttachment.attachmentId(), RepairProject.AttachmentPurpose.ORIGINAL_QUOTE,
+                        quoteAttachment.originalFileName(), quoteAttachment.contentType(), quoteAttachment.fileSize()));
+            }
+        }
 
         return new OwnerRepairProjectDisclosure(
                 workOrderId, project.projectId(), project.projectNo(), project.projectName(),
@@ -74,6 +92,7 @@ public class OwnerRepairProjectQueryService {
                                 plan.planId(), project.tenantId(), plan.planDescription()),
                         plan.budgetTotal(), plan.allocationRuleType(), plan.allocationRuleDescription(),
                         plan.supplierSelectionMethod(), plan.supplierSelectionReason(),
+                        publishedSelection(selection, selectedQuote),
                         plan.constructionManagementRequirements(), plan.evidenceRequirements(),
                         plan.safetyRequirements(), plan.acceptanceMethod(),
                         plan.affectedOwnerScopeDescription(), plan.minimumAffectedOwnerAcceptors(),
@@ -82,6 +101,17 @@ public class OwnerRepairProjectQueryService {
                         plan.warrantyDays(), plan.priceReviewRequired(), plan.paymentMilestones(),
                         items.stream().map(this::toItem).toList(), allocationSummary(allocation),
                         attachments, plan.lockedAt()));
+    }
+
+    private OwnerRepairProjectDisclosure.PublishedSupplierSelection publishedSelection(
+            Selection selection, Quote quote) {
+        if (selection == null || quote == null) {
+            return null;
+        }
+        return new OwnerRepairProjectDisclosure.PublishedSupplierSelection(
+                quote.quoteId(), quote.supplierDeptId(), quote.supplierName(), quote.quoteAmount(),
+                quote.quoteSummary(), quote.attachmentId(), selection.selectionMethod(),
+                selection.recommendationReason(), selection.insufficientQuoteReason());
     }
 
     private OwnerRepairProjectDisclosure.PublishedItem toItem(Item item) {

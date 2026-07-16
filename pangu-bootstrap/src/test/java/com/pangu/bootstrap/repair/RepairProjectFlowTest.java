@@ -49,6 +49,7 @@ class RepairProjectFlowTest {
     private static final long USER_PROPERTY_MANAGER = 800201L;
     private static final String PROJECT_PREFIX = "IT-维修工程-";
     private static final String CASE_PREFIX = "IT-维修工程报修-";
+    private static final String SUPPLIER_PREFIX = "IT-维修工程供应商-";
 
     @Autowired private MockMvc mockMvc;
     @Autowired private ObjectMapper objectMapper;
@@ -99,6 +100,7 @@ class RepairProjectFlowTest {
     @AfterEach
     void clean() {
         jdbcTemplate.update("DELETE FROM t_repair_project WHERE project_name LIKE ?", PROJECT_PREFIX + "%");
+        RepairProjectSourcingTestSupport.cleanSuppliers(jdbcTemplate, SUPPLIER_PREFIX);
         jdbcTemplate.update("DELETE FROM t_repair_narrative_image WHERE tenant_id = ? AND status = 'DRAFT'", TENANT);
         jdbcTemplate.update("DELETE FROM t_repair_work_order WHERE title LIKE ?", CASE_PREFIX + "%");
     }
@@ -132,9 +134,9 @@ class RepairProjectFlowTest {
                 .andExpect(jsonPath("$.msg", is(
                         "共有部分维修已切换到维修工程项目；勘验完成后请在工程项目台账关联本工单，旧工单项目级写接口仅保留历史只读")));
 
-        long quoteAttachmentId = upload(projectId, "报价单.pdf", "application/pdf", "quote");
+        RepairProjectSourcingTestSupport.completeCompetitiveSourcing(
+                mockMvc, objectMapper, token, SUPPLIER_PREFIX, projectId, 1000);
         long photoAttachmentId = upload(projectId, "现场照片.jpg", "image/jpeg", "photo");
-        link(projectId, planId, quoteAttachmentId, "ORIGINAL_QUOTE");
         link(projectId, planId, photoAttachmentId, "SITE_PHOTO");
 
         String lockedBody = mockMvc.perform(post("/api/v1/admin/repair-projects/" + projectId
@@ -163,7 +165,6 @@ class RepairProjectFlowTest {
         revisionRequest.put("expectedProjectVersion", 1);
         Map<String, Object> revisionPlan = buildingPlan(workOrderId, "2");
         revisionPlan.put("attachments", List.of(
-                Map.of("attachmentId", quoteAttachmentId, "purpose", "ORIGINAL_QUOTE"),
                 Map.of("attachmentId", photoAttachmentId, "purpose", "SITE_PHOTO")));
         revisionRequest.put("plan", revisionPlan);
         String revisedBody = mockMvc.perform(post(
@@ -177,6 +178,8 @@ class RepairProjectFlowTest {
                 .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
         long revisionPlanId = objectMapper.readTree(revisedBody).path("data").path("plans").get(0)
                 .path("planId").asLong();
+        RepairProjectSourcingTestSupport.completeCompetitiveSourcing(
+                mockMvc, objectMapper, token, SUPPLIER_PREFIX, projectId, 1000);
 
         mockMvc.perform(post("/api/v1/admin/repair-projects/" + projectId
                         + "/plans/" + revisionPlanId + "/lock")
@@ -202,9 +205,9 @@ class RepairProjectFlowTest {
                 WHERE item.project_id = ?
                 """, Integer.class, projectId));
 
-        long quoteAttachmentId = upload(projectId, "道路维修报价.pdf", "application/pdf", "quote");
+        RepairProjectSourcingTestSupport.completeCompetitiveSourcing(
+                mockMvc, objectMapper, token, SUPPLIER_PREFIX, projectId, 1000);
         long photoAttachmentId = upload(projectId, "道路现场.jpg", "image/jpeg", "photo");
-        link(projectId, planId, quoteAttachmentId, "ORIGINAL_QUOTE");
         link(projectId, planId, photoAttachmentId, "SITE_PHOTO");
         mockMvc.perform(post("/api/v1/admin/repair-projects/" + projectId
                         + "/plans/" + planId + "/lock")
@@ -252,9 +255,10 @@ class RepairProjectFlowTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data").doesNotExist());
 
-        long quoteAttachmentId = upload(projectId, "业主端报价.pdf", "application/pdf", "quote");
+        RepairProjectSourcingTestSupport.SelectedSupplier selectedSupplier =
+                RepairProjectSourcingTestSupport.completeCompetitiveSourcing(
+                        mockMvc, objectMapper, token, SUPPLIER_PREFIX, projectId, 1000);
         long photoAttachmentId = upload(projectId, "业主端现场.jpg", "image/jpeg", "photo");
-        link(projectId, planId, quoteAttachmentId, "ORIGINAL_QUOTE");
         link(projectId, planId, photoAttachmentId, "SITE_PHOTO");
         mockMvc.perform(post("/api/v1/admin/repair-projects/" + projectId
                         + "/plans/" + planId + "/lock")
@@ -274,13 +278,16 @@ class RepairProjectFlowTest {
                 .andExpect(jsonPath("$.data.plan.items", hasSize(1)))
                 .andExpect(jsonPath("$.data.plan.allocationSummary.roomCount").isNumber())
                 .andExpect(jsonPath("$.data.plan.attachments", hasSize(2)))
+                .andExpect(jsonPath("$.data.plan.selectedSupplier.supplierDeptId",
+                        is((int) selectedSupplier.supplierDeptId())))
                 .andExpect(jsonPath("$.data.plan.lockedAt").isString());
 
         mockMvc.perform(get("/api/v1/me/repair-projects/by-work-order/" + workOrderId
-                        + "/attachments/" + quoteAttachmentId + "/download-ticket")
+                        + "/attachments/" + selectedSupplier.quoteAttachmentId() + "/download-ticket")
                         .header("Authorization", "Bearer " + ownerToken))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.attachmentId", is((int) quoteAttachmentId)))
+                .andExpect(jsonPath("$.data.attachmentId",
+                        is((int) selectedSupplier.quoteAttachmentId())))
                 .andExpect(jsonPath("$.data.downloadUrl", is(
                         "https://oss.example.test/repair-project")));
     }

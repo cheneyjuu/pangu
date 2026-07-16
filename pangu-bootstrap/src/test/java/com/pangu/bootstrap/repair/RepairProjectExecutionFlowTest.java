@@ -226,11 +226,38 @@ class RepairProjectExecutionFlowTest {
     @Test
     void buildingExecutionRequiresVerifiedEvidenceTwoOwnerSideRolesAndLegalPaymentLimits() throws Exception {
         LockedProject locked = createAndAuthorizeProject();
-        long supplierDeptId = registerVerifiedSupplier();
+        long supplierDeptId = locked.supplierDeptId();
         long contractFile = upload(locked.projectId(), "三方施工合同.pdf", "contract");
         long ownerSignature = upload(locked.projectId(), "业主方签署页.pdf", "owner-signature");
         long propertySignature = upload(locked.projectId(), "物业签署页.pdf", "property-signature");
         long supplierSignature = upload(locked.projectId(), "施工单位签署页.pdf", "supplier-signature");
+        List<Map<String, Object>> signatures = List.of(
+                signature("OWNERS_ASSEMBLY_OR_GROUP", "业委会主任", USER_DIRECTOR, ownerSignature),
+                signature("PROPERTY", "物业项目经理", USER_PROPERTY_MANAGER, propertySignature),
+                signature("SUPPLIER", "施工单位负责人", null, supplierSignature));
+        long nonSelectedSupplierDeptId = jdbcTemplate.queryForObject("""
+                SELECT supplier_dept_id
+                FROM t_repair_project_quote_invitation
+                WHERE project_id = ? AND supplier_dept_id <> ?
+                ORDER BY invitation_id
+                LIMIT 1
+                """, Long.class, locked.projectId(), supplierDeptId);
+        postBadRequest(projectPath(locked.projectId(), "/contract"), propertyToken,
+                Map.ofEntries(
+                        Map.entry("expectedProjectVersion", projectVersion(locked.projectId())),
+                        Map.entry("supplierDeptId", nonSelectedSupplierDeptId),
+                        Map.entry("contractAmount", 1000),
+                        Map.entry("contractAttachmentId", contractFile),
+                        Map.entry("signatures", signatures)),
+                "合同施工单位必须与锁定方案的中选供应商一致");
+        postBadRequest(projectPath(locked.projectId(), "/contract"), propertyToken,
+                Map.ofEntries(
+                        Map.entry("expectedProjectVersion", projectVersion(locked.projectId())),
+                        Map.entry("supplierDeptId", supplierDeptId),
+                        Map.entry("contractAmount", 1001),
+                        Map.entry("contractAttachmentId", contractFile),
+                        Map.entry("signatures", signatures)),
+                "合同金额超过中选报价、锁定方案预算或有效审价金额");
 
         JsonNode contract = data(postOk(projectPath(locked.projectId(), "/contract"), propertyToken,
                 Map.ofEntries(
@@ -238,10 +265,7 @@ class RepairProjectExecutionFlowTest {
                         Map.entry("supplierDeptId", supplierDeptId),
                         Map.entry("contractAmount", 1000),
                         Map.entry("contractAttachmentId", contractFile),
-                        Map.entry("signatures", List.of(
-                                signature("OWNERS_ASSEMBLY_OR_GROUP", "业委会主任", USER_DIRECTOR, ownerSignature),
-                                signature("PROPERTY", "物业项目经理", USER_PROPERTY_MANAGER, propertySignature),
-                                signature("SUPPLIER", "施工单位负责人", null, supplierSignature))))));
+                        Map.entry("signatures", signatures))));
         assertEquals("BUILDING_MAINTENANCE_FUND", contract.path("fundSource").asText());
         assertEquals("OFFLINE", contract.path("signingMethod").asText());
         String supplierToken = createSupplierIdentity(supplierDeptId);
@@ -435,33 +459,16 @@ class RepairProjectExecutionFlowTest {
         long projectId = created.path("project").path("projectId").asLong();
         long planId = created.path("plans").get(0).path("planId").asLong();
         long itemId = created.path("currentPlanItems").get(0).path("itemId").asLong();
-        long quote = upload(projectId, "原始报价.pdf", "quote");
+        RepairProjectSourcingTestSupport.SelectedSupplier selectedSupplier =
+                RepairProjectSourcingTestSupport.completeCompetitiveSourcing(
+                        mockMvc, objectMapper, propertyToken, SUPPLIER_PREFIX, projectId, 1000);
         long photo = upload(projectId, "现场照片.jpg", "photo");
-        postOk(projectPath(projectId, "/plans/" + planId + "/attachments"), propertyToken,
-                Map.of("attachmentId", quote, "purpose", "ORIGINAL_QUOTE"));
         postOk(projectPath(projectId, "/plans/" + planId + "/attachments"), propertyToken,
                 Map.of("attachmentId", photo, "purpose", "SITE_PHOTO"));
         postOk(projectPath(projectId, "/plans/" + planId + "/lock"), propertyToken,
                 Map.of("expectedProjectVersion", 0));
         jdbcTemplate.update("UPDATE t_repair_project SET status = 'AUTHORIZED' WHERE project_id = ?", projectId);
-        return new LockedProject(projectId, itemId);
-    }
-
-    private long registerVerifiedSupplier() throws Exception {
-        String supplierName = SUPPLIER_PREFIX + System.nanoTime();
-        JsonNode supplier = data(postOk("/api/v1/admin/supplier-organizations", propertyToken,
-                Map.of("legalName", supplierName)));
-        long supplierDeptId = supplier.isNumber() ? supplier.asLong() : supplier.path("supplierDeptId").asLong();
-        mockMvc.perform(post("/api/v1/admin/supplier-organizations/" + supplierDeptId + "/manual-verifications")
-                        .header("Authorization", bearer(propertyToken))
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(json(Map.of(
-                                "unifiedSocialCreditCode", "91310000" + String.format("%010d", supplierDeptId),
-                                "sourceCode", "GSXT_WEB",
-                                "verificationResult", "PASSED",
-                                "remark", "测试中已核对企业登记信息"))))
-                .andExpect(status().isCreated());
-        return supplierDeptId;
+        return new LockedProject(projectId, itemId, selectedSupplier.supplierDeptId());
     }
 
     private String createSupplierIdentity(long supplierDeptId) {
@@ -597,6 +604,6 @@ class RepairProjectExecutionFlowTest {
         return objectMapper.writeValueAsString(value);
     }
 
-    private record LockedProject(long projectId, long itemId) {
+    private record LockedProject(long projectId, long itemId, long supplierDeptId) {
     }
 }

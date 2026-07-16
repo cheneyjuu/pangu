@@ -12,6 +12,7 @@ import com.pangu.domain.model.repair.RepairProject.Status;
 import com.pangu.domain.repository.RepairEvidenceObjectStorage;
 import com.pangu.domain.repository.RepairProjectExecutionRepository;
 import com.pangu.domain.repository.RepairProjectRepository;
+import com.pangu.domain.repository.RepairProjectSourcingRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -50,6 +51,7 @@ public class RepairProjectAttachmentService {
 
     private final RepairProjectRepository projectRepository;
     private final RepairProjectExecutionRepository executionRepository;
+    private final RepairProjectSourcingRepository sourcingRepository;
     private final RepairEvidenceObjectStorage objectStorage;
     private final UserContextHolder userContextHolder;
     private final ObjectMapper objectMapper;
@@ -60,7 +62,7 @@ public class RepairProjectAttachmentService {
         UserContext actor = requireActor();
         RepairProject project = projectRepository.findProject(projectId, actor.tenantId())
                 .orElseThrow(() -> new RepairWorkOrderApplicationException(NOT_FOUND, "维修工程项目不存在"));
-        assertProjectAccess(actor, project, true);
+        assertProjectAccess(actor, project, true, null);
         if (command == null) {
             throw new RepairWorkOrderApplicationException(PARAM_INVALID, "附件不能为空");
         }
@@ -96,9 +98,9 @@ public class RepairProjectAttachmentService {
         UserContext actor = requireActor();
         RepairProject project = projectRepository.findProject(projectId, actor.tenantId())
                 .orElseThrow(() -> new RepairWorkOrderApplicationException(NOT_FOUND, "维修工程项目不存在"));
-        assertProjectAccess(actor, project, false);
         Attachment attachment = projectRepository.findAttachment(attachmentId, projectId, actor.tenantId())
                 .orElseThrow(() -> new RepairWorkOrderApplicationException(NOT_FOUND, "维修工程附件不存在"));
+        assertProjectAccess(actor, project, false, attachment);
         return createTicket(attachment);
     }
 
@@ -231,7 +233,8 @@ public class RepairProjectAttachmentService {
         return actor;
     }
 
-    private void assertProjectAccess(UserContext actor, RepairProject project, boolean writing) {
+    private void assertProjectAccess(
+            UserContext actor, RepairProject project, boolean writing, Attachment attachment) {
         String role = actor.roleKey();
         if (Set.of("PROPERTY_MANAGER", "PROPERTY_STAFF", "COMMITTEE_DIRECTOR", "COMMITTEE_MEMBER")
                 .contains(role)) {
@@ -248,6 +251,21 @@ public class RepairProjectAttachmentService {
             }
         }
         if (Set.of("SERVICE_PROVIDER_MANAGER", "SERVICE_PROVIDER_STAFF").contains(role)) {
+            Long draftPlanId = projectRepository.listPlans(project.projectId(), project.tenantId()).stream()
+                    .filter(plan -> plan.status() == RepairProject.PlanStatus.DRAFT)
+                    .map(RepairProject.PlanVersion::planId)
+                    .findFirst()
+                    .orElse(null);
+            boolean invitedForDraft = project.status() == Status.DRAFT
+                    && draftPlanId != null
+                    && actor.deptId() != null
+                    && sourcingRepository.supplierInvited(
+                    project.projectId(), draftPlanId, project.tenantId(), actor.deptId());
+            boolean ownDraftAttachment = attachment == null
+                    || actor.accountId().equals(attachment.uploadedByAccountId());
+            if (invitedForDraft && (writing || ownDraftAttachment)) {
+                return;
+            }
             boolean contractSupplier = executionRepository.findContract(project.projectId(), project.tenantId())
                     .map(contract -> actor.deptId() != null && actor.deptId().equals(contract.supplierDeptId()))
                     .orElse(false);

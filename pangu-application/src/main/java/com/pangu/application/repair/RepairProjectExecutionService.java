@@ -32,9 +32,11 @@ import com.pangu.domain.model.repair.RepairProjectExecution.SettlementItem;
 import com.pangu.domain.model.repair.RepairProjectExecution.SettlementStatus;
 import com.pangu.domain.model.repair.RepairProjectExecution.SignatureMethod;
 import com.pangu.domain.model.repair.RepairProjectExecution.VerificationStatus;
+import com.pangu.domain.model.repair.RepairProjectSourcing.Selection;
 import com.pangu.domain.model.repair.RepairProjectGovernance.BuildingProcess;
 import com.pangu.domain.model.repair.RepairWorkflowType;
 import com.pangu.domain.repository.RepairProjectExecutionRepository;
+import com.pangu.domain.repository.RepairProjectSourcingRepository;
 import com.pangu.domain.repository.RepairProjectGovernanceRepository;
 import com.pangu.domain.repository.RepairProjectRepository;
 import com.pangu.domain.repository.RepairWorkOrderRepository;
@@ -69,6 +71,7 @@ public class RepairProjectExecutionService {
     private final RepairProjectApplicationSupport support;
     private final RepairProjectRepository projectRepository;
     private final RepairProjectExecutionRepository executionRepository;
+    private final RepairProjectSourcingRepository sourcingRepository;
     private final RepairProjectGovernanceRepository governanceRepository;
     private final RepairWorkOrderRepository workOrderRepository;
 
@@ -116,6 +119,12 @@ public class RepairProjectExecutionService {
         if (executionRepository.findContract(projectId, actor.tenantId()).isPresent()) {
             throw support.conflict("当前项目已有生效合同");
         }
+        Selection selection = sourcingRepository.findCurrentSelection(
+                        projectId, context.plan().planId(), actor.tenantId())
+                .orElseThrow(() -> support.invalid("当前锁定方案缺少有效的中选供应商报价"));
+        if (!selection.supplierDeptId().equals(command.supplierDeptId())) {
+            throw support.invalid("合同施工单位必须与锁定方案的中选供应商一致");
+        }
         if (command.supplierDeptId() == null
                 || !workOrderRepository.supplierVerified(actor.tenantId(), command.supplierDeptId())) {
             throw support.invalid("施工单位必须是当前小区已核验的供应商组织");
@@ -128,8 +137,9 @@ public class RepairProjectExecutionService {
         requirePositive(command.contractAmount(), "contractAmount");
         BigDecimal priceLimit = priceLimit(context);
         if (command.contractAmount().compareTo(context.plan().budgetTotal()) > 0
-                || command.contractAmount().compareTo(priceLimit) > 0) {
-            throw support.invalid("合同金额超过锁定方案预算或有效审价金额");
+                || command.contractAmount().compareTo(priceLimit) > 0
+                || command.contractAmount().compareTo(selection.quoteAmount()) > 0) {
+            throw support.invalid("合同金额超过中选报价、锁定方案预算或有效审价金额");
         }
         Attachment contractAttachment = support.attachment(
                 context, command.contractAttachmentId(), "三方合同文件");
@@ -152,7 +162,8 @@ public class RepairProjectExecutionService {
         support.advance(context, Status.CONTRACT_EFFECTIVE);
         support.event(context, actor, "PROJECT_CONTRACT_EFFECTIVE", Map.of(
                 "contractId", contract.contractId(), "supplierDeptId", contract.supplierDeptId(),
-                "contractAmount", contract.contractAmount(), "partyCount", bound.size()));
+                "contractAmount", contract.contractAmount(), "partyCount", bound.size(),
+                "selectionId", selection.selectionId(), "quoteId", selection.quoteId()));
         return contract;
     }
 

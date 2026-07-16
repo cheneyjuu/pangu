@@ -6,10 +6,10 @@
 ## Current Phases
 | # | 内容 | Status |
 |---|---|---|
-| 1 | 核对旧工单报价能力、新项目状态机、表决披露和合同约束 | in_progress |
-| 2 | 增加项目级邀价、报价、比价推荐与中选快照 | pending |
+| 1 | 核对旧工单报价能力、新项目状态机、表决披露和合同约束 | complete |
+| 2 | 增加项目级邀价、报价、比价推荐与中选快照 | complete |
 | 3 | 将 Yaochi 工程项目流程接入项目级供应商选择 | pending |
-| 4 | 将中选报价纳入锁定方案和有权业主披露 | pending |
+| 4 | 将中选报价纳入锁定方案和有权业主披露 | in_progress |
 | 5 | 执行后端测试、前端构建、数据迁移与流程回归 | pending |
 
 ## Current Completion Criteria
@@ -22,6 +22,10 @@
 ## Current Errors Encountered
 | Error | Attempt | Resolution |
 |---|---|---|
+| Docker daemon 当前未运行，无法用容器命令直接查看 PostgreSQL 测试数据 | 1 | 不重复启动容器假设；后续直接运行既有 Spring 集成测试，按其真实数据源结果处理 |
+| Spring 集成测试确认 `localhost:5432` 无 PostgreSQL 监听，应用上下文无法启动 | 1 | 先完成静态实现和测试用例；验证阶段启动项目既有 PostgreSQL 依赖后再运行，不把基础设施失败计为代码失败 |
+| 测试支持类的 `post` 帮助方法遮蔽 MockMvc 静态导入，导致测试编译失败 | 1 | 将自定义方法改名为 `postJson`，避免同名解析歧义 |
+| 新方案版本建立后项目状态仍为 `PLAN_LOCKED`，项目级邀价错误地只允许 `DRAFT` 项目 | 1 | 写操作同时允许 `DRAFT / PLAN_LOCKED`，但必须存在 `DRAFT` 方案；读操作优先读取草稿，否则读取当前锁定方案 |
 
 ## Historical Plan
 
