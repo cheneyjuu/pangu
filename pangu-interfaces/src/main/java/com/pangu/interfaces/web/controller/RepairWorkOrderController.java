@@ -326,7 +326,7 @@ public class RepairWorkOrderController extends BaseController {
     }
 
     @PostMapping("/admin/supplier-organizations")
-    @PreAuthorize("hasAuthority('repair:workorder:manage')")
+    @PreAuthorize("hasAuthority('repair:supplier:manage')")
     public ResponseEntity<Result<Long>> registerSupplierOrganization(
             @Valid @RequestBody RegisterSupplierOrganizationRequest request) {
         Long supplierDeptId = service.registerSupplierOrganization(new RegisterSupplierOrganizationCommand(
@@ -336,7 +336,7 @@ public class RepairWorkOrderController extends BaseController {
     }
 
     @GetMapping("/admin/supplier-organizations")
-    @PreAuthorize("hasAnyAuthority('repair:workorder:manage','repair:workorder:field')")
+    @PreAuthorize("hasAnyAuthority('repair:supplier:manage','repair:supplier:verify','repair:workorder:manage','repair:workorder:field')")
     public Result<List<RepairSupplierOrganizationResponse>> listSupplierOrganizations() {
         return success(service.listSupplierOrganizations().stream()
                 .map(RepairSupplierOrganizationResponse::from)

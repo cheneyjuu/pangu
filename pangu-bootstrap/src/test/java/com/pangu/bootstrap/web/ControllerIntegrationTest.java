@@ -192,6 +192,7 @@ public class ControllerIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.user_info.role_key", is("PROPERTY_MANAGER")))
                 .andExpect(jsonPath("$.data.user_info.permissions", hasItem("repair:workorder:read")))
+                .andExpect(jsonPath("$.data.user_info.permissions", hasItem("repair:supplier:manage")))
                 .andExpect(jsonPath("$.data.user_info.permissions", hasItem("fund:account:read")))
                 .andReturn().getResponse().getContentAsString();
 
@@ -217,6 +218,7 @@ public class ControllerIntegrationTest {
         List<Map<String, Object>> propertyPages = (List<Map<String, Object>>) propertyModule.get("pages");
         assertTrue(propertyPages.stream().anyMatch(page -> "assets".equals(page.get("id"))));
         assertTrue(propertyPages.stream().anyMatch(page -> "work-orders".equals(page.get("id"))));
+        assertTrue(propertyPages.stream().anyMatch(page -> "repair-suppliers".equals(page.get("id"))));
         assertTrue(propertyPages.stream().anyMatch(page -> "engineering".equals(page.get("id"))));
         assertTrue(propertyPages.stream().noneMatch(page -> "property-mgmt".equals(page.get("id"))));
 

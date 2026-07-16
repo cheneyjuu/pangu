@@ -1,3 +1,4 @@
+// 关联业务：由物业经理为已登记维修供应商创建独立的后台账号激活邀请。
 package com.pangu.interfaces.web.controller;
 
 import com.pangu.application.repair.SupplierActivationResult;
@@ -28,7 +29,7 @@ public class SupplierActivationController extends BaseController {
     private final SupplierActivationService service;
 
     @PostMapping("/admin/supplier-organizations/{supplierDeptId}/activation-invitations")
-    @PreAuthorize("hasAuthority('repair:workorder:manage')")
+    @PreAuthorize("hasAuthority('repair:supplier:manage')")
     public ResponseEntity<Result<SupplierActivationInvitationResponse>> createInvitation(
             @PathVariable("supplierDeptId") Long supplierDeptId,
             @Valid @RequestBody(required = false) CreateSupplierActivationInvitationRequest request) {

@@ -186,6 +186,13 @@ public class RepairWorkOrderFlowTest {
             throws Exception {
         String managerToken = token(ACC_PROPERTY_MANAGER, "SYS_USER", USR_PROPERTY_MANAGER);
         String staffToken = token(ACC_PROPERTY_STAFF, "SYS_USER", USR_PROPERTY_STAFF);
+
+        mockMvc.perform(post("/api/v1/admin/supplier-organizations")
+                        .header("Authorization", "Bearer " + staffToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("legalName", "IT-员工不得登记供应商-" + System.nanoTime()))))
+                .andExpect(status().isForbidden());
+
         long supplierDeptId = registerMinimalSupplier(
                 managerToken, "IT-供应商-主体核验-" + System.nanoTime());
         String uscc = "91310000A000000001";
