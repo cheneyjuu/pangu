@@ -272,7 +272,8 @@ class RepairProjectSourcingFlowTest {
                 SELECT ?, role_id, 'ORG_ONLY', ?
                 FROM sys_role WHERE role_key = 'SERVICE_PROVIDER_STAFF'
                 """, userId, USER_PROPERTY_MANAGER);
-        return token(accountId, "SYS_USER", userId);
+        // 供应商组织可服务多个小区，真实登录令牌不携带单一 tenant_id。
+        return jwtTokenProvider.generateToken(accountId, "SYS_USER", userId, null);
     }
 
     private long upload(long projectId, String fileName, String content, String token) throws Exception {

@@ -14,7 +14,10 @@ public interface RepairProjectSourcingRepository {
 
     List<Invitation> listInvitations(Long projectId, Long planId, Long tenantId);
 
-    List<Invitation> listSupplierInvitations(Long tenantId, Long supplierDeptId);
+    List<Invitation> listSupplierInvitations(Long supplierDeptId);
+
+    Optional<Invitation> findSupplierInvitation(
+            Long invitationId, Long projectId, Long supplierDeptId);
 
     Optional<Invitation> findInvitation(
             Long invitationId, Long projectId, Long planId, Long tenantId, Long supplierDeptId);

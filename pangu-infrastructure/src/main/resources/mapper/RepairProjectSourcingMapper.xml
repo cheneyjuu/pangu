@@ -44,8 +44,7 @@
         FROM (
             SELECT DISTINCT ON (project_id, plan_id) latest.*
             FROM t_repair_project_quote_invitation latest
-            WHERE latest.tenant_id = #{tenantId}
-              AND latest.supplier_dept_id = #{supplierDeptId}
+            WHERE latest.supplier_dept_id = #{supplierDeptId}
               AND latest.status IN ('PENDING', 'SUBMITTED')
             ORDER BY project_id, plan_id, invitation_round DESC, invitation_id DESC
         ) invitation
@@ -60,6 +59,18 @@
         JOIN t_supplier_org_profile supplier
           ON supplier.supplier_dept_id = invitation.supplier_dept_id
         ORDER BY invitation.sent_at DESC, invitation.invitation_id DESC
+    </select>
+
+    <!-- 供应商工作身份不绑定单一小区，邀价本身是确定租户边界的可信事实。 -->
+    <select id="findSupplierInvitation"
+            resultType="com.pangu.infrastructure.persistence.entity.RepairProjectSourcingRows$InvitationRow">
+        SELECT <include refid="invitationColumns"/>
+        FROM t_repair_project_quote_invitation invitation
+        JOIN t_supplier_org_profile supplier
+          ON supplier.supplier_dept_id = invitation.supplier_dept_id
+        WHERE invitation.invitation_id = #{invitationId}
+          AND invitation.project_id = #{projectId}
+          AND invitation.supplier_dept_id = #{supplierDeptId}
     </select>
 
     <select id="findInvitation"

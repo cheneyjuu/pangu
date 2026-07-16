@@ -20,7 +20,11 @@ public interface RepairProjectSourcingMapper {
             @Param("tenantId") Long tenantId);
 
     List<InvitationRow> listSupplierInvitations(
-            @Param("tenantId") Long tenantId,
+            @Param("supplierDeptId") Long supplierDeptId);
+
+    InvitationRow findSupplierInvitation(
+            @Param("invitationId") Long invitationId,
+            @Param("projectId") Long projectId,
             @Param("supplierDeptId") Long supplierDeptId);
 
     InvitationRow findInvitation(

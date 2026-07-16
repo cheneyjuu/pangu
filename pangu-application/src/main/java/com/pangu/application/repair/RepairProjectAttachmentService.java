@@ -9,6 +9,7 @@ import com.pangu.domain.context.UserContextHolder;
 import com.pangu.domain.model.repair.RepairProject;
 import com.pangu.domain.model.repair.RepairProject.Attachment;
 import com.pangu.domain.model.repair.RepairProject.Status;
+import com.pangu.domain.model.repair.RepairProjectSourcing.Invitation;
 import com.pangu.domain.repository.RepairEvidenceObjectStorage;
 import com.pangu.domain.repository.RepairProjectExecutionRepository;
 import com.pangu.domain.repository.RepairProjectRepository;
@@ -60,7 +61,8 @@ public class RepairProjectAttachmentService {
     @Transactional
     public Attachment upload(Long projectId, UploadRepairProjectAttachmentCommand command) {
         UserContext actor = requireActor();
-        RepairProject project = projectRepository.findProject(projectId, actor.tenantId())
+        Long tenantId = resolveTenant(actor, projectId);
+        RepairProject project = projectRepository.findProject(projectId, tenantId)
                 .orElseThrow(() -> new RepairWorkOrderApplicationException(NOT_FOUND, "维修工程项目不存在"));
         assertProjectAccess(actor, project, true, null);
         if (command == null) {
@@ -80,11 +82,11 @@ public class RepairProjectAttachmentService {
         validateStoredObject(objectKey, contentType, content.length, metadata);
         try {
             Attachment attachment = projectRepository.insertAttachment(new Attachment(
-                    null, projectId, actor.tenantId(), objectKey, fileName, contentType,
+                    null, projectId, project.tenantId(), objectKey, fileName, contentType,
                     (long) content.length, metadata.etag(), digestHex("SHA-256", content),
                     actor.accountId(), actor.userId(), null));
             projectRepository.insertEvent(
-                    projectId, actor.tenantId(), "PROJECT_ATTACHMENT_UPLOADED",
+                    projectId, project.tenantId(), "PROJECT_ATTACHMENT_UPLOADED",
                     actor.accountId(), actor.userId(), eventPayload(attachment.attachmentId()));
             return attachment;
         } catch (RuntimeException ex) {
@@ -96,9 +98,10 @@ public class RepairProjectAttachmentService {
     @Transactional(readOnly = true)
     public RepairAttachmentDownloadTicket createDownloadTicket(Long projectId, Long attachmentId) {
         UserContext actor = requireActor();
-        RepairProject project = projectRepository.findProject(projectId, actor.tenantId())
+        Long tenantId = resolveTenant(actor, projectId);
+        RepairProject project = projectRepository.findProject(projectId, tenantId)
                 .orElseThrow(() -> new RepairWorkOrderApplicationException(NOT_FOUND, "维修工程项目不存在"));
-        Attachment attachment = projectRepository.findAttachment(attachmentId, projectId, actor.tenantId())
+        Attachment attachment = projectRepository.findAttachment(attachmentId, projectId, tenantId)
                 .orElseThrow(() -> new RepairWorkOrderApplicationException(NOT_FOUND, "维修工程附件不存在"));
         assertProjectAccess(actor, project, false, attachment);
         return createTicket(attachment);
@@ -227,10 +230,34 @@ public class RepairProjectAttachmentService {
     private UserContext requireActor() {
         UserContext actor = userContextHolder.current();
         if (actor == null || !actor.isSysUser() || actor.userId() == null
-                || actor.accountId() == null || actor.tenantId() == null) {
+                || actor.accountId() == null
+                || (actor.tenantId() == null && !isSupplier(actor))) {
             throw new RepairWorkOrderApplicationException(FORBIDDEN, "未识别到当前小区管理端工作身份");
         }
         return actor;
+    }
+
+    private Long resolveTenant(UserContext actor, Long projectId) {
+        if (actor.tenantId() != null) {
+            return actor.tenantId();
+        }
+        if (isSupplier(actor) && actor.deptId() != null) {
+            return sourcingRepository.listSupplierInvitations(actor.deptId()).stream()
+                    .filter(invitation -> invitation.projectId().equals(projectId))
+                    .map(Invitation::tenantId)
+                    .distinct()
+                    .reduce((first, second) -> {
+                        throw new RepairWorkOrderApplicationException(
+                                FORBIDDEN, "维修工程邀价所属小区不唯一");
+                    })
+                    .orElseThrow(() -> new RepairWorkOrderApplicationException(
+                            FORBIDDEN, "当前供应商未获该维修工程邀价"));
+        }
+        throw new RepairWorkOrderApplicationException(FORBIDDEN, "未识别到维修工程所属小区");
+    }
+
+    private boolean isSupplier(UserContext actor) {
+        return Set.of("SERVICE_PROVIDER_MANAGER", "SERVICE_PROVIDER_STAFF").contains(actor.roleKey());
     }
 
     private void assertProjectAccess(
@@ -250,13 +277,13 @@ public class RepairProjectAttachmentService {
                 return;
             }
         }
-        if (Set.of("SERVICE_PROVIDER_MANAGER", "SERVICE_PROVIDER_STAFF").contains(role)) {
+        if (isSupplier(actor)) {
             Long draftPlanId = projectRepository.listPlans(project.projectId(), project.tenantId()).stream()
                     .filter(plan -> plan.status() == RepairProject.PlanStatus.DRAFT)
                     .map(RepairProject.PlanVersion::planId)
                     .findFirst()
                     .orElse(null);
-            boolean invitedForDraft = project.status() == Status.DRAFT
+            boolean invitedForDraft = Set.of(Status.DRAFT, Status.PLAN_LOCKED).contains(project.status())
                     && draftPlanId != null
                     && actor.deptId() != null
                     && sourcingRepository.supplierInvited(

@@ -42,8 +42,15 @@ public class RepairProjectSourcingRepositoryImpl implements RepairProjectSourcin
     }
 
     @Override
-    public List<Invitation> listSupplierInvitations(Long tenantId, Long supplierDeptId) {
-        return mapper.listSupplierInvitations(tenantId, supplierDeptId).stream().map(this::toDomain).toList();
+    public List<Invitation> listSupplierInvitations(Long supplierDeptId) {
+        return mapper.listSupplierInvitations(supplierDeptId).stream().map(this::toDomain).toList();
+    }
+
+    @Override
+    public Optional<Invitation> findSupplierInvitation(
+            Long invitationId, Long projectId, Long supplierDeptId) {
+        return Optional.ofNullable(mapper.findSupplierInvitation(
+                invitationId, projectId, supplierDeptId)).map(this::toDomain);
     }
 
     @Override

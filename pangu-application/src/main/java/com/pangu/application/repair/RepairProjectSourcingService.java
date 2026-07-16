@@ -144,19 +144,31 @@ public class RepairProjectSourcingService {
 
     @Transactional
     public Quote submitQuote(Long projectId, SubmitQuote command) {
-        UserContext actor = support.requireSysActor(QUOTE_ROLES, "当前身份无权提交维修工程报价");
-        DraftContext context = draftContext(projectId, actor.tenantId(), true);
+        UserContext actor = support.requireGlobalSysActor(QUOTE_ROLES, "当前身份无权提交维修工程报价");
         boolean supplierSubmission = SUPPLIER_ROLES.contains(actor.roleKey());
         Long supplierDeptId = supplierSubmission ? actor.deptId() : command == null ? null : command.supplierDeptId();
         if (command == null || supplierDeptId == null) {
             throw support.invalid("供应商和报价内容均为必填项");
         }
+        Invitation invitation = supplierSubmission
+                ? supplierInvitation(projectId, supplierDeptId, command.invitationId())
+                : null;
+        Long tenantId = supplierSubmission ? invitation.tenantId() : actor.tenantId();
+        if (tenantId == null) {
+            throw support.forbidden("未识别到报价所属小区");
+        }
+        DraftContext context = draftContext(projectId, tenantId, true);
+        if (supplierSubmission && !context.plan().planId().equals(invitation.planId())) {
+            throw support.invalid("当前邀价不属于项目正在编制的实施方案");
+        }
         String supplierName = workOrderRepository.findSupplierLegalName(supplierDeptId)
                 .orElseThrow(() -> support.notFound("供应商组织不存在 supplierDeptId=" + supplierDeptId));
         requirePositive(command.quoteAmount(), "quoteAmount");
-        Invitation invitation = resolveInvitation(context, actor, supplierDeptId, command.invitationId(), supplierSubmission);
+        if (!supplierSubmission) {
+            invitation = resolvePropertyInvitation(context, supplierDeptId, command.invitationId());
+        }
         Attachment attachment = projectRepository.findAttachment(
-                        command.attachmentId(), projectId, actor.tenantId())
+                        command.attachmentId(), projectId, tenantId)
                 .orElseThrow(() -> support.notFound("报价原件不存在或不属于当前项目"));
         if (supplierSubmission && !actor.accountId().equals(attachment.uploadedByAccountId())) {
             throw support.forbidden("供应商只能提交本人上传的报价原件");
@@ -166,13 +178,13 @@ public class RepairProjectSourcingService {
                 : propertyConfirmationStatus(command.confirmationStatus());
         String originalSource = supplierSubmission ? null : requireText(command.originalSource(), "原始报价来源");
         Quote previous = sourcingRepository.findLatestSupplierQuote(
-                projectId, context.plan().planId(), actor.tenantId(), supplierDeptId).orElse(null);
+                projectId, context.plan().planId(), tenantId, supplierDeptId).orElse(null);
         int revisionNo = previous == null ? 1 : previous.revisionNo() + 1;
         if (previous != null && previous.quoteStatus() != RepairSupplierQuoteStatus.SUPERSEDED) {
             sourcingRepository.supersedeQuote(previous.quoteId(), null);
         }
         Quote quote = sourcingRepository.insertQuote(new Quote(
-                null, projectId, context.plan().planId(), actor.tenantId(), supplierDeptId, supplierName,
+                null, projectId, context.plan().planId(), tenantId, supplierDeptId, supplierName,
                 command.quoteAmount().setScale(2, RoundingMode.HALF_UP), trim(command.quoteSummary()),
                 attachment.attachmentId(), attachment.sha256(), actor.userId(), actor.roleKey(),
                 supplierSubmission ? RepairQuoteSubmissionSource.SUPPLIER_ONLINE : RepairQuoteSubmissionSource.PROPERTY_ENTRY,
@@ -182,7 +194,7 @@ public class RepairProjectSourcingService {
             sourcingRepository.supersedeQuote(previous.quoteId(), quote.quoteId());
         }
         if (invitation != null) {
-            sourcingRepository.markInvitationSubmitted(invitation.invitationId(), actor.tenantId());
+            sourcingRepository.markInvitationSubmitted(invitation.invitationId(), tenantId);
         }
         support.event(context.projectContext(), actor, "PROJECT_SUPPLIER_QUOTE_SUBMITTED", Map.of(
                 "planId", context.plan().planId(), "quoteId", quote.quoteId(),
@@ -242,68 +254,78 @@ public class RepairProjectSourcingService {
 
     @Transactional(readOnly = true)
     public List<SupplierOpportunity> listSupplierOpportunities() {
-        UserContext actor = support.requireSysActor(SUPPLIER_ROLES, "仅施工单位账号可查看维修工程邀价");
+        UserContext actor = support.requireGlobalSysActor(SUPPLIER_ROLES, "仅施工单位账号可查看维修工程邀价");
         if (actor.deptId() == null) {
             throw support.forbidden("当前施工单位账号未绑定企业组织");
         }
-        return sourcingRepository.listSupplierInvitations(actor.tenantId(), actor.deptId()).stream()
+        return sourcingRepository.listSupplierInvitations(actor.deptId()).stream()
                 .map(invitation -> supplierOpportunity(actor, invitation))
                 .toList();
     }
 
     private SupplierOpportunity supplierOpportunity(UserContext actor, Invitation invitation) {
-        RepairProject project = projectRepository.findProject(invitation.projectId(), actor.tenantId())
+        Long tenantId = invitation.tenantId();
+        RepairProject project = projectRepository.findProject(invitation.projectId(), tenantId)
                 .orElseThrow(() -> support.notFound("维修工程项目不存在"));
-        PlanVersion plan = projectRepository.listPlans(project.projectId(), actor.tenantId()).stream()
+        PlanVersion plan = projectRepository.listPlans(project.projectId(), tenantId).stream()
                 .filter(candidate -> candidate.planId().equals(invitation.planId()))
                 .findFirst()
                 .orElseThrow(() -> support.notFound("维修工程实施方案不存在"));
-        List<SupplierItem> items = projectRepository.listItems(plan.planId(), actor.tenantId()).stream()
+        List<SupplierItem> items = projectRepository.listItems(plan.planId(), tenantId).stream()
                 .map(item -> new SupplierItem(
                         item.itemId(), item.itemNo(), item.locationText(), item.workContent(),
                         item.quantity(), item.unit()))
                 .toList();
         Quote latestQuote = sourcingRepository.findLatestSupplierQuote(
-                project.projectId(), plan.planId(), actor.tenantId(), actor.deptId()).orElse(null);
+                project.projectId(), plan.planId(), tenantId, actor.deptId()).orElse(null);
         return new SupplierOpportunity(
                 project.projectId(), project.projectNo(), project.projectName(), plan.planId(),
-                narrativeImageService.resolveForPlan(plan.planId(), actor.tenantId(), plan.planDescription()),
+                narrativeImageService.resolveForPlan(plan.planId(), tenantId, plan.planDescription()),
                 plan.constructionManagementRequirements(), plan.safetyRequirements(),
                 plan.plannedStartDate(), plan.plannedCompletionDate(), plan.warrantyDays(),
                 items, invitation, latestQuote);
     }
 
-    private Invitation resolveInvitation(
+    private Invitation resolvePropertyInvitation(
             DraftContext context,
-            UserContext actor,
             Long supplierDeptId,
-            Long invitationId,
-            boolean supplierSubmission) {
+            Long invitationId) {
         if (invitationId != null) {
             Invitation invitation = sourcingRepository.findInvitation(
                             invitationId, context.project().projectId(), context.plan().planId(),
-                            actor.tenantId(), supplierDeptId)
+                            context.project().tenantId(), supplierDeptId)
                     .orElseThrow(() -> support.notFound("维修工程邀价不存在"));
-            if (invitation.status() != InvitationStatus.PENDING) {
-                throw support.invalid("当前邀价已响应或不可用");
-            }
-            if (invitation.deadline() != null && !invitation.deadline().isAfter(LocalDateTime.now())) {
-                throw support.invalid("当前邀价已经超过报价截止时间");
-            }
-            return invitation;
-        }
-        if (supplierSubmission) {
-            throw support.invalid("供应商在线报价必须关联有效邀价");
+            return requireUsableInvitation(invitation);
         }
         if (context.plan().supplierSelectionMethod() == RepairSupplierSelectionMethod.COMPETITIVE_QUOTATION) {
             return sourcingRepository.listInvitations(
-                            context.project().projectId(), context.plan().planId(), actor.tenantId()).stream()
+                            context.project().projectId(), context.plan().planId(), context.project().tenantId()).stream()
                     .filter(candidate -> candidate.supplierDeptId().equals(supplierDeptId))
                     .filter(candidate -> candidate.status() == InvitationStatus.PENDING)
                     .findFirst()
                     .orElseThrow(() -> support.invalid("竞争性询价只能录入已受邀供应商的报价"));
         }
         return null;
+    }
+
+    private Invitation supplierInvitation(Long projectId, Long supplierDeptId, Long invitationId) {
+        if (invitationId == null) {
+            throw support.invalid("供应商在线报价必须关联有效邀价");
+        }
+        Invitation invitation = sourcingRepository.findSupplierInvitation(
+                        invitationId, projectId, supplierDeptId)
+                .orElseThrow(() -> support.notFound("维修工程邀价不存在"));
+        return requireUsableInvitation(invitation);
+    }
+
+    private Invitation requireUsableInvitation(Invitation invitation) {
+        if (invitation.status() != InvitationStatus.PENDING) {
+            throw support.invalid("当前邀价已响应或不可用");
+        }
+        if (invitation.deadline() != null && !invitation.deadline().isAfter(LocalDateTime.now())) {
+            throw support.invalid("当前邀价已经超过报价截止时间");
+        }
+        return invitation;
     }
 
     private Details details(DraftContext context) {

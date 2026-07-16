@@ -41,6 +41,19 @@ class RepairProjectApplicationSupport {
         return actor;
     }
 
+    /**
+     * 供应商组织可同时服务多个小区，其登录上下文不携带单一 tenant_id。
+     * 具体租户必须由邀价或合同等业务凭证反查，不能由前端选择或全局默认值补齐。
+     */
+    UserContext requireGlobalSysActor(Set<String> roles, String message) {
+        UserContext actor = userContextHolder.current();
+        if (actor == null || actor.accountId() == null || !actor.isSysUser()
+                || actor.userId() == null || !roles.contains(actor.roleKey())) {
+            throw forbidden(message);
+        }
+        return actor;
+    }
+
     UserContext requireOwnerActor() {
         UserContext actor = requireActor();
         if (!actor.isCUser() || actor.uid() == null) {
