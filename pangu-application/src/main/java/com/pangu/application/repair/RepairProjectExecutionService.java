@@ -13,10 +13,10 @@ import com.pangu.application.repair.command.RepairProjectExecutionCommands.Verif
 import com.pangu.application.repair.command.RepairProjectExecutionCommands.VerifySettlement;
 import com.pangu.domain.context.UserContext;
 import com.pangu.domain.model.repair.RepairProject;
-import com.pangu.domain.model.repair.RepairProject.AllocationRoom;
 import com.pangu.domain.model.repair.RepairProject.Attachment;
 import com.pangu.domain.model.repair.RepairProject.EvidenceRequirement;
 import com.pangu.domain.model.repair.RepairProject.EvidenceStage;
+import com.pangu.domain.model.repair.RepairProject.PlanAffectedOwner;
 import com.pangu.domain.model.repair.RepairProject.Status;
 import com.pangu.domain.model.repair.RepairProjectExecution.AcceptancePolicy;
 import com.pangu.domain.model.repair.RepairProjectExecution.Contract;
@@ -375,10 +375,10 @@ public class RepairProjectExecutionService {
     }
 
     private void openAcceptance(Context context, Settlement settlement, UserContext actor) {
-        List<AllocationRoom> allocation = projectRepository.listAllocationRooms(
+        List<PlanAffectedOwner> affectedOwners = projectRepository.listPlanAffectedOwners(
                 context.plan().planId(), context.project().tenantId());
         int affectedOwnerCount = context.project().workflowType() == RepairWorkflowType.BUILDING_REPAIR
-                ? Math.toIntExact(allocation.stream().map(AllocationRoom::ownerUid).distinct().count()) : 0;
+                ? Math.toIntExact(affectedOwners.stream().map(PlanAffectedOwner::ownerUid).distinct().count()) : 0;
         int minimumParticipants = context.project().workflowType() == RepairWorkflowType.BUILDING_REPAIR
                 ? context.plan().minimumAffectedOwnerAcceptors() : 0;
         int minimumApprovals = context.project().workflowType() == RepairWorkflowType.BUILDING_REPAIR
@@ -399,8 +399,7 @@ public class RepairProjectExecutionService {
                 minimumApprovals, actor.userId());
         if (context.project().workflowType() == RepairWorkflowType.BUILDING_REPAIR) {
             executionRepository.snapshotAcceptanceAffectedOwners(
-                    policy.policyId(), context.plan().planId(), context.project().tenantId(),
-                    context.plan().affectedOwnerScopeDescription());
+                    policy.policyId(), context.plan().planId(), context.project().tenantId());
         }
         executionRepository.startAcceptance(
                 context.project().projectId(), context.project().tenantId(), policy.policyId(),

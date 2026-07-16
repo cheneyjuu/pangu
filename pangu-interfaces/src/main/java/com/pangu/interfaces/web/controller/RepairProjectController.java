@@ -1,4 +1,4 @@
-// 关联业务：暴露维修工程项目台账、实施方案版本、项目附件和方案锁定后台接口。
+// 关联业务：暴露维修工程项目台账、实施方案版本、受影响业主预览、项目附件和方案锁定后台接口。
 package com.pangu.interfaces.web.controller;
 
 import com.pangu.application.repair.RepairProjectAttachmentService;
@@ -65,6 +65,15 @@ public class RepairProjectController extends BaseController {
             @RequestParam(value = "buildingId", required = false) Long buildingId,
             @RequestParam(value = "unitName", required = false) String unitName) {
         return success(projectService.previewAllocation(scopeType, buildingId, unitName));
+    }
+
+    @GetMapping("/affected-owner-preview")
+    @PreAuthorize("hasAuthority('repair:workorder:manage')")
+    public Result<RepairProject.AffectedOwnerPreview> affectedOwnerPreview(
+            @RequestParam("scopeType") RepairProject.ScopeType scopeType,
+            @RequestParam("buildingId") Long buildingId,
+            @RequestParam(value = "unitName", required = false) String unitName) {
+        return success(projectService.previewAffectedOwners(scopeType, buildingId, unitName));
     }
 
     @PostMapping(value = "/narrative-images", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)

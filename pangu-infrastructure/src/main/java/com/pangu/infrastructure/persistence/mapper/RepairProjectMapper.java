@@ -1,7 +1,9 @@
-// 关联业务：读写维修工程项目、不可变实施方案、工程项、费用分摊快照和项目附件。
+// 关联业务：读写维修工程项目、不可变实施方案、工程项、费用分摊及受影响业主快照和项目附件。
 package com.pangu.infrastructure.persistence.mapper;
 
 import com.pangu.infrastructure.persistence.entity.RepairPlanAllocationRoomRow;
+import com.pangu.infrastructure.persistence.entity.RepairEligibleAffectedOwnerRow;
+import com.pangu.infrastructure.persistence.entity.RepairPlanAffectedOwnerRow;
 import com.pangu.infrastructure.persistence.entity.RepairAllocationBasisRow;
 import com.pangu.infrastructure.persistence.entity.RepairPlanAttachmentRow;
 import com.pangu.infrastructure.persistence.entity.RepairPlanVersionRow;
@@ -66,6 +68,17 @@ public interface RepairProjectMapper {
 
     List<RepairPlanAllocationRoomRow> listAllocationRooms(@Param("planId") Long planId,
                                                           @Param("tenantId") Long tenantId);
+
+    List<RepairEligibleAffectedOwnerRow> listEligibleAffectedOwners(
+            @Param("tenantId") Long tenantId,
+            @Param("scopeType") String scopeType,
+            @Param("buildingId") Long buildingId,
+            @Param("unitName") String unitName);
+
+    int insertPlanAffectedOwner(RepairPlanAffectedOwnerRow row);
+
+    List<RepairPlanAffectedOwnerRow> listPlanAffectedOwners(@Param("planId") Long planId,
+                                                            @Param("tenantId") Long tenantId);
 
     int insertAttachment(RepairProjectAttachmentRow row);
 

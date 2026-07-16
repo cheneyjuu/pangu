@@ -1,4 +1,4 @@
-// 关联业务：接收维修工程结构化实施方案草稿、工程项、付款节点与附件用途引用。
+// 关联业务：接收维修工程结构化实施方案草稿、受影响业主确认、工程项、付款节点与附件用途引用。
 package com.pangu.application.repair.command;
 
 import com.pangu.domain.model.repair.RepairProject.AffectedOwnerPassRule;
@@ -21,7 +21,8 @@ public record RepairPlanDraftCommand(
         List<EvidenceRequirement> evidenceRequirements,
         String safetyRequirements,
         String acceptanceMethod,
-        String affectedOwnerScopeDescription,
+        List<AffectedOwnerDraft> affectedOwners,
+        String affectedOwnerAdjustmentReason,
         Integer minimumAffectedOwnerAcceptors,
         AffectedOwnerPassRule affectedOwnerPassRule,
         BigDecimal affectedOwnerApprovalRatio,
@@ -36,9 +37,17 @@ public record RepairPlanDraftCommand(
 ) {
     public RepairPlanDraftCommand {
         evidenceRequirements = evidenceRequirements == null ? List.of() : List.copyOf(evidenceRequirements);
+        affectedOwners = affectedOwners == null ? List.of() : List.copyOf(affectedOwners);
         paymentMilestones = paymentMilestones == null ? List.of() : List.copyOf(paymentMilestones);
         items = items == null ? List.of() : List.copyOf(items);
         attachments = attachments == null ? List.of() : List.copyOf(attachments);
+    }
+
+    /** 管理端只确认房屋与受影响原因，业主身份由后端产权名册解析。 */
+    public record AffectedOwnerDraft(
+            Long roomId,
+            String affectedReason
+    ) {
     }
 
     public record ItemDraft(

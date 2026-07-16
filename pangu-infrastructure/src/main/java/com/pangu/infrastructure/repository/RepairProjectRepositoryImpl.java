@@ -1,4 +1,4 @@
-// 关联业务：实现维修工程项目、实施方案版本、工程项、费用分摊快照与项目附件的数据访问。
+// 关联业务：实现维修工程项目、实施方案版本、工程项、费用分摊及受影响业主快照与项目附件的数据访问。
 package com.pangu.infrastructure.repository;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -9,9 +9,11 @@ import com.pangu.domain.model.repair.RepairProject.AllocationRoom;
 import com.pangu.domain.model.repair.RepairProject.AllocationBasis;
 import com.pangu.domain.model.repair.RepairProject.Attachment;
 import com.pangu.domain.model.repair.RepairProject.EvidenceRequirement;
+import com.pangu.domain.model.repair.RepairProject.EligibleAffectedOwner;
 import com.pangu.domain.model.repair.RepairProject.Item;
 import com.pangu.domain.model.repair.RepairProject.PaymentMilestone;
 import com.pangu.domain.model.repair.RepairProject.PlanAttachment;
+import com.pangu.domain.model.repair.RepairProject.PlanAffectedOwner;
 import com.pangu.domain.model.repair.RepairProject.PlanVersion;
 import com.pangu.domain.model.repair.RepairProject.Status;
 import com.pangu.domain.model.repair.RepairSupplierSelectionMethod;
@@ -19,6 +21,8 @@ import com.pangu.domain.model.repair.RepairWorkflowType;
 import com.pangu.domain.repository.RepairProjectRepository;
 import com.pangu.infrastructure.persistence.entity.RepairPlanAllocationRoomRow;
 import com.pangu.infrastructure.persistence.entity.RepairAllocationBasisRow;
+import com.pangu.infrastructure.persistence.entity.RepairEligibleAffectedOwnerRow;
+import com.pangu.infrastructure.persistence.entity.RepairPlanAffectedOwnerRow;
 import com.pangu.infrastructure.persistence.entity.RepairPlanAttachmentRow;
 import com.pangu.infrastructure.persistence.entity.RepairPlanVersionRow;
 import com.pangu.infrastructure.persistence.entity.RepairProjectAttachmentRow;
@@ -147,6 +151,28 @@ public class RepairProjectRepositoryImpl implements RepairProjectRepository {
     @Override
     public List<AllocationRoom> listAllocationRooms(Long planId, Long tenantId) {
         return mapper.listAllocationRooms(planId, tenantId).stream().map(this::toDomain).toList();
+    }
+
+    @Override
+    public List<EligibleAffectedOwner> listEligibleAffectedOwners(
+            Long tenantId, RepairProject.ScopeType scopeType, Long buildingId, String unitName) {
+        return mapper.listEligibleAffectedOwners(
+                        tenantId, scopeType.name(), buildingId, unitName).stream()
+                .map(this::toDomain)
+                .toList();
+    }
+
+    @Override
+    public PlanAffectedOwner insertPlanAffectedOwner(PlanAffectedOwner affectedOwner) {
+        RepairPlanAffectedOwnerRow row = toRow(affectedOwner);
+        mapper.insertPlanAffectedOwner(row);
+        row.setCreateTime(affectedOwner.createTime());
+        return toDomain(row);
+    }
+
+    @Override
+    public List<PlanAffectedOwner> listPlanAffectedOwners(Long planId, Long tenantId) {
+        return mapper.listPlanAffectedOwners(planId, tenantId).stream().map(this::toDomain).toList();
     }
 
     @Override
@@ -330,6 +356,37 @@ public class RepairProjectRepositoryImpl implements RepairProjectRepository {
     private AllocationBasis toDomain(RepairAllocationBasisRow row) {
         return new AllocationBasis(
                 row.getScopeLabel(), row.getRoomCount(), row.getOwnerCount(), row.getTotalBuildArea());
+    }
+
+    private EligibleAffectedOwner toDomain(RepairEligibleAffectedOwnerRow row) {
+        return new EligibleAffectedOwner(
+                row.getRoomId(), row.getBuildingId(), row.getBuildingName(), row.getUnitName(),
+                row.getRoomName(), row.getOwnerUid());
+    }
+
+    private PlanAffectedOwner toDomain(RepairPlanAffectedOwnerRow row) {
+        return new PlanAffectedOwner(
+                row.getPlanAffectedOwnerId(), row.getPlanId(), row.getTenantId(), row.getRoomId(),
+                row.getBuildingId(), row.getBuildingName(), row.getUnitName(), row.getRoomName(),
+                row.getOwnerUid(), row.getAffectedReason(),
+                RepairProject.AffectedOwnerSourceType.valueOf(row.getSourceType()), row.getCreateTime());
+    }
+
+    private RepairPlanAffectedOwnerRow toRow(PlanAffectedOwner affectedOwner) {
+        RepairPlanAffectedOwnerRow row = new RepairPlanAffectedOwnerRow();
+        row.setPlanAffectedOwnerId(affectedOwner.planAffectedOwnerId());
+        row.setPlanId(affectedOwner.planId());
+        row.setTenantId(affectedOwner.tenantId());
+        row.setRoomId(affectedOwner.roomId());
+        row.setBuildingId(affectedOwner.buildingId());
+        row.setBuildingName(affectedOwner.buildingName());
+        row.setUnitName(affectedOwner.unitName());
+        row.setRoomName(affectedOwner.roomName());
+        row.setOwnerUid(affectedOwner.ownerUid());
+        row.setAffectedReason(affectedOwner.affectedReason());
+        row.setSourceType(affectedOwner.sourceType().name());
+        row.setCreateTime(affectedOwner.createTime());
+        return row;
     }
 
     private Attachment toDomain(RepairProjectAttachmentRow row) {

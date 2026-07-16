@@ -1,4 +1,4 @@
-// 关联业务：持久化维修工程项目、实施方案版本、工程项、费用分摊快照与项目附件。
+// 关联业务：持久化维修工程项目、实施方案版本、工程项、费用分摊及受影响业主快照与项目附件。
 package com.pangu.domain.repository;
 
 import com.pangu.domain.model.repair.RepairProject;
@@ -6,7 +6,9 @@ import com.pangu.domain.model.repair.RepairProject.AllocationRoom;
 import com.pangu.domain.model.repair.RepairProject.AllocationBasis;
 import com.pangu.domain.model.repair.RepairProject.Attachment;
 import com.pangu.domain.model.repair.RepairProject.Item;
+import com.pangu.domain.model.repair.RepairProject.EligibleAffectedOwner;
 import com.pangu.domain.model.repair.RepairProject.PlanAttachment;
+import com.pangu.domain.model.repair.RepairProject.PlanAffectedOwner;
 import com.pangu.domain.model.repair.RepairProject.PlanVersion;
 import com.pangu.domain.model.repair.RepairProject.Status;
 
@@ -49,6 +51,13 @@ public interface RepairProjectRepository {
     List<Item> listItems(Long planId, Long tenantId);
 
     List<AllocationRoom> listAllocationRooms(Long planId, Long tenantId);
+
+    List<EligibleAffectedOwner> listEligibleAffectedOwners(
+            Long tenantId, RepairProject.ScopeType scopeType, Long buildingId, String unitName);
+
+    PlanAffectedOwner insertPlanAffectedOwner(PlanAffectedOwner affectedOwner);
+
+    List<PlanAffectedOwner> listPlanAffectedOwners(Long planId, Long tenantId);
 
     List<Attachment> listAttachments(Long projectId, Long tenantId);
 

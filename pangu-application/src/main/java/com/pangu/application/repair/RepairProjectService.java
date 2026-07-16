@@ -1,4 +1,4 @@
-// 关联业务：编排维修工程项目创建、实施方案版本、费用分摊快照、附件引用与方案锁定。
+// 关联业务：编排维修工程项目创建、实施方案版本、费用分摊与受影响业主快照、附件引用及方案锁定。
 package com.pangu.application.repair;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -15,13 +15,18 @@ import com.pangu.domain.model.repair.RepairProject;
 import com.pangu.domain.model.repair.RepairProject.AllocationBasis;
 import com.pangu.domain.model.repair.RepairProject.AllocationPreview;
 import com.pangu.domain.model.repair.RepairProject.AllocationRoom;
+import com.pangu.domain.model.repair.RepairProject.AffectedOwnerCandidate;
+import com.pangu.domain.model.repair.RepairProject.AffectedOwnerPreview;
+import com.pangu.domain.model.repair.RepairProject.AffectedOwnerSourceType;
 import com.pangu.domain.model.repair.RepairProject.AttachmentPurpose;
 import com.pangu.domain.model.repair.RepairProject.EvidenceRequirement;
 import com.pangu.domain.model.repair.RepairProject.EvidenceStage;
+import com.pangu.domain.model.repair.RepairProject.EligibleAffectedOwner;
 import com.pangu.domain.model.repair.RepairProject.Item;
 import com.pangu.domain.model.repair.RepairProject.PaymentMilestone;
 import com.pangu.domain.model.repair.RepairProject.PaymentMilestoneType;
 import com.pangu.domain.model.repair.RepairProject.PlanAttachment;
+import com.pangu.domain.model.repair.RepairProject.PlanAffectedOwner;
 import com.pangu.domain.model.repair.RepairProject.PlanStatus;
 import com.pangu.domain.model.repair.RepairProject.PlanVersion;
 import com.pangu.domain.model.repair.RepairProject.ScopeType;
@@ -31,6 +36,7 @@ import com.pangu.domain.model.repair.RepairWorkOrder;
 import com.pangu.domain.model.repair.RepairWorkOrderEvent;
 import com.pangu.domain.model.repair.RepairWorkOrderStatus;
 import com.pangu.domain.model.repair.RepairWorkflowType;
+import com.pangu.domain.model.repair.RepairSupplierSelectionMethod;
 import com.pangu.domain.policy.RepairAllocationPolicy;
 import com.pangu.domain.policy.RepairAllocationPolicy.AllocationDecision;
 import com.pangu.domain.policy.RepairAllocationPolicy.AllocationInput;
@@ -199,6 +205,8 @@ public class RepairProjectService {
         }
         List<Item> items = projectRepository.listItems(planId, actor.tenantId());
         List<AllocationRoom> allocation = projectRepository.listAllocationRooms(planId, actor.tenantId());
+        List<PlanAffectedOwner> affectedOwners = projectRepository.listPlanAffectedOwners(
+                planId, actor.tenantId());
         List<PlanAttachment> attachments = projectRepository.listPlanAttachments(planId, actor.tenantId());
         Selection selection = sourcingRepository.findCurrentSelection(projectId, planId, actor.tenantId())
                 .orElseThrow(() -> new RepairWorkOrderApplicationException(
@@ -214,14 +222,19 @@ public class RepairProjectService {
                     INVALID_STATUS, "费用承担房屋快照为空，禁止锁定实施方案");
         }
         if (project.workflowType() == RepairWorkflowType.BUILDING_REPAIR) {
-            long affectedOwnerCount = allocation.stream().map(AllocationRoom::ownerUid).distinct().count();
+            if (affectedOwners.isEmpty()) {
+                throw new RepairWorkOrderApplicationException(
+                        INVALID_STATUS, "受影响业主名单为空，禁止锁定实施方案");
+            }
+            long affectedOwnerCount = affectedOwners.stream().map(PlanAffectedOwner::ownerUid).distinct().count();
             if (plan.minimumAffectedOwnerAcceptors() > affectedOwnerCount) {
                 throw new RepairWorkOrderApplicationException(
                         INVALID_STATUS,
                         "最低有效验收人数不能超过锁定范围内的受影响业主人数");
             }
         }
-        String snapshotHash = snapshotHash(project, plan, items, allocation, attachments, selection);
+        String snapshotHash = snapshotHash(
+                project, plan, items, allocation, affectedOwners, attachments, selection);
         if (projectRepository.lockPlan(planId, projectId, actor.tenantId(), snapshotHash, actor.userId()) != 1) {
             throw new RepairWorkOrderApplicationException(INVALID_STATUS, "实施方案锁定失败，请刷新后重试");
         }
@@ -270,6 +283,32 @@ public class RepairProjectService {
         return resolveAllocation(actor.tenantId(), scopeType, buildingId, normalizedUnitName, fundSource);
     }
 
+    @Transactional(readOnly = true)
+    public AffectedOwnerPreview previewAffectedOwners(
+            ScopeType scopeType, Long buildingId, String unitName) {
+        UserContext actor = requireActor();
+        if (scopeType == ScopeType.COMMUNITY) {
+            throw invalid("全小区公共维修由业委会验收，不生成楼栋受影响业主名单");
+        }
+        String normalizedUnitName = normalizeUnitName(scopeType, unitName);
+        route(scopeType, buildingId, normalizedUnitName,
+                RepairProject.FundSource.BUILDING_MAINTENANCE_FUND,
+                RepairProject.GovernancePath.BUILDING_REPAIR_DECISION);
+        validateBuilding(actor.tenantId(), scopeType, buildingId);
+        AllocationPreview allocation = resolveAllocation(
+                actor.tenantId(), scopeType, buildingId, normalizedUnitName,
+                RepairProject.FundSource.BUILDING_MAINTENANCE_FUND);
+        List<EligibleAffectedOwner> eligible = projectRepository.listEligibleAffectedOwners(
+                actor.tenantId(), scopeType, buildingId, normalizedUnitName);
+        String reason = defaultAffectedReason(allocation.scopeLabel());
+        return new AffectedOwnerPreview(
+                allocation.scopeLabel(),
+                eligible.stream().map(EligibleAffectedOwner::ownerUid).distinct().count(),
+                eligible.stream().map(candidate -> new AffectedOwnerCandidate(
+                        candidate.roomId(), candidate.buildingId(), candidate.buildingName(),
+                        candidate.unitName(), candidate.roomName(), reason)).toList());
+    }
+
     private PlanVersion insertPlan(
             RepairProject project,
             RepairPlanDraftCommand draft,
@@ -282,17 +321,24 @@ public class RepairProjectService {
         // 先清洗再持久化和计算快照，保证管理端预览、业主端披露与锁定哈希使用同一正文。
         PlanNarratives narratives = sanitizeNarratives(draft);
         validateDraft(project, draft);
+        RepairSupplierSelectionMethod supplierSelectionMethod = draft.supplierSelectionMethod() == null
+                ? RepairSupplierSelectionMethod.COMPETITIVE_QUOTATION
+                : draft.supplierSelectionMethod();
+        String supplierSelectionBasis = supplierSelectionBasis(
+                supplierSelectionMethod, draft.supplierSelectionReason());
+        AffectedOwnerSelection affectedOwnerSelection = resolveAffectedOwnerSelection(
+                project, draft, allocation);
         narrativeImageService.assertDraftImagesUsable(narratives.imageIds(), actor);
         PlanVersion plan = projectRepository.insertPlan(new PlanVersion(
                 null, project.projectId(), project.tenantId(), versionNo,
                 narratives.planDescription(),
                 draft.budgetTotal(), project.fundSource(), allocation.allocationRuleType(),
-                allocation.allocationRuleDescription(), draft.supplierSelectionMethod(),
-                requireText(draft.supplierSelectionReason(), "supplierSelectionReason"),
+                allocation.allocationRuleDescription(), supplierSelectionMethod,
+                supplierSelectionBasis,
                 narratives.constructionManagementRequirements(), draft.evidenceRequirements(),
                 narratives.safetyRequirements(),
                 requireText(draft.acceptanceMethod(), "acceptanceMethod"), acceptanceRoles(project.workflowType()),
-                trim(draft.affectedOwnerScopeDescription()), draft.minimumAffectedOwnerAcceptors(),
+                affectedOwnerSelection.scopeDescription(), draft.minimumAffectedOwnerAcceptors(),
                 draft.affectedOwnerPassRule(), draft.affectedOwnerApprovalRatio(), draft.settlementMethod(),
                 draft.plannedStartDate(), draft.plannedCompletionDate(), draft.warrantyDays(),
                 project.governancePath(), draft.priceReviewRequired(), draft.paymentMilestones(),
@@ -304,6 +350,23 @@ public class RepairProjectService {
                 plan.planId(), project.tenantId(), project.scopeType(), project.buildingId(), project.unitName());
         if (allocationRooms.isEmpty()) {
             throw invalid("当前维修范围没有已核验的费用承担房屋，不能形成实施方案");
+        }
+        for (PlanAffectedOwner affectedOwner : affectedOwnerSelection.affectedOwners()) {
+            projectRepository.insertPlanAffectedOwner(new PlanAffectedOwner(
+                    null, plan.planId(), project.tenantId(), affectedOwner.roomId(),
+                    affectedOwner.buildingId(), affectedOwner.buildingName(), affectedOwner.unitName(),
+                    affectedOwner.roomName(), affectedOwner.ownerUid(), affectedOwner.affectedReason(),
+                    affectedOwner.sourceType(), null));
+        }
+        if (!affectedOwnerSelection.affectedOwners().isEmpty()) {
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("planId", plan.planId());
+            payload.put("affectedOwnerCount", affectedOwnerSelection.ownerCount());
+            payload.put("sourceType", affectedOwnerSelection.sourceType());
+            if (affectedOwnerSelection.adjustmentReason() != null) {
+                payload.put("adjustmentReason", affectedOwnerSelection.adjustmentReason());
+            }
+            event(project, actor, "AFFECTED_OWNER_SCOPE_LOCKED", payload);
         }
         linkInitialAttachments(project, plan, draft.attachments());
         return plan;
@@ -368,10 +431,9 @@ public class RepairProjectService {
 
     private void validateDraft(RepairProject project, RepairPlanDraftCommand draft) {
         requirePositive(draft.budgetTotal(), "budgetTotal");
-        if (draft.supplierSelectionMethod() == null || draft.settlementMethod() == null) {
-            throw invalid("supplierSelectionMethod、settlementMethod 均为必填项");
+        if (draft.settlementMethod() == null) {
+            throw invalid("settlementMethod 必填");
         }
-        requireText(draft.supplierSelectionReason(), "supplierSelectionReason");
         requireText(draft.acceptanceMethod(), "acceptanceMethod");
         if (draft.plannedStartDate() == null || draft.plannedCompletionDate() == null
                 || draft.plannedCompletionDate().isBefore(draft.plannedStartDate())) {
@@ -464,7 +526,6 @@ public class RepairProjectService {
 
     private void validateAcceptanceRule(RepairWorkflowType workflowType, RepairPlanDraftCommand draft) {
         if (workflowType == RepairWorkflowType.BUILDING_REPAIR) {
-            requireText(draft.affectedOwnerScopeDescription(), "affectedOwnerScopeDescription");
             if (draft.minimumAffectedOwnerAcceptors() == null || draft.minimumAffectedOwnerAcceptors() <= 0) {
                 throw invalid("楼栋维修必须锁定受影响业主最低有效验收人数");
             }
@@ -478,12 +539,96 @@ public class RepairProjectService {
             }
             return;
         }
-        if (trim(draft.affectedOwnerScopeDescription()) != null
+        if (!draft.affectedOwners().isEmpty()
+                || trim(draft.affectedOwnerAdjustmentReason()) != null
                 || draft.minimumAffectedOwnerAcceptors() != null
                 || draft.affectedOwnerPassRule() != null
                 || draft.affectedOwnerApprovalRatio() != null) {
             throw invalid("全小区公共维修由业委会验收，不能配置楼栋受影响业主验收规则");
         }
+    }
+
+    private String supplierSelectionBasis(
+            RepairSupplierSelectionMethod method, String submittedBasis) {
+        if (method == RepairSupplierSelectionMethod.COMPETITIVE_QUOTATION) {
+            return null;
+        }
+        return requireText(submittedBasis, "非竞争性供应商遴选方式依据");
+    }
+
+    /**
+     * 费用承担范围和受影响业主名单是两个事实：前者依法确定分摊，后者用于楼栋验收。
+     * 系统先按项目范围推荐，物业如调整名单必须说明原因并保留结构化快照。
+     */
+    private AffectedOwnerSelection resolveAffectedOwnerSelection(
+            RepairProject project, RepairPlanDraftCommand draft, AllocationPreview allocation) {
+        if (project.workflowType() != RepairWorkflowType.BUILDING_REPAIR) {
+            return new AffectedOwnerSelection(List.of(), null, 0, null, null);
+        }
+        List<EligibleAffectedOwner> eligible = projectRepository.listEligibleAffectedOwners(
+                project.tenantId(), project.scopeType(), project.buildingId(), project.unitName());
+        if (eligible.isEmpty()) {
+            throw invalid("当前维修范围没有已核验的受影响业主候选房屋");
+        }
+        Map<Long, EligibleAffectedOwner> eligibleByRoom = new LinkedHashMap<>();
+        eligible.forEach(candidate -> eligibleByRoom.put(candidate.roomId(), candidate));
+
+        Map<Long, RepairPlanDraftCommand.AffectedOwnerDraft> submittedByRoom = new LinkedHashMap<>();
+        for (RepairPlanDraftCommand.AffectedOwnerDraft submitted : draft.affectedOwners()) {
+            if (submitted == null || submitted.roomId() == null) {
+                throw invalid("affectedOwners.roomId 必填");
+            }
+            if (!eligibleByRoom.containsKey(submitted.roomId())) {
+                throw invalid("受影响业主房屋不在当前维修范围 roomId=" + submitted.roomId());
+            }
+            if (submittedByRoom.put(submitted.roomId(), submitted) != null) {
+                throw invalid("受影响业主房屋重复 roomId=" + submitted.roomId());
+            }
+        }
+
+        boolean useSystemRecommendation = submittedByRoom.isEmpty();
+        Set<Long> selectedRoomIds = useSystemRecommendation
+                ? new LinkedHashSet<>(eligibleByRoom.keySet())
+                : new LinkedHashSet<>(submittedByRoom.keySet());
+        if (selectedRoomIds.isEmpty()) {
+            throw invalid("楼栋维修至少需要锁定一名受影响业主");
+        }
+        String defaultReason = defaultAffectedReason(allocation.scopeLabel());
+        boolean reasonAdjusted = submittedByRoom.values().stream()
+                .map(RepairPlanDraftCommand.AffectedOwnerDraft::affectedReason)
+                .map(this::trim)
+                .filter(Objects::nonNull)
+                .anyMatch(reason -> !reason.equals(defaultReason));
+        boolean adjusted = !selectedRoomIds.equals(eligibleByRoom.keySet()) || reasonAdjusted;
+        String adjustmentReason = trim(draft.affectedOwnerAdjustmentReason());
+        if (adjusted && adjustmentReason == null) {
+            throw invalid("调整系统推荐的受影响业主名单时必须填写调整原因");
+        }
+        AffectedOwnerSourceType sourceType = adjusted
+                ? AffectedOwnerSourceType.PROPERTY_ADJUSTED
+                : AffectedOwnerSourceType.SYSTEM_RECOMMENDED;
+        List<PlanAffectedOwner> selected = selectedRoomIds.stream().map(roomId -> {
+            EligibleAffectedOwner candidate = eligibleByRoom.get(roomId);
+            RepairPlanDraftCommand.AffectedOwnerDraft submitted = submittedByRoom.get(roomId);
+            String affectedReason = submitted == null || trim(submitted.affectedReason()) == null
+                    ? defaultReason
+                    : trim(submitted.affectedReason());
+            return new PlanAffectedOwner(
+                    null, null, project.tenantId(), candidate.roomId(), candidate.buildingId(),
+                    candidate.buildingName(), candidate.unitName(), candidate.roomName(), candidate.ownerUid(),
+                    affectedReason, sourceType, null);
+        }).toList();
+        long ownerCount = selected.stream().map(PlanAffectedOwner::ownerUid).distinct().count();
+        if (draft.minimumAffectedOwnerAcceptors() > ownerCount) {
+            throw invalid("最低有效验收人数不能超过已选择的受影响业主人数");
+        }
+        String scopeDescription = allocation.scopeLabel() + " · 已锁定 " + ownerCount + " 名受影响业主";
+        return new AffectedOwnerSelection(
+                selected, scopeDescription, ownerCount, sourceType.name(), adjusted ? adjustmentReason : null);
+    }
+
+    private String defaultAffectedReason(String scopeLabel) {
+        return scopeLabel + "维修范围内受影响，参与楼栋维修验收";
     }
 
     private void validateItemAmounts(
@@ -668,6 +813,7 @@ public class RepairProjectService {
             PlanVersion plan,
             List<Item> items,
             List<AllocationRoom> allocation,
+            List<PlanAffectedOwner> affectedOwners,
             List<PlanAttachment> attachments,
             Selection selection) {
         Map<String, Object> snapshot = new LinkedHashMap<>();
@@ -681,6 +827,8 @@ public class RepairProjectService {
         snapshot.put("plan", immutablePlanSnapshot(plan));
         snapshot.put("items", items.stream().sorted(Comparator.comparing(Item::sortOrder)).toList());
         snapshot.put("allocation", allocation.stream().sorted(Comparator.comparing(AllocationRoom::roomId)).toList());
+        snapshot.put("affectedOwners", affectedOwners.stream()
+                .sorted(Comparator.comparing(PlanAffectedOwner::roomId)).toList());
         snapshot.put("attachments", attachments.stream().sorted(Comparator.comparing(PlanAttachment::sortOrder)).toList());
         snapshot.put("supplierSelection", selection);
         try {
@@ -712,6 +860,7 @@ public class RepairProjectService {
                 plans,
                 currentPlanId == null ? List.of() : projectRepository.listItems(currentPlanId, tenantId),
                 currentPlanId == null ? List.of() : projectRepository.listAllocationRooms(currentPlanId, tenantId),
+                currentPlanId == null ? List.of() : projectRepository.listPlanAffectedOwners(currentPlanId, tenantId),
                 projectRepository.listAttachments(projectId, tenantId),
                 currentPlanId == null ? List.of() : projectRepository.listPlanAttachments(currentPlanId, tenantId));
     }
@@ -825,6 +974,18 @@ public class RepairProjectService {
             Set<Long> imageIds,
             String constructionManagementRequirements,
             String safetyRequirements) {
+    }
+
+    private record AffectedOwnerSelection(
+            List<PlanAffectedOwner> affectedOwners,
+            String scopeDescription,
+            long ownerCount,
+            String sourceType,
+            String adjustmentReason
+    ) {
+        private AffectedOwnerSelection {
+            affectedOwners = affectedOwners == null ? List.of() : List.copyOf(affectedOwners);
+        }
     }
 
     private void requirePositive(BigDecimal value, String field) {

@@ -1,4 +1,4 @@
-// 关联业务：维修工程项目、不可变实施方案、工程项、费用分摊快照与项目附件。
+// 关联业务：维修工程项目、不可变实施方案、工程项、费用分摊及受影响业主快照与项目附件。
 package com.pangu.domain.model.repair;
 
 import java.math.BigDecimal;
@@ -103,6 +103,11 @@ public record RepairProject(
     public enum AffectedOwnerPassRule {
         ALL,
         AT_LEAST_RATIO
+    }
+
+    public enum AffectedOwnerSourceType {
+        SYSTEM_RECOMMENDED,
+        PROPERTY_ADJUSTED
     }
 
     public record EvidenceRequirement(
@@ -241,6 +246,56 @@ public record RepairProject(
     ) {
     }
 
+    /** 后端从已核验产权名册解析出的可选受影响业主房屋，包含持久化所需身份但不直接返回管理端。 */
+    public record EligibleAffectedOwner(
+            Long roomId,
+            Long buildingId,
+            String buildingName,
+            String unitName,
+            String roomName,
+            Long ownerUid
+    ) {
+    }
+
+    /** 管理端可确认或调整的受影响业主候选房屋，不披露业主身份。 */
+    public record AffectedOwnerCandidate(
+            Long roomId,
+            Long buildingId,
+            String buildingName,
+            String unitName,
+            String roomName,
+            String affectedReason
+    ) {
+    }
+
+    /** 项目创建前由系统根据维修范围生成的受影响业主候选名单。 */
+    public record AffectedOwnerPreview(
+            String scopeLabel,
+            long recommendedOwnerCount,
+            List<AffectedOwnerCandidate> candidates
+    ) {
+        public AffectedOwnerPreview {
+            candidates = candidates == null ? List.of() : List.copyOf(candidates);
+        }
+    }
+
+    /** 实施方案内独立于费用分摊范围固化的楼栋维修受影响业主。 */
+    public record PlanAffectedOwner(
+            Long planAffectedOwnerId,
+            Long planId,
+            Long tenantId,
+            Long roomId,
+            Long buildingId,
+            String buildingName,
+            String unitName,
+            String roomName,
+            Long ownerUid,
+            String affectedReason,
+            AffectedOwnerSourceType sourceType,
+            LocalDateTime createTime
+    ) {
+    }
+
     public record Attachment(
             Long attachmentId,
             Long projectId,
@@ -269,6 +324,7 @@ public record RepairProject(
             List<PlanVersion> plans,
             List<Item> currentPlanItems,
             List<AllocationRoom> currentPlanAllocationRooms,
+            List<PlanAffectedOwner> currentPlanAffectedOwners,
             List<Attachment> attachments,
             List<PlanAttachment> currentPlanAttachments
     ) {
@@ -278,6 +334,9 @@ public record RepairProject(
             currentPlanAllocationRooms = currentPlanAllocationRooms == null
                     ? List.of()
                     : List.copyOf(currentPlanAllocationRooms);
+            currentPlanAffectedOwners = currentPlanAffectedOwners == null
+                    ? List.of()
+                    : List.copyOf(currentPlanAffectedOwners);
             attachments = attachments == null ? List.of() : List.copyOf(attachments);
             currentPlanAttachments = currentPlanAttachments == null
                     ? List.of()

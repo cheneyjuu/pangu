@@ -1,4 +1,4 @@
-// 关联业务：校验维修工程结构化实施方案、工程项、施工证据、验收规则和付款节点输入。
+// 关联业务：校验维修工程结构化实施方案、受影响业主确认、施工证据、验收规则和付款节点输入。
 package com.pangu.interfaces.web.controller.dto.repair;
 
 import com.pangu.application.repair.command.RepairPlanDraftCommand;
@@ -26,13 +26,14 @@ import java.util.List;
 public record RepairPlanRequest(
         @NotBlank @Size(max = 16000) String planDescription,
         @NotNull @DecimalMin(value = "0.01") BigDecimal budgetTotal,
-        @NotNull RepairSupplierSelectionMethod supplierSelectionMethod,
-        @NotBlank @Size(max = 1000) String supplierSelectionReason,
+        RepairSupplierSelectionMethod supplierSelectionMethod,
+        @Size(max = 1000) String supplierSelectionReason,
         @NotBlank @Size(max = 8000) String constructionManagementRequirements,
         @NotEmpty List<@Valid EvidenceRequirementRequest> evidenceRequirements,
         @NotBlank @Size(max = 8000) String safetyRequirements,
         @NotBlank @Size(max = 4000) String acceptanceMethod,
-        @Size(max = 1000) String affectedOwnerScopeDescription,
+        List<@Valid AffectedOwnerRequest> affectedOwners,
+        @Size(max = 1000) String affectedOwnerAdjustmentReason,
         @Min(1) Integer minimumAffectedOwnerAcceptors,
         AffectedOwnerPassRule affectedOwnerPassRule,
         @DecimalMin(value = "0.0001") @DecimalMax("1.0000") BigDecimal affectedOwnerApprovalRatio,
@@ -52,7 +53,11 @@ public record RepairPlanRequest(
                 supplierSelectionMethod, supplierSelectionReason,
                 constructionManagementRequirements,
                 evidenceRequirements.stream().map(EvidenceRequirementRequest::toDomain).toList(),
-                safetyRequirements, acceptanceMethod, affectedOwnerScopeDescription,
+                safetyRequirements, acceptanceMethod,
+                affectedOwners == null
+                        ? List.of()
+                        : affectedOwners.stream().map(AffectedOwnerRequest::toCommand).toList(),
+                affectedOwnerAdjustmentReason,
                 minimumAffectedOwnerAcceptors, affectedOwnerPassRule, affectedOwnerApprovalRatio,
                 settlementMethod, plannedStartDate, plannedCompletionDate, warrantyDays,
                 priceReviewRequired,
@@ -61,6 +66,15 @@ public record RepairPlanRequest(
                 attachments == null
                         ? List.of()
                         : attachments.stream().map(AttachmentReferenceRequest::toCommand).toList());
+    }
+
+    public record AffectedOwnerRequest(
+            @NotNull Long roomId,
+            @Size(max = 500) String affectedReason
+    ) {
+        RepairPlanDraftCommand.AffectedOwnerDraft toCommand() {
+            return new RepairPlanDraftCommand.AffectedOwnerDraft(roomId, affectedReason);
+        }
     }
 
     public record EvidenceRequirementRequest(

@@ -218,9 +218,8 @@ public class RepairProjectExecutionRepositoryImpl implements RepairProjectExecut
     }
 
     @Override
-    public void snapshotAcceptanceAffectedOwners(
-            Long policyId, Long planId, Long tenantId, String reason) {
-        mapper.snapshotAcceptanceAffectedOwners(policyId, planId, tenantId, reason);
+    public void snapshotAcceptanceAffectedOwners(Long policyId, Long planId, Long tenantId) {
+        mapper.snapshotAcceptanceAffectedOwners(policyId, planId, tenantId);
     }
 
     @Override

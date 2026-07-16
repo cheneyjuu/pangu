@@ -115,6 +115,10 @@ class RepairProjectFlowTest {
                 created.path("plans").get(0).path("allocationRuleType").asText());
         assertTrue(created.path("plans").get(0).path("allocationRuleDescription").asText()
                 .contains("《上海市商品住宅专项维修资金管理办法》第十六条"));
+        assertTrue(created.path("plans").get(0).path("supplierSelectionReason").isNull());
+        assertTrue(created.path("currentPlanAffectedOwners").size() > 0);
+        assertEquals("SYSTEM_RECOMMENDED",
+                created.path("currentPlanAffectedOwners").get(0).path("sourceType").asText());
         assertEquals("PROJECT_LINKED", jdbcTemplate.queryForObject(
                 "SELECT status FROM t_repair_work_order WHERE work_order_id = ?",
                 String.class, workOrderId));
@@ -325,6 +329,44 @@ class RepairProjectFlowTest {
                         is("《上海市商品住宅专项维修资金管理办法》第十六条")));
     }
 
+    @Test
+    void affectedOwnerPreviewCanBeAdjustedOnlyWithRecordedReason() throws Exception {
+        String previewBody = mockMvc.perform(get("/api/v1/admin/repair-projects/affected-owner-preview")
+                        .header("Authorization", "Bearer " + token)
+                        .queryParam("scopeType", "BUILDING")
+                        .queryParam("buildingId", String.valueOf(buildingId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.scopeLabel").isNotEmpty())
+                .andExpect(jsonPath("$.data.recommendedOwnerCount").isNumber())
+                .andExpect(jsonPath("$.data.candidates[0].roomName").isNotEmpty())
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+        JsonNode candidates = objectMapper.readTree(previewBody).path("data").path("candidates");
+        assertTrue(candidates.size() > 1, "测试楼栋应包含多套已核验产权房屋");
+
+        long workOrderId = createBuildingRepairCase();
+        Map<String, Object> invalid = buildingProjectRequest(workOrderId, "ADJUST");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> invalidPlan = (Map<String, Object>) invalid.get("plan");
+        invalidPlan.put("affectedOwners", List.of(Map.of(
+                "roomId", candidates.get(0).path("roomId").asLong(),
+                "affectedReason", "靠近本次外墙维修作业面")));
+
+        mockMvc.perform(post("/api/v1/admin/repair-projects")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(invalid)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.msg", is("调整系统推荐的受影响业主名单时必须填写调整原因")));
+
+        invalidPlan.put("affectedOwnerAdjustmentReason", "现场勘验确认仅该房屋直接受施工影响");
+        JsonNode created = createProject(invalid);
+        assertEquals(1, created.path("currentPlanAffectedOwners").size());
+        assertEquals("PROPERTY_ADJUSTED",
+                created.path("currentPlanAffectedOwners").get(0).path("sourceType").asText());
+        assertTrue(created.path("plans").get(0).path("affectedOwnerScopeDescription").asText()
+                .contains("已锁定 1 名受影响业主"));
+    }
+
     private JsonNode createProject(Map<String, Object> request) throws Exception {
         String response = mockMvc.perform(post("/api/v1/admin/repair-projects")
                         .header("Authorization", "Bearer " + token)
@@ -385,7 +427,6 @@ class RepairProjectFlowTest {
 
     private Map<String, Object> buildingPlan(long workOrderId, String suffix) {
         Map<String, Object> plan = commonPlan("楼栋外墙渗水原因及维修范围-版本" + suffix);
-        plan.put("affectedOwnerScopeDescription", "本楼栋受渗水维修直接影响的业主");
         plan.put("minimumAffectedOwnerAcceptors", 1);
         plan.put("affectedOwnerPassRule", "ALL");
         plan.put("affectedOwnerApprovalRatio", 1);
@@ -421,7 +462,6 @@ class RepairProjectFlowTest {
         plan.put("planDescription", cause + "；按工程项清单及锁定范围施工");
         plan.put("budgetTotal", 1000);
         plan.put("supplierSelectionMethod", "COMPETITIVE_QUOTATION");
-        plan.put("supplierSelectionReason", "通过询价比较形成实施报价");
         plan.put("constructionManagementRequirements", "物业项目负责人组织现场和工程量管理");
         plan.put("evidenceRequirements", evidenceRequirements());
         plan.put("safetyRequirements", "设置围挡并落实高空和用电安全措施");

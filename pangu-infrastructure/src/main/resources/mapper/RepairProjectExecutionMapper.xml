@@ -277,8 +277,8 @@
         INSERT INTO t_repair_acceptance_affected_owner (
             policy_id, tenant_id, room_id, owner_uid, affected_reason
         )
-        SELECT #{policyId}, #{tenantId}, room_id, owner_uid, #{reason}
-        FROM t_repair_plan_allocation_room
+        SELECT #{policyId}, #{tenantId}, room_id, owner_uid, affected_reason
+        FROM t_repair_plan_affected_owner
         WHERE plan_id = #{planId} AND tenant_id = #{tenantId}
     </insert>
 

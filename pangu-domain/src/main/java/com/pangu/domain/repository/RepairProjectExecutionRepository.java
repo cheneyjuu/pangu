@@ -77,7 +77,7 @@ public interface RepairProjectExecutionRepository {
     AcceptancePolicy insertAcceptancePolicy(
             AcceptancePolicy policy, int minimumApprovals, Long lockedByUserId);
 
-    void snapshotAcceptanceAffectedOwners(Long policyId, Long planId, Long tenantId, String reason);
+    void snapshotAcceptanceAffectedOwners(Long policyId, Long planId, Long tenantId);
 
     AcceptanceRound startAcceptance(
             Long projectId, Long tenantId, Long policyId, Long settlementId, Long submittedByUserId);

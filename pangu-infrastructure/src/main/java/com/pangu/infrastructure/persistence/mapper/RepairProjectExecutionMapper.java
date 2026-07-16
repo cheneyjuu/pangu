@@ -129,8 +129,7 @@ public interface RepairProjectExecutionMapper {
     int snapshotAcceptanceAffectedOwners(
             @Param("policyId") Long policyId,
             @Param("planId") Long planId,
-            @Param("tenantId") Long tenantId,
-            @Param("reason") String reason);
+            @Param("tenantId") Long tenantId);
 
     int insertAcceptanceRound(@Param("row") AcceptanceRoundRow row,
                               @Param("submittedByUserId") Long submittedByUserId);
