@@ -31,6 +31,7 @@ import com.pangu.domain.model.repair.RepairProject.PlanStatus;
 import com.pangu.domain.model.repair.RepairProject.PlanVersion;
 import com.pangu.domain.model.repair.RepairProject.ScopeType;
 import com.pangu.domain.model.repair.RepairProject.Status;
+import com.pangu.domain.model.repair.RepairProjectSourcing.Quote;
 import com.pangu.domain.model.repair.RepairProjectSourcing.Selection;
 import com.pangu.domain.model.repair.RepairWorkOrder;
 import com.pangu.domain.model.repair.RepairWorkOrderEvent;
@@ -211,6 +212,10 @@ public class RepairProjectService {
         Selection selection = sourcingRepository.findCurrentSelection(projectId, planId, actor.tenantId())
                 .orElseThrow(() -> new RepairWorkOrderApplicationException(
                         INVALID_STATUS, "锁定实施方案前必须完成供应商报价、比价和定商"));
+        Quote selectedQuote = sourcingRepository.findQuote(
+                        selection.quoteId(), projectId, planId, actor.tenantId())
+                .orElseThrow(() -> new RepairWorkOrderApplicationException(
+                        INVALID_STATUS, "中选报价不存在，禁止锁定实施方案"));
         if (selection.selectionMethod() != plan.supplierSelectionMethod()) {
             throw new RepairWorkOrderApplicationException(
                     INVALID_STATUS, "中选供应商方式与当前实施方案不一致，请重新定商");
@@ -234,7 +239,7 @@ public class RepairProjectService {
             }
         }
         String snapshotHash = snapshotHash(
-                project, plan, items, allocation, affectedOwners, attachments, selection);
+                project, plan, items, allocation, affectedOwners, attachments, selection, selectedQuote);
         if (projectRepository.lockPlan(planId, projectId, actor.tenantId(), snapshotHash, actor.userId()) != 1) {
             throw new RepairWorkOrderApplicationException(INVALID_STATUS, "实施方案锁定失败，请刷新后重试");
         }
@@ -815,7 +820,8 @@ public class RepairProjectService {
             List<AllocationRoom> allocation,
             List<PlanAffectedOwner> affectedOwners,
             List<PlanAttachment> attachments,
-            Selection selection) {
+            Selection selection,
+            Quote selectedQuote) {
         Map<String, Object> snapshot = new LinkedHashMap<>();
         snapshot.put("projectId", project.projectId());
         snapshot.put("workflowType", project.workflowType());
@@ -831,6 +837,8 @@ public class RepairProjectService {
                 .sorted(Comparator.comparing(PlanAffectedOwner::roomId)).toList());
         snapshot.put("attachments", attachments.stream().sorted(Comparator.comparing(PlanAttachment::sortOrder)).toList());
         snapshot.put("supplierSelection", selection);
+        // 锁定哈希同时绑定中选报价原件摘要和结构化明细，避免后续合同引用另一份报价。
+        snapshot.put("selectedQuote", selectedQuote);
         try {
             byte[] canonical = objectMapper.writeValueAsString(snapshot).getBytes(StandardCharsets.UTF_8);
             return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(canonical));

@@ -1,6 +1,8 @@
 // 关联业务：集中表达维修工程项目邀价、报价修订、报价提交和中选供应商命令。
 package com.pangu.application.repair.command;
 
+import com.pangu.domain.model.repair.RepairProjectSourcing.QuoteLineDraft;
+
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -33,8 +35,15 @@ public final class RepairProjectSourcingCommands {
             String quoteSummary,
             Long attachmentId,
             String confirmationStatus,
-            String originalSource
+            String originalSource,
+            Integer constructionPeriodDays,
+            Integer warrantyDays,
+            boolean originalAmountConfirmed,
+            List<QuoteLineDraft> quoteLines
     ) {
+        public SubmitQuote {
+            quoteLines = quoteLines == null ? List.of() : List.copyOf(quoteLines);
+        }
     }
 
     public record SelectQuote(

@@ -57,10 +57,53 @@ public final class RepairProjectSourcing {
             RepairQuoteSubmissionSource submissionSource,
             RepairQuoteConfirmationStatus confirmationStatus,
             String originalSource,
+            Integer constructionPeriodDays,
+            Integer warrantyDays,
+            boolean originalAmountConfirmed,
             RepairSupplierQuoteStatus quoteStatus,
             Integer revisionNo,
             Long supersededByQuoteId,
-            LocalDateTime createTime
+            LocalDateTime createTime,
+            List<QuoteLine> quoteLines
+    ) {
+        public Quote {
+            quoteLines = quoteLines == null ? List.of() : List.copyOf(quoteLines);
+        }
+    }
+
+    /**
+     * 报价明细绑定锁定工程项，但允许供应商在工程项下拆分材料、人工、运输等构成。
+     * 工程范围仍由 projectItemId 指向的方案工程项决定，报价行不能新增方案外范围。
+     */
+    public record QuoteLine(
+            Long quoteLineId,
+            Long quoteId,
+            Long projectItemId,
+            String projectItemNo,
+            Integer lineNo,
+            String itemName,
+            String specificationModel,
+            String brand,
+            BigDecimal quantity,
+            String unit,
+            BigDecimal taxIncludedUnitPrice,
+            BigDecimal taxRate,
+            BigDecimal taxIncludedAmount,
+            String remark
+    ) {
+    }
+
+    /** 供应商或物业代录时提交的未计价报价行。 */
+    public record QuoteLineDraft(
+            Long projectItemId,
+            String itemName,
+            String specificationModel,
+            String brand,
+            BigDecimal quantity,
+            String unit,
+            BigDecimal taxIncludedUnitPrice,
+            BigDecimal taxRate,
+            String remark
     ) {
     }
 

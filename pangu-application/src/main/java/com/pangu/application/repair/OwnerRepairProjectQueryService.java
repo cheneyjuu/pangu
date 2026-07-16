@@ -110,8 +110,13 @@ public class OwnerRepairProjectQueryService {
         }
         return new OwnerRepairProjectDisclosure.PublishedSupplierSelection(
                 quote.quoteId(), quote.supplierDeptId(), quote.supplierName(), quote.quoteAmount(),
-                quote.quoteSummary(), quote.attachmentId(), selection.selectionMethod(),
-                selection.recommendationReason(), selection.insufficientQuoteReason());
+                quote.quoteSummary(), quote.attachmentId(), quote.constructionPeriodDays(), quote.warrantyDays(),
+                selection.selectionMethod(), selection.recommendationReason(), selection.insufficientQuoteReason(),
+                quote.quoteLines().stream().map(line -> new OwnerRepairProjectDisclosure.PublishedQuoteLine(
+                        line.projectItemId(), line.projectItemNo(), line.lineNo(), line.itemName(),
+                        line.specificationModel(), line.brand(), line.quantity(), line.unit(),
+                        line.taxIncludedUnitPrice(), line.taxRate(), line.taxIncludedAmount(), line.remark()))
+                        .toList());
     }
 
     private OwnerRepairProjectDisclosure.PublishedItem toItem(Item item) {

@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -39,18 +40,27 @@ final class RepairProjectSourcingTestSupport {
         postJson(mockMvc, objectMapper, propertyToken, sourcingPath(projectId, "/invitations"), Map.of(
                 "supplierDeptIds", supplierIds,
                 "deadline", LocalDateTime.now().plusDays(3)));
+        JsonNode projectItems = getJson(
+                mockMvc, objectMapper, propertyToken, "/api/v1/admin/repair-projects/" + projectId)
+                .path("currentPlanItems");
 
         JsonNode selectedQuote = null;
         for (int index = 0; index < supplierIds.size(); index++) {
             long attachmentId = uploadQuote(
                     mockMvc, objectMapper, propertyToken, projectId, index + 1);
-            JsonNode quote = postJson(mockMvc, objectMapper, propertyToken, sourcingPath(projectId, "/quotes"), Map.of(
-                    "supplierDeptId", supplierIds.get(index),
-                    "quoteAmount", budgetAmount + index * 50,
-                    "quoteSummary", "第 " + (index + 1) + " 家供应商纸质报价，物业核验原件后录入",
-                    "attachmentId", attachmentId,
-                    "confirmationStatus", "OFFLINE_EVIDENCE_VERIFIED",
-                    "originalSource", "PAPER"));
+            int quoteAmount = budgetAmount + index * 50;
+            JsonNode quote = postJson(
+                    mockMvc, objectMapper, propertyToken, sourcingPath(projectId, "/quotes"), Map.ofEntries(
+                            Map.entry("supplierDeptId", supplierIds.get(index)),
+                            Map.entry("quoteAmount", quoteAmount),
+                            Map.entry("quoteSummary", "第 " + (index + 1) + " 家供应商纸质报价，物业核验原件后录入"),
+                            Map.entry("attachmentId", attachmentId),
+                            Map.entry("confirmationStatus", "OFFLINE_EVIDENCE_VERIFIED"),
+                            Map.entry("originalSource", "PAPER"),
+                            Map.entry("constructionPeriodDays", 15 + index),
+                            Map.entry("warrantyDays", 365),
+                            Map.entry("originalAmountConfirmed", true),
+                            Map.entry("quoteLines", quoteLines(projectItems, quoteAmount))));
             if (index == 0) {
                 selectedQuote = quote;
             }
@@ -143,6 +153,42 @@ final class RepairProjectSourcingTestSupport {
                 .andExpect(status().is2xxSuccessful())
                 .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
         return objectMapper.readTree(response).path("data");
+    }
+
+    private static JsonNode getJson(
+            MockMvc mockMvc,
+            ObjectMapper objectMapper,
+            String token,
+            String path
+    ) throws Exception {
+        String response = mockMvc.perform(get(path).header("Authorization", bearer(token)))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+        return objectMapper.readTree(response).path("data");
+    }
+
+    private static List<Map<String, Object>> quoteLines(JsonNode projectItems, int quoteAmount) {
+        if (!projectItems.isArray() || projectItems.isEmpty()) {
+            throw new IllegalStateException("维修工程测试数据缺少工程项");
+        }
+        int itemCount = projectItems.size();
+        int baseAmount = quoteAmount / itemCount;
+        List<Map<String, Object>> lines = new ArrayList<>();
+        for (int index = 0; index < itemCount; index++) {
+            JsonNode item = projectItems.get(index);
+            int lineAmount = index == itemCount - 1
+                    ? quoteAmount - baseAmount * (itemCount - 1)
+                    : baseAmount;
+            lines.add(Map.of(
+                    "projectItemId", item.path("itemId").asLong(),
+                    "itemName", item.path("workContent").asText("工程施工"),
+                    "quantity", 1,
+                    "unit", "项",
+                    "taxIncludedUnitPrice", lineAmount,
+                    "taxRate", 9,
+                    "remark", "含材料、人工及相关费用"));
+        }
+        return lines;
     }
 
     private static JsonNode postCreated(

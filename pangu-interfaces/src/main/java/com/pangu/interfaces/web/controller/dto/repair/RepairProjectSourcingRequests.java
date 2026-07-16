@@ -2,10 +2,16 @@
 package com.pangu.interfaces.web.controller.dto.repair;
 
 import com.pangu.application.repair.command.RepairProjectSourcingCommands;
+import com.pangu.domain.model.repair.RepairProjectSourcing.QuoteLineDraft;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.PositiveOrZero;
 import jakarta.validation.constraints.Size;
 
 import java.math.BigDecimal;
@@ -44,12 +50,36 @@ public final class RepairProjectSourcingRequests {
             @Size(max = 4000) String quoteSummary,
             @NotNull Long attachmentId,
             @Size(max = 40) String confirmationStatus,
-            @Size(max = 32) String originalSource
+            @Size(max = 32) String originalSource,
+            @NotNull @Positive Integer constructionPeriodDays,
+            @NotNull @PositiveOrZero Integer warrantyDays,
+            @AssertTrue boolean originalAmountConfirmed,
+            @NotEmpty @Size(max = 200) List<@Valid QuoteLineRequest> quoteLines
     ) {
         public RepairProjectSourcingCommands.SubmitQuote toCommand() {
             return new RepairProjectSourcingCommands.SubmitQuote(
                     supplierDeptId, invitationId, quoteAmount, quoteSummary,
-                    attachmentId, confirmationStatus, originalSource);
+                    attachmentId, confirmationStatus, originalSource,
+                    constructionPeriodDays, warrantyDays, originalAmountConfirmed,
+                    quoteLines.stream().map(QuoteLineRequest::toDraft).toList());
+        }
+    }
+
+    public record QuoteLineRequest(
+            @NotNull Long projectItemId,
+            @NotBlank @Size(max = 200) String itemName,
+            @Size(max = 200) String specificationModel,
+            @Size(max = 120) String brand,
+            @NotNull @DecimalMin(value = "0.001") BigDecimal quantity,
+            @NotBlank @Size(max = 40) String unit,
+            @NotNull @DecimalMin(value = "0.00") BigDecimal taxIncludedUnitPrice,
+            @NotNull @DecimalMin(value = "0.00") @DecimalMax(value = "100.00") BigDecimal taxRate,
+            @Size(max = 500) String remark
+    ) {
+        public QuoteLineDraft toDraft() {
+            return new QuoteLineDraft(
+                    projectItemId, itemName, specificationModel, brand, quantity,
+                    unit, taxIncludedUnitPrice, taxRate, remark);
         }
     }
 

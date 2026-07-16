@@ -23,6 +23,8 @@ import com.pangu.domain.model.repair.RepairQuoteConfirmationStatus;
 import com.pangu.domain.model.repair.RepairQuoteSubmissionSource;
 import com.pangu.domain.model.repair.RepairSupplierQuoteStatus;
 import com.pangu.domain.model.repair.RepairSupplierSelectionMethod;
+import com.pangu.domain.policy.RepairProjectQuotePricingPolicy;
+import com.pangu.domain.policy.RepairProjectQuotePricingPolicy.ScopeItem;
 import com.pangu.domain.policy.RepairSupplierSelectionPolicy;
 import com.pangu.domain.policy.RepairSupplierSelectionPolicy.Input;
 import com.pangu.domain.repository.RepairProjectRepository;
@@ -33,7 +35,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.LinkedHashSet;
@@ -55,6 +56,7 @@ public class RepairProjectSourcingService {
     private final RepairProjectRepository projectRepository;
     private final RepairProjectSourcingRepository sourcingRepository;
     private final RepairWorkOrderRepository workOrderRepository;
+    private final RepairProjectQuotePricingPolicy quotePricingPolicy;
     private final RepairSupplierSelectionPolicy selectionPolicy;
     private final SupplierActivationService supplierActivationService;
     private final RepairNarrativeImageService narrativeImageService;
@@ -163,7 +165,6 @@ public class RepairProjectSourcingService {
         }
         String supplierName = workOrderRepository.findSupplierLegalName(supplierDeptId)
                 .orElseThrow(() -> support.notFound("供应商组织不存在 supplierDeptId=" + supplierDeptId));
-        requirePositive(command.quoteAmount(), "quoteAmount");
         if (!supplierSubmission) {
             invitation = resolvePropertyInvitation(context, supplierDeptId, command.invitationId());
         }
@@ -177,6 +178,14 @@ public class RepairProjectSourcingService {
                 ? RepairQuoteConfirmationStatus.ONLINE_CONFIRMED
                 : propertyConfirmationStatus(command.confirmationStatus());
         String originalSource = supplierSubmission ? null : requireText(command.originalSource(), "原始报价来源");
+        List<Item> planItems = projectRepository.listItems(context.plan().planId(), tenantId);
+        var pricing = quotePricingPolicy.evaluate(new RepairProjectQuotePricingPolicy.Input(
+                planItems.stream().map(item -> new ScopeItem(item.itemId(), item.itemNo())).toList(),
+                command.quoteLines(), command.quoteAmount(), command.constructionPeriodDays(),
+                command.warrantyDays(), command.originalAmountConfirmed()));
+        if (!pricing.allowed()) {
+            throw support.invalid(pricing.rejectionReason());
+        }
         Quote previous = sourcingRepository.findLatestSupplierQuote(
                 projectId, context.plan().planId(), tenantId, supplierDeptId).orElse(null);
         int revisionNo = previous == null ? 1 : previous.revisionNo() + 1;
@@ -185,11 +194,11 @@ public class RepairProjectSourcingService {
         }
         Quote quote = sourcingRepository.insertQuote(new Quote(
                 null, projectId, context.plan().planId(), tenantId, supplierDeptId, supplierName,
-                command.quoteAmount().setScale(2, RoundingMode.HALF_UP), trim(command.quoteSummary()),
+                pricing.calculatedAmount(), trim(command.quoteSummary()),
                 attachment.attachmentId(), attachment.sha256(), actor.userId(), actor.roleKey(),
                 supplierSubmission ? RepairQuoteSubmissionSource.SUPPLIER_ONLINE : RepairQuoteSubmissionSource.PROPERTY_ENTRY,
-                confirmationStatus, originalSource, RepairSupplierQuoteStatus.ACTIVE,
-                revisionNo, null, null));
+                confirmationStatus, originalSource, command.constructionPeriodDays(), command.warrantyDays(),
+                true, RepairSupplierQuoteStatus.ACTIVE, revisionNo, null, null, pricing.normalizedLines()));
         if (previous != null && previous.quoteStatus() != RepairSupplierQuoteStatus.SUPERSEDED) {
             sourcingRepository.supersedeQuote(previous.quoteId(), quote.quoteId());
         }
@@ -405,12 +414,6 @@ public class RepairProjectSourcingService {
             throw support.invalid(field + " 必填");
         }
         return normalized;
-    }
-
-    private void requirePositive(BigDecimal value, String field) {
-        if (value == null || value.compareTo(BigDecimal.ZERO) <= 0) {
-            throw support.invalid(field + " 必须大于 0");
-        }
     }
 
     private String trim(String value) {

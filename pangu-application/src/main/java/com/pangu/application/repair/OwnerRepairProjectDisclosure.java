@@ -79,9 +79,32 @@ public record OwnerRepairProjectDisclosure(
             BigDecimal quoteAmount,
             String quoteSummary,
             Long quoteAttachmentId,
+            Integer constructionPeriodDays,
+            Integer warrantyDays,
             RepairSupplierSelectionMethod selectionMethod,
             String recommendationReason,
-            String insufficientQuoteReason
+            String insufficientQuoteReason,
+            List<PublishedQuoteLine> quoteLines
+    ) {
+        public PublishedSupplierSelection {
+            quoteLines = quoteLines == null ? List.of() : List.copyOf(quoteLines);
+        }
+    }
+
+    /** 向受影响业主披露中选报价的材料、人工、运输等构成，不披露供应商内部信息。 */
+    public record PublishedQuoteLine(
+            Long projectItemId,
+            String projectItemNo,
+            Integer lineNo,
+            String itemName,
+            String specificationModel,
+            String brand,
+            BigDecimal quantity,
+            String unit,
+            BigDecimal taxIncludedUnitPrice,
+            BigDecimal taxRate,
+            BigDecimal taxIncludedAmount,
+            String remark
     ) {
     }
 

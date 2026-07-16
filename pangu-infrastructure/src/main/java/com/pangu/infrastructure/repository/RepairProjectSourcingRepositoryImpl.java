@@ -5,6 +5,7 @@ import com.pangu.domain.model.repair.RepairProjectSourcing.Invitation;
 import com.pangu.domain.model.repair.RepairProjectSourcing.InvitationStatus;
 import com.pangu.domain.model.repair.RepairProjectSourcing.InvitationType;
 import com.pangu.domain.model.repair.RepairProjectSourcing.Quote;
+import com.pangu.domain.model.repair.RepairProjectSourcing.QuoteLine;
 import com.pangu.domain.model.repair.RepairProjectSourcing.Selection;
 import com.pangu.domain.model.repair.RepairQuoteConfirmationStatus;
 import com.pangu.domain.model.repair.RepairQuoteSubmissionSource;
@@ -12,6 +13,7 @@ import com.pangu.domain.model.repair.RepairSupplierQuoteStatus;
 import com.pangu.domain.model.repair.RepairSupplierSelectionMethod;
 import com.pangu.domain.repository.RepairProjectSourcingRepository;
 import com.pangu.infrastructure.persistence.entity.RepairProjectSourcingRows.InvitationRow;
+import com.pangu.infrastructure.persistence.entity.RepairProjectSourcingRows.QuoteLineRow;
 import com.pangu.infrastructure.persistence.entity.RepairProjectSourcingRows.QuoteRow;
 import com.pangu.infrastructure.persistence.entity.RepairProjectSourcingRows.SelectionRow;
 import com.pangu.infrastructure.persistence.mapper.RepairProjectSourcingMapper;
@@ -19,7 +21,9 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 @Repository
 @RequiredArgsConstructor
@@ -79,24 +83,40 @@ public class RepairProjectSourcingRepositoryImpl implements RepairProjectSourcin
     public Quote insertQuote(Quote quote) {
         QuoteRow row = toRow(quote);
         mapper.insertQuote(row);
+        for (QuoteLine quoteLine : quote.quoteLines()) {
+            mapper.insertQuoteLine(toRow(row.getQuoteId(), quoteLine));
+        }
         return findQuote(row.getQuoteId(), quote.projectId(), quote.planId(), quote.tenantId()).orElseThrow();
     }
 
     @Override
     public Optional<Quote> findQuote(Long quoteId, Long projectId, Long planId, Long tenantId) {
-        return Optional.ofNullable(mapper.findQuote(quoteId, projectId, planId, tenantId)).map(this::toDomain);
+        return Optional.ofNullable(mapper.findQuote(quoteId, projectId, planId, tenantId))
+                .map(row -> toDomain(row, listQuoteLines(row.getQuoteId())));
     }
 
     @Override
     public Optional<Quote> findLatestSupplierQuote(
             Long projectId, Long planId, Long tenantId, Long supplierDeptId) {
         return Optional.ofNullable(mapper.findLatestSupplierQuote(
-                projectId, planId, tenantId, supplierDeptId)).map(this::toDomain);
+                        projectId, planId, tenantId, supplierDeptId))
+                .map(row -> toDomain(row, listQuoteLines(row.getQuoteId())));
     }
 
     @Override
     public List<Quote> listQuotes(Long projectId, Long planId, Long tenantId) {
-        return mapper.listQuotes(projectId, planId, tenantId).stream().map(this::toDomain).toList();
+        List<QuoteRow> rows = mapper.listQuotes(projectId, planId, tenantId);
+        if (rows.isEmpty()) {
+            return List.of();
+        }
+        Map<Long, List<QuoteLine>> linesByQuoteId = mapper.listQuoteLines(
+                        rows.stream().map(QuoteRow::getQuoteId).toList())
+                .stream()
+                .map(this::toDomain)
+                .collect(Collectors.groupingBy(QuoteLine::quoteId));
+        return rows.stream()
+                .map(row -> toDomain(row, linesByQuoteId.getOrDefault(row.getQuoteId(), List.of())))
+                .toList();
     }
 
     @Override
@@ -156,15 +176,17 @@ public class RepairProjectSourcingRepositoryImpl implements RepairProjectSourcin
         return row;
     }
 
-    private Quote toDomain(QuoteRow row) {
+    private Quote toDomain(QuoteRow row, List<QuoteLine> quoteLines) {
         return new Quote(
                 row.getQuoteId(), row.getProjectId(), row.getPlanId(), row.getTenantId(),
                 row.getSupplierDeptId(), row.getSupplierName(), row.getQuoteAmount(), row.getQuoteSummary(),
                 row.getAttachmentId(), row.getAttachmentHash(), row.getSubmittedByUserId(),
                 row.getSubmittedByRoleKey(), RepairQuoteSubmissionSource.valueOf(row.getSubmissionSource()),
                 RepairQuoteConfirmationStatus.valueOf(row.getConfirmationStatus()), row.getOriginalSource(),
+                row.getConstructionPeriodDays(), row.getWarrantyDays(),
+                Boolean.TRUE.equals(row.getOriginalAmountConfirmed()),
                 RepairSupplierQuoteStatus.valueOf(row.getQuoteStatus()), row.getRevisionNo(),
-                row.getSupersededByQuoteId(), row.getCreateTime());
+                row.getSupersededByQuoteId(), row.getCreateTime(), quoteLines);
     }
 
     private QuoteRow toRow(Quote quote) {
@@ -184,8 +206,41 @@ public class RepairProjectSourcingRepositoryImpl implements RepairProjectSourcin
         row.setSubmissionSource(quote.submissionSource().name());
         row.setConfirmationStatus(quote.confirmationStatus().name());
         row.setOriginalSource(quote.originalSource());
+        row.setConstructionPeriodDays(quote.constructionPeriodDays());
+        row.setWarrantyDays(quote.warrantyDays());
+        row.setOriginalAmountConfirmed(quote.originalAmountConfirmed());
         row.setQuoteStatus(quote.quoteStatus().name());
         row.setRevisionNo(quote.revisionNo());
+        return row;
+    }
+
+    private List<QuoteLine> listQuoteLines(Long quoteId) {
+        return mapper.listQuoteLines(List.of(quoteId)).stream().map(this::toDomain).toList();
+    }
+
+    private QuoteLine toDomain(QuoteLineRow row) {
+        return new QuoteLine(
+                row.getQuoteLineId(), row.getQuoteId(), row.getProjectItemId(), row.getProjectItemNo(),
+                row.getLineNo(), row.getItemName(), row.getSpecificationModel(), row.getBrand(),
+                row.getQuantity(), row.getUnit(), row.getTaxIncludedUnitPrice(), row.getTaxRate(),
+                row.getTaxIncludedAmount(), row.getRemark());
+    }
+
+    private QuoteLineRow toRow(Long quoteId, QuoteLine quoteLine) {
+        QuoteLineRow row = new QuoteLineRow();
+        row.setQuoteLineId(quoteLine.quoteLineId());
+        row.setQuoteId(quoteId);
+        row.setProjectItemId(quoteLine.projectItemId());
+        row.setLineNo(quoteLine.lineNo());
+        row.setItemName(quoteLine.itemName());
+        row.setSpecificationModel(quoteLine.specificationModel());
+        row.setBrand(quoteLine.brand());
+        row.setQuantity(quoteLine.quantity());
+        row.setUnit(quoteLine.unit());
+        row.setTaxIncludedUnitPrice(quoteLine.taxIncludedUnitPrice());
+        row.setTaxRate(quoteLine.taxRate());
+        row.setTaxIncludedAmount(quoteLine.taxIncludedAmount());
+        row.setRemark(quoteLine.remark());
         return row;
     }
 

@@ -2,6 +2,7 @@
 package com.pangu.infrastructure.persistence.mapper;
 
 import com.pangu.infrastructure.persistence.entity.RepairProjectSourcingRows.InvitationRow;
+import com.pangu.infrastructure.persistence.entity.RepairProjectSourcingRows.QuoteLineRow;
 import com.pangu.infrastructure.persistence.entity.RepairProjectSourcingRows.QuoteRow;
 import com.pangu.infrastructure.persistence.entity.RepairProjectSourcingRows.SelectionRow;
 import org.apache.ibatis.annotations.Mapper;
@@ -50,6 +51,8 @@ public interface RepairProjectSourcingMapper {
 
     int insertQuote(QuoteRow row);
 
+    int insertQuoteLine(QuoteLineRow row);
+
     QuoteRow findQuote(
             @Param("quoteId") Long quoteId,
             @Param("projectId") Long projectId,
@@ -66,6 +69,8 @@ public interface RepairProjectSourcingMapper {
             @Param("projectId") Long projectId,
             @Param("planId") Long planId,
             @Param("tenantId") Long tenantId);
+
+    List<QuoteLineRow> listQuoteLines(@Param("quoteIds") List<Long> quoteIds);
 
     int supersedeQuote(@Param("quoteId") Long quoteId, @Param("supersededByQuoteId") Long supersededByQuoteId);
 

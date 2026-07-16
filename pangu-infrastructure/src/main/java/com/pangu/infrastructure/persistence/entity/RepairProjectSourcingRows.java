@@ -46,10 +46,31 @@ public final class RepairProjectSourcingRows {
         private String submissionSource;
         private String confirmationStatus;
         private String originalSource;
+        private Integer constructionPeriodDays;
+        private Integer warrantyDays;
+        private Boolean originalAmountConfirmed;
         private String quoteStatus;
         private Integer revisionNo;
         private Long supersededByQuoteId;
         private LocalDateTime createTime;
+    }
+
+    @Data
+    public static class QuoteLineRow {
+        private Long quoteLineId;
+        private Long quoteId;
+        private Long projectItemId;
+        private String projectItemNo;
+        private Integer lineNo;
+        private String itemName;
+        private String specificationModel;
+        private String brand;
+        private BigDecimal quantity;
+        private String unit;
+        private BigDecimal taxIncludedUnitPrice;
+        private BigDecimal taxRate;
+        private BigDecimal taxIncludedAmount;
+        private String remark;
     }
 
     @Data
