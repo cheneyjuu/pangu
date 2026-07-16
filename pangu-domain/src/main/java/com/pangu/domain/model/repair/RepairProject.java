@@ -207,6 +207,29 @@ public record RepairProject(
     ) {
     }
 
+    /** 项目创建前从已核验产权名册汇总出的费用承担范围，不包含逐户身份信息。 */
+    public record AllocationBasis(
+            String scopeLabel,
+            long roomCount,
+            long ownerCount,
+            BigDecimal totalBuildArea
+    ) {
+    }
+
+    /** 管理端只读展示的法定分摊预览，创建方案时由后端再次解析并固化。 */
+    public record AllocationPreview(
+            ScopeType scopeType,
+            FundSource fundSource,
+            String scopeLabel,
+            long roomCount,
+            long ownerCount,
+            BigDecimal totalBuildArea,
+            AllocationRuleType allocationRuleType,
+            String allocationRuleDescription,
+            String legalBasis
+    ) {
+    }
+
     public record Attachment(
             Long attachmentId,
             Long projectId,

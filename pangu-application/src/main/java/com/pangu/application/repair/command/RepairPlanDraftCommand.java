@@ -2,7 +2,6 @@
 package com.pangu.application.repair.command;
 
 import com.pangu.domain.model.repair.RepairProject.AffectedOwnerPassRule;
-import com.pangu.domain.model.repair.RepairProject.AllocationRuleType;
 import com.pangu.domain.model.repair.RepairProject.AttachmentPurpose;
 import com.pangu.domain.model.repair.RepairProject.EvidenceRequirement;
 import com.pangu.domain.model.repair.RepairProject.PaymentMilestone;
@@ -17,8 +16,6 @@ public record RepairPlanDraftCommand(
         String problemCause,
         String implementationScope,
         BigDecimal budgetTotal,
-        AllocationRuleType allocationRuleType,
-        String allocationRuleDescription,
         RepairSupplierSelectionMethod supplierSelectionMethod,
         String supplierSelectionReason,
         String constructionManagementRequirements,

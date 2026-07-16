@@ -3,7 +3,6 @@ package com.pangu.interfaces.web.controller.dto.repair;
 
 import com.pangu.application.repair.command.RepairPlanDraftCommand;
 import com.pangu.domain.model.repair.RepairProject.AffectedOwnerPassRule;
-import com.pangu.domain.model.repair.RepairProject.AllocationRuleType;
 import com.pangu.domain.model.repair.RepairProject.AttachmentPurpose;
 import com.pangu.domain.model.repair.RepairProject.EvidenceRequirement;
 import com.pangu.domain.model.repair.RepairProject.EvidenceStage;
@@ -28,8 +27,6 @@ public record RepairPlanRequest(
         @NotBlank @Size(max = 4000) String problemCause,
         @NotBlank @Size(max = 8000) String implementationScope,
         @NotNull @DecimalMin(value = "0.01") BigDecimal budgetTotal,
-        @NotNull AllocationRuleType allocationRuleType,
-        @Size(max = 1000) String allocationRuleDescription,
         @NotNull RepairSupplierSelectionMethod supplierSelectionMethod,
         @NotBlank @Size(max = 1000) String supplierSelectionReason,
         @NotBlank @Size(max = 8000) String constructionManagementRequirements,
@@ -52,8 +49,8 @@ public record RepairPlanRequest(
 
     public RepairPlanDraftCommand toCommand() {
         return new RepairPlanDraftCommand(
-                problemCause, implementationScope, budgetTotal, allocationRuleType,
-                allocationRuleDescription, supplierSelectionMethod, supplierSelectionReason,
+                problemCause, implementationScope, budgetTotal,
+                supplierSelectionMethod, supplierSelectionReason,
                 constructionManagementRequirements,
                 evidenceRequirements.stream().map(EvidenceRequirementRequest::toDomain).toList(),
                 safetyRequirements, acceptanceMethod, affectedOwnerScopeDescription,

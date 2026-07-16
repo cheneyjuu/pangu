@@ -3,6 +3,7 @@ package com.pangu.domain.repository;
 
 import com.pangu.domain.model.repair.RepairProject;
 import com.pangu.domain.model.repair.RepairProject.AllocationRoom;
+import com.pangu.domain.model.repair.RepairProject.AllocationBasis;
 import com.pangu.domain.model.repair.RepairProject.Attachment;
 import com.pangu.domain.model.repair.RepairProject.Item;
 import com.pangu.domain.model.repair.RepairProject.PlanAttachment;
@@ -24,6 +25,9 @@ public interface RepairProjectRepository {
 
     List<AllocationRoom> snapshotAllocationRooms(
             Long planId, Long tenantId, RepairProject.ScopeType scopeType, Long buildingId, String unitName);
+
+    Optional<AllocationBasis> findAllocationBasis(
+            Long tenantId, RepairProject.ScopeType scopeType, Long buildingId, String unitName);
 
     void linkPlanAttachment(Long planId, PlanAttachment attachment);
 

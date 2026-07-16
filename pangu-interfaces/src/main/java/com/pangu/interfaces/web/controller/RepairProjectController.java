@@ -26,6 +26,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestPart;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -51,6 +52,15 @@ public class RepairProjectController extends BaseController {
         Page<RepairProject> result = projectService.pageProjects(
                 request.getStatus(), request.getKeyword(), request.getPage(), request.getSize());
         return success(PageResponse.from(result, item -> item));
+    }
+
+    @GetMapping("/allocation-preview")
+    @PreAuthorize("hasAuthority('repair:workorder:manage')")
+    public Result<RepairProject.AllocationPreview> allocationPreview(
+            @RequestParam("scopeType") RepairProject.ScopeType scopeType,
+            @RequestParam(value = "buildingId", required = false) Long buildingId,
+            @RequestParam(value = "unitName", required = false) String unitName) {
+        return success(projectService.previewAllocation(scopeType, buildingId, unitName));
     }
 
     @GetMapping("/{projectId}")

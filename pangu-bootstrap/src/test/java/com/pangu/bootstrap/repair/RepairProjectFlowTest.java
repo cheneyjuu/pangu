@@ -29,6 +29,7 @@ import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.is;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
@@ -106,6 +107,10 @@ class RepairProjectFlowTest {
         JsonNode created = createProject(buildingProjectRequest(workOrderId, "1"));
         long projectId = created.path("project").path("projectId").asLong();
         long planId = created.path("plans").get(0).path("planId").asLong();
+        assertEquals("BY_BUILDING_AREA",
+                created.path("plans").get(0).path("allocationRuleType").asText());
+        assertTrue(created.path("plans").get(0).path("allocationRuleDescription").asText()
+                .contains("《上海市商品住宅专项维修资金管理办法》第十六条"));
         assertEquals("PROJECT_LINKED", jdbcTemplate.queryForObject(
                 "SELECT status FROM t_repair_work_order WHERE work_order_id = ?",
                 String.class, workOrderId));
@@ -289,6 +294,23 @@ class RepairProjectFlowTest {
                 .andExpect(jsonPath("$.msg", is("problemCause 必填")));
     }
 
+    @Test
+    void allocationPreviewComesFromVerifiedPropertyLedgerAndStatutoryRule() throws Exception {
+        mockMvc.perform(get("/api/v1/admin/repair-projects/allocation-preview")
+                        .header("Authorization", "Bearer " + token)
+                        .queryParam("scopeType", "BUILDING")
+                        .queryParam("buildingId", String.valueOf(buildingId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.scopeType", is("BUILDING")))
+                .andExpect(jsonPath("$.data.fundSource", is("BUILDING_MAINTENANCE_FUND")))
+                .andExpect(jsonPath("$.data.scopeLabel").isNotEmpty())
+                .andExpect(jsonPath("$.data.roomCount").isNumber())
+                .andExpect(jsonPath("$.data.totalBuildArea").isNumber())
+                .andExpect(jsonPath("$.data.allocationRuleType", is("BY_BUILDING_AREA")))
+                .andExpect(jsonPath("$.data.legalBasis",
+                        is("《上海市商品住宅专项维修资金管理办法》第十六条")));
+    }
+
     private JsonNode createProject(Map<String, Object> request) throws Exception {
         String response = mockMvc.perform(post("/api/v1/admin/repair-projects")
                         .header("Authorization", "Bearer " + token)
@@ -385,8 +407,6 @@ class RepairProjectFlowTest {
         plan.put("problemCause", cause);
         plan.put("implementationScope", "按工程项清单及锁定范围施工");
         plan.put("budgetTotal", 1000);
-        plan.put("allocationRuleType", "BY_BUILDING_AREA");
-        plan.put("allocationRuleDescription", "按锁定房屋建筑面积分摊");
         plan.put("supplierSelectionMethod", "COMPETITIVE_QUOTATION");
         plan.put("supplierSelectionReason", "通过询价比较形成实施报价");
         plan.put("constructionManagementRequirements", "物业项目负责人组织现场和工程量管理");

@@ -11,6 +11,8 @@ import com.pangu.domain.context.UserContext;
 import com.pangu.domain.context.UserContextHolder;
 import com.pangu.domain.gateway.RichTextSanitizer;
 import com.pangu.domain.model.repair.RepairProject;
+import com.pangu.domain.model.repair.RepairProject.AllocationBasis;
+import com.pangu.domain.model.repair.RepairProject.AllocationPreview;
 import com.pangu.domain.model.repair.RepairProject.AllocationRoom;
 import com.pangu.domain.model.repair.RepairProject.AttachmentPurpose;
 import com.pangu.domain.model.repair.RepairProject.EvidenceRequirement;
@@ -27,6 +29,9 @@ import com.pangu.domain.model.repair.RepairWorkOrder;
 import com.pangu.domain.model.repair.RepairWorkOrderEvent;
 import com.pangu.domain.model.repair.RepairWorkOrderStatus;
 import com.pangu.domain.model.repair.RepairWorkflowType;
+import com.pangu.domain.policy.RepairAllocationPolicy;
+import com.pangu.domain.policy.RepairAllocationPolicy.AllocationDecision;
+import com.pangu.domain.policy.RepairAllocationPolicy.AllocationInput;
 import com.pangu.domain.policy.RepairCaseLifecyclePolicy;
 import com.pangu.domain.policy.RepairWorkflowRoutingPolicy;
 import com.pangu.domain.policy.RepairWorkflowRoutingPolicy.RoutingDecision;
@@ -81,6 +86,7 @@ public class RepairProjectService {
     private final RepairProjectRepository projectRepository;
     private final RepairWorkOrderRepository workOrderRepository;
     private final RepairWorkflowRoutingPolicy routingPolicy;
+    private final RepairAllocationPolicy allocationPolicy;
     private final RepairCaseLifecyclePolicy caseLifecyclePolicy;
     private final UserContextHolder userContextHolder;
     private final ObjectMapper objectMapper;
@@ -97,12 +103,14 @@ public class RepairProjectService {
         RoutingDecision routing = route(command.scopeType(), command.buildingId(), unitName,
                 command.fundSource(), command.governancePath());
         validateBuilding(actor.tenantId(), command.scopeType(), command.buildingId());
+        AllocationPreview allocation = resolveAllocation(
+                actor.tenantId(), command.scopeType(), command.buildingId(), unitName, command.fundSource());
 
         RepairProject project = projectRepository.insertProject(new RepairProject(
                 null, null, actor.tenantId(), projectName, routing.workflowType(), command.scopeType(),
                 command.buildingId(), unitName, command.fundSource(), command.governancePath(),
                 Status.DRAFT, null, 0, actor.accountId(), actor.userId(), null, null));
-        PlanVersion plan = insertPlan(project, command.plan(), 1, actor);
+        PlanVersion plan = insertPlan(project, command.plan(), 1, actor, allocation);
         event(project, actor, "PROJECT_CREATED", Map.of(
                 "workflowType", project.workflowType().name(),
                 "planId", plan.planId(),
@@ -130,7 +138,9 @@ public class RepairProjectService {
             throw new RepairWorkOrderApplicationException(INVALID_STATUS, "当前项目已有未锁定的实施方案草稿");
         }
         int nextVersion = plans.stream().mapToInt(PlanVersion::versionNo).max().orElse(0) + 1;
-        PlanVersion plan = insertPlan(project, command.plan(), nextVersion, actor);
+        AllocationPreview allocation = resolveAllocation(
+                actor.tenantId(), project.scopeType(), project.buildingId(), project.unitName(), project.fundSource());
+        PlanVersion plan = insertPlan(project, command.plan(), nextVersion, actor, allocation);
         event(project, actor, "PLAN_VERSION_CREATED", Map.of(
                 "planId", plan.planId(), "planVersion", plan.versionNo()));
         return details(projectId, actor.tenantId());
@@ -231,8 +241,27 @@ public class RepairProjectService {
                 size);
     }
 
+    @Transactional(readOnly = true)
+    public AllocationPreview previewAllocation(ScopeType scopeType, Long buildingId, String unitName) {
+        UserContext actor = requireActor();
+        String normalizedUnitName = normalizeUnitName(scopeType, unitName);
+        RepairProject.FundSource fundSource = scopeType == ScopeType.COMMUNITY
+                ? RepairProject.FundSource.COMMUNITY_MAINTENANCE_FUND
+                : RepairProject.FundSource.BUILDING_MAINTENANCE_FUND;
+        RepairProject.GovernancePath governancePath = scopeType == ScopeType.COMMUNITY
+                ? RepairProject.GovernancePath.COMMUNITY_ASSEMBLY_DECISION
+                : RepairProject.GovernancePath.BUILDING_REPAIR_DECISION;
+        route(scopeType, buildingId, normalizedUnitName, fundSource, governancePath);
+        validateBuilding(actor.tenantId(), scopeType, buildingId);
+        return resolveAllocation(actor.tenantId(), scopeType, buildingId, normalizedUnitName, fundSource);
+    }
+
     private PlanVersion insertPlan(
-            RepairProject project, RepairPlanDraftCommand draft, int versionNo, UserContext actor) {
+            RepairProject project,
+            RepairPlanDraftCommand draft,
+            int versionNo,
+            UserContext actor,
+            AllocationPreview allocation) {
         if (draft == null) {
             throw invalid("plan 必填");
         }
@@ -242,8 +271,8 @@ public class RepairProjectService {
         PlanVersion plan = projectRepository.insertPlan(new PlanVersion(
                 null, project.projectId(), project.tenantId(), versionNo,
                 narratives.problemCause(), narratives.implementationScope(),
-                draft.budgetTotal(), project.fundSource(), draft.allocationRuleType(),
-                trim(draft.allocationRuleDescription()), draft.supplierSelectionMethod(),
+                draft.budgetTotal(), project.fundSource(), allocation.allocationRuleType(),
+                allocation.allocationRuleDescription(), draft.supplierSelectionMethod(),
                 requireText(draft.supplierSelectionReason(), "supplierSelectionReason"),
                 narratives.constructionManagementRequirements(), draft.evidenceRequirements(),
                 narratives.safetyRequirements(),
@@ -254,9 +283,9 @@ public class RepairProjectService {
                 project.governancePath(), draft.priceReviewRequired(), draft.paymentMilestones(),
                 PlanStatus.DRAFT, null, actor.accountId(), actor.userId(), null, null, null));
         insertItems(project, plan, draft.items(), actor);
-        List<AllocationRoom> allocation = projectRepository.snapshotAllocationRooms(
+        List<AllocationRoom> allocationRooms = projectRepository.snapshotAllocationRooms(
                 plan.planId(), project.tenantId(), project.scopeType(), project.buildingId(), project.unitName());
-        if (allocation.isEmpty()) {
+        if (allocationRooms.isEmpty()) {
             throw invalid("当前维修范围没有已核验的费用承担房屋，不能形成实施方案");
         }
         linkInitialAttachments(project, plan, draft.attachments());
@@ -322,9 +351,8 @@ public class RepairProjectService {
 
     private void validateDraft(RepairProject project, RepairPlanDraftCommand draft) {
         requirePositive(draft.budgetTotal(), "budgetTotal");
-        if (draft.allocationRuleType() == null || draft.supplierSelectionMethod() == null
-                || draft.settlementMethod() == null) {
-            throw invalid("allocationRuleType、supplierSelectionMethod、settlementMethod 均为必填项");
+        if (draft.supplierSelectionMethod() == null || draft.settlementMethod() == null) {
+            throw invalid("supplierSelectionMethod、settlementMethod 均为必填项");
         }
         requireText(draft.supplierSelectionReason(), "supplierSelectionReason");
         requireText(draft.acceptanceMethod(), "acceptanceMethod");
@@ -572,6 +600,29 @@ public class RepairProjectService {
             throw invalid(routing.rejectionReason());
         }
         return routing;
+    }
+
+    private AllocationPreview resolveAllocation(
+            Long tenantId,
+            ScopeType scopeType,
+            Long buildingId,
+            String unitName,
+            RepairProject.FundSource fundSource) {
+        AllocationBasis basis = projectRepository.findAllocationBasis(
+                        tenantId, scopeType, buildingId, unitName)
+                .orElseThrow(() -> invalid("当前小区没有可用的费用承担产权名册"));
+        if (basis.roomCount() <= 0 || basis.totalBuildArea() == null
+                || basis.totalBuildArea().signum() <= 0) {
+            throw invalid("当前维修范围没有已核验且面积有效的费用承担房屋");
+        }
+        AllocationDecision decision = allocationPolicy.resolve(
+                new AllocationInput(scopeType, fundSource, basis.scopeLabel()));
+        if (!decision.supported()) {
+            throw invalid(decision.rejectionReason());
+        }
+        return new AllocationPreview(
+                scopeType, fundSource, basis.scopeLabel(), basis.roomCount(), basis.ownerCount(),
+                basis.totalBuildArea(), decision.ruleType(), decision.ruleDescription(), decision.legalBasis());
     }
 
     private void validateBudget(BigDecimal budgetTotal, List<Item> items) {

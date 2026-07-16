@@ -6,6 +6,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pangu.domain.model.repair.RepairProject;
 import com.pangu.domain.model.repair.RepairProject.AllocationRoom;
+import com.pangu.domain.model.repair.RepairProject.AllocationBasis;
 import com.pangu.domain.model.repair.RepairProject.Attachment;
 import com.pangu.domain.model.repair.RepairProject.EvidenceRequirement;
 import com.pangu.domain.model.repair.RepairProject.Item;
@@ -17,6 +18,7 @@ import com.pangu.domain.model.repair.RepairSupplierSelectionMethod;
 import com.pangu.domain.model.repair.RepairWorkflowType;
 import com.pangu.domain.repository.RepairProjectRepository;
 import com.pangu.infrastructure.persistence.entity.RepairPlanAllocationRoomRow;
+import com.pangu.infrastructure.persistence.entity.RepairAllocationBasisRow;
 import com.pangu.infrastructure.persistence.entity.RepairPlanAttachmentRow;
 import com.pangu.infrastructure.persistence.entity.RepairPlanVersionRow;
 import com.pangu.infrastructure.persistence.entity.RepairProjectAttachmentRow;
@@ -78,6 +80,14 @@ public class RepairProjectRepositoryImpl implements RepairProjectRepository {
             Long planId, Long tenantId, RepairProject.ScopeType scopeType, Long buildingId, String unitName) {
         mapper.snapshotAllocationRooms(planId, tenantId, scopeType.name(), buildingId, unitName);
         return listAllocationRooms(planId, tenantId);
+    }
+
+    @Override
+    public Optional<AllocationBasis> findAllocationBasis(
+            Long tenantId, RepairProject.ScopeType scopeType, Long buildingId, String unitName) {
+        return Optional.ofNullable(mapper.findAllocationBasis(
+                        tenantId, scopeType.name(), buildingId, unitName))
+                .map(this::toDomain);
     }
 
     @Override
@@ -316,6 +326,11 @@ public class RepairProjectRepositoryImpl implements RepairProjectRepository {
         return new AllocationRoom(
                 row.getAllocationRoomId(), row.getPlanId(), row.getTenantId(), row.getRoomId(),
                 row.getBuildingId(), row.getUnitName(), row.getOwnerUid(), row.getBuildArea(), row.getCreateTime());
+    }
+
+    private AllocationBasis toDomain(RepairAllocationBasisRow row) {
+        return new AllocationBasis(
+                row.getScopeLabel(), row.getRoomCount(), row.getOwnerCount(), row.getTotalBuildArea());
     }
 
     private Attachment toDomain(RepairProjectAttachmentRow row) {

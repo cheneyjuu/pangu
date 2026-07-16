@@ -2,6 +2,7 @@
 package com.pangu.infrastructure.persistence.mapper;
 
 import com.pangu.infrastructure.persistence.entity.RepairPlanAllocationRoomRow;
+import com.pangu.infrastructure.persistence.entity.RepairAllocationBasisRow;
 import com.pangu.infrastructure.persistence.entity.RepairPlanAttachmentRow;
 import com.pangu.infrastructure.persistence.entity.RepairPlanVersionRow;
 import com.pangu.infrastructure.persistence.entity.RepairProjectAttachmentRow;
@@ -57,6 +58,11 @@ public interface RepairProjectMapper {
                                 @Param("scopeType") String scopeType,
                                 @Param("buildingId") Long buildingId,
                                 @Param("unitName") String unitName);
+
+    RepairAllocationBasisRow findAllocationBasis(@Param("tenantId") Long tenantId,
+                                                  @Param("scopeType") String scopeType,
+                                                  @Param("buildingId") Long buildingId,
+                                                  @Param("unitName") String unitName);
 
     List<RepairPlanAllocationRoomRow> listAllocationRooms(@Param("planId") Long planId,
                                                           @Param("tenantId") Long tenantId);

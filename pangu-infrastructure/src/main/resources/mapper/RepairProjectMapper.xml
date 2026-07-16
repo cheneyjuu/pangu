@@ -24,6 +24,38 @@
         locked_by_user_id, create_time, locked_at
     </sql>
 
+    <!-- 项目预览与方案快照必须使用同一份已核验产权房屋选择规则。 -->
+    <sql id="repairAllocationCandidates">
+        SELECT DISTINCT ON (property.room_id)
+               property.room_id,
+               property.building_id,
+               roster.unit_name,
+               property.uid AS owner_uid,
+               property.build_area,
+               COALESCE(roster.building_name, CONCAT(property.building_id::TEXT, ' 号楼')) AS building_name
+        FROM c_owner_property property
+        LEFT JOIN LATERAL (
+            SELECT item.building_name, item.unit_name
+            FROM c_property_roster item
+            WHERE item.tenant_id = property.tenant_id
+              AND item.room_id = property.room_id
+              AND item.status = 'ACTIVE'
+            ORDER BY item.roster_id
+            LIMIT 1
+        ) roster ON TRUE
+        WHERE property.tenant_id = #{tenantId}
+          AND property.account_status = 1
+          AND property.verify_status = 'VERIFIED'
+          AND property.build_area &gt; 0
+        <if test="scopeType == 'BUILDING' or scopeType == 'BUILDING_UNIT'">
+          AND property.building_id = #{buildingId}
+        </if>
+        <if test="scopeType == 'BUILDING_UNIT'">
+          AND roster.unit_name = #{unitName}
+        </if>
+        ORDER BY property.room_id, property.is_voting_delegate DESC, property.uid
+    </sql>
+
     <insert id="insertProject" useGeneratedKeys="true" keyProperty="projectId" keyColumn="project_id">
         INSERT INTO t_repair_project (
             tenant_id, project_name, workflow_type, scope_type, building_id, unit_name,
@@ -169,31 +201,37 @@
             plan_id, tenant_id, room_id, building_id, unit_name, owner_uid, build_area
         )
         SELECT #{planId}, #{tenantId}, selected.room_id, selected.building_id,
-               selected.unit_name, selected.uid, selected.build_area
+               selected.unit_name, selected.owner_uid, selected.build_area
         FROM (
-            SELECT DISTINCT ON (op.room_id)
-                   op.room_id,
-                   op.building_id,
-                   roster.unit_name,
-                   op.uid,
-                   op.build_area
-            FROM c_owner_property op
-            LEFT JOIN c_property_roster roster
-                   ON roster.tenant_id = op.tenant_id
-                  AND roster.room_id = op.room_id
-                  AND roster.status = 'ACTIVE'
-            WHERE op.tenant_id = #{tenantId}
-              AND op.account_status = 1
-              AND op.verify_status = 'VERIFIED'
-              <if test="scopeType == 'BUILDING' or scopeType == 'BUILDING_UNIT'">
-                  AND op.building_id = #{buildingId}
-              </if>
-              <if test="scopeType == 'BUILDING_UNIT'">
-                  AND roster.unit_name = #{unitName}
-              </if>
-            ORDER BY op.room_id, op.is_voting_delegate DESC, op.uid
+            <include refid="repairAllocationCandidates"/>
         ) selected
     </insert>
+
+    <select id="findAllocationBasis"
+            resultType="com.pangu.infrastructure.persistence.entity.RepairAllocationBasisRow">
+        SELECT CASE
+                   WHEN #{scopeType} = 'COMMUNITY' THEN
+                       COALESCE(community.property_area_name, community.tenant_name) || ' · 全小区'
+                   WHEN #{scopeType} = 'BUILDING_UNIT' THEN
+                       COALESCE(community.property_area_name, community.tenant_name) || ' · '
+                       || COALESCE(MAX(selected.building_name), CONCAT(#{buildingId}::TEXT, ' 号楼'))
+                       || ' · ' || #{unitName}
+                   ELSE
+                       COALESCE(community.property_area_name, community.tenant_name) || ' · '
+                       || COALESCE(MAX(selected.building_name), CONCAT(#{buildingId}::TEXT, ' 号楼'))
+                       || ' · 整栋'
+               END AS scope_label,
+               COUNT(selected.room_id)::BIGINT AS room_count,
+               COUNT(DISTINCT selected.owner_uid)::BIGINT AS owner_count,
+               COALESCE(SUM(selected.build_area), 0)::NUMERIC(14, 2) AS total_build_area
+        FROM t_tenant_community community
+        LEFT JOIN (
+            <include refid="repairAllocationCandidates"/>
+        ) selected ON TRUE
+        WHERE community.tenant_id = #{tenantId}
+          AND community.status = 'ACTIVE'
+        GROUP BY community.property_area_name, community.tenant_name
+    </select>
 
     <select id="listAllocationRooms"
             resultType="com.pangu.infrastructure.persistence.entity.RepairPlanAllocationRoomRow">
