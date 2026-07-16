@@ -29,6 +29,7 @@ public class RepairSupplierProjectService {
     private final RepairProjectRepository projectRepository;
     private final RepairProjectExecutionRepository executionRepository;
     private final RepairProjectExecutionService executionService;
+    private final RepairNarrativeImageService narrativeImageService;
 
     @Transactional(readOnly = true)
     public List<SupplierProjectSummary> listAssignedProjects() {
@@ -44,11 +45,13 @@ public class RepairSupplierProjectService {
         Contract contract = contract(projectId, actor);
         RepairProject project = projectRepository.findProject(projectId, actor.context().tenantId())
                 .orElseThrow(() -> support.notFound("维修工程项目不存在"));
-        PlanVersion plan = projectRepository.listPlans(projectId, actor.context().tenantId()).stream()
+        PlanVersion storedPlan = projectRepository.listPlans(projectId, actor.context().tenantId()).stream()
                 .filter(candidate -> candidate.planId().equals(project.activePlanId())
                         && candidate.status() == PlanStatus.LOCKED)
                 .findFirst()
                 .orElseThrow(() -> support.conflict("项目缺少已锁定实施方案"));
+        PlanVersion plan = storedPlan.withPlanDescription(narrativeImageService.resolveForPlan(
+                storedPlan.planId(), actor.context().tenantId(), storedPlan.planDescription()));
         return new SupplierProjectDetails(
                 project,
                 plan,

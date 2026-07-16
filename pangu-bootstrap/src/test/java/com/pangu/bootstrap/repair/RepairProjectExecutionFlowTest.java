@@ -250,6 +250,8 @@ class RepairProjectExecutionFlowTest {
         JsonNode supplierProject = data(getOk(
                 "/api/v1/supplier/repair-projects/" + locked.projectId(), supplierToken));
         assertEquals(locked.itemId(), supplierProject.path("items").get(0).path("itemId").asLong());
+        assertEquals("2号楼外墙渗水；按锁定工程项维修2号楼外墙",
+                supplierProject.path("activePlan").path("planDescription").asText());
         assertEquals(supplierDeptId, supplierProject.path("contract").path("supplierDeptId").asLong());
         assertEquals(true, supplierProject.path("currentPlanAllocationRooms").isMissingNode());
 
