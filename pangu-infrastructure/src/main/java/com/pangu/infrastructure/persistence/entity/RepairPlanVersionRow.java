@@ -13,8 +13,7 @@ public class RepairPlanVersionRow {
     private Long projectId;
     private Long tenantId;
     private Integer versionNo;
-    private String problemCause;
-    private String implementationScope;
+    private String planDescription;
     private BigDecimal budgetTotal;
     private String fundSource;
     private String allocationRuleType;

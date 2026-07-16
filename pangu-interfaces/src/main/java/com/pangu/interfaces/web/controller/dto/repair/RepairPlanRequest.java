@@ -24,8 +24,7 @@ import java.time.LocalDate;
 import java.util.List;
 
 public record RepairPlanRequest(
-        @NotBlank @Size(max = 4000) String problemCause,
-        @NotBlank @Size(max = 8000) String implementationScope,
+        @NotBlank @Size(max = 16000) String planDescription,
         @NotNull @DecimalMin(value = "0.01") BigDecimal budgetTotal,
         @NotNull RepairSupplierSelectionMethod supplierSelectionMethod,
         @NotBlank @Size(max = 1000) String supplierSelectionReason,
@@ -49,7 +48,7 @@ public record RepairPlanRequest(
 
     public RepairPlanDraftCommand toCommand() {
         return new RepairPlanDraftCommand(
-                problemCause, implementationScope, budgetTotal,
+                planDescription, budgetTotal,
                 supplierSelectionMethod, supplierSelectionReason,
                 constructionManagementRequirements,
                 evidenceRequirements.stream().map(EvidenceRequirementRequest::toDomain).toList(),

@@ -129,8 +129,7 @@ public record RepairProject(
             Long projectId,
             Long tenantId,
             Integer versionNo,
-            String problemCause,
-            String implementationScope,
+            String planDescription,
             BigDecimal budgetTotal,
             FundSource fundSource,
             AllocationRuleType allocationRuleType,
@@ -167,6 +166,18 @@ public record RepairProject(
                     ? List.of()
                     : List.copyOf(requiredAcceptanceRoles);
             paymentMilestones = paymentMilestones == null ? List.of() : List.copyOf(paymentMilestones);
+        }
+
+        public PlanVersion withPlanDescription(String resolvedPlanDescription) {
+            return new PlanVersion(
+                    planId, projectId, tenantId, versionNo, resolvedPlanDescription,
+                    budgetTotal, fundSource, allocationRuleType, allocationRuleDescription,
+                    supplierSelectionMethod, supplierSelectionReason, constructionManagementRequirements,
+                    evidenceRequirements, safetyRequirements, acceptanceMethod, requiredAcceptanceRoles,
+                    affectedOwnerScopeDescription, minimumAffectedOwnerAcceptors, affectedOwnerPassRule,
+                    affectedOwnerApprovalRatio, settlementMethod, plannedStartDate, plannedCompletionDate,
+                    warrantyDays, governancePath, priceReviewRequired, paymentMilestones, status, snapshotHash,
+                    createdByAccountId, createdByUserId, lockedByUserId, createTime, lockedAt);
         }
     }
 

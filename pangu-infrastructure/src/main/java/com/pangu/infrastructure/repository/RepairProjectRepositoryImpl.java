@@ -236,7 +236,7 @@ public class RepairProjectRepositoryImpl implements RepairProjectRepository {
     private PlanVersion toDomain(RepairPlanVersionRow row) {
         return new PlanVersion(
                 row.getPlanId(), row.getProjectId(), row.getTenantId(), row.getVersionNo(),
-                row.getProblemCause(), row.getImplementationScope(), row.getBudgetTotal(),
+                row.getPlanDescription(), row.getBudgetTotal(),
                 RepairProject.FundSource.valueOf(row.getFundSource()),
                 RepairProject.AllocationRuleType.valueOf(row.getAllocationRuleType()),
                 row.getAllocationRuleDescription(),
@@ -264,8 +264,7 @@ public class RepairProjectRepositoryImpl implements RepairProjectRepository {
         row.setProjectId(plan.projectId());
         row.setTenantId(plan.tenantId());
         row.setVersionNo(plan.versionNo());
-        row.setProblemCause(plan.problemCause());
-        row.setImplementationScope(plan.implementationScope());
+        row.setPlanDescription(plan.planDescription());
         row.setBudgetTotal(plan.budgetTotal());
         row.setFundSource(plan.fundSource().name());
         row.setAllocationRuleType(plan.allocationRuleType().name());

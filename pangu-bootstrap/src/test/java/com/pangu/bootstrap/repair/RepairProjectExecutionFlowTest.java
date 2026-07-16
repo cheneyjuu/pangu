@@ -394,8 +394,7 @@ class RepairProjectExecutionFlowTest {
 
     private LockedProject createAndAuthorizeProject() throws Exception {
         Map<String, Object> plan = new LinkedHashMap<>();
-        plan.put("problemCause", "2号楼外墙渗水");
-        plan.put("implementationScope", "按锁定工程项维修2号楼外墙");
+        plan.put("planDescription", "2号楼外墙渗水；按锁定工程项维修2号楼外墙");
         plan.put("budgetTotal", 1000);
         plan.put("allocationRuleType", "BY_BUILDING_AREA");
         plan.put("allocationRuleDescription", "按2号楼锁定房屋建筑面积分摊");

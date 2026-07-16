@@ -38,8 +38,7 @@ public record OwnerRepairProjectDisclosure(
     public record PublishedPlan(
             Long planId,
             Integer versionNo,
-            String problemCause,
-            String implementationScope,
+            String planDescription,
             BigDecimal budgetTotal,
             AllocationRuleType allocationRuleType,
             String allocationRuleDescription,

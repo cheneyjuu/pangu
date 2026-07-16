@@ -27,6 +27,7 @@ public class OwnerRepairProjectQueryService {
 
     private final RepairWorkOrderService workOrderService;
     private final RepairProjectRepository projectRepository;
+    private final RepairNarrativeImageService narrativeImageService;
 
     @Transactional(readOnly = true)
     public Optional<OwnerRepairProjectDisclosure> findPublishedByWorkOrder(Long workOrderId) {
@@ -69,7 +70,8 @@ public class OwnerRepairProjectQueryService {
                 project.workflowType(), project.scopeType(), project.buildingId(), project.unitName(),
                 project.fundSource(), project.governancePath(), project.status(),
                 new OwnerRepairProjectDisclosure.PublishedPlan(
-                        plan.planId(), plan.versionNo(), plan.problemCause(), plan.implementationScope(),
+                        plan.planId(), plan.versionNo(), narrativeImageService.resolveForPlan(
+                                plan.planId(), project.tenantId(), plan.planDescription()),
                         plan.budgetTotal(), plan.allocationRuleType(), plan.allocationRuleDescription(),
                         plan.supplierSelectionMethod(), plan.supplierSelectionReason(),
                         plan.constructionManagementRequirements(), plan.evidenceRequirements(),

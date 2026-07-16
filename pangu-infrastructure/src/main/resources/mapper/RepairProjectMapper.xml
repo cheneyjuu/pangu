@@ -10,7 +10,7 @@
     </sql>
 
     <sql id="planColumns">
-        plan_id, project_id, tenant_id, version_no, problem_cause, implementation_scope,
+        plan_id, project_id, tenant_id, version_no, plan_description,
         budget_total, fund_source, allocation_rule_type, allocation_rule_description,
         supplier_selection_method, supplier_selection_reason,
         construction_management_requirements, evidence_requirements_json::TEXT AS evidence_requirements_json,
@@ -125,7 +125,7 @@
 
     <insert id="insertPlan" useGeneratedKeys="true" keyProperty="planId" keyColumn="plan_id">
         INSERT INTO t_repair_plan_version (
-            project_id, tenant_id, version_no, problem_cause, implementation_scope,
+            project_id, tenant_id, version_no, plan_description,
             budget_total, fund_source, allocation_rule_type, allocation_rule_description,
             supplier_selection_method, supplier_selection_reason,
             construction_management_requirements, evidence_requirements_json,
@@ -136,7 +136,7 @@
             price_review_required, payment_milestones_json, status,
             created_by_account_id, created_by_user_id
         ) VALUES (
-            #{projectId}, #{tenantId}, #{versionNo}, #{problemCause}, #{implementationScope},
+            #{projectId}, #{tenantId}, #{versionNo}, #{planDescription},
             #{budgetTotal}, #{fundSource}, #{allocationRuleType}, #{allocationRuleDescription},
             #{supplierSelectionMethod}, #{supplierSelectionReason},
             #{constructionManagementRequirements}, CAST(#{evidenceRequirementsJson} AS JSONB),

@@ -10,6 +10,7 @@ import com.pangu.domain.common.Page;
 import com.pangu.domain.context.UserContext;
 import com.pangu.domain.context.UserContextHolder;
 import com.pangu.domain.gateway.RichTextSanitizer;
+import com.pangu.domain.gateway.RichTextSanitizer.SanitizedRichText;
 import com.pangu.domain.model.repair.RepairProject;
 import com.pangu.domain.model.repair.RepairProject.AllocationBasis;
 import com.pangu.domain.model.repair.RepairProject.AllocationPreview;
@@ -91,6 +92,7 @@ public class RepairProjectService {
     private final UserContextHolder userContextHolder;
     private final ObjectMapper objectMapper;
     private final RichTextSanitizer richTextSanitizer;
+    private final RepairNarrativeImageService narrativeImageService;
 
     @Transactional
     public RepairProject.Details createProject(CreateRepairProjectCommand command) {
@@ -268,9 +270,10 @@ public class RepairProjectService {
         // 先清洗再持久化和计算快照，保证管理端预览、业主端披露与锁定哈希使用同一正文。
         PlanNarratives narratives = sanitizeNarratives(draft);
         validateDraft(project, draft);
+        narrativeImageService.assertDraftImagesUsable(narratives.imageIds(), actor);
         PlanVersion plan = projectRepository.insertPlan(new PlanVersion(
                 null, project.projectId(), project.tenantId(), versionNo,
-                narratives.problemCause(), narratives.implementationScope(),
+                narratives.planDescription(),
                 draft.budgetTotal(), project.fundSource(), allocation.allocationRuleType(),
                 allocation.allocationRuleDescription(), draft.supplierSelectionMethod(),
                 requireText(draft.supplierSelectionReason(), "supplierSelectionReason"),
@@ -282,6 +285,8 @@ public class RepairProjectService {
                 draft.plannedStartDate(), draft.plannedCompletionDate(), draft.warrantyDays(),
                 project.governancePath(), draft.priceReviewRequired(), draft.paymentMilestones(),
                 PlanStatus.DRAFT, null, actor.accountId(), actor.userId(), null, null, null));
+        narrativeImageService.bindDraftImages(
+                narratives.imageIds(), actor, project.projectId(), plan.planId());
         insertItems(project, plan, draft.items(), actor);
         List<AllocationRoom> allocationRooms = projectRepository.snapshotAllocationRooms(
                 plan.planId(), project.tenantId(), project.scopeType(), project.buildingId(), project.unitName());
@@ -676,7 +681,11 @@ public class RepairProjectService {
     private RepairProject.Details details(Long projectId, Long tenantId) {
         RepairProject project = projectRepository.findProject(projectId, tenantId)
                 .orElseThrow(() -> notFound("维修工程项目不存在"));
-        List<PlanVersion> plans = projectRepository.listPlans(projectId, tenantId);
+        List<PlanVersion> storedPlans = projectRepository.listPlans(projectId, tenantId);
+        List<PlanVersion> plans = storedPlans.stream()
+                .map(plan -> plan.withPlanDescription(narrativeImageService.resolveForPlan(
+                        plan.planId(), tenantId, plan.planDescription())))
+                .toList();
         Long currentPlanId = plans.stream()
                 .filter(plan -> plan.status() == PlanStatus.DRAFT)
                 .map(PlanVersion::planId)
@@ -706,8 +715,7 @@ public class RepairProjectService {
         Map<String, Object> snapshot = new LinkedHashMap<>();
         snapshot.put("planId", plan.planId());
         snapshot.put("versionNo", plan.versionNo());
-        snapshot.put("problemCause", plan.problemCause());
-        snapshot.put("implementationScope", plan.implementationScope());
+        snapshot.put("planDescription", plan.planDescription());
         snapshot.put("budgetTotal", plan.budgetTotal());
         snapshot.put("fundSource", plan.fundSource());
         snapshot.put("allocationRuleType", plan.allocationRuleType());
@@ -774,26 +782,34 @@ public class RepairProjectService {
     }
 
     private PlanNarratives sanitizeNarratives(RepairPlanDraftCommand draft) {
+        SanitizedRichText planDescription = requireRichText(draft.planDescription(), "planDescription");
+        SanitizedRichText construction = requireTextOnlyRichText(
+                draft.constructionManagementRequirements(), "constructionManagementRequirements");
+        SanitizedRichText safety = requireTextOnlyRichText(draft.safetyRequirements(), "safetyRequirements");
         return new PlanNarratives(
-                requireRichText(draft.problemCause(), "problemCause"),
-                requireRichText(draft.implementationScope(), "implementationScope"),
-                requireRichText(
-                        draft.constructionManagementRequirements(),
-                        "constructionManagementRequirements"),
-                requireRichText(draft.safetyRequirements(), "safetyRequirements"));
+                planDescription.html(), planDescription.narrativeImageIds(),
+                construction.html(), safety.html());
     }
 
-    private String requireRichText(String value, String field) {
-        RichTextSanitizer.SanitizedRichText sanitized = richTextSanitizer.sanitize(value);
+    private SanitizedRichText requireRichText(String value, String field) {
+        SanitizedRichText sanitized = richTextSanitizer.sanitize(value);
         if (sanitized.isBlank()) {
             throw invalid(field + " 必填");
         }
-        return sanitized.html();
+        return sanitized;
+    }
+
+    private SanitizedRichText requireTextOnlyRichText(String value, String field) {
+        SanitizedRichText sanitized = requireRichText(value, field);
+        if (!sanitized.narrativeImageIds().isEmpty()) {
+            throw invalid(field + " 不支持正文图片");
+        }
+        return sanitized;
     }
 
     private record PlanNarratives(
-            String problemCause,
-            String implementationScope,
+            String planDescription,
+            Set<Long> imageIds,
             String constructionManagementRequirements,
             String safetyRequirements) {
     }

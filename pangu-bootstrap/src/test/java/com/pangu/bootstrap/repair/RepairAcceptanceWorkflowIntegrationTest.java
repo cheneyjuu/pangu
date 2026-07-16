@@ -240,8 +240,7 @@ class RepairAcceptanceWorkflowIntegrationTest {
 
     private Map<String, Object> communityPlan() {
         Map<String, Object> plan = new LinkedHashMap<>();
-        plan.put("problemCause", "小区道路破损原因及整体维修范围");
-        plan.put("implementationScope", "按工程项清单及锁定范围施工");
+        plan.put("planDescription", "小区道路破损原因及整体维修范围；按工程项清单及锁定范围施工");
         plan.put("budgetTotal", 1000);
         plan.put("allocationRuleType", "BY_BUILDING_AREA");
         plan.put("allocationRuleDescription", "按小区锁定房屋建筑面积分摊");

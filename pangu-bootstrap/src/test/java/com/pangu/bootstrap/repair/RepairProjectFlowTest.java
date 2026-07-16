@@ -27,6 +27,7 @@ import java.util.Map;
 
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.is;
+import static org.hamcrest.Matchers.containsString;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -98,6 +99,7 @@ class RepairProjectFlowTest {
     @AfterEach
     void clean() {
         jdbcTemplate.update("DELETE FROM t_repair_project WHERE project_name LIKE ?", PROJECT_PREFIX + "%");
+        jdbcTemplate.update("DELETE FROM t_repair_narrative_image WHERE tenant_id = ? AND status = 'DRAFT'", TENANT);
         jdbcTemplate.update("DELETE FROM t_repair_work_order WHERE title LIKE ?", CASE_PREFIX + "%");
     }
 
@@ -235,8 +237,11 @@ class RepairProjectFlowTest {
         Map<String, Object> request = buildingProjectRequest(workOrderId, "OWNER-VIEW");
         @SuppressWarnings("unchecked")
         Map<String, Object> plan = (Map<String, Object>) request.get("plan");
-        plan.put("problemCause", "<h3>现场原因</h3><script>alert(1)</script>"
-                + "<p onclick=\"steal()\">外墙渗水<strong>严重</strong></p><img src=\"x\">");
+        long narrativeImageId = uploadNarrativeImage("渗水点.jpg", "image/jpeg", "photo");
+        plan.put("planDescription", "<h3>现场问题与维修方案</h3><script>alert(1)</script>"
+                + "<p onclick=\"steal()\">外墙渗水<strong>严重</strong>，按锁定工程项施工</p>"
+                + "<img src=\"https://attacker.example/x.jpg\">"
+                + "<img data-repair-image-id=\"" + narrativeImageId + "\" alt=\"渗水点\">");
 
         JsonNode created = createProject(request);
         long projectId = created.path("project").path("projectId").asLong();
@@ -262,8 +267,10 @@ class RepairProjectFlowTest {
                         .header("Authorization", "Bearer " + ownerToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.projectId", is((int) projectId)))
-                .andExpect(jsonPath("$.data.plan.problemCause", is(
-                        "<h3>现场原因</h3><p>外墙渗水<strong>严重</strong></p>")))
+                .andExpect(jsonPath("$.data.plan.planDescription", containsString(
+                        "<h3>现场问题与维修方案</h3><p>外墙渗水<strong>严重</strong>，按锁定工程项施工</p>")))
+                .andExpect(jsonPath("$.data.plan.planDescription", containsString(
+                        "<img src=\"https://oss.example.test/repair-project\" alt=\"渗水点\">")))
                 .andExpect(jsonPath("$.data.plan.items", hasSize(1)))
                 .andExpect(jsonPath("$.data.plan.allocationSummary.roomCount").isNumber())
                 .andExpect(jsonPath("$.data.plan.attachments", hasSize(2)))
@@ -284,14 +291,14 @@ class RepairProjectFlowTest {
         Map<String, Object> request = buildingProjectRequest(workOrderId, "EMPTY-RICH-TEXT");
         @SuppressWarnings("unchecked")
         Map<String, Object> plan = (Map<String, Object>) request.get("plan");
-        plan.put("problemCause", "<script>alert('only script')</script>");
+        plan.put("planDescription", "<script>alert('only script')</script>");
 
         mockMvc.perform(post("/api/v1/admin/repair-projects")
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(request)))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.msg", is("problemCause 必填")));
+                .andExpect(jsonPath("$.msg", is("planDescription 必填")));
     }
 
     @Test
@@ -404,8 +411,7 @@ class RepairProjectFlowTest {
 
     private Map<String, Object> commonPlan(String cause) {
         Map<String, Object> plan = new LinkedHashMap<>();
-        plan.put("problemCause", cause);
-        plan.put("implementationScope", "按工程项清单及锁定范围施工");
+        plan.put("planDescription", cause + "；按工程项清单及锁定范围施工");
         plan.put("budgetTotal", 1000);
         plan.put("supplierSelectionMethod", "COMPETITIVE_QUOTATION");
         plan.put("supplierSelectionReason", "通过询价比较形成实施报价");
@@ -458,6 +464,19 @@ class RepairProjectFlowTest {
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
         return objectMapper.readTree(response).path("data").path("attachmentId").asLong();
+    }
+
+    private long uploadNarrativeImage(String fileName, String contentType, String content) throws Exception {
+        MockMultipartFile file = new MockMultipartFile(
+                "file", fileName, contentType, content.getBytes(StandardCharsets.UTF_8));
+        String response = mockMvc.perform(multipart("/api/v1/admin/repair-projects/narrative-images")
+                        .file(file)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.source").value(org.hamcrest.Matchers.startsWith("repair-image://")))
+                .andExpect(jsonPath("$.data.previewUrl", is("https://oss.example.test/repair-project")))
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+        return objectMapper.readTree(response).path("data").path("imageId").asLong();
     }
 
     private void link(long projectId, long planId, long attachmentId, String purpose) throws Exception {

@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 关联业务：持久化维修方案正文图片，并限制草稿图片只能绑定一次。 -->
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pangu.infrastructure.persistence.mapper.RepairNarrativeImageMapper">
+
+    <sql id="columns">
+        image_id, tenant_id, project_id, plan_id, object_key, original_file_name,
+        content_type, file_size, etag, sha256, uploaded_by_account_id,
+        uploaded_by_user_id, status, create_time, bound_at
+    </sql>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="imageId" keyColumn="image_id">
+        INSERT INTO t_repair_narrative_image (
+            tenant_id, object_key, original_file_name, content_type, file_size,
+            etag, sha256, uploaded_by_account_id, uploaded_by_user_id, status
+        ) VALUES (
+            #{tenantId}, #{objectKey}, #{originalFileName}, #{contentType}, #{fileSize},
+            #{etag}, #{sha256}, #{uploadedByAccountId}, #{uploadedByUserId}, #{status}
+        )
+    </insert>
+
+    <select id="findById" resultType="com.pangu.infrastructure.persistence.entity.RepairNarrativeImageRow">
+        SELECT <include refid="columns"/>
+        FROM t_repair_narrative_image
+        WHERE image_id = #{imageId} AND tenant_id = #{tenantId}
+    </select>
+
+    <select id="findByIds" resultType="com.pangu.infrastructure.persistence.entity.RepairNarrativeImageRow">
+        SELECT <include refid="columns"/>
+        FROM t_repair_narrative_image
+        WHERE tenant_id = #{tenantId}
+          AND image_id IN
+          <foreach collection="imageIds" item="imageId" open="(" separator="," close=")">
+              #{imageId}
+          </foreach>
+        ORDER BY image_id
+    </select>
+
+    <update id="bindDraftImages">
+        UPDATE t_repair_narrative_image
+        SET project_id = #{projectId}, plan_id = #{planId}, status = 'BOUND', bound_at = CURRENT_TIMESTAMP
+        WHERE tenant_id = #{tenantId}
+          AND uploaded_by_account_id = #{uploadedByAccountId}
+          AND status = 'DRAFT'
+          AND image_id IN
+          <foreach collection="imageIds" item="imageId" open="(" separator="," close=")">
+              #{imageId}
+          </foreach>
+    </update>
+
+    <delete id="deleteDraft">
+        DELETE FROM t_repair_narrative_image
+        WHERE image_id = #{imageId}
+          AND tenant_id = #{tenantId}
+          AND uploaded_by_account_id = #{uploadedByAccountId}
+          AND status = 'DRAFT'
+    </delete>
+
+    <select id="listExpiredDrafts" resultType="com.pangu.infrastructure.persistence.entity.RepairNarrativeImageRow">
+        SELECT <include refid="columns"/>
+        FROM t_repair_narrative_image
+        WHERE status = 'DRAFT' AND create_time &lt; #{createdBefore}
+        ORDER BY create_time, image_id
+        LIMIT #{limit}
+    </select>
+
+    <delete id="deleteExpiredDraft">
+        DELETE FROM t_repair_narrative_image
+        WHERE image_id = #{imageId} AND status = 'DRAFT'
+    </delete>
+</mapper>

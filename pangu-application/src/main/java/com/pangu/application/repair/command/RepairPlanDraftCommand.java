@@ -13,8 +13,7 @@ import java.time.LocalDate;
 import java.util.List;
 
 public record RepairPlanDraftCommand(
-        String problemCause,
-        String implementationScope,
+        String planDescription,
         BigDecimal budgetTotal,
         RepairSupplierSelectionMethod supplierSelectionMethod,
         String supplierSelectionReason,

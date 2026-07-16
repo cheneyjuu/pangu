@@ -2,6 +2,7 @@
 package com.pangu.interfaces.web.controller;
 
 import com.pangu.application.repair.RepairProjectAttachmentService;
+import com.pangu.application.repair.RepairNarrativeImageService;
 import com.pangu.application.repair.RepairProjectService;
 import com.pangu.application.repair.RepairWorkOrderApplicationException;
 import com.pangu.application.repair.command.UploadRepairProjectAttachmentCommand;
@@ -14,11 +15,13 @@ import com.pangu.interfaces.web.controller.dto.repair.CreateRepairProjectRequest
 import com.pangu.interfaces.web.controller.dto.repair.LockRepairPlanRequest;
 import com.pangu.interfaces.web.controller.dto.repair.RepairAttachmentDownloadTicketResponse;
 import com.pangu.interfaces.web.controller.dto.repair.RepairPlanAttachmentLinkRequest;
+import com.pangu.interfaces.web.controller.dto.repair.RepairNarrativeImageResponse;
 import com.pangu.interfaces.web.controller.dto.repair.RepairProjectPageRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -39,6 +42,7 @@ public class RepairProjectController extends BaseController {
 
     private final RepairProjectService projectService;
     private final RepairProjectAttachmentService attachmentService;
+    private final RepairNarrativeImageService narrativeImageService;
 
     @PostMapping
     @PreAuthorize("hasAuthority('repair:workorder:manage')")
@@ -61,6 +65,34 @@ public class RepairProjectController extends BaseController {
             @RequestParam(value = "buildingId", required = false) Long buildingId,
             @RequestParam(value = "unitName", required = false) String unitName) {
         return success(projectService.previewAllocation(scopeType, buildingId, unitName));
+    }
+
+    @PostMapping(value = "/narrative-images", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PreAuthorize("hasAuthority('repair:workorder:manage')")
+    public Result<RepairNarrativeImageResponse> uploadNarrativeImage(
+            @RequestPart("file") MultipartFile file) {
+        try {
+            return success("正文图片已上传", RepairNarrativeImageResponse.from(
+                    narrativeImageService.upload(new UploadRepairProjectAttachmentCommand(
+                            file.getOriginalFilename(), file.getContentType(), file.getBytes()))));
+        } catch (IOException ex) {
+            throw new RepairWorkOrderApplicationException(
+                    RepairWorkOrderApplicationException.Reason.PARAM_INVALID, "读取正文图片失败", ex);
+        }
+    }
+
+    @GetMapping("/narrative-images/{imageId}/preview-ticket")
+    @PreAuthorize("hasAuthority('repair:workorder:manage')")
+    public Result<RepairNarrativeImageResponse> narrativeImagePreviewTicket(
+            @PathVariable("imageId") Long imageId) {
+        return success(RepairNarrativeImageResponse.from(narrativeImageService.previewTicket(imageId)));
+    }
+
+    @DeleteMapping("/narrative-images/{imageId}")
+    @PreAuthorize("hasAuthority('repair:workorder:manage')")
+    public Result<Void> deleteNarrativeImage(@PathVariable("imageId") Long imageId) {
+        narrativeImageService.deleteDraft(imageId);
+        return success("正文图片已删除", null);
     }
 
     @GetMapping("/{projectId}")

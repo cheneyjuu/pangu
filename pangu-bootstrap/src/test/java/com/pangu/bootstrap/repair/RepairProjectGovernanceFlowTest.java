@@ -356,8 +356,7 @@ class RepairProjectGovernanceFlowTest {
 
     private Map<String, Object> commonPlan(String cause) {
         Map<String, Object> plan = new LinkedHashMap<>();
-        plan.put("problemCause", cause);
-        plan.put("implementationScope", "按工程项清单及锁定范围施工");
+        plan.put("planDescription", cause + "；按工程项清单及锁定范围施工");
         plan.put("budgetTotal", 1000);
         plan.put("allocationRuleType", "BY_BUILDING_AREA");
         plan.put("allocationRuleDescription", "按锁定房屋建筑面积分摊");
