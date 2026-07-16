@@ -52,7 +52,7 @@
         JOIN t_repair_project project
           ON project.project_id = invitation.project_id
          AND project.tenant_id = invitation.tenant_id
-         AND project.status = 'DRAFT'
+         AND project.status IN ('DRAFT', 'PLAN_LOCKED')
         JOIN t_repair_plan_version plan
           ON plan.plan_id = invitation.plan_id
          AND plan.project_id = invitation.project_id

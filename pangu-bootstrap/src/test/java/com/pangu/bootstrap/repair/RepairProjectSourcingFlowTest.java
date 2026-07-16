@@ -178,6 +178,18 @@ class RepairProjectSourcingFlowTest {
         JsonNode lockedSourcing = data(getOk(sourcingPath(projectId, ""), propertyToken));
         assertEquals(firstQuote.path("quoteId").asLong(),
                 lockedSourcing.path("selection").path("quoteId").asLong());
+        JsonNode revised = data(postOk(
+                "/api/v1/admin/repair-projects/" + projectId + "/plan-versions",
+                propertyToken, Map.of(
+                        "expectedProjectVersion", 1,
+                        "plan", projectRequest().get("plan"))));
+        long revisionPlanId = revised.path("plans").get(0).path("planId").asLong();
+        data(postOk(sourcingPath(projectId, "/invitations"), propertyToken, Map.of(
+                "supplierDeptIds", suppliers,
+                "deadline", LocalDateTime.now().plusDays(3))));
+        JsonNode revisionOpportunities = data(getOk(
+                "/api/v1/supplier/repair-projects/quote-opportunities", firstSupplierToken));
+        assertEquals(revisionPlanId, revisionOpportunities.get(0).path("planId").asLong());
         assertEquals(1, count("""
                 SELECT COUNT(*) FROM t_repair_project_event
                 WHERE project_id = ? AND action = 'PROJECT_SUPPLIER_SELECTED'
