@@ -28,7 +28,7 @@ public class RepairNarrativeImageDeliveryController {
     @GetMapping("/{imageId}")
     public ResponseEntity<byte[]> image(
             @PathVariable("imageId") Long imageId,
-            @RequestParam("ticket") String ticket) {
+            @RequestParam(value = "ticket", required = false) String ticket) {
         RepairNarrativeImageService.DeliveredImage image = imageService.deliver(imageId, ticket);
         byte[] content = image.content();
         Duration remaining = Duration.between(Instant.now(), image.expiresAt());

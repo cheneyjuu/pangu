@@ -318,6 +318,8 @@ class RepairProjectFlowTest {
         mockMvc.perform(get(deliveryUri.getRawPath())
                         .queryParam("ticket", deliveryTicket + "tampered"))
                 .andExpect(status().isForbidden());
+        mockMvc.perform(get(deliveryUri.getRawPath()))
+                .andExpect(status().isForbidden());
 
         mockMvc.perform(get("/api/v1/me/repair-projects/by-work-order/" + workOrderId
                         + "/attachments/" + selectedSupplier.quoteAttachmentId() + "/download-ticket")
