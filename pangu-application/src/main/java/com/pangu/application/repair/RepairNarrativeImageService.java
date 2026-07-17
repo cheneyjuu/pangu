@@ -56,6 +56,7 @@ public class RepairNarrativeImageService {
     private final RepairNarrativeImageRepository imageRepository;
     private final RepairEvidenceObjectStorage objectStorage;
     private final UserContextHolder userContextHolder;
+    private final RepairNarrativeImageDeliveryTicketCodec deliveryTicketCodec;
 
     @Transactional
     public UploadResult upload(UploadRepairProjectAttachmentCommand command) {
@@ -177,6 +178,30 @@ public class RepairNarrativeImageService {
         return resolved.toString();
     }
 
+    /** 公开读取端只接受短期签名凭证，并再次核对图片与锁定方案的绑定关系。 */
+    public DeliveredImage deliver(Long imageId, String ticket) {
+        RepairNarrativeImageDeliveryTicketCodec.TicketClaims claims =
+                deliveryTicketCodec.verify(imageId, ticket);
+        RepairNarrativeImage image = imageRepository.findById(imageId, claims.tenantId())
+                .filter(candidate -> candidate.status() == RepairNarrativeImage.Status.BOUND)
+                .filter(candidate -> claims.planId().equals(candidate.planId()))
+                .orElseThrow(() -> new RepairWorkOrderApplicationException(
+                        FORBIDDEN, "维修正文图片访问凭证无效或已过期"));
+        byte[] content;
+        try {
+            content = objectStorage.read(image.objectKey());
+        } catch (RuntimeException ex) {
+            throw new RepairWorkOrderApplicationException(
+                    STORAGE_UNAVAILABLE, "读取维修方案正文图片失败", ex);
+        }
+        if (content == null || image.fileSize() == null || content.length != image.fileSize()) {
+            throw new RepairWorkOrderApplicationException(
+                    STORAGE_UNAVAILABLE, "维修方案正文图片完整性校验失败");
+        }
+        return new DeliveredImage(
+                content, image.contentType(), image.originalFileName(), claims.expiresAt());
+    }
+
     @Transactional
     public int cleanupExpiredDrafts() {
         LocalDateTime cutoff = LocalDateTime.now().minus(DRAFT_RETENTION);
@@ -218,12 +243,8 @@ public class RepairNarrativeImageService {
     private String resolvedTag(RepairNarrativeImage image, String canonicalTag) {
         Matcher altMatcher = ALT_ATTRIBUTE.matcher(canonicalTag);
         String alt = altMatcher.find() ? unescapeAttribute(altMatcher.group(1)) : image.originalFileName();
-        String src;
-        try {
-            src = objectStorage.createDownloadUrl(image.objectKey(), PREVIEW_URL_VALIDITY).toString();
-        } catch (RuntimeException ex) {
-            throw new RepairWorkOrderApplicationException(STORAGE_UNAVAILABLE, "生成正文图片展示地址失败", ex);
-        }
+        String src = deliveryTicketCodec.issue(
+                image.imageId(), image.planId(), image.tenantId()).url();
         return "<img src=\"" + escapeAttribute(src) + "\" alt=\"" + escapeAttribute(alt) + "\">";
     }
 
@@ -375,5 +396,21 @@ public class RepairNarrativeImageService {
     }
 
     public record UploadResult(RepairNarrativeImage image, PreviewTicket preview) {
+    }
+
+    public record DeliveredImage(
+            byte[] content,
+            String contentType,
+            String originalFileName,
+            Instant expiresAt) {
+
+        public DeliveredImage {
+            content = content == null ? new byte[0] : content.clone();
+        }
+
+        @Override
+        public byte[] content() {
+            return content.clone();
+        }
     }
 }

@@ -6,7 +6,7 @@ import java.time.LocalDateTime;
 /**
  * 维修方案正文图片的可信引用。
  *
- * <p>正文只保存 imageId，不保存外部图片地址；展示时再生成短期签名地址。
+ * <p>正文只保存 imageId，不保存外部图片地址；展示时再生成同源短期访问地址。
  */
 public record RepairNarrativeImage(
         Long imageId,

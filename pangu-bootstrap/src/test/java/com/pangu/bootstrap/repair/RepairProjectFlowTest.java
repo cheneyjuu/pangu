@@ -24,6 +24,8 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.is;
@@ -38,10 +40,11 @@ import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@SpringBootTest
+@SpringBootTest(properties = "platform.public-api-base-url=https://api.example.test/api/v1")
 @AutoConfigureMockMvc
 class RepairProjectFlowTest {
 
@@ -96,6 +99,7 @@ class RepairProjectFlowTest {
                         "project-etag"));
         when(objectStorage.createDownloadUrl(anyString(), any()))
                 .thenReturn(URI.create("https://oss.example.test/repair-project").toURL());
+        when(objectStorage.read(anyString())).thenReturn("photo".getBytes(StandardCharsets.UTF_8));
     }
 
     @AfterEach
@@ -279,7 +283,8 @@ class RepairProjectFlowTest {
                 .andExpect(jsonPath("$.data.plan.planDescription", containsString(
                         "<h3>现场问题与维修方案</h3><p>外墙渗水<strong>严重</strong>，按锁定工程项施工</p>")))
                 .andExpect(jsonPath("$.data.plan.planDescription", containsString(
-                        "<img src=\"https://oss.example.test/repair-project\" alt=\"渗水点\">")))
+                        "<img src=\"https://api.example.test/api/v1/public/repair-plan-images/"
+                                + narrativeImageId + "?ticket=")))
                 .andExpect(jsonPath("$.data.plan.items", hasSize(1)))
                 .andExpect(jsonPath("$.data.plan.allocationSummary.roomCount").isNumber())
                 .andExpect(jsonPath("$.data.plan.attachments", hasSize(2)))
@@ -291,6 +296,28 @@ class RepairProjectFlowTest {
                 .andExpect(jsonPath("$.data.plan.selectedSupplier.quoteLines[0].unitPriceExcludingTax").isNumber())
                 .andExpect(jsonPath("$.data.plan.selectedSupplier.quoteLines[0].taxIncludedUnitPrice").isNumber())
                 .andExpect(jsonPath("$.data.plan.lockedAt").isString());
+
+        String disclosureBody = mockMvc.perform(get(
+                        "/api/v1/me/repair-projects/by-work-order/" + workOrderId)
+                        .header("Authorization", "Bearer " + ownerToken))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+        String disclosedHtml = objectMapper.readTree(disclosureBody)
+                .path("data").path("plan").path("planDescription").asText();
+        Matcher imageSource = Pattern.compile("<img src=\"([^\"]+)\"")
+                .matcher(disclosedHtml);
+        assertTrue(imageSource.find());
+        URI deliveryUri = URI.create(imageSource.group(1).replace("&amp;", "&"));
+        String deliveryTicket = deliveryUri.getRawQuery().substring("ticket=".length());
+
+        mockMvc.perform(get(deliveryUri.getRawPath())
+                        .queryParam("ticket", deliveryTicket))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType(MediaType.IMAGE_JPEG))
+                .andExpect(content().bytes("photo".getBytes(StandardCharsets.UTF_8)));
+        mockMvc.perform(get(deliveryUri.getRawPath())
+                        .queryParam("ticket", deliveryTicket + "tampered"))
+                .andExpect(status().isForbidden());
 
         mockMvc.perform(get("/api/v1/me/repair-projects/by-work-order/" + workOrderId
                         + "/attachments/" + selectedSupplier.quoteAttachmentId() + "/download-ticket")
@@ -314,11 +341,6 @@ class RepairProjectFlowTest {
                         + objectKey
                         + "?x-oss-date=old&amp;x-oss-signature=old\" alt=\"历史现场图\">",
                 planId, TENANT);
-        when(objectStorage.createDownloadUrl(anyString(), any()))
-                .thenAnswer(invocation -> URI.create(
-                        "https://oss.example.test/" + invocation.getArgument(0)
-                                + "?x-oss-date=fresh&x-oss-signature=new").toURL());
-
         String legacyBody = mockMvc.perform(get(
                         "/api/v1/me/repair-projects/by-work-order/" + workOrderId)
                         .header("Authorization", "Bearer " + ownerToken))
@@ -327,7 +349,8 @@ class RepairProjectFlowTest {
         String resolvedLegacyHtml = objectMapper.readTree(legacyBody)
                 .path("data").path("plan").path("planDescription").asText();
         assertTrue(resolvedLegacyHtml.contains(
-                "x-oss-date=fresh&amp;x-oss-signature=new"));
+                "https://api.example.test/api/v1/public/repair-plan-images/"
+                        + narrativeImageId + "?ticket="));
         assertFalse(resolvedLegacyHtml.contains("x-oss-date=old"));
     }
 
