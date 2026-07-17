@@ -12,6 +12,7 @@ import com.pangu.domain.model.repair.RepairProject.PaymentMilestone;
 import com.pangu.domain.model.repair.RepairProject.ScopeType;
 import com.pangu.domain.model.repair.RepairProject.SettlementMethod;
 import com.pangu.domain.model.repair.RepairProject.Status;
+import com.pangu.domain.model.repair.RepairProjectSourcing.QuoteLineType;
 import com.pangu.domain.model.repair.RepairSupplierSelectionMethod;
 import com.pangu.domain.model.repair.RepairWorkflowType;
 
@@ -76,6 +77,9 @@ public record OwnerRepairProjectDisclosure(
             Long quoteId,
             Long supplierDeptId,
             String supplierName,
+            BigDecimal amountExcludingTax,
+            BigDecimal taxRate,
+            BigDecimal taxAmount,
             BigDecimal quoteAmount,
             String quoteSummary,
             Long quoteAttachmentId,
@@ -97,10 +101,15 @@ public record OwnerRepairProjectDisclosure(
             String projectItemNo,
             Integer lineNo,
             String itemName,
+            QuoteLineType lineType,
+            String workDescription,
             String specificationModel,
             String brand,
+            String procurementMethod,
             BigDecimal quantity,
             String unit,
+            BigDecimal unitPriceExcludingTax,
+            BigDecimal amountExcludingTax,
             BigDecimal taxIncludedUnitPrice,
             BigDecimal taxRate,
             BigDecimal taxIncludedAmount,

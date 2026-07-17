@@ -139,7 +139,8 @@ class RepairProjectSourcingFlowTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(Map.of(
                                 "invitationId", firstInvitationId,
-                                "quoteAmount", 901,
+                                "quoteAmount", 982,
+                                "taxRate", 9,
                                 "quoteSummary", "金额与明细不一致的报价",
                                 "attachmentId", firstAttachment,
                                 "constructionPeriodDays", 10,
@@ -152,7 +153,8 @@ class RepairProjectSourcingFlowTest {
                 "/api/v1/supplier/repair-projects/" + projectId + "/quotes",
                 firstSupplierToken, Map.of(
                         "invitationId", firstInvitationId,
-                        "quoteAmount", 900,
+                        "quoteAmount", 981,
+                        "taxRate", 9,
                         "quoteSummary", "供应商在线提交首版报价",
                         "attachmentId", firstAttachment,
                         "constructionPeriodDays", 10,
@@ -163,12 +165,16 @@ class RepairProjectSourcingFlowTest {
         assertEquals(10, firstQuote.path("constructionPeriodDays").asInt());
         assertTrue(firstQuote.path("originalAmountConfirmed").asBoolean());
         assertEquals(1, firstQuote.path("quoteLines").size());
-        assertEquals(900, firstQuote.path("quoteLines").get(0).path("taxIncludedAmount").asInt());
+        assertEquals(900, firstQuote.path("amountExcludingTax").asInt());
+        assertEquals(9, firstQuote.path("taxRate").asInt());
+        assertEquals(81, firstQuote.path("taxAmount").asInt());
+        assertEquals(900, firstQuote.path("quoteLines").get(0).path("amountExcludingTax").asInt());
 
         long secondAttachment = upload(projectId, "供应商二纸质报价.pdf", "supplier-two", propertyToken);
         JsonNode secondQuote = data(postOk(sourcingPath(projectId, "/quotes"), propertyToken, Map.ofEntries(
                 Map.entry("supplierDeptId", suppliers.get(1)),
-                Map.entry("quoteAmount", 930),
+                Map.entry("quoteAmount", 1013.70),
+                Map.entry("taxRate", 9),
                 Map.entry("quoteSummary", "物业代录纸质报价"),
                 Map.entry("attachmentId", secondAttachment),
                 Map.entry("confirmationStatus", "OFFLINE_EVIDENCE_VERIFIED"),
@@ -190,7 +196,7 @@ class RepairProjectSourcingFlowTest {
                 "recommendationReason", "综合施工组织和报价选择",
                 "insufficientQuoteReason", "第三家供应商在截止日前未响应")));
         assertEquals(suppliers.get(0).longValue(), selected.path("selection").path("supplierDeptId").asLong());
-        assertEquals(900, selected.path("selection").path("quoteAmount").asInt());
+        assertEquals(981, selected.path("selection").path("quoteAmount").asInt());
         assertEquals(2, selected.path("quotes").size());
         assertEquals(secondQuote.path("quoteId").asLong(), selected.path("quotes").get(1).path("quoteId").asLong());
         assertEquals(2, count("""
@@ -274,13 +280,14 @@ class RepairProjectSourcingFlowTest {
         return Map.of(
                 "projectItemId", projectItemId,
                 "itemName", "外墙防水修复",
+                "lineType", "CONSTRUCTION_MEASURE",
+                "workDescription", "清理空鼓并修复外墙防水层",
                 "specificationModel", "按现场工程量",
                 "brand", "同等质量材料",
                 "quantity", 10,
                 "unit", "平方米",
-                "taxIncludedUnitPrice", unitPrice,
-                "taxRate", 9,
-                "remark", "含材料、人工和清运");
+                "unitPriceExcludingTax", unitPrice,
+                "remark", "含材料、人工和清运，不含税单价");
     }
 
     private long registerVerifiedSupplier() throws Exception {

@@ -19,6 +19,7 @@ public interface RepairProjectQuotePricingPolicy {
             List<ScopeItem> scopeItems,
             List<QuoteLineDraft> quoteLines,
             BigDecimal declaredAmount,
+            BigDecimal taxRate,
             Integer constructionPeriodDays,
             Integer warrantyDays,
             boolean originalAmountConfirmed
@@ -32,6 +33,9 @@ public interface RepairProjectQuotePricingPolicy {
     record Decision(
             boolean allowed,
             String rejectionReason,
+            BigDecimal amountExcludingTax,
+            BigDecimal taxRate,
+            BigDecimal taxAmount,
             BigDecimal calculatedAmount,
             List<QuoteLine> normalizedLines
     ) {
@@ -39,12 +43,19 @@ public interface RepairProjectQuotePricingPolicy {
             normalizedLines = normalizedLines == null ? List.of() : List.copyOf(normalizedLines);
         }
 
-        public static Decision allow(BigDecimal calculatedAmount, List<QuoteLine> normalizedLines) {
-            return new Decision(true, null, calculatedAmount, normalizedLines);
+        public static Decision allow(
+                BigDecimal amountExcludingTax,
+                BigDecimal taxRate,
+                BigDecimal taxAmount,
+                BigDecimal calculatedAmount,
+                List<QuoteLine> normalizedLines) {
+            return new Decision(
+                    true, null, amountExcludingTax, taxRate, taxAmount,
+                    calculatedAmount, normalizedLines);
         }
 
         public static Decision reject(String reason) {
-            return new Decision(false, reason, null, List.of());
+            return new Decision(false, reason, null, null, null, null, List.of());
         }
     }
 }

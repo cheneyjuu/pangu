@@ -3,6 +3,7 @@ package com.pangu.application.repair;
 
 import com.pangu.domain.model.repair.RepairProjectSourcing.QuoteLine;
 import com.pangu.domain.model.repair.RepairProjectSourcing.QuoteLineDraft;
+import com.pangu.domain.model.repair.RepairProjectSourcing.QuoteLineType;
 import com.pangu.domain.policy.RepairProjectQuotePricingPolicy;
 import org.springframework.stereotype.Component;
 
@@ -54,6 +55,8 @@ public class DefaultRepairProjectQuotePricingPolicy implements RepairProjectQuot
         if (!input.originalAmountConfirmed()) {
             reject("必须确认线上报价明细总额与报价原件一致");
         }
+        BigDecimal taxRate = range(
+                input.taxRate(), BigDecimal.ZERO, new BigDecimal("100"), 3, "报价税率");
 
         Map<Long, ScopeItem> scopeById = new LinkedHashMap<>();
         for (ScopeItem scopeItem : input.scopeItems()) {
@@ -66,7 +69,7 @@ public class DefaultRepairProjectQuotePricingPolicy implements RepairProjectQuot
         Map<Long, Integer> lineNumbers = new HashMap<>();
         Set<Long> coveredItems = new LinkedHashSet<>();
         List<QuoteLine> normalized = new ArrayList<>();
-        BigDecimal calculatedAmount = BigDecimal.ZERO.setScale(2);
+        BigDecimal amountExcludingTax = BigDecimal.ZERO.setScale(2);
         for (QuoteLineDraft draft : input.quoteLines()) {
             if (draft == null || draft.projectItemId() == null) {
                 reject("每条报价明细必须关联实施方案工程项");
@@ -76,17 +79,22 @@ public class DefaultRepairProjectQuotePricingPolicy implements RepairProjectQuot
                 reject("报价明细包含当前实施方案以外的工程项");
             }
             String itemName = requiredText(draft.itemName(), 200, "报价项目名称");
+            QuoteLineType lineType = draft.lineType();
+            if (lineType == null) {
+                reject("明细类别必填");
+            }
+            String workDescription = optionalText(draft.workDescription(), 1000, "项目特征或工作内容");
             String specificationModel = optionalText(draft.specificationModel(), 200, "规格型号");
             String brand = optionalText(draft.brand(), 120, "品牌");
+            String procurementMethod = optionalText(draft.procurementMethod(), 120, "采购方式");
             String unit = requiredText(draft.unit(), 40, "单位");
             String remark = optionalText(draft.remark(), 500, "报价备注");
             BigDecimal quantity = positive(draft.quantity(), 3, "数量");
-            BigDecimal unitPrice = nonNegative(draft.taxIncludedUnitPrice(), 2, "含税单价")
+            BigDecimal unitPrice = nonNegative(draft.unitPriceExcludingTax(), 2, "不含税单价")
                     .setScale(2, RoundingMode.UNNECESSARY);
             if (quantity.compareTo(MAX_QUANTITY) > 0 || unitPrice.compareTo(MAX_MONEY) > 0) {
-                reject("报价明细数量或含税单价超出系统可记录范围");
+                reject("报价明细数量或不含税单价超出系统可记录范围");
             }
-            BigDecimal taxRate = range(draft.taxRate(), BigDecimal.ZERO, new BigDecimal("100"), 3, "税率");
             BigDecimal lineAmount = quantity.multiply(unitPrice).setScale(2, RoundingMode.HALF_UP);
             if (lineAmount.compareTo(MAX_MONEY) > 0) {
                 reject("单条报价明细金额超出系统可记录范围");
@@ -94,12 +102,12 @@ public class DefaultRepairProjectQuotePricingPolicy implements RepairProjectQuot
             int lineNo = lineNumbers.merge(draft.projectItemId(), 1, Integer::sum);
             normalized.add(new QuoteLine(
                     null, null, draft.projectItemId(), scopeItem.itemNo(), lineNo,
-                    itemName, specificationModel, brand, quantity, unit, unitPrice,
-                    taxRate, lineAmount, remark));
+                    itemName, lineType, workDescription, specificationModel, brand,
+                    procurementMethod, quantity, unit, unitPrice, lineAmount, remark));
             coveredItems.add(draft.projectItemId());
-            calculatedAmount = calculatedAmount.add(lineAmount);
-            if (calculatedAmount.compareTo(MAX_MONEY) > 0) {
-                reject("报价明细含税合计超出系统可记录范围");
+            amountExcludingTax = amountExcludingTax.add(lineAmount);
+            if (amountExcludingTax.compareTo(MAX_MONEY) > 0) {
+                reject("报价明细不含税合计超出系统可记录范围");
             }
         }
 
@@ -110,8 +118,15 @@ public class DefaultRepairProjectQuotePricingPolicy implements RepairProjectQuot
                     .toList();
             reject("报价明细必须覆盖全部实施方案工程项，缺少：" + String.join("、", missing));
         }
-        if (calculatedAmount.signum() <= 0) {
-            reject("报价明细含税总额必须大于 0");
+        if (amountExcludingTax.signum() <= 0) {
+            reject("报价明细不含税总额必须大于 0");
+        }
+        BigDecimal taxAmount = amountExcludingTax.multiply(taxRate)
+                .movePointLeft(2)
+                .setScale(2, RoundingMode.HALF_UP);
+        BigDecimal calculatedAmount = amountExcludingTax.add(taxAmount);
+        if (calculatedAmount.compareTo(MAX_MONEY) > 0) {
+            reject("报价含税总额超出系统可记录范围");
         }
         if (input.declaredAmount() == null) {
             reject("含税报价总额必填");
@@ -120,7 +135,7 @@ public class DefaultRepairProjectQuotePricingPolicy implements RepairProjectQuot
         if (declaredAmount.compareTo(calculatedAmount) != 0) {
             reject("含税报价总额必须与报价明细合计一致");
         }
-        return Decision.allow(calculatedAmount, normalized);
+        return Decision.allow(amountExcludingTax, taxRate, taxAmount, calculatedAmount, normalized);
     }
 
     private String requiredText(String value, int maxLength, String field) {

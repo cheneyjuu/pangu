@@ -6,6 +6,7 @@ import com.pangu.domain.model.repair.RepairProjectSourcing.InvitationStatus;
 import com.pangu.domain.model.repair.RepairProjectSourcing.InvitationType;
 import com.pangu.domain.model.repair.RepairProjectSourcing.Quote;
 import com.pangu.domain.model.repair.RepairProjectSourcing.QuoteLine;
+import com.pangu.domain.model.repair.RepairProjectSourcing.QuoteLineType;
 import com.pangu.domain.model.repair.RepairProjectSourcing.Selection;
 import com.pangu.domain.model.repair.RepairQuoteConfirmationStatus;
 import com.pangu.domain.model.repair.RepairQuoteSubmissionSource;
@@ -179,7 +180,8 @@ public class RepairProjectSourcingRepositoryImpl implements RepairProjectSourcin
     private Quote toDomain(QuoteRow row, List<QuoteLine> quoteLines) {
         return new Quote(
                 row.getQuoteId(), row.getProjectId(), row.getPlanId(), row.getTenantId(),
-                row.getSupplierDeptId(), row.getSupplierName(), row.getQuoteAmount(), row.getQuoteSummary(),
+                row.getSupplierDeptId(), row.getSupplierName(), row.getAmountExcludingTax(),
+                row.getTaxRate(), row.getTaxAmount(), row.getQuoteAmount(), row.getQuoteSummary(),
                 row.getAttachmentId(), row.getAttachmentHash(), row.getSubmittedByUserId(),
                 row.getSubmittedByRoleKey(), RepairQuoteSubmissionSource.valueOf(row.getSubmissionSource()),
                 RepairQuoteConfirmationStatus.valueOf(row.getConfirmationStatus()), row.getOriginalSource(),
@@ -197,6 +199,9 @@ public class RepairProjectSourcingRepositoryImpl implements RepairProjectSourcin
         row.setTenantId(quote.tenantId());
         row.setSupplierDeptId(quote.supplierDeptId());
         row.setSupplierName(quote.supplierName());
+        row.setAmountExcludingTax(quote.amountExcludingTax());
+        row.setTaxRate(quote.taxRate());
+        row.setTaxAmount(quote.taxAmount());
         row.setQuoteAmount(quote.quoteAmount());
         row.setQuoteSummary(quote.quoteSummary());
         row.setAttachmentId(quote.attachmentId());
@@ -221,9 +226,10 @@ public class RepairProjectSourcingRepositoryImpl implements RepairProjectSourcin
     private QuoteLine toDomain(QuoteLineRow row) {
         return new QuoteLine(
                 row.getQuoteLineId(), row.getQuoteId(), row.getProjectItemId(), row.getProjectItemNo(),
-                row.getLineNo(), row.getItemName(), row.getSpecificationModel(), row.getBrand(),
-                row.getQuantity(), row.getUnit(), row.getTaxIncludedUnitPrice(), row.getTaxRate(),
-                row.getTaxIncludedAmount(), row.getRemark());
+                row.getLineNo(), row.getItemName(), QuoteLineType.valueOf(row.getLineType()),
+                row.getWorkDescription(), row.getSpecificationModel(), row.getBrand(),
+                row.getProcurementMethod(), row.getQuantity(), row.getUnit(),
+                row.getUnitPriceExcludingTax(), row.getAmountExcludingTax(), row.getRemark());
     }
 
     private QuoteLineRow toRow(Long quoteId, QuoteLine quoteLine) {
@@ -233,13 +239,15 @@ public class RepairProjectSourcingRepositoryImpl implements RepairProjectSourcin
         row.setProjectItemId(quoteLine.projectItemId());
         row.setLineNo(quoteLine.lineNo());
         row.setItemName(quoteLine.itemName());
+        row.setLineType(quoteLine.lineType().name());
+        row.setWorkDescription(quoteLine.workDescription());
         row.setSpecificationModel(quoteLine.specificationModel());
         row.setBrand(quoteLine.brand());
+        row.setProcurementMethod(quoteLine.procurementMethod());
         row.setQuantity(quoteLine.quantity());
         row.setUnit(quoteLine.unit());
-        row.setTaxIncludedUnitPrice(quoteLine.taxIncludedUnitPrice());
-        row.setTaxRate(quoteLine.taxRate());
-        row.setTaxIncludedAmount(quoteLine.taxIncludedAmount());
+        row.setUnitPriceExcludingTax(quoteLine.unitPriceExcludingTax());
+        row.setAmountExcludingTax(quoteLine.amountExcludingTax());
         row.setRemark(quoteLine.remark());
         return row;
     }

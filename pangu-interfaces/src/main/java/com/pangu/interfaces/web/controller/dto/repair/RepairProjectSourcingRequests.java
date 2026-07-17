@@ -2,6 +2,7 @@
 package com.pangu.interfaces.web.controller.dto.repair;
 
 import com.pangu.application.repair.command.RepairProjectSourcingCommands;
+import com.pangu.domain.model.repair.RepairProjectSourcing.QuoteLineType;
 import com.pangu.domain.model.repair.RepairProjectSourcing.QuoteLineDraft;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.AssertTrue;
@@ -47,6 +48,7 @@ public final class RepairProjectSourcingRequests {
             Long supplierDeptId,
             Long invitationId,
             @NotNull @DecimalMin(value = "0.01") BigDecimal quoteAmount,
+            @NotNull @DecimalMin(value = "0.000") @DecimalMax(value = "100.000") BigDecimal taxRate,
             @Size(max = 4000) String quoteSummary,
             @NotNull Long attachmentId,
             @Size(max = 40) String confirmationStatus,
@@ -58,7 +60,7 @@ public final class RepairProjectSourcingRequests {
     ) {
         public RepairProjectSourcingCommands.SubmitQuote toCommand() {
             return new RepairProjectSourcingCommands.SubmitQuote(
-                    supplierDeptId, invitationId, quoteAmount, quoteSummary,
+                    supplierDeptId, invitationId, quoteAmount, taxRate, quoteSummary,
                     attachmentId, confirmationStatus, originalSource,
                     constructionPeriodDays, warrantyDays, originalAmountConfirmed,
                     quoteLines.stream().map(QuoteLineRequest::toDraft).toList());
@@ -68,18 +70,21 @@ public final class RepairProjectSourcingRequests {
     public record QuoteLineRequest(
             @NotNull Long projectItemId,
             @NotBlank @Size(max = 200) String itemName,
+            @NotNull QuoteLineType lineType,
+            @Size(max = 1000) String workDescription,
             @Size(max = 200) String specificationModel,
             @Size(max = 120) String brand,
+            @Size(max = 120) String procurementMethod,
             @NotNull @DecimalMin(value = "0.001") BigDecimal quantity,
             @NotBlank @Size(max = 40) String unit,
-            @NotNull @DecimalMin(value = "0.00") BigDecimal taxIncludedUnitPrice,
-            @NotNull @DecimalMin(value = "0.00") @DecimalMax(value = "100.00") BigDecimal taxRate,
+            @NotNull @DecimalMin(value = "0.00") BigDecimal unitPriceExcludingTax,
             @Size(max = 500) String remark
     ) {
         public QuoteLineDraft toDraft() {
             return new QuoteLineDraft(
-                    projectItemId, itemName, specificationModel, brand, quantity,
-                    unit, taxIncludedUnitPrice, taxRate, remark);
+                    projectItemId, itemName, lineType, workDescription,
+                    specificationModel, brand, procurementMethod, quantity,
+                    unit, unitPriceExcludingTax, remark);
         }
     }
 

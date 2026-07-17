@@ -284,6 +284,11 @@ class RepairProjectFlowTest {
                 .andExpect(jsonPath("$.data.plan.attachments", hasSize(2)))
                 .andExpect(jsonPath("$.data.plan.selectedSupplier.supplierDeptId",
                         is((int) selectedSupplier.supplierDeptId())))
+                .andExpect(jsonPath("$.data.plan.selectedSupplier.taxRate", is(0.0)))
+                .andExpect(jsonPath("$.data.plan.selectedSupplier.quoteLines[0].lineType",
+                        is("CONSTRUCTION_MEASURE")))
+                .andExpect(jsonPath("$.data.plan.selectedSupplier.quoteLines[0].unitPriceExcludingTax").isNumber())
+                .andExpect(jsonPath("$.data.plan.selectedSupplier.quoteLines[0].taxIncludedUnitPrice").isNumber())
                 .andExpect(jsonPath("$.data.plan.lockedAt").isString());
 
         mockMvc.perform(get("/api/v1/me/repair-projects/by-work-order/" + workOrderId

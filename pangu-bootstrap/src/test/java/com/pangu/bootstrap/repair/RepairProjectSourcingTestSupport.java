@@ -53,6 +53,7 @@ final class RepairProjectSourcingTestSupport {
                     mockMvc, objectMapper, propertyToken, sourcingPath(projectId, "/quotes"), Map.ofEntries(
                             Map.entry("supplierDeptId", supplierIds.get(index)),
                             Map.entry("quoteAmount", quoteAmount),
+                            Map.entry("taxRate", 0),
                             Map.entry("quoteSummary", "第 " + (index + 1) + " 家供应商纸质报价，物业核验原件后录入"),
                             Map.entry("attachmentId", attachmentId),
                             Map.entry("confirmationStatus", "OFFLINE_EVIDENCE_VERIFIED"),
@@ -182,11 +183,12 @@ final class RepairProjectSourcingTestSupport {
             lines.add(Map.of(
                     "projectItemId", item.path("itemId").asLong(),
                     "itemName", item.path("workContent").asText("工程施工"),
+                    "lineType", "CONSTRUCTION_MEASURE",
+                    "workDescription", item.path("workContent").asText("工程施工"),
                     "quantity", 1,
                     "unit", "项",
-                    "taxIncludedUnitPrice", lineAmount,
-                    "taxRate", 9,
-                    "remark", "含材料、人工及相关费用"));
+                    "unitPriceExcludingTax", lineAmount,
+                    "remark", "不含税单价，含材料、人工及相关费用"));
         }
         return lines;
     }

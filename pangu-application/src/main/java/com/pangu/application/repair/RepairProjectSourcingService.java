@@ -181,7 +181,7 @@ public class RepairProjectSourcingService {
         List<Item> planItems = projectRepository.listItems(context.plan().planId(), tenantId);
         var pricing = quotePricingPolicy.evaluate(new RepairProjectQuotePricingPolicy.Input(
                 planItems.stream().map(item -> new ScopeItem(item.itemId(), item.itemNo())).toList(),
-                command.quoteLines(), command.quoteAmount(), command.constructionPeriodDays(),
+                command.quoteLines(), command.quoteAmount(), command.taxRate(), command.constructionPeriodDays(),
                 command.warrantyDays(), command.originalAmountConfirmed()));
         if (!pricing.allowed()) {
             throw support.invalid(pricing.rejectionReason());
@@ -194,6 +194,7 @@ public class RepairProjectSourcingService {
         }
         Quote quote = sourcingRepository.insertQuote(new Quote(
                 null, projectId, context.plan().planId(), tenantId, supplierDeptId, supplierName,
+                pricing.amountExcludingTax(), pricing.taxRate(), pricing.taxAmount(),
                 pricing.calculatedAmount(), trim(command.quoteSummary()),
                 attachment.attachmentId(), attachment.sha256(), actor.userId(), actor.roleKey(),
                 supplierSubmission ? RepairQuoteSubmissionSource.SUPPLIER_ONLINE : RepairQuoteSubmissionSource.PROPERTY_ENTRY,

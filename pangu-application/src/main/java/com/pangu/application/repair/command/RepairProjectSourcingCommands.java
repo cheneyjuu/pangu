@@ -32,6 +32,7 @@ public final class RepairProjectSourcingCommands {
             Long supplierDeptId,
             Long invitationId,
             BigDecimal quoteAmount,
+            BigDecimal taxRate,
             String quoteSummary,
             Long attachmentId,
             String confirmationStatus,

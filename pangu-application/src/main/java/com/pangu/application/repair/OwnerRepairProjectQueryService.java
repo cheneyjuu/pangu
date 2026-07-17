@@ -9,6 +9,7 @@ import com.pangu.domain.model.repair.RepairProject.PlanAttachment;
 import com.pangu.domain.model.repair.RepairProject.PlanStatus;
 import com.pangu.domain.model.repair.RepairProject.PlanVersion;
 import com.pangu.domain.model.repair.RepairProjectSourcing.Quote;
+import com.pangu.domain.model.repair.RepairProjectSourcing.QuoteLine;
 import com.pangu.domain.model.repair.RepairProjectSourcing.Selection;
 import com.pangu.domain.repository.RepairProjectRepository;
 import com.pangu.domain.repository.RepairProjectSourcingRepository;
@@ -17,6 +18,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.Comparator;
 import java.util.ArrayList;
 import java.util.List;
@@ -109,14 +111,30 @@ public class OwnerRepairProjectQueryService {
             return null;
         }
         return new OwnerRepairProjectDisclosure.PublishedSupplierSelection(
-                quote.quoteId(), quote.supplierDeptId(), quote.supplierName(), quote.quoteAmount(),
+                quote.quoteId(), quote.supplierDeptId(), quote.supplierName(),
+                quote.amountExcludingTax(), quote.taxRate(), quote.taxAmount(), quote.quoteAmount(),
                 quote.quoteSummary(), quote.attachmentId(), quote.constructionPeriodDays(), quote.warrantyDays(),
                 selection.selectionMethod(), selection.recommendationReason(), selection.insufficientQuoteReason(),
-                quote.quoteLines().stream().map(line -> new OwnerRepairProjectDisclosure.PublishedQuoteLine(
-                        line.projectItemId(), line.projectItemNo(), line.lineNo(), line.itemName(),
-                        line.specificationModel(), line.brand(), line.quantity(), line.unit(),
-                        line.taxIncludedUnitPrice(), line.taxRate(), line.taxIncludedAmount(), line.remark()))
+                quote.quoteLines().stream().map(line -> publishedQuoteLine(line, quote.taxRate()))
                         .toList());
+    }
+
+    private OwnerRepairProjectDisclosure.PublishedQuoteLine publishedQuoteLine(
+            QuoteLine line, BigDecimal quoteTaxRate) {
+        BigDecimal taxMultiplier = BigDecimal.ONE.add(quoteTaxRate.movePointLeft(2));
+        // 兼容已发布的小程序字段；税率真值仍只存于报价头，逐行含税金额仅为披露投影。
+        BigDecimal taxIncludedUnitPrice = line.unitPriceExcludingTax()
+                .multiply(taxMultiplier)
+                .setScale(2, RoundingMode.HALF_UP);
+        BigDecimal taxIncludedAmount = line.amountExcludingTax()
+                .multiply(taxMultiplier)
+                .setScale(2, RoundingMode.HALF_UP);
+        return new OwnerRepairProjectDisclosure.PublishedQuoteLine(
+                line.projectItemId(), line.projectItemNo(), line.lineNo(), line.itemName(),
+                line.lineType(), line.workDescription(), line.specificationModel(), line.brand(),
+                line.procurementMethod(), line.quantity(), line.unit(),
+                line.unitPriceExcludingTax(), line.amountExcludingTax(),
+                taxIncludedUnitPrice, quoteTaxRate, taxIncludedAmount, line.remark());
     }
 
     private OwnerRepairProjectDisclosure.PublishedItem toItem(Item item) {

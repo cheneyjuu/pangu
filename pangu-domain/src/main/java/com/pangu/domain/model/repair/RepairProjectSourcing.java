@@ -48,6 +48,9 @@ public final class RepairProjectSourcing {
             Long tenantId,
             Long supplierDeptId,
             String supplierName,
+            BigDecimal amountExcludingTax,
+            BigDecimal taxRate,
+            BigDecimal taxAmount,
             BigDecimal quoteAmount,
             String quoteSummary,
             Long attachmentId,
@@ -71,6 +74,15 @@ public final class RepairProjectSourcing {
         }
     }
 
+    /** 报价明细类别决定录入时展示哪些业务字段，不改变其必须绑定方案工程项的边界。 */
+    public enum QuoteLineType {
+        MATERIAL_EQUIPMENT,
+        LABOR_SERVICE,
+        CONSTRUCTION_MEASURE,
+        TRANSPORT_CLEANUP,
+        OTHER
+    }
+
     /**
      * 报价明细绑定锁定工程项，但允许供应商在工程项下拆分材料、人工、运输等构成。
      * 工程范围仍由 projectItemId 指向的方案工程项决定，报价行不能新增方案外范围。
@@ -82,13 +94,15 @@ public final class RepairProjectSourcing {
             String projectItemNo,
             Integer lineNo,
             String itemName,
+            QuoteLineType lineType,
+            String workDescription,
             String specificationModel,
             String brand,
+            String procurementMethod,
             BigDecimal quantity,
             String unit,
-            BigDecimal taxIncludedUnitPrice,
-            BigDecimal taxRate,
-            BigDecimal taxIncludedAmount,
+            BigDecimal unitPriceExcludingTax,
+            BigDecimal amountExcludingTax,
             String remark
     ) {
     }
@@ -97,12 +111,14 @@ public final class RepairProjectSourcing {
     public record QuoteLineDraft(
             Long projectItemId,
             String itemName,
+            QuoteLineType lineType,
+            String workDescription,
             String specificationModel,
             String brand,
+            String procurementMethod,
             BigDecimal quantity,
             String unit,
-            BigDecimal taxIncludedUnitPrice,
-            BigDecimal taxRate,
+            BigDecimal unitPriceExcludingTax,
             String remark
     ) {
     }

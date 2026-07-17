@@ -37,6 +37,9 @@ public final class RepairProjectSourcingRows {
         private Long tenantId;
         private Long supplierDeptId;
         private String supplierName;
+        private BigDecimal amountExcludingTax;
+        private BigDecimal taxRate;
+        private BigDecimal taxAmount;
         private BigDecimal quoteAmount;
         private String quoteSummary;
         private Long attachmentId;
@@ -63,13 +66,15 @@ public final class RepairProjectSourcingRows {
         private String projectItemNo;
         private Integer lineNo;
         private String itemName;
+        private String lineType;
+        private String workDescription;
         private String specificationModel;
         private String brand;
+        private String procurementMethod;
         private BigDecimal quantity;
         private String unit;
-        private BigDecimal taxIncludedUnitPrice;
-        private BigDecimal taxRate;
-        private BigDecimal taxIncludedAmount;
+        private BigDecimal unitPriceExcludingTax;
+        private BigDecimal amountExcludingTax;
         private String remark;
     }
 

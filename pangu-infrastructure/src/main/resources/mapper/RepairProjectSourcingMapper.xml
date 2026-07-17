@@ -119,13 +119,15 @@
     <insert id="insertQuote" useGeneratedKeys="true" keyProperty="quoteId" keyColumn="quote_id">
         INSERT INTO t_repair_project_supplier_quote (
             project_id, plan_id, tenant_id, supplier_dept_id, supplier_name,
-            quote_amount, quote_summary, attachment_id, attachment_hash,
+            amount_excluding_tax, tax_rate, tax_amount, quote_amount,
+            quote_summary, attachment_id, attachment_hash,
             submitted_by_user_id, submitted_by_role_key, submission_source,
             confirmation_status, original_source, construction_period_days, warranty_days,
             original_amount_confirmed, quote_status, revision_no
         ) VALUES (
             #{projectId}, #{planId}, #{tenantId}, #{supplierDeptId}, #{supplierName},
-            #{quoteAmount}, #{quoteSummary}, #{attachmentId}, #{attachmentHash},
+            #{amountExcludingTax}, #{taxRate}, #{taxAmount}, #{quoteAmount},
+            #{quoteSummary}, #{attachmentId}, #{attachmentHash},
             #{submittedByUserId}, #{submittedByRoleKey}, #{submissionSource},
             #{confirmationStatus}, #{originalSource}, #{constructionPeriodDays}, #{warrantyDays},
             #{originalAmountConfirmed}, #{quoteStatus}, #{revisionNo}
@@ -134,17 +136,20 @@
 
     <insert id="insertQuoteLine" useGeneratedKeys="true" keyProperty="quoteLineId" keyColumn="quote_line_id">
         INSERT INTO t_repair_project_supplier_quote_line (
-            quote_id, project_item_id, line_no, item_name, specification_model, brand,
-            quantity, unit, tax_included_unit_price, tax_rate, tax_included_amount, remark
+            quote_id, project_item_id, line_no, item_name, line_type, work_description,
+            specification_model, brand, procurement_method, quantity, unit,
+            unit_price_excluding_tax, amount_excluding_tax, remark
         ) VALUES (
-            #{quoteId}, #{projectItemId}, #{lineNo}, #{itemName}, #{specificationModel}, #{brand},
-            #{quantity}, #{unit}, #{taxIncludedUnitPrice}, #{taxRate}, #{taxIncludedAmount}, #{remark}
+            #{quoteId}, #{projectItemId}, #{lineNo}, #{itemName}, #{lineType}, #{workDescription},
+            #{specificationModel}, #{brand}, #{procurementMethod}, #{quantity}, #{unit},
+            #{unitPriceExcludingTax}, #{amountExcludingTax}, #{remark}
         )
     </insert>
 
     <sql id="quoteColumns">
         quote_id, project_id, plan_id, tenant_id, supplier_dept_id, supplier_name,
-        quote_amount, quote_summary, attachment_id, attachment_hash,
+        amount_excluding_tax, tax_rate, tax_amount, quote_amount,
+        quote_summary, attachment_id, attachment_hash,
         submitted_by_user_id, submitted_by_role_key, submission_source,
         confirmation_status, original_source, construction_period_days, warranty_days,
         original_amount_confirmed, quote_status, revision_no,
@@ -187,8 +192,9 @@
             resultType="com.pangu.infrastructure.persistence.entity.RepairProjectSourcingRows$QuoteLineRow">
         SELECT line.quote_line_id, line.quote_id, line.project_item_id,
                item.item_no AS project_item_no, line.line_no, line.item_name,
-               line.specification_model, line.brand, line.quantity, line.unit,
-               line.tax_included_unit_price, line.tax_rate, line.tax_included_amount, line.remark
+               line.line_type, line.work_description, line.specification_model, line.brand,
+               line.procurement_method, line.quantity, line.unit,
+               line.unit_price_excluding_tax, line.amount_excluding_tax, line.remark
         FROM t_repair_project_supplier_quote_line line
         JOIN t_repair_project_item item ON item.item_id = line.project_item_id
         WHERE line.quote_id IN
