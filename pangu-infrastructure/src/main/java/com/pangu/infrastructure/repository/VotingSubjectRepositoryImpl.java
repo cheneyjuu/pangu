@@ -107,15 +107,18 @@ public class VotingSubjectRepositoryImpl implements VotingSubjectRepository {
     }
 
     @Override
-    public Page<VotingSubject> pageForAdmin(Long tenantId, SubjectStatus status, SubjectType type, int page, int size) {
+    public Page<VotingSubject> pageForWorkbench(Long tenantId, Long proposedByUserId,
+                                                SubjectStatus status, SubjectType type,
+                                                int page, int size) {
         Integer statusDb = status == null ? null : status.getDbValue();
         Integer typeDb = type == null ? null : type.getDbValue();
-        long total = mapper.countAdminPage(tenantId, statusDb, typeDb);
+        long total = mapper.countWorkbenchPage(tenantId, proposedByUserId, statusDb, typeDb);
         if (total == 0) {
             return new Page<>(Collections.emptyList(), 0, page, size);
         }
         int offset = (page - 1) * size;
-        List<VotingSubject> items = mapper.selectAdminPage(tenantId, statusDb, typeDb, size, offset)
+        List<VotingSubject> items = mapper.selectWorkbenchPage(
+                        tenantId, proposedByUserId, statusDb, typeDb, size, offset)
                 .stream().map(this::toAggregate).toList();
         return new Page<>(items, total, page, size);
     }

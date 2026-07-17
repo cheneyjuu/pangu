@@ -188,13 +188,15 @@ public class SubjectAdminController extends BaseController {
     }
 
     /**
-     * 管理端议题分页列表（M4-1）。
+     * 管理端议题工作台分页列表（M4-1）。
      *
-     * <p>租户内分页查询，可选 {@code status}/{@code type} 筛选（按枚举 name 传参，如 {@code ?status=VOTING}）。
-     * 返回统一分页契约 {@code { items, total, page, size }}。
+     * <p>治理角色持有 {@code voting:subject:audit} 时可查看租户内全部议题；仅持有立项权限的
+     * 服务角色只能查看本人发起的议题。可选 {@code status}/{@code type} 筛选（按枚举 name 传参，
+     * 如 {@code ?status=VOTING}），返回统一分页契约 {@code { items, total, page, size }}。
      */
     @GetMapping("/voting-subjects")
-    @PreAuthorize("hasAuthority('voting:subject:audit')")
+    @PreAuthorize("hasAnyAuthority('voting:subject:audit', 'voting:subject:create',"
+            + " 'voting:subject:create:election')")
     public Result<PageResponse<AdminSubjectResponse>> page(
             @RequestParam(name = "page", defaultValue = "1") int page,
             @RequestParam(name = "size", defaultValue = "20") int size,
@@ -202,8 +204,9 @@ public class SubjectAdminController extends BaseController {
             @RequestParam(name = "type", required = false) SubjectType type) {
         int safePage = Math.max(page, 1);
         int safeSize = Math.min(Math.max(size, 1), 100);
-        Page<VotingSubject> result = votingSubjectRepository.pageForAdmin(
-                requireTenantId(), status, type, safePage, safeSize);
+        Long proposedByUserId = hasAuthority("voting:subject:audit") ? null : requireUserId();
+        Page<VotingSubject> result = votingSubjectRepository.pageForWorkbench(
+                requireTenantId(), proposedByUserId, status, type, safePage, safeSize);
         return success(PageResponse.from(result, AdminSubjectResponse::from));
     }
 

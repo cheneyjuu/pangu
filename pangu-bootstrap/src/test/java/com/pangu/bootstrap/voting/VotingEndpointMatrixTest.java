@@ -7,12 +7,15 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.HashMap;
 import java.util.Map;
 
+import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.is;
+import static org.hamcrest.Matchers.not;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -48,12 +51,16 @@ public class VotingEndpointMatrixTest {
     @Autowired
     private JwtTokenProvider jwtTokenProvider;
 
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
     private static final long TENANT_RUSHI = 10001L;
 
     private static final long ACC_STREET = 999801L, USR_STREET = 800001L; // 王街道 GOV_SUPER_ADMIN
     private static final long ACC_OPERATOR = 999805L, USR_OPERATOR = 800005L; // 吴经办员 GOV_OPERATOR
     private static final long ACC_GRID = 999804L, USR_GRID = 800004L;   // 陈网格员 GRID_MEMBER（publish/audit）
     private static final long ACC_COMM = 999803L, USR_COMM = 800003L;   // 刘主任 COMMUNITY_ADMIN（create/publish/audit）
+    private static final long ACC_PROPERTY = 999821L, USR_PROPERTY = 800201L; // 赵经理 PROPERTY_MANAGER（create/publish）
     private static final long ACC_LISI = 999913L, UID_LISI = 70002L;    // 李四 C_USER（无 sys_role）
 
     private String sysToken(long acc, long userId) {
@@ -120,6 +127,38 @@ public class VotingEndpointMatrixTest {
                         .content(proposeBody("ELECTION")))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code", is(40940)));
+    }
+
+    @Test
+    public void propertyManagerPreparationList_returnsOnlyOwnSubjects() throws Exception {
+        long marker = System.nanoTime();
+        String ownTitle = "物业经理本人议题-" + marker;
+        String otherTitle = "其他治理角色议题-" + marker;
+        String insertSql = """
+                INSERT INTO t_voting_subject(
+                    tenant_id, title, content_html, subject_type, scope, status,
+                    vote_start_at, vote_end_at, proposed_by_user_id
+                ) VALUES (10001, ?, '<p>权限矩阵测试</p>', 3, 1, 1,
+                          CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + INTERVAL '7 days', ?)
+                """;
+
+        jdbcTemplate.update(insertSql, ownTitle, USR_PROPERTY);
+        jdbcTemplate.update(insertSql, otherTitle, USR_COMM);
+        try {
+            mockMvc.perform(get("/api/v1/voting-subjects")
+                            .param("page", "1")
+                            .param("size", "100")
+                            .header("Authorization", "Bearer " + sysToken(ACC_PROPERTY, USR_PROPERTY)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.code", is(200)))
+                    .andExpect(jsonPath("$.data.items[*].title", hasItem(ownTitle)))
+                    .andExpect(jsonPath("$.data.items[*].title", not(hasItem(otherTitle))));
+        } finally {
+            jdbcTemplate.update(
+                    "DELETE FROM t_voting_subject WHERE title IN (?, ?)",
+                    ownTitle,
+                    otherTitle);
+        }
     }
 
     // ===== 审计查看 audit =====

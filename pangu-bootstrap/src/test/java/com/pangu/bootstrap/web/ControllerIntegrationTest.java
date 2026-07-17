@@ -194,6 +194,8 @@ public class ControllerIntegrationTest {
                 .andExpect(jsonPath("$.data.user_info.permissions", hasItem("repair:workorder:read")))
                 .andExpect(jsonPath("$.data.user_info.permissions", hasItem("repair:supplier:manage")))
                 .andExpect(jsonPath("$.data.user_info.permissions", hasItem("fund:account:read")))
+                .andExpect(jsonPath("$.data.user_info.menu_permissions", hasItem("subject-proposal")))
+                .andExpect(jsonPath("$.data.user_info.menu_permissions", not(hasItem("term-management"))))
                 .andReturn().getResponse().getContentAsString();
 
         Map<String, Object> responseMap = objectMapper.readValue(responseJson, Map.class);
@@ -206,6 +208,11 @@ public class ControllerIntegrationTest {
                 .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
         Map<String, Object> menusResponse = objectMapper.readValue(menusJson, Map.class);
         List<Map<String, Object>> modules = (List<Map<String, Object>>) menusResponse.get("data");
+
+        assertTrue(modules.stream()
+                        .flatMap(module -> ((List<Map<String, Object>>) module.get("pages")).stream())
+                        .noneMatch(page -> "term-management".equals(page.get("id"))),
+                "物业经理不负责业委会换届流程，导航不得下发换届管理");
 
         assertTrue(modules.stream().noneMatch(module -> "assets".equals(module.get("id"))),
                 "旧资产与维修一级菜单不应继续下发");

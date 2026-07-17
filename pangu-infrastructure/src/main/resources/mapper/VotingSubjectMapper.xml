@@ -197,11 +197,14 @@
         ORDER BY subject_id ASC
         LIMIT 1
     </select>
-    <!-- M4-1: 管理端议题分页查询。tenant 恒在 + status/type 可选筛选。
-         不挂 @DataScope：受众为社区级及以上角色，租户 + endpoint @PreAuthorize 即安全边界。 -->
-    <sql id="admin_page_where">
+    <!-- M4-1: 管理端议题工作台分页查询。治理角色按 tenant 查看全部；
+         仅有立项权限的服务角色由 controller 传 proposedByUserId，只能查看本人发起记录。 -->
+    <sql id="workbench_page_where">
         <where>
             tenant_id = #{tenantId}
+            <if test="proposedByUserId != null">
+                AND proposed_by_user_id = #{proposedByUserId}
+            </if>
             <if test="status != null">
                 AND status = #{status}
             </if>
@@ -211,18 +214,18 @@
         </where>
     </sql>
 
-    <select id="selectAdminPage" resultMap="VotingSubjectRowMap">
+    <select id="selectWorkbenchPage" resultMap="VotingSubjectRowMap">
         SELECT <include refid="all_columns"/>
         FROM t_voting_subject
-        <include refid="admin_page_where"/>
+        <include refid="workbench_page_where"/>
         ORDER BY create_time DESC, subject_id DESC
         LIMIT #{limit} OFFSET #{offset}
     </select>
 
-    <select id="countAdminPage" resultType="long">
+    <select id="countWorkbenchPage" resultType="long">
         SELECT COUNT(*)
         FROM t_voting_subject
-        <include refid="admin_page_where"/>
+        <include refid="workbench_page_where"/>
     </select>
 
 </mapper>
