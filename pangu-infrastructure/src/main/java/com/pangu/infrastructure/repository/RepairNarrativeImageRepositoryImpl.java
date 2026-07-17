@@ -40,6 +40,11 @@ public class RepairNarrativeImageRepositoryImpl implements RepairNarrativeImageR
     }
 
     @Override
+    public List<RepairNarrativeImage> findByPlanId(Long planId, Long tenantId) {
+        return mapper.findByPlanId(planId, tenantId).stream().map(this::toDomain).toList();
+    }
+
+    @Override
     public int bindDraftImages(Collection<Long> imageIds, Long tenantId, Long uploadedByAccountId,
                                Long projectId, Long planId) {
         if (imageIds == null || imageIds.isEmpty()) {

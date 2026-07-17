@@ -16,6 +16,8 @@ public interface RepairNarrativeImageRepository {
 
     List<RepairNarrativeImage> findByIds(Collection<Long> imageIds, Long tenantId);
 
+    List<RepairNarrativeImage> findByPlanId(Long planId, Long tenantId);
+
     int bindDraftImages(Collection<Long> imageIds, Long tenantId, Long uploadedByAccountId,
                         Long projectId, Long planId);
 

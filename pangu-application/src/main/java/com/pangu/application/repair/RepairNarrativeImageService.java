@@ -12,6 +12,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.net.URI;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
@@ -46,8 +47,10 @@ public class RepairNarrativeImageService {
     private static final Duration PREVIEW_URL_VALIDITY = Duration.ofMinutes(10);
     private static final Duration DRAFT_RETENTION = Duration.ofHours(24);
     private static final Set<String> CONTENT_TYPES = Set.of("image/jpeg", "image/png", "image/webp");
-    private static final Pattern IMAGE_TAG = Pattern.compile(
-            "<img\\b[^>]*data-repair-image-id=\\\"(\\d+)\\\"[^>]*>", Pattern.CASE_INSENSITIVE);
+    private static final Pattern IMAGE_TAG = Pattern.compile("<img\\b[^>]*>", Pattern.CASE_INSENSITIVE);
+    private static final Pattern IMAGE_ID_ATTRIBUTE = Pattern.compile(
+            "\\sdata-repair-image-id=\\\"(\\d+)\\\"", Pattern.CASE_INSENSITIVE);
+    private static final Pattern SRC_ATTRIBUTE = Pattern.compile("\\ssrc=\\\"([^\\\"]*)\\\"", Pattern.CASE_INSENSITIVE);
     private static final Pattern ALT_ATTRIBUTE = Pattern.compile("\\salt=\\\"([^\\\"]*)\\\"", Pattern.CASE_INSENSITIVE);
 
     private final RepairNarrativeImageRepository imageRepository;
@@ -150,19 +153,23 @@ public class RepairNarrativeImageService {
         if (html == null || html.isBlank()) {
             return html;
         }
-        Set<Long> imageIds = extractImageIds(html);
-        if (imageIds.isEmpty()) {
+        Matcher matcher = IMAGE_TAG.matcher(html);
+        if (!matcher.find()) {
             return html;
         }
-        Map<Long, RepairNarrativeImage> images = imageRepository.findByIds(imageIds, tenantId).stream()
+        var planImages = imageRepository.findByPlanId(planId, tenantId).stream()
                 .filter(image -> image.status() == RepairNarrativeImage.Status.BOUND)
                 .filter(image -> planId.equals(image.planId()))
+                .toList();
+        Map<Long, RepairNarrativeImage> imagesById = planImages.stream()
                 .collect(Collectors.toMap(RepairNarrativeImage::imageId, Function.identity()));
-        Matcher matcher = IMAGE_TAG.matcher(html);
+        Map<String, RepairNarrativeImage> imagesByObjectKey = planImages.stream()
+                .collect(Collectors.toMap(RepairNarrativeImage::objectKey, Function.identity()));
+        matcher.reset();
         StringBuffer resolved = new StringBuffer();
         while (matcher.find()) {
-            Long imageId = Long.valueOf(matcher.group(1));
-            RepairNarrativeImage image = images.get(imageId);
+            RepairNarrativeImage image = imageForTag(
+                    matcher.group(), imagesById, imagesByObjectKey);
             String replacement = image == null ? "" : resolvedTag(image, matcher.group());
             matcher.appendReplacement(resolved, Matcher.quoteReplacement(replacement));
         }
@@ -190,7 +197,7 @@ public class RepairNarrativeImageService {
         if (html == null || html.isBlank()) {
             return imageIds;
         }
-        Matcher matcher = IMAGE_TAG.matcher(html);
+        Matcher matcher = IMAGE_ID_ATTRIBUTE.matcher(html);
         while (matcher.find()) {
             imageIds.add(Long.valueOf(matcher.group(1)));
         }
@@ -210,7 +217,7 @@ public class RepairNarrativeImageService {
 
     private String resolvedTag(RepairNarrativeImage image, String canonicalTag) {
         Matcher altMatcher = ALT_ATTRIBUTE.matcher(canonicalTag);
-        String alt = altMatcher.find() ? altMatcher.group(1) : image.originalFileName();
+        String alt = altMatcher.find() ? unescapeAttribute(altMatcher.group(1)) : image.originalFileName();
         String src;
         try {
             src = objectStorage.createDownloadUrl(image.objectKey(), PREVIEW_URL_VALIDITY).toString();
@@ -218,6 +225,38 @@ public class RepairNarrativeImageService {
             throw new RepairWorkOrderApplicationException(STORAGE_UNAVAILABLE, "生成正文图片展示地址失败", ex);
         }
         return "<img src=\"" + escapeAttribute(src) + "\" alt=\"" + escapeAttribute(alt) + "\">";
+    }
+
+    private RepairNarrativeImage imageForTag(
+            String tag,
+            Map<Long, RepairNarrativeImage> imagesById,
+            Map<String, RepairNarrativeImage> imagesByObjectKey) {
+        Matcher imageIdMatcher = IMAGE_ID_ATTRIBUTE.matcher(tag);
+        if (imageIdMatcher.find()) {
+            return imagesById.get(Long.valueOf(imageIdMatcher.group(1)));
+        }
+        Matcher srcMatcher = SRC_ATTRIBUTE.matcher(tag);
+        if (!srcMatcher.find()) {
+            return null;
+        }
+        try {
+            URI uri = URI.create(unescapeAttribute(srcMatcher.group(1)));
+            if (!"https".equalsIgnoreCase(uri.getScheme()) || uri.getRawPath() == null) {
+                return null;
+            }
+            String objectPath = uri.getRawPath().replaceFirst("^/+", "");
+            RepairNarrativeImage exact = imagesByObjectKey.get(objectPath);
+            if (exact != null) {
+                return exact;
+            }
+            return imagesByObjectKey.entrySet().stream()
+                    .filter(entry -> objectPath.endsWith("/" + entry.getKey()))
+                    .map(Map.Entry::getValue)
+                    .findFirst()
+                    .orElse(null);
+        } catch (IllegalArgumentException ex) {
+            return null;
+        }
     }
 
     private Set<Long> normalizedIds(Collection<Long> imageIds) {
@@ -304,6 +343,11 @@ public class RepairNarrativeImageService {
     private String escapeAttribute(String value) {
         return value.replace("&", "&amp;").replace("\"", "&quot;")
                 .replace("<", "&lt;").replace(">", "&gt;");
+    }
+
+    private String unescapeAttribute(String value) {
+        return value.replace("&quot;", "\"").replace("&#39;", "'")
+                .replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&");
     }
 
     private void deleteQuietly(String objectKey, RuntimeException failure) {

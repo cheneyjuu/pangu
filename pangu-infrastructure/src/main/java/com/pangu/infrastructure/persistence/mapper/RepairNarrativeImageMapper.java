@@ -20,6 +20,9 @@ public interface RepairNarrativeImageMapper {
     List<RepairNarrativeImageRow> findByIds(@Param("imageIds") Collection<Long> imageIds,
                                             @Param("tenantId") Long tenantId);
 
+    List<RepairNarrativeImageRow> findByPlanId(@Param("planId") Long planId,
+                                               @Param("tenantId") Long tenantId);
+
     int bindDraftImages(@Param("imageIds") Collection<Long> imageIds,
                         @Param("tenantId") Long tenantId,
                         @Param("uploadedByAccountId") Long uploadedByAccountId,

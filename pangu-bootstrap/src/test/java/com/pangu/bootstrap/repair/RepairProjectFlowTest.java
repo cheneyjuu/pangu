@@ -29,6 +29,7 @@ import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.containsString;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -299,6 +300,35 @@ class RepairProjectFlowTest {
                         is((int) selectedSupplier.quoteAttachmentId())))
                 .andExpect(jsonPath("$.data.downloadUrl", is(
                         "https://oss.example.test/repair-project")));
+
+        String objectKey = jdbcTemplate.queryForObject("""
+                SELECT object_key
+                FROM t_repair_narrative_image
+                WHERE image_id = ? AND plan_id = ? AND tenant_id = ?
+                """, String.class, narrativeImageId, planId, TENANT);
+        jdbcTemplate.update("""
+                UPDATE t_repair_plan_version
+                SET plan_description = ?
+                WHERE plan_id = ? AND tenant_id = ?
+                """, "<h3>历史方案</h3><img src=\"https://oss.example.test/"
+                        + objectKey
+                        + "?x-oss-date=old&amp;x-oss-signature=old\" alt=\"历史现场图\">",
+                planId, TENANT);
+        when(objectStorage.createDownloadUrl(anyString(), any()))
+                .thenAnswer(invocation -> URI.create(
+                        "https://oss.example.test/" + invocation.getArgument(0)
+                                + "?x-oss-date=fresh&x-oss-signature=new").toURL());
+
+        String legacyBody = mockMvc.perform(get(
+                        "/api/v1/me/repair-projects/by-work-order/" + workOrderId)
+                        .header("Authorization", "Bearer " + ownerToken))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+        String resolvedLegacyHtml = objectMapper.readTree(legacyBody)
+                .path("data").path("plan").path("planDescription").asText();
+        assertTrue(resolvedLegacyHtml.contains(
+                "x-oss-date=fresh&amp;x-oss-signature=new"));
+        assertFalse(resolvedLegacyHtml.contains("x-oss-date=old"));
     }
 
     @Test

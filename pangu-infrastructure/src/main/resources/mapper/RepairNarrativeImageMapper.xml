@@ -36,6 +36,15 @@
         ORDER BY image_id
     </select>
 
+    <select id="findByPlanId" resultType="com.pangu.infrastructure.persistence.entity.RepairNarrativeImageRow">
+        SELECT <include refid="columns"/>
+        FROM t_repair_narrative_image
+        WHERE plan_id = #{planId}
+          AND tenant_id = #{tenantId}
+          AND status = 'BOUND'
+        ORDER BY image_id
+    </select>
+
     <update id="bindDraftImages">
         UPDATE t_repair_narrative_image
         SET project_id = #{projectId}, plan_id = #{planId}, status = 'BOUND', bound_at = CURRENT_TIMESTAMP
