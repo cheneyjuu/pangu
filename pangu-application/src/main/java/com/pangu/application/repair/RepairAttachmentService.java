@@ -16,6 +16,7 @@ import com.pangu.domain.repository.RepairAttachmentRepository;
 import com.pangu.domain.repository.RepairDocumentPreviewConverter;
 import com.pangu.domain.repository.RepairEvidenceObjectStorage;
 import com.pangu.domain.repository.RepairWorkOrderRepository;
+import com.pangu.domain.policy.RepairCaseLifecyclePolicy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -71,6 +72,7 @@ public class RepairAttachmentService {
     private final RepairEvidenceObjectStorage objectStorage;
     private final RepairDocumentPreviewConverter documentPreviewConverter;
     private final UserContextHolder userContextHolder;
+    private final RepairCaseLifecyclePolicy caseLifecyclePolicy;
 
     @Transactional
     public RepairAttachment upload(Long workOrderId, UploadRepairAttachmentCommand command) {
@@ -84,6 +86,11 @@ public class RepairAttachmentService {
                                              RepairWorkOrder order,
                                              RepairAttachmentKind kind,
                                              UploadRepairAttachmentCommand command) {
+        RepairCaseLifecyclePolicy.Decision cutover =
+                caseLifecyclePolicy.assessLegacyAttachment(order, kind);
+        if (!cutover.allowed()) {
+            throw new RepairWorkOrderApplicationException(INVALID_STATUS, cutover.reason());
+        }
         assertUploadStatus(order, kind);
         String contentType = normalizeContentType(command.contentType());
         byte[] content = command.content() == null ? new byte[0] : command.content();
@@ -348,6 +355,7 @@ public class RepairAttachmentService {
             case APPROVAL_DOCUMENT -> 3;
             case SOLITAIRE_SCREENSHOT -> 3;
             case GOVERNANCE_SEALED_DOCUMENT -> 3;
+            case ACCEPTANCE_SEALED_DOCUMENT -> 3;
             case INTAKE_ATTACHMENT -> 5;
             default -> 3;
         };
@@ -359,6 +367,7 @@ public class RepairAttachmentService {
                         case APPROVAL_DOCUMENT -> "单个工单最多保留 3 份待提交报审文件";
                         case SOLITAIRE_SCREENSHOT -> "微信接龙截图最多上传 3 张";
                         case GOVERNANCE_SEALED_DOCUMENT -> "单个工单最多保留 3 份待确认盖章文件";
+                        case ACCEPTANCE_SEALED_DOCUMENT -> "单个工单最多保留 3 份验收盖章文件";
                         case INTAKE_ATTACHMENT -> "登记工单最多上传 5 个附件";
                         default -> "现场证据图片最多上传 3 张";
                     });
@@ -367,17 +376,20 @@ public class RepairAttachmentService {
 
     private void validateMedia(RepairAttachmentKind kind, String contentType, long fileSize) {
         if (kind == RepairAttachmentKind.INTAKE_ATTACHMENT
-                || kind == RepairAttachmentKind.GOVERNANCE_SEALED_DOCUMENT) {
+                || kind == RepairAttachmentKind.GOVERNANCE_SEALED_DOCUMENT
+                || kind == RepairAttachmentKind.ACCEPTANCE_SEALED_DOCUMENT) {
             boolean supported = IMAGE_CONTENT_TYPES.contains(contentType) || "application/pdf".equals(contentType);
             if (!supported) {
                 throw new RepairWorkOrderApplicationException(PARAM_INVALID,
                         kind == RepairAttachmentKind.GOVERNANCE_SEALED_DOCUMENT
+                                || kind == RepairAttachmentKind.ACCEPTANCE_SEALED_DOCUMENT
                                 ? "盖章结果文件仅支持图片或 PDF 文件"
                                 : "登记附件仅支持图片或 PDF 文件");
             }
             if (fileSize <= 0 || fileSize > MAX_DOCUMENT_SIZE) {
                 throw new RepairWorkOrderApplicationException(PARAM_INVALID,
                         kind == RepairAttachmentKind.GOVERNANCE_SEALED_DOCUMENT
+                                || kind == RepairAttachmentKind.ACCEPTANCE_SEALED_DOCUMENT
                                 ? "单个盖章结果文件大小必须在 20MB 以内"
                                 : "单个登记附件大小必须在 20MB 以内");
             }
@@ -443,6 +455,10 @@ public class RepairAttachmentService {
                     RepairWorkOrderStatus.LOCAL_DECISION_PASSED,
                     RepairWorkOrderStatus.APPROVAL_DOCUMENT_PREPARING).contains(order.status());
             case GOVERNANCE_SEALED_DOCUMENT -> order.status() == RepairWorkOrderStatus.GOVERNANCE_CONFIRMED;
+            case ACCEPTANCE_SEALED_DOCUMENT -> Set.of(
+                    RepairWorkOrderStatus.PENDING_ACCEPTANCE,
+                    RepairWorkOrderStatus.ACCEPTANCE_EXCEPTION,
+                    RepairWorkOrderStatus.RECTIFICATION_REQUIRED).contains(order.status());
         };
         if (!allowed) {
             throw new RepairWorkOrderApplicationException(INVALID_STATUS,
@@ -566,11 +582,13 @@ public class RepairAttachmentService {
         if (supplierUser && kind != null && kind != RepairAttachmentKind.QUOTE_DOCUMENT) {
             throw new RepairWorkOrderApplicationException(FORBIDDEN, "供应商只能上传报价原件");
         }
-        if (kind == RepairAttachmentKind.GOVERNANCE_SEALED_DOCUMENT && !governanceUser) {
+        if ((kind == RepairAttachmentKind.GOVERNANCE_SEALED_DOCUMENT
+                || kind == RepairAttachmentKind.ACCEPTANCE_SEALED_DOCUMENT) && !governanceUser) {
             throw new RepairWorkOrderApplicationException(FORBIDDEN, "仅业委会印章经办人可上传盖章结果文件");
         }
         if (governanceUser && !fieldUser && kind != null
-                && kind != RepairAttachmentKind.GOVERNANCE_SEALED_DOCUMENT) {
+                && kind != RepairAttachmentKind.GOVERNANCE_SEALED_DOCUMENT
+                && kind != RepairAttachmentKind.ACCEPTANCE_SEALED_DOCUMENT) {
             throw new RepairWorkOrderApplicationException(FORBIDDEN, "业委会印章经办人只能上传盖章结果文件");
         }
         return ctx;

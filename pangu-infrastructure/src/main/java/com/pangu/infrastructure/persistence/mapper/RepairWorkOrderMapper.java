@@ -1,7 +1,6 @@
 // 关联业务：持久化维修工单全流程状态、表决、报审、盖章、合同及验收记录。
 package com.pangu.infrastructure.persistence.mapper;
 
-import com.pangu.domain.model.repair.RepairAcceptanceRecord;
 import com.pangu.domain.model.repair.RepairContractSignature;
 import com.pangu.domain.model.repair.RepairSolitaireEntry;
 import com.pangu.domain.model.user.WorkIdentityBuildingScope;
@@ -9,7 +8,6 @@ import com.pangu.infrastructure.persistence.entity.OwnerPropertyDetailRow;
 import com.pangu.infrastructure.persistence.entity.RepairBuildingDecisionSnapshotRow;
 import com.pangu.infrastructure.persistence.entity.RepairDecisionRoomRow;
 import com.pangu.infrastructure.persistence.entity.RepairFrameworkRelationRow;
-import com.pangu.infrastructure.persistence.entity.RepairAcceptanceSummaryRow;
 import com.pangu.infrastructure.persistence.entity.RepairLocationOptionRow;
 import com.pangu.infrastructure.persistence.entity.RepairQuoteInvitationRow;
 import com.pangu.infrastructure.persistence.entity.RepairLocalDecisionRow;
@@ -331,6 +329,9 @@ public interface RepairWorkOrderMapper {
     String findActiveCommitteePosition(@Param("tenantId") Long tenantId,
                                        @Param("userId") Long userId);
 
+    boolean activeUserBelongsToDept(@Param("userId") Long userId,
+                                    @Param("deptId") Long deptId);
+
     int insertContract(@Param("workOrderId") Long workOrderId,
                        @Param("tenantId") Long tenantId,
                        @Param("supplierDeptId") Long supplierDeptId,
@@ -374,35 +375,6 @@ public interface RepairWorkOrderMapper {
 
     Long findLatestPaymentRequestId(@Param("workOrderId") Long workOrderId,
                                     @Param("contractId") Long contractId);
-
-    int deleteAcceptanceScope(@Param("workOrderId") Long workOrderId,
-                              @Param("tenantId") Long tenantId);
-
-    int insertAcceptanceScope(@Param("workOrderId") Long workOrderId,
-                              @Param("tenantId") Long tenantId,
-                              @Param("roomId") Long roomId,
-                              @Param("affectedReason") String affectedReason,
-                              @Param("createdByUserId") Long createdByUserId);
-
-    boolean roomInAcceptanceScope(@Param("workOrderId") Long workOrderId,
-                                  @Param("tenantId") Long tenantId,
-                                  @Param("roomId") Long roomId);
-
-    boolean ownerOwnsAcceptanceRoom(@Param("workOrderId") Long workOrderId,
-                                    @Param("tenantId") Long tenantId,
-                                    @Param("roomId") Long roomId,
-                                    @Param("uid") Long uid);
-
-    List<Long> listOwnerAcceptanceRooms(@Param("workOrderId") Long workOrderId,
-                                        @Param("tenantId") Long tenantId,
-                                        @Param("uid") Long uid);
-
-    int insertAcceptanceRecord(@Param("workOrderId") Long workOrderId,
-                               @Param("tenantId") Long tenantId,
-                               @Param("record") RepairAcceptanceRecord record);
-
-    RepairAcceptanceSummaryRow summarizeAcceptance(@Param("workOrderId") Long workOrderId,
-                                                    @Param("tenantId") Long tenantId);
 
     int insertEvent(RepairWorkOrderEventRow row);
 

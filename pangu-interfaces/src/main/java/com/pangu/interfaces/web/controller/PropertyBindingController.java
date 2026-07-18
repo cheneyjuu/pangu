@@ -35,7 +35,7 @@ public class PropertyBindingController extends BaseController {
     public Result<PropertyBindingApplicationService.RosterOptionsResponse> options(
             @RequestParam(name = "tenantId", required = false) Long tenantId) {
         requireCUser();
-        return success(service.listRosterOptions(tenantId));
+        return success(service.listRosterOptions(SecurityUtils.getAccountId(), tenantId));
     }
 
     @PostMapping("/me/property-bindings/claims")

@@ -31,6 +31,11 @@ public interface FinanceDisclosureMapper {
                                               @Param("disclosureType") String disclosureType,
                                               @Param("period") String period);
 
+    /** 当前租户某类已公示快照中最新的一期。 */
+    FinanceDisclosureRow selectLatestPublished(@Param("tenantId") Long tenantId,
+                                                @Param("disclosureType") String disclosureType,
+                                                @Param("publishedStatus") Integer publishedStatus);
+
     int insert(FinanceDisclosureRow row);
 
     int update(FinanceDisclosureRow row);

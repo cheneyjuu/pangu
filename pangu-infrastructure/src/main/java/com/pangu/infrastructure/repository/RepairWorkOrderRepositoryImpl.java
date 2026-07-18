@@ -2,8 +2,6 @@
 package com.pangu.infrastructure.repository;
 
 import com.pangu.domain.model.asset.OwnerPropertyDetail;
-import com.pangu.domain.model.repair.RepairAcceptanceRecord;
-import com.pangu.domain.model.repair.RepairAcceptanceSummary;
 import com.pangu.domain.model.repair.RepairApprovalAttachment;
 import com.pangu.domain.model.repair.RepairBuildingDecisionSnapshot;
 import com.pangu.domain.model.repair.RepairContractSignature;
@@ -584,6 +582,11 @@ public class RepairWorkOrderRepositoryImpl implements RepairWorkOrderRepository 
     }
 
     @Override
+    public boolean activeUserBelongsToDept(Long userId, Long deptId) {
+        return mapper.activeUserBelongsToDept(userId, deptId);
+    }
+
+    @Override
     public Long insertContract(Long workOrderId,
                                Long tenantId,
                                Long supplierDeptId,
@@ -648,51 +651,6 @@ public class RepairWorkOrderRepositoryImpl implements RepairWorkOrderRepository 
         mapper.insertPaymentRequest(workOrderId, contractId, tenantId, milestoneType,
                 requestedAmount, conditionEvidenceHash, requestedByUserId);
         return mapper.findLatestPaymentRequestId(workOrderId, contractId);
-    }
-
-    @Override
-    public void replaceAcceptanceScope(Long workOrderId,
-                                       Long tenantId,
-                                       Long createdByUserId,
-                                       List<Long> roomIds,
-                                       List<String> affectedReasons) {
-        mapper.deleteAcceptanceScope(workOrderId, tenantId);
-        for (int index = 0; index < roomIds.size(); index++) {
-            mapper.insertAcceptanceScope(workOrderId, tenantId, roomIds.get(index),
-                    affectedReasons.get(index), createdByUserId);
-        }
-    }
-
-    @Override
-    public boolean roomInAcceptanceScope(Long workOrderId, Long tenantId, Long roomId) {
-        return mapper.roomInAcceptanceScope(workOrderId, tenantId, roomId);
-    }
-
-    @Override
-    public boolean ownerOwnsAcceptanceRoom(Long workOrderId, Long tenantId, Long roomId, Long uid) {
-        return mapper.ownerOwnsAcceptanceRoom(workOrderId, tenantId, roomId, uid);
-    }
-
-    @Override
-    public List<Long> listOwnerAcceptanceRooms(Long workOrderId, Long tenantId, Long uid) {
-        return mapper.listOwnerAcceptanceRooms(workOrderId, tenantId, uid);
-    }
-
-    @Override
-    public void insertAcceptanceRecord(Long workOrderId, Long tenantId, RepairAcceptanceRecord record) {
-        mapper.insertAcceptanceRecord(workOrderId, tenantId, record);
-    }
-
-    @Override
-    public RepairAcceptanceSummary summarizeAcceptance(Long workOrderId, Long tenantId) {
-        var row = mapper.summarizeAcceptance(workOrderId, tenantId);
-        return new RepairAcceptanceSummary(
-                row.getAffectedRoomCount() == null ? 0 : row.getAffectedRoomCount(),
-                row.getPassedAffectedRoomCount() == null ? 0 : row.getPassedAffectedRoomCount(),
-                row.getRectificationCount() == null ? 0 : row.getRectificationCount(),
-                row.getUnreachableCount() == null ? 0 : row.getUnreachableCount(),
-                Boolean.TRUE.equals(row.getOwnerRepresentativePassed()),
-                Boolean.TRUE.equals(row.getPropertyRepresentativePassed()));
     }
 
     @Override

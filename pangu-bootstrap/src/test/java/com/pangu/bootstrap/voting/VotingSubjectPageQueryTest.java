@@ -19,7 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * {@link VotingSubjectRepository#pageForAdmin} 管理端议题分页查询集成测试。
+ * {@link VotingSubjectRepository#pageForWorkbench} 管理端议题工作台分页查询集成测试。
  *
  * <p>覆盖 M4-1 读侧分页范式的关键正确性：
  * <ul>
@@ -93,7 +93,8 @@ public class VotingSubjectPageQueryTest {
         seedSubject(TENANT_A, "CANCELLED", TYPE_GENERAL, ST_CANCELLED);
         seedSubject(TENANT_B, "OTHER", TYPE_GENERAL, ST_VOTING);
 
-        Page<VotingSubject> page = subjectRepository.pageForAdmin(TENANT_A, null, null, 1, 20);
+        Page<VotingSubject> page = subjectRepository.pageForWorkbench(
+                TENANT_A, null, null, null, 1, 20);
 
         assertEquals(3, page.total(), "应覆盖本租户全部状态（含 DRAFT/CANCELLED）");
         assertEquals(3, page.items().size());
@@ -107,7 +108,8 @@ public class VotingSubjectPageQueryTest {
         seedSubject(TENANT_A, "DRAFT2", TYPE_MAJOR, ST_DRAFT);
         seedSubject(TENANT_A, "VOTING", TYPE_GENERAL, ST_VOTING);
 
-        Page<VotingSubject> page = subjectRepository.pageForAdmin(TENANT_A, SubjectStatus.DRAFT, null, 1, 20);
+        Page<VotingSubject> page = subjectRepository.pageForWorkbench(
+                TENANT_A, null, SubjectStatus.DRAFT, null, 1, 20);
 
         assertEquals(2, page.total());
         assertTrue(page.items().stream().allMatch(s -> s.getStatus() == SubjectStatus.DRAFT));
@@ -119,7 +121,8 @@ public class VotingSubjectPageQueryTest {
         seedSubject(TENANT_A, "MAJ", TYPE_MAJOR, ST_PUBLISHED);
         seedSubject(TENANT_A, "ELE", TYPE_ELECTION, ST_PUBLISHED);
 
-        Page<VotingSubject> page = subjectRepository.pageForAdmin(TENANT_A, null, SubjectType.GENERAL, 1, 20);
+        Page<VotingSubject> page = subjectRepository.pageForWorkbench(
+                TENANT_A, null, null, SubjectType.GENERAL, 1, 20);
 
         assertEquals(1, page.total());
         assertEquals(SubjectType.GENERAL, page.items().get(0).getSubjectType());
@@ -131,8 +134,8 @@ public class VotingSubjectPageQueryTest {
         seedSubject(TENANT_A, "GEN-VOTING", TYPE_GENERAL, ST_VOTING);
         seedSubject(TENANT_A, "MAJ-DRAFT", TYPE_MAJOR, ST_DRAFT);
 
-        Page<VotingSubject> page = subjectRepository.pageForAdmin(
-                TENANT_A, SubjectStatus.DRAFT, SubjectType.GENERAL, 1, 20);
+        Page<VotingSubject> page = subjectRepository.pageForWorkbench(
+                TENANT_A, null, SubjectStatus.DRAFT, SubjectType.GENERAL, 1, 20);
 
         assertEquals(1, page.total());
         assertEquals(SubjectStatus.DRAFT, page.items().get(0).getStatus());
@@ -145,9 +148,12 @@ public class VotingSubjectPageQueryTest {
             seedSubject(TENANT_A, "P" + i, TYPE_GENERAL, ST_PUBLISHED);
         }
 
-        Page<VotingSubject> p1 = subjectRepository.pageForAdmin(TENANT_A, null, null, 1, 2);
-        Page<VotingSubject> p2 = subjectRepository.pageForAdmin(TENANT_A, null, null, 2, 2);
-        Page<VotingSubject> p3 = subjectRepository.pageForAdmin(TENANT_A, null, null, 3, 2);
+        Page<VotingSubject> p1 = subjectRepository.pageForWorkbench(
+                TENANT_A, null, null, null, 1, 2);
+        Page<VotingSubject> p2 = subjectRepository.pageForWorkbench(
+                TENANT_A, null, null, null, 2, 2);
+        Page<VotingSubject> p3 = subjectRepository.pageForWorkbench(
+                TENANT_A, null, null, null, 3, 2);
 
         assertEquals(5, p1.total());
         assertEquals(5, p2.total());
@@ -166,7 +172,8 @@ public class VotingSubjectPageQueryTest {
 
     @Test
     public void emptyResult_returnsZeroTotal() {
-        Page<VotingSubject> page = subjectRepository.pageForAdmin(TENANT_A, null, null, 1, 20);
+        Page<VotingSubject> page = subjectRepository.pageForWorkbench(
+                TENANT_A, null, null, null, 1, 20);
         assertEquals(0, page.total());
         assertFalse(page.items().iterator().hasNext());
     }

@@ -34,6 +34,7 @@
         <lombok.version>1.18.32</lombok.version>
         <aliyun-oss.version>3.17.4</aliyun-oss.version>
         <pdfbox.version>3.0.7</pdfbox.version>
+        <jsoup.version>1.22.2</jsoup.version>
 
         <!-- Distributed Lock -->
         <redisson.version>3.27.2</redisson.version>
@@ -130,6 +131,13 @@
                 <groupId>org.apache.pdfbox</groupId>
                 <artifactId>pdfbox</artifactId>
                 <version>${pdfbox.version}</version>
+            </dependency>
+
+            <!-- HTML parser used to canonicalize and sanitize owner-visible rich text. -->
+            <dependency>
+                <groupId>org.jsoup</groupId>
+                <artifactId>jsoup</artifactId>
+                <version>${jsoup.version}</version>
             </dependency>
 
             <!-- Redisson (Distributed Lock) -->

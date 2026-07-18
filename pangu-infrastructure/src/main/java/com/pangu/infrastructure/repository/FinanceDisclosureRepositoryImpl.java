@@ -48,6 +48,16 @@ public class FinanceDisclosureRepositoryImpl implements FinanceDisclosureReposit
     }
 
     @Override
+    public Optional<FinanceDisclosureSnapshot> findLatestPublished(
+            Long tenantId, DisclosureType disclosureType) {
+        FinanceDisclosureRow row = mapper.selectLatestPublished(
+                tenantId,
+                disclosureType.name(),
+                DisclosureStatus.PUBLISHED.getDbValue());
+        return Optional.ofNullable(row).map(this::toAggregate);
+    }
+
+    @Override
     public FinanceDisclosureSnapshot insert(FinanceDisclosureSnapshot snapshot) {
         FinanceDisclosureRow row = toRow(snapshot);
         try {

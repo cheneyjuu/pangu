@@ -1,0 +1,515 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 关联业务：持久化维修工程合同、施工、材料、结算、项目验收、付款和完工披露结构化事实。 -->
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pangu.infrastructure.persistence.mapper.RepairProjectExecutionMapper">
+
+    <insert id="insertCostReview" useGeneratedKeys="true" keyProperty="reviewId" keyColumn="review_id">
+        INSERT INTO t_repair_project_cost_review (
+            project_id, plan_id, tenant_id, review_mode, reviewed_amount,
+            report_attachment_id, reviewed_by_user_id
+        ) VALUES (
+            #{projectId}, #{planId}, #{tenantId}, #{reviewMode}, #{reviewedAmount},
+            #{reportAttachmentId}, #{reviewedByUserId}
+        )
+    </insert>
+
+    <select id="findCostReview"
+            resultType="com.pangu.infrastructure.persistence.entity.RepairProjectExecutionRows$CostReviewRow">
+        SELECT review_id, project_id, plan_id, tenant_id, review_mode, reviewed_amount,
+               report_attachment_id, reviewed_by_user_id, reviewed_at
+        FROM t_repair_project_cost_review
+        WHERE project_id = #{projectId} AND plan_id = #{planId} AND tenant_id = #{tenantId}
+    </select>
+
+    <insert id="insertContract" useGeneratedKeys="true" keyProperty="contractId" keyColumn="contract_id">
+        INSERT INTO t_repair_contract (
+            work_order_id, project_id, plan_id, tenant_id, supplier_dept_id, supplier_name,
+            contract_amount, repair_scope_hash, fund_source, signing_method,
+            contract_file_hash, contract_attachment_id, status, created_by_user_id, effective_at
+        ) VALUES (
+            NULL, #{projectId}, #{planId}, #{tenantId}, #{supplierDeptId}, #{supplierName},
+            #{contractAmount}, #{repairScopeHash}, #{fundSource}, #{signingMethod},
+            #{contractFileHash}, #{contractAttachmentId}, 'EFFECTIVE', #{createdByUserId}, CURRENT_TIMESTAMP
+        )
+    </insert>
+
+    <insert id="insertContractSignature" useGeneratedKeys="true"
+            keyProperty="signatureId" keyColumn="signature_id">
+        INSERT INTO t_repair_contract_signature (
+            contract_id, party_type, signer_name, signer_user_id, signature_method,
+            signature_file_hash, signature_attachment_id, signed_at
+        ) VALUES (
+            #{contractId}, #{partyType}, #{signerName}, #{signerUserId}, #{signatureMethod},
+            #{signatureFileHash}, #{signatureAttachmentId}, #{signedAt}
+        )
+    </insert>
+
+    <select id="findContract"
+            resultType="com.pangu.infrastructure.persistence.entity.RepairProjectExecutionRows$ContractRow">
+        SELECT contract_id, project_id, plan_id, tenant_id, supplier_dept_id, supplier_name,
+               contract_amount, repair_scope_hash, fund_source, signing_method,
+               contract_attachment_id, contract_file_hash,
+               status, created_by_user_id,
+               effective_at, create_time
+        FROM t_repair_contract
+        WHERE project_id = #{projectId} AND tenant_id = #{tenantId} AND status &lt;&gt; 'VOIDED'
+        ORDER BY contract_id DESC
+        LIMIT 1
+    </select>
+
+    <!-- 供应商工作台只能发现当前租户内由本企业签署生效合同的工程项目。 -->
+    <select id="listSupplierProjectIds" resultType="long">
+        SELECT p.project_id
+        FROM t_repair_project p
+        JOIN t_repair_contract c
+          ON c.project_id = p.project_id
+         AND c.tenant_id = p.tenant_id
+         AND c.status = 'EFFECTIVE'
+        WHERE p.tenant_id = #{tenantId}
+          AND c.supplier_dept_id = #{supplierDeptId}
+        ORDER BY p.update_time DESC, p.project_id DESC
+    </select>
+
+    <select id="listContractSignatures"
+            resultType="com.pangu.infrastructure.persistence.entity.RepairProjectExecutionRows$ContractSignatureRow">
+        SELECT signature_id, contract_id, party_type, signer_name, signer_user_id,
+               signature_method, signature_attachment_id, signature_file_hash, signed_at
+        FROM t_repair_contract_signature
+        WHERE contract_id = #{contractId}
+        ORDER BY signature_id
+    </select>
+
+    <insert id="insertExecutionRecord" useGeneratedKeys="true" keyProperty="recordId" keyColumn="record_id">
+        INSERT INTO t_repair_execution_record (
+            project_id, plan_id, item_id, tenant_id, stage, description,
+            occurred_at, submitted_by_user_id, verification_status
+        ) VALUES (
+            #{projectId}, #{planId}, #{itemId}, #{tenantId}, #{stage}, #{description},
+            #{occurredAt}, #{submittedByUserId}, #{verificationStatus}
+        )
+    </insert>
+
+    <insert id="insertExecutionAttachment">
+        INSERT INTO t_repair_execution_attachment(record_id, attachment_id, tenant_id, sort_order)
+        VALUES (#{recordId}, #{attachmentId}, #{tenantId}, #{sortOrder})
+    </insert>
+
+    <update id="verifyExecutionRecord">
+        UPDATE t_repair_execution_record
+        SET verification_status = #{status}, verified_by_user_id = #{verifiedByUserId},
+            verification_opinion = #{opinion}, verified_at = CURRENT_TIMESTAMP
+        WHERE record_id = #{recordId} AND project_id = #{projectId} AND tenant_id = #{tenantId}
+          AND verification_status = 'PENDING'
+    </update>
+
+    <sql id="executionColumns">
+        record_id, project_id, plan_id, item_id, tenant_id, stage, description,
+        occurred_at, submitted_by_user_id, verification_status, verified_by_user_id,
+        verification_opinion, verified_at, create_time
+    </sql>
+
+    <select id="findExecutionRecord"
+            resultType="com.pangu.infrastructure.persistence.entity.RepairProjectExecutionRows$ExecutionRecordRow">
+        SELECT <include refid="executionColumns"/>
+        FROM t_repair_execution_record
+        WHERE record_id = #{recordId} AND project_id = #{projectId} AND tenant_id = #{tenantId}
+    </select>
+
+    <select id="listExecutionRecords"
+            resultType="com.pangu.infrastructure.persistence.entity.RepairProjectExecutionRows$ExecutionRecordRow">
+        SELECT <include refid="executionColumns"/>
+        FROM t_repair_execution_record
+        WHERE project_id = #{projectId} AND tenant_id = #{tenantId}
+        ORDER BY record_id
+    </select>
+
+    <select id="listExecutionAttachmentIds" resultType="long">
+        SELECT attachment_id
+        FROM t_repair_execution_attachment
+        WHERE record_id = #{recordId} AND tenant_id = #{tenantId}
+        ORDER BY sort_order
+    </select>
+
+    <insert id="insertMaterialInspection" useGeneratedKeys="true"
+            keyProperty="inspectionId" keyColumn="inspection_id">
+        INSERT INTO t_repair_material_inspection (
+            project_id, plan_id, item_id, tenant_id, material_name, brand, model,
+            specification, quantity, unit, manufacturer, qualification_attachment_id,
+            submitted_by_user_id, status
+        ) VALUES (
+            #{projectId}, #{planId}, #{itemId}, #{tenantId}, #{materialName}, #{brand}, #{model},
+            #{specification}, #{quantity}, #{unit}, #{manufacturer}, #{qualificationAttachmentId},
+            #{submittedByUserId}, #{status}
+        )
+    </insert>
+
+    <insert id="insertMaterialPhoto">
+        INSERT INTO t_repair_material_photo(inspection_id, attachment_id, tenant_id, sort_order)
+        VALUES (#{inspectionId}, #{attachmentId}, #{tenantId}, #{sortOrder})
+    </insert>
+
+    <update id="verifyMaterialInspection">
+        UPDATE t_repair_material_inspection
+        SET status = #{status}, verified_by_user_id = #{verifiedByUserId},
+            verification_opinion = #{opinion}, verified_at = CURRENT_TIMESTAMP
+        WHERE inspection_id = #{inspectionId} AND project_id = #{projectId} AND tenant_id = #{tenantId}
+          AND status = 'PENDING'
+    </update>
+
+    <sql id="materialColumns">
+        inspection_id, project_id, plan_id, item_id, tenant_id, material_name,
+        brand, model, specification, quantity, unit, manufacturer,
+        qualification_attachment_id, submitted_by_user_id, status,
+        verified_by_user_id, verification_opinion, verified_at, create_time
+    </sql>
+
+    <select id="findMaterialInspection"
+            resultType="com.pangu.infrastructure.persistence.entity.RepairProjectExecutionRows$MaterialInspectionRow">
+        SELECT <include refid="materialColumns"/>
+        FROM t_repair_material_inspection
+        WHERE inspection_id = #{inspectionId} AND project_id = #{projectId} AND tenant_id = #{tenantId}
+    </select>
+
+    <select id="listMaterialInspections"
+            resultType="com.pangu.infrastructure.persistence.entity.RepairProjectExecutionRows$MaterialInspectionRow">
+        SELECT <include refid="materialColumns"/>
+        FROM t_repair_material_inspection
+        WHERE project_id = #{projectId} AND tenant_id = #{tenantId}
+        ORDER BY inspection_id
+    </select>
+
+    <select id="listMaterialPhotoIds" resultType="long">
+        SELECT attachment_id
+        FROM t_repair_material_photo
+        WHERE inspection_id = #{inspectionId} AND tenant_id = #{tenantId}
+        ORDER BY sort_order
+    </select>
+
+    <insert id="insertSettlement" useGeneratedKeys="true"
+            keyProperty="settlementId" keyColumn="settlement_id">
+        INSERT INTO t_repair_project_settlement (
+            project_id, plan_id, contract_id, tenant_id, version_no, status,
+            subtotal_amount, tax_amount, total_amount, settlement_attachment_id,
+            submitted_by_user_id
+        ) VALUES (
+            #{projectId}, #{planId}, #{contractId}, #{tenantId}, #{versionNo}, #{status},
+            #{subtotalAmount}, #{taxAmount}, #{totalAmount}, #{settlementAttachmentId},
+            #{submittedByUserId}
+        )
+    </insert>
+
+    <select id="nextSettlementVersion" resultType="int">
+        SELECT COALESCE(MAX(version_no), 0) + 1
+        FROM t_repair_project_settlement
+        WHERE project_id = #{projectId} AND tenant_id = #{tenantId}
+    </select>
+
+    <insert id="insertSettlementItem" useGeneratedKeys="true"
+            keyProperty="settlementItemId" keyColumn="settlement_item_id">
+        INSERT INTO t_repair_project_settlement_item (
+            settlement_id, project_item_id, actual_quantity, unit, actual_unit_price,
+            amount_excluding_tax, tax_rate, tax_amount, amount_including_tax, variance_reason
+        ) VALUES (
+            #{settlementId}, #{projectItemId}, #{actualQuantity}, #{unit}, #{actualUnitPrice},
+            #{amountExcludingTax}, #{taxRate}, #{taxAmount}, #{amountIncludingTax}, #{varianceReason}
+        )
+    </insert>
+
+    <select id="findActiveSettlement"
+            resultType="com.pangu.infrastructure.persistence.entity.RepairProjectExecutionRows$SettlementRow">
+        SELECT settlement_id, project_id, plan_id, contract_id, tenant_id, version_no,
+               status, subtotal_amount, tax_amount, total_amount, settlement_attachment_id,
+               submitted_by_user_id, verified_by_user_id, verification_opinion,
+               submitted_at, verified_at
+        FROM t_repair_project_settlement
+        WHERE project_id = #{projectId} AND tenant_id = #{tenantId}
+          AND status IN ('SUBMITTED', 'VERIFIED')
+        ORDER BY version_no DESC
+        LIMIT 1
+    </select>
+
+    <select id="listSettlementItems"
+            resultType="com.pangu.infrastructure.persistence.entity.RepairProjectExecutionRows$SettlementItemRow">
+        SELECT settlement_item_id, settlement_id, project_item_id, actual_quantity, unit,
+               actual_unit_price, amount_excluding_tax, tax_rate, tax_amount,
+               amount_including_tax, variance_reason
+        FROM t_repair_project_settlement_item
+        WHERE settlement_id = #{settlementId}
+        ORDER BY settlement_item_id
+    </select>
+
+    <update id="verifySettlement">
+        UPDATE t_repair_project_settlement
+        SET status = #{status}, verified_by_user_id = #{verifiedByUserId},
+            verification_opinion = #{opinion}, verified_at = CURRENT_TIMESTAMP
+        WHERE settlement_id = #{settlementId} AND project_id = #{projectId} AND tenant_id = #{tenantId}
+          AND status = 'SUBMITTED'
+    </update>
+
+    <update id="invalidateVerifiedSettlement">
+        UPDATE t_repair_project_settlement
+        SET status = 'REJECTED', verification_opinion = #{opinion}
+        WHERE settlement_id = #{settlementId} AND project_id = #{projectId} AND tenant_id = #{tenantId}
+          AND status = 'VERIFIED'
+    </update>
+
+    <insert id="insertAcceptancePolicy" useGeneratedKeys="true"
+            keyProperty="row.policyId" keyColumn="policy_id">
+        INSERT INTO t_repair_acceptance_policy_snapshot (
+            work_order_id, project_id, plan_id, tenant_id, workflow_type, policy_hash,
+            affected_owner_count, minimum_affected_owner_participants,
+            minimum_affected_owner_approvals, affected_owner_pass_rule,
+            affected_owner_approval_ratio, version, status, locked_by_user_id
+        ) VALUES (
+            NULL, #{row.projectId}, #{row.planId}, #{row.tenantId}, #{row.workflowType}, #{row.policyHash},
+            #{row.affectedOwnerCount},
+            CASE WHEN #{row.workflowType} = 'BUILDING_REPAIR' THEN #{row.minimumAffectedOwnerParticipants} ELSE NULL END,
+            CASE WHEN #{row.workflowType} = 'BUILDING_REPAIR' THEN #{minimumApprovals} ELSE NULL END,
+            #{row.affectedOwnerPassRule}, #{row.affectedOwnerApprovalRatio},
+            (SELECT COALESCE(MAX(version), 0) + 1
+             FROM t_repair_acceptance_policy_snapshot
+             WHERE project_id = #{row.projectId}),
+            'ACTIVE', #{lockedByUserId}
+        )
+    </insert>
+
+    <insert id="snapshotAcceptanceAffectedOwners">
+        INSERT INTO t_repair_acceptance_affected_owner (
+            policy_id, tenant_id, room_id, owner_uid, affected_reason
+        )
+        SELECT #{policyId}, #{tenantId}, room_id, owner_uid, affected_reason
+        FROM t_repair_plan_affected_owner
+        WHERE plan_id = #{planId} AND tenant_id = #{tenantId}
+    </insert>
+
+    <insert id="insertAcceptanceRound" useGeneratedKeys="true"
+            keyProperty="row.acceptanceId" keyColumn="acceptance_id">
+        INSERT INTO t_repair_acceptance (
+            work_order_id, project_id, settlement_id, tenant_id, policy_id,
+            round_no, status, submitted_by_user_id
+        ) VALUES (
+            NULL, #{row.projectId}, #{row.settlementId}, #{row.tenantId}, #{row.policyId},
+            (SELECT COALESCE(MAX(round_no), 0) + 1 FROM t_repair_acceptance WHERE project_id = #{row.projectId}),
+            'COLLECTING', #{submittedByUserId}
+        )
+    </insert>
+
+    <select id="findAcceptancePolicy"
+            resultType="com.pangu.infrastructure.persistence.entity.RepairProjectExecutionRows$AcceptancePolicyRow">
+        SELECT policy_id, project_id, plan_id, tenant_id, workflow_type, policy_hash,
+               affected_owner_count, COALESCE(minimum_affected_owner_participants, 0)
+                   AS minimum_affected_owner_participants,
+               affected_owner_pass_rule, affected_owner_approval_ratio
+        FROM t_repair_acceptance_policy_snapshot
+        WHERE project_id = #{projectId} AND tenant_id = #{tenantId} AND status = 'ACTIVE'
+    </select>
+
+    <select id="findCollectingAcceptance"
+            resultType="com.pangu.infrastructure.persistence.entity.RepairProjectExecutionRows$AcceptanceRoundRow">
+        SELECT acceptance_id, project_id, policy_id, settlement_id, tenant_id,
+               round_no, status, result_project_attachment_id, submitted_at, completed_at
+        FROM t_repair_acceptance
+        WHERE project_id = #{projectId} AND tenant_id = #{tenantId} AND status = 'COLLECTING'
+    </select>
+
+    <select id="findLatestAcceptance"
+            resultType="com.pangu.infrastructure.persistence.entity.RepairProjectExecutionRows$AcceptanceRoundRow">
+        SELECT acceptance_id, project_id, policy_id, settlement_id, tenant_id,
+               round_no, status, result_project_attachment_id, submitted_at, completed_at
+        FROM t_repair_acceptance
+        WHERE project_id = #{projectId} AND tenant_id = #{tenantId}
+        ORDER BY round_no DESC
+        LIMIT 1
+    </select>
+
+    <select id="affectedOwnerIncluded" resultType="int">
+        SELECT COUNT(*)
+        FROM t_repair_acceptance_affected_owner
+        WHERE policy_id = #{policyId} AND tenant_id = #{tenantId}
+          AND room_id = #{roomId} AND owner_uid = #{ownerUid}
+    </select>
+
+    <select id="listAffectedOwnerRoomIds" resultType="long">
+        SELECT room_id
+        FROM t_repair_acceptance_affected_owner
+        WHERE policy_id = #{policyId} AND tenant_id = #{tenantId} AND owner_uid = #{ownerUid}
+        ORDER BY room_id
+    </select>
+
+    <!-- C 端只发现本人位于锁定受影响范围且当前正在收集意见的楼栋验收任务。 -->
+    <select id="listOpenAcceptanceProjectIds" resultType="long">
+        SELECT DISTINCT p.project_id
+        FROM t_repair_project p
+        JOIN t_repair_acceptance a
+          ON a.project_id = p.project_id
+         AND a.status = 'COLLECTING'
+        JOIN t_repair_acceptance_policy_snapshot aps
+          ON aps.policy_id = a.policy_id
+         AND aps.status = 'ACTIVE'
+        JOIN t_repair_acceptance_affected_owner ao
+          ON ao.policy_id = aps.policy_id
+         AND ao.tenant_id = aps.tenant_id
+        WHERE p.tenant_id = #{tenantId}
+          AND p.workflow_type = 'BUILDING_REPAIR'
+          AND p.status = 'PENDING_ACCEPTANCE'
+          AND ao.owner_uid = #{ownerUid}
+        ORDER BY p.project_id DESC
+    </select>
+
+    <insert id="insertAcceptanceParty" useGeneratedKeys="true"
+            keyProperty="row.partyId" keyColumn="party_id">
+        INSERT INTO t_repair_acceptance_party (
+            acceptance_id, tenant_id, participant_key, party_role, room_id, owner_uid,
+            participant_account_id, participant_user_id, participant_name,
+            participant_organization, committee_position, conclusion, opinion,
+            submission_method, evidence_project_attachment_id, seal_usage_id,
+            submitted_by_user_id
+        ) VALUES (
+            #{row.acceptanceId}, #{tenantId}, #{row.participantKey}, #{row.partyRole},
+            #{row.roomId}, #{row.ownerUid}, #{row.participantAccountId}, #{row.participantUserId},
+            #{row.participantName}, #{row.participantOrganization}, #{row.committeePosition},
+            #{row.conclusion}, #{row.opinion}, #{row.submissionMethod},
+            #{row.evidenceProjectAttachmentId}, #{row.sealUsageId}, #{row.submittedByUserId}
+        )
+    </insert>
+
+    <select id="listAcceptanceParties"
+            resultType="com.pangu.infrastructure.persistence.entity.RepairProjectExecutionRows$AcceptancePartyRow">
+        SELECT party_id, acceptance_id, participant_key, party_role, room_id, owner_uid,
+               participant_account_id, participant_user_id, participant_name,
+               participant_organization, committee_position, conclusion, opinion,
+               submission_method, evidence_project_attachment_id, seal_usage_id,
+               submitted_by_user_id, submitted_at
+        FROM t_repair_acceptance_party
+        WHERE acceptance_id = #{acceptanceId} AND tenant_id = #{tenantId}
+        ORDER BY party_id
+    </select>
+
+    <select id="summarizeAcceptance"
+            resultType="com.pangu.infrastructure.persistence.entity.RepairProjectExecutionRows$AcceptanceSummaryRow">
+        WITH latest AS (
+            SELECT DISTINCT ON (participant_key)
+                   participant_key, party_role, conclusion, committee_position, seal_usage_id
+            FROM t_repair_acceptance_party
+            WHERE acceptance_id = #{acceptanceId} AND tenant_id = #{tenantId}
+            ORDER BY participant_key, submitted_at DESC, party_id DESC
+        )
+        SELECT
+            COUNT(*) FILTER (WHERE party_role = 'AFFECTED_OWNER')::INT AS participating_affected_owner_count,
+            COUNT(*) FILTER (WHERE party_role = 'AFFECTED_OWNER' AND conclusion = 'PASSED')::INT
+                AS passed_affected_owner_count,
+            COUNT(*) FILTER (WHERE conclusion = 'RECTIFICATION_REQUIRED')::INT AS rectification_count,
+            COALESCE(BOOL_OR(party_role = 'BUILDING_LEADER' AND conclusion = 'PASSED'), FALSE)
+                AS building_leader_passed,
+            COALESCE(BOOL_OR(party_role = 'COMMITTEE_EXECUTIVE_APPROVER'
+                AND committee_position IN ('DIRECTOR', 'VICE_DIRECTOR') AND conclusion = 'PASSED'), FALSE)
+                AS committee_executive_passed,
+            COALESCE(BOOL_OR(party_role = 'COMMITTEE_SEAL_OPERATOR'
+                AND seal_usage_id IS NOT NULL AND conclusion = 'PASSED'), FALSE)
+                AS committee_seal_applied,
+            COALESCE(BOOL_OR(party_role = 'PROPERTY_TECHNICAL_COSIGNER' AND conclusion = 'PASSED'), FALSE)
+                AS property_technical_cosigned,
+            COALESCE(BOOL_OR(party_role = 'THIRD_PARTY_TECHNICAL_COSIGNER' AND conclusion = 'PASSED'), FALSE)
+                AS third_party_technical_cosigned
+        FROM latest
+    </select>
+
+    <update id="completeAcceptance">
+        UPDATE t_repair_acceptance
+        SET status = #{status}, completed_by_user_id = #{completedByUserId},
+            result_project_attachment_id = #{resultAttachmentId},
+            completed_at = CURRENT_TIMESTAMP, completion_remark = #{remark}
+        WHERE acceptance_id = #{acceptanceId} AND tenant_id = #{tenantId} AND status = 'COLLECTING'
+    </update>
+
+    <update id="supersedeAcceptancePolicy">
+        UPDATE t_repair_acceptance_policy_snapshot
+        SET status = 'SUPERSEDED'
+        WHERE policy_id = #{policyId} AND project_id = #{projectId} AND tenant_id = #{tenantId}
+          AND status = 'ACTIVE'
+    </update>
+
+    <select id="sumActivePaymentRequests" resultType="java.math.BigDecimal">
+        SELECT COALESCE(SUM(requested_amount), 0)
+        FROM t_repair_payment_request
+        WHERE project_id = #{projectId} AND contract_id = #{contractId} AND tenant_id = #{tenantId}
+          AND status IN ('PENDING_FINANCE', 'APPROVED', 'PAID')
+    </select>
+
+    <insert id="insertPaymentRequest" useGeneratedKeys="true"
+            keyProperty="row.paymentRequestId" keyColumn="payment_request_id">
+        INSERT INTO t_repair_payment_request (
+            work_order_id, project_id, contract_id, tenant_id, milestone_type,
+            requested_amount, condition_evidence_hash, cumulative_requested_amount,
+            eligible_upper_limit, eligibility_result, status, requested_by_user_id
+        ) VALUES (
+            NULL, #{row.projectId}, #{row.contractId}, #{row.tenantId}, #{row.milestoneType},
+            #{row.requestedAmount}, NULL, #{row.cumulativeRequestedAmount},
+            #{row.eligibleUpperLimit}, CAST(#{eligibilityResultJson} AS JSONB),
+            #{row.status}, #{row.requestedByUserId}
+        )
+    </insert>
+
+    <insert id="insertPaymentEvidence">
+        INSERT INTO t_repair_payment_evidence (
+            payment_request_id, tenant_id, evidence_code, attachment_id
+        ) VALUES (
+            #{paymentRequestId}, #{tenantId}, #{evidenceCode}, #{attachmentId}
+        )
+    </insert>
+
+    <select id="listPaymentRequests"
+            resultType="com.pangu.infrastructure.persistence.entity.RepairProjectExecutionRows$PaymentRequestRow">
+        SELECT payment_request_id, project_id, contract_id, tenant_id, milestone_type,
+               requested_amount, cumulative_requested_amount, eligible_upper_limit,
+               status, requested_by_user_id, create_time
+        FROM t_repair_payment_request
+        WHERE project_id = #{projectId} AND tenant_id = #{tenantId}
+        ORDER BY payment_request_id
+    </select>
+
+    <select id="listPaymentEvidence"
+            resultType="com.pangu.infrastructure.persistence.entity.RepairProjectExecutionRows$PaymentEvidenceRow">
+        SELECT payment_request_id, evidence_code, attachment_id
+        FROM t_repair_payment_evidence
+        WHERE payment_request_id = #{paymentRequestId}
+        ORDER BY evidence_code
+    </select>
+
+    <insert id="insertCompletionDisclosure" useGeneratedKeys="true"
+            keyProperty="disclosureId" keyColumn="disclosure_id">
+        INSERT INTO t_repair_completion_disclosure (
+            project_id, tenant_id, notice_start_date, notice_end_date, posting_scope,
+            notice_attachment_id, property_report_attachment_id,
+            warranty_start_date, warranty_end_date, created_by_user_id
+        ) VALUES (
+            #{projectId}, #{tenantId}, #{noticeStartDate}, #{noticeEndDate}, #{postingScope},
+            #{noticeAttachmentId}, #{propertyReportAttachmentId},
+            #{warrantyStartDate}, #{warrantyEndDate}, #{createdByUserId}
+        )
+    </insert>
+
+    <insert id="insertCompletionDisclosurePhoto">
+        INSERT INTO t_repair_completion_disclosure_photo (
+            disclosure_id, attachment_id, tenant_id, sort_order
+        ) VALUES (
+            #{disclosureId}, #{attachmentId}, #{tenantId}, #{sortOrder}
+        )
+    </insert>
+
+    <select id="findCompletionDisclosure"
+            resultType="com.pangu.infrastructure.persistence.entity.RepairProjectExecutionRows$CompletionDisclosureRow">
+        SELECT disclosure_id, project_id, tenant_id, notice_start_date, notice_end_date,
+               posting_scope, notice_attachment_id, property_report_attachment_id,
+               warranty_start_date, warranty_end_date, created_by_user_id, create_time
+        FROM t_repair_completion_disclosure
+        WHERE project_id = #{projectId} AND tenant_id = #{tenantId}
+    </select>
+
+    <select id="listCompletionDisclosurePhotoIds" resultType="long">
+        SELECT attachment_id
+        FROM t_repair_completion_disclosure_photo
+        WHERE disclosure_id = #{disclosureId} AND tenant_id = #{tenantId}
+        ORDER BY sort_order
+    </select>
+</mapper>

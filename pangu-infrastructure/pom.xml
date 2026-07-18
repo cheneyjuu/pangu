@@ -33,6 +33,12 @@
             <artifactId>postgresql</artifactId>
         </dependency>
 
+        <!-- 维修实施方案的 JSONB 字段通过结构化领域对象序列化，禁止手工拼接 JSON。 -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+
         <!-- Spring Boot Starter Data Redis -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -77,6 +83,12 @@
         <dependency>
             <groupId>org.apache.pdfbox</groupId>
             <artifactId>pdfbox</artifactId>
+        </dependency>
+
+        <!-- 业主端披露正文必须在服务端按可信标签白名单清洗。 -->
+        <dependency>
+            <groupId>org.jsoup</groupId>
+            <artifactId>jsoup</artifactId>
         </dependency>
 
         <!-- Spring Boot Security Starter (For SecurityContextHolder in DataScopeInterceptor) -->

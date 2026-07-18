@@ -36,8 +36,11 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.io.IOException;
+import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -67,6 +70,10 @@ public class FinanceDisclosureApplicationService {
     private static final Set<String> COMPOSE_ROLES = Set.of("COMMITTEE_DIRECTOR", "COMMUNITY_ADMIN");
     private static final Set<String> AUDIT_ROLES = Set.of("GOV_SUPER_ADMIN", "COMMUNITY_ADMIN");
     private static final String PUBLISH_ROLE = "COMMITTEE_DIRECTOR";
+    /** t_fund_ledger_entry.direction=1：维修资金入账。 */
+    private static final int LEDGER_DIRECTION_INFLOW = 1;
+    /** t_fund_ledger_entry.direction=2：维修资金出账。 */
+    private static final int LEDGER_DIRECTION_OUTFLOW = 2;
 
     /** 内部 canonical mapper：保证 hash / 持久化 JSON 在不同 JVM 上一致。 */
     private static final ObjectMapper CANONICAL_MAPPER = new ObjectMapper()
@@ -296,6 +303,24 @@ public class FinanceDisclosureApplicationService {
         return snapshot;
     }
 
+    /**
+     * 业主首页读取当前小区最近一期已公示的专项维修资金收支摘要。
+     *
+     * <p>只从状态为 {@code PUBLISHED} 的快照解析，不把草稿、锁定快照或实时账目暴露给业主端。
+     * 尚未公示时返回空结果，属于正常业务状态而非读取失败。
+     */
+    public Optional<PublishedMaintenanceFundSummary> getLatestPublishedMaintenanceFundSummary(
+            Long currentTenantId) {
+        if (currentTenantId == null) {
+            throw new FinanceDisclosureApplicationException(
+                    FinanceDisclosureApplicationException.Reason.SNAPSHOT_NOT_FOUND,
+                    "未识别到租户上下文，禁止读取财务公示摘要");
+        }
+        return disclosureRepository.findLatestPublished(
+                        currentTenantId, DisclosureType.MAINTENANCE_FUND)
+                .map(this::toMaintenanceFundSummary);
+    }
+
     // -----------------------------------------------------------------
     // helpers
     // -----------------------------------------------------------------
@@ -330,6 +355,33 @@ public class FinanceDisclosureApplicationService {
                 .orElseThrow(() -> new FinanceDisclosureApplicationException(
                         FinanceDisclosureApplicationException.Reason.SNAPSHOT_NOT_FOUND,
                         "财务公示快照不存在 snapshotId=" + snapshotId));
+    }
+
+    private PublishedMaintenanceFundSummary toMaintenanceFundSummary(FinanceDisclosureSnapshot snapshot) {
+        FundLedgerSnapshotData data = parseFundLedgerSnapshotData(snapshot.getDataPayload());
+        return new PublishedMaintenanceFundSummary(
+                snapshot.getSnapshotId(),
+                snapshot.getPeriod(),
+                sumByDirection(data, LEDGER_DIRECTION_INFLOW),
+                sumByDirection(data, LEDGER_DIRECTION_OUTFLOW),
+                snapshot.getPublishedAt());
+    }
+
+    private FundLedgerSnapshotData parseFundLedgerSnapshotData(String payload) {
+        try {
+            return CANONICAL_MAPPER.readValue(payload, FundLedgerSnapshotData.class);
+        } catch (IOException e) {
+            // 已发布快照的载荷由 compose 固化；解析失败必须显性失败，不能用零值掩盖公示数据异常。
+            throw new IllegalStateException("已发布维修资金公示快照载荷无法解析", e);
+        }
+    }
+
+    private BigDecimal sumByDirection(FundLedgerSnapshotData data, int direction) {
+        return data.entrySummaries().stream()
+                .filter(entry -> Objects.equals(entry.direction(), direction))
+                .map(FundLedgerSnapshotData.EntrySummary::totalAmount)
+                .filter(Objects::nonNull)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
     }
 
     private void updateSnapshot(FinanceDisclosureSnapshot snapshot) {

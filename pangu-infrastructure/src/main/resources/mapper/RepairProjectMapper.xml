@@ -1,0 +1,412 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 关联业务：持久化维修工程项目、实施方案版本、工程项、费用分摊及受影响业主快照与项目附件。 -->
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pangu.infrastructure.persistence.mapper.RepairProjectMapper">
+
+    <sql id="projectColumns">
+        project_id, project_no, tenant_id, project_name, workflow_type, scope_type,
+        building_id, unit_name, fund_source, governance_path, status, active_plan_id,
+        version, created_by_account_id, created_by_user_id, create_time, update_time
+    </sql>
+
+    <sql id="planColumns">
+        plan_id, project_id, tenant_id, version_no, plan_description,
+        budget_total, fund_source, allocation_rule_type, allocation_rule_description,
+        supplier_selection_method, supplier_selection_reason,
+        construction_management_requirements, evidence_requirements_json::TEXT AS evidence_requirements_json,
+        safety_requirements, acceptance_method,
+        required_acceptance_roles_json::TEXT AS required_acceptance_roles_json,
+        affected_owner_scope_description, minimum_affected_owner_acceptors,
+        affected_owner_pass_rule, affected_owner_approval_ratio, settlement_method,
+        planned_start_date, planned_completion_date, warranty_days, governance_path,
+        price_review_required, payment_milestones_json::TEXT AS payment_milestones_json,
+        status, snapshot_hash, created_by_account_id, created_by_user_id,
+        locked_by_user_id, create_time, locked_at
+    </sql>
+
+    <!-- 项目预览与方案快照必须使用同一份已核验产权房屋选择规则。 -->
+    <sql id="repairAllocationCandidates">
+        SELECT DISTINCT ON (property.room_id)
+               property.room_id,
+               property.building_id,
+               roster.unit_name,
+               property.uid AS owner_uid,
+               property.build_area,
+               COALESCE(roster.building_name, CONCAT(property.building_id::TEXT, ' 号楼')) AS building_name,
+               COALESCE(roster.room_name, property.room_id::TEXT) AS room_name
+        FROM c_owner_property property
+        LEFT JOIN LATERAL (
+            SELECT item.building_name, item.unit_name, item.room_name
+            FROM c_property_roster item
+            WHERE item.tenant_id = property.tenant_id
+              AND item.room_id = property.room_id
+              AND item.status = 'ACTIVE'
+            ORDER BY item.roster_id
+            LIMIT 1
+        ) roster ON TRUE
+        WHERE property.tenant_id = #{tenantId}
+          AND property.account_status = 1
+          AND property.verify_status = 'VERIFIED'
+          AND property.build_area &gt; 0
+        <if test="scopeType == 'BUILDING' or scopeType == 'BUILDING_UNIT'">
+          AND property.building_id = #{buildingId}
+        </if>
+        <if test="scopeType == 'BUILDING_UNIT'">
+          AND roster.unit_name = #{unitName}
+        </if>
+        ORDER BY property.room_id, property.is_voting_delegate DESC, property.uid
+    </sql>
+
+    <insert id="insertProject" useGeneratedKeys="true" keyProperty="projectId" keyColumn="project_id">
+        INSERT INTO t_repair_project (
+            tenant_id, project_name, workflow_type, scope_type, building_id, unit_name,
+            fund_source, governance_path, status, created_by_account_id, created_by_user_id
+        ) VALUES (
+            #{tenantId}, #{projectName}, #{workflowType}, #{scopeType}, #{buildingId}, #{unitName},
+            #{fundSource}, #{governancePath}, #{status}, #{createdByAccountId}, #{createdByUserId}
+        )
+    </insert>
+
+    <select id="findProject" resultType="com.pangu.infrastructure.persistence.entity.RepairProjectRow">
+        SELECT <include refid="projectColumns"/>
+        FROM t_repair_project
+        WHERE project_id = #{projectId} AND tenant_id = #{tenantId}
+    </select>
+
+    <select id="findProjectByActivePlanWorkOrder"
+            resultType="com.pangu.infrastructure.persistence.entity.RepairProjectRow">
+        SELECT DISTINCT
+               project.project_id, project.project_no, project.tenant_id, project.project_name,
+               project.workflow_type, project.scope_type, project.building_id, project.unit_name,
+               project.fund_source, project.governance_path, project.status, project.active_plan_id,
+               project.version, project.created_by_account_id, project.created_by_user_id,
+               project.create_time, project.update_time
+        FROM t_repair_project project
+        JOIN t_repair_project_item item
+          ON item.project_id = project.project_id
+         AND item.plan_id = project.active_plan_id
+         AND item.tenant_id = project.tenant_id
+        JOIN t_repair_project_item_case item_case
+          ON item_case.item_id = item.item_id
+         AND item_case.tenant_id = project.tenant_id
+        WHERE item_case.work_order_id = #{workOrderId}
+          AND project.tenant_id = #{tenantId}
+        ORDER BY project.update_time DESC, project.project_id DESC
+        LIMIT 1
+    </select>
+
+    <select id="findProjectForUpdate" resultType="com.pangu.infrastructure.persistence.entity.RepairProjectRow">
+        SELECT <include refid="projectColumns"/>
+        FROM t_repair_project
+        WHERE project_id = #{projectId} AND tenant_id = #{tenantId}
+        FOR UPDATE
+    </select>
+
+    <select id="listProjects" resultType="com.pangu.infrastructure.persistence.entity.RepairProjectRow">
+        SELECT <include refid="projectColumns"/>
+        FROM t_repair_project
+        WHERE tenant_id = #{tenantId}
+        <if test="status != null">AND status = #{status}</if>
+        <if test="keyword != null">
+            AND (project_no ILIKE '%' || #{keyword} || '%' OR project_name ILIKE '%' || #{keyword} || '%')
+        </if>
+        ORDER BY update_time DESC, project_id DESC
+        OFFSET #{offset} LIMIT #{limit}
+    </select>
+
+    <select id="countProjects" resultType="long">
+        SELECT COUNT(*)
+        FROM t_repair_project
+        WHERE tenant_id = #{tenantId}
+        <if test="status != null">AND status = #{status}</if>
+        <if test="keyword != null">
+            AND (project_no ILIKE '%' || #{keyword} || '%' OR project_name ILIKE '%' || #{keyword} || '%')
+        </if>
+    </select>
+
+    <insert id="insertPlan" useGeneratedKeys="true" keyProperty="planId" keyColumn="plan_id">
+        INSERT INTO t_repair_plan_version (
+            project_id, tenant_id, version_no, plan_description,
+            budget_total, fund_source, allocation_rule_type, allocation_rule_description,
+            supplier_selection_method, supplier_selection_reason,
+            construction_management_requirements, evidence_requirements_json,
+            safety_requirements, acceptance_method, required_acceptance_roles_json,
+            affected_owner_scope_description, minimum_affected_owner_acceptors,
+            affected_owner_pass_rule, affected_owner_approval_ratio, settlement_method,
+            planned_start_date, planned_completion_date, warranty_days, governance_path,
+            price_review_required, payment_milestones_json, status,
+            created_by_account_id, created_by_user_id
+        ) VALUES (
+            #{projectId}, #{tenantId}, #{versionNo}, #{planDescription},
+            #{budgetTotal}, #{fundSource}, #{allocationRuleType}, #{allocationRuleDescription},
+            #{supplierSelectionMethod}, #{supplierSelectionReason},
+            #{constructionManagementRequirements}, CAST(#{evidenceRequirementsJson} AS JSONB),
+            #{safetyRequirements}, #{acceptanceMethod}, CAST(#{requiredAcceptanceRolesJson} AS JSONB),
+            #{affectedOwnerScopeDescription}, #{minimumAffectedOwnerAcceptors},
+            #{affectedOwnerPassRule}, #{affectedOwnerApprovalRatio}, #{settlementMethod},
+            #{plannedStartDate}, #{plannedCompletionDate}, #{warrantyDays}, #{governancePath},
+            #{priceReviewRequired}, CAST(#{paymentMilestonesJson} AS JSONB), #{status},
+            #{createdByAccountId}, #{createdByUserId}
+        )
+    </insert>
+
+    <select id="listPlans" resultType="com.pangu.infrastructure.persistence.entity.RepairPlanVersionRow">
+        SELECT <include refid="planColumns"/>
+        FROM t_repair_plan_version
+        WHERE project_id = #{projectId} AND tenant_id = #{tenantId}
+        ORDER BY version_no DESC
+    </select>
+
+    <select id="findPlanForUpdate" resultType="com.pangu.infrastructure.persistence.entity.RepairPlanVersionRow">
+        SELECT <include refid="planColumns"/>
+        FROM t_repair_plan_version
+        WHERE plan_id = #{planId} AND project_id = #{projectId} AND tenant_id = #{tenantId}
+        FOR UPDATE
+    </select>
+
+    <insert id="insertItem" useGeneratedKeys="true" keyProperty="itemId" keyColumn="item_id">
+        INSERT INTO t_repair_project_item (
+            project_id, plan_id, tenant_id, item_no, building_id, unit_name, room_id,
+            location_text, work_content, quantity, unit, estimated_unit_price,
+            estimated_amount, sort_order
+        ) VALUES (
+            #{projectId}, #{planId}, #{tenantId}, #{itemNo}, #{buildingId}, #{unitName}, #{roomId},
+            #{locationText}, #{workContent}, #{quantity}, #{unit}, #{estimatedUnitPrice},
+            #{estimatedAmount}, #{sortOrder}
+        )
+    </insert>
+
+    <insert id="linkItemToWorkOrder">
+        INSERT INTO t_repair_project_item_case (item_id, work_order_id, tenant_id)
+        VALUES (#{itemId}, #{workOrderId}, #{tenantId})
+    </insert>
+
+    <select id="listItems" resultType="com.pangu.infrastructure.persistence.entity.RepairProjectItemRow">
+        SELECT item_id, project_id, plan_id, tenant_id, item_no, building_id, unit_name,
+               room_id, location_text, work_content, quantity, unit, estimated_unit_price,
+               estimated_amount, sort_order, create_time
+        FROM t_repair_project_item
+        WHERE plan_id = #{planId} AND tenant_id = #{tenantId}
+        ORDER BY sort_order, item_id
+    </select>
+
+    <select id="listLinkedWorkOrderIds" resultType="long">
+        SELECT work_order_id
+        FROM t_repair_project_item_case
+        WHERE item_id = #{itemId}
+        ORDER BY work_order_id
+    </select>
+
+    <insert id="snapshotAllocationRooms">
+        INSERT INTO t_repair_plan_allocation_room (
+            plan_id, tenant_id, room_id, building_id, unit_name, owner_uid, build_area
+        )
+        SELECT #{planId}, #{tenantId}, selected.room_id, selected.building_id,
+               selected.unit_name, selected.owner_uid, selected.build_area
+        FROM (
+            <include refid="repairAllocationCandidates"/>
+        ) selected
+    </insert>
+
+    <select id="findAllocationBasis"
+            resultType="com.pangu.infrastructure.persistence.entity.RepairAllocationBasisRow">
+        SELECT CASE
+                   WHEN #{scopeType} = 'COMMUNITY' THEN
+                       COALESCE(community.property_area_name, community.tenant_name) || ' · 全小区'
+                   WHEN #{scopeType} = 'BUILDING_UNIT' THEN
+                       COALESCE(community.property_area_name, community.tenant_name) || ' · '
+                       || COALESCE(MAX(selected.building_name), CONCAT(#{buildingId}::TEXT, ' 号楼'))
+                       || ' · ' || #{unitName}
+                   ELSE
+                       COALESCE(community.property_area_name, community.tenant_name) || ' · '
+                       || COALESCE(MAX(selected.building_name), CONCAT(#{buildingId}::TEXT, ' 号楼'))
+                       || ' · 整栋'
+               END AS scope_label,
+               COUNT(selected.room_id)::BIGINT AS room_count,
+               COUNT(DISTINCT selected.owner_uid)::BIGINT AS owner_count,
+               COALESCE(SUM(selected.build_area), 0)::NUMERIC(14, 2) AS total_build_area
+        FROM t_tenant_community community
+        LEFT JOIN (
+            <include refid="repairAllocationCandidates"/>
+        ) selected ON TRUE
+        WHERE community.tenant_id = #{tenantId}
+          AND community.status = 'ACTIVE'
+        GROUP BY community.property_area_name, community.tenant_name
+    </select>
+
+    <select id="findAllocationSnapshotBasis"
+            resultType="com.pangu.infrastructure.persistence.entity.RepairAllocationBasisRow">
+        SELECT CASE
+                   WHEN project.scope_type = 'COMMUNITY' THEN
+                       COALESCE(community.property_area_name, community.tenant_name) || ' · 全小区'
+                   WHEN project.scope_type = 'BUILDING_UNIT' THEN
+                       COALESCE(community.property_area_name, community.tenant_name) || ' · '
+                       || COALESCE(MAX(roster.building_name), CONCAT(project.building_id::TEXT, ' 号楼'))
+                       || ' · ' || project.unit_name
+                   ELSE
+                       COALESCE(community.property_area_name, community.tenant_name) || ' · '
+                       || COALESCE(MAX(roster.building_name), CONCAT(project.building_id::TEXT, ' 号楼'))
+                       || ' · 整栋'
+               END AS scope_label,
+               COUNT(DISTINCT allocation.room_id)::BIGINT AS room_count,
+               COUNT(DISTINCT allocation.owner_uid)::BIGINT AS owner_count,
+               COALESCE(SUM(allocation.build_area), 0)::NUMERIC(14, 2) AS total_build_area
+        FROM t_repair_plan_allocation_room allocation
+        JOIN t_repair_plan_version plan
+          ON plan.plan_id = allocation.plan_id AND plan.tenant_id = allocation.tenant_id
+        JOIN t_repair_project project
+          ON project.project_id = plan.project_id AND project.tenant_id = plan.tenant_id
+        JOIN t_tenant_community community ON community.tenant_id = allocation.tenant_id
+        LEFT JOIN c_property_roster roster
+          ON roster.tenant_id = allocation.tenant_id
+         AND roster.room_id = allocation.room_id
+         AND roster.status = 'ACTIVE'
+        WHERE allocation.plan_id = #{planId}
+          AND allocation.tenant_id = #{tenantId}
+        GROUP BY community.property_area_name, community.tenant_name,
+                 project.scope_type, project.building_id, project.unit_name
+    </select>
+
+    <select id="listAllocationRooms"
+            resultType="com.pangu.infrastructure.persistence.entity.RepairPlanAllocationRoomRow">
+        SELECT allocation_room_id, plan_id, tenant_id, room_id, building_id, unit_name,
+               owner_uid, build_area, create_time
+        FROM t_repair_plan_allocation_room
+        WHERE plan_id = #{planId} AND tenant_id = #{tenantId}
+        ORDER BY building_id, unit_name NULLS LAST, room_id
+    </select>
+
+    <select id="listEligibleAffectedOwners"
+            resultType="com.pangu.infrastructure.persistence.entity.RepairEligibleAffectedOwnerRow">
+        SELECT selected.room_id, selected.building_id, selected.building_name,
+               selected.unit_name, selected.room_name, selected.owner_uid
+        FROM (
+            <include refid="repairAllocationCandidates"/>
+        ) selected
+        ORDER BY selected.building_name, selected.unit_name NULLS LAST,
+                 selected.room_name, selected.room_id
+    </select>
+
+    <insert id="insertPlanAffectedOwner" useGeneratedKeys="true"
+            keyProperty="planAffectedOwnerId" keyColumn="plan_affected_owner_id">
+        INSERT INTO t_repair_plan_affected_owner (
+            plan_id, tenant_id, room_id, building_id, building_name, unit_name,
+            room_name, owner_uid, affected_reason, source_type
+        ) VALUES (
+            #{planId}, #{tenantId}, #{roomId}, #{buildingId}, #{buildingName}, #{unitName},
+            #{roomName}, #{ownerUid}, #{affectedReason}, #{sourceType}
+        )
+    </insert>
+
+    <select id="listPlanAffectedOwners"
+            resultType="com.pangu.infrastructure.persistence.entity.RepairPlanAffectedOwnerRow">
+        SELECT plan_affected_owner_id, plan_id, tenant_id, room_id, building_id,
+               building_name, unit_name, room_name, owner_uid, affected_reason,
+               source_type, create_time
+        FROM t_repair_plan_affected_owner
+        WHERE plan_id = #{planId} AND tenant_id = #{tenantId}
+        ORDER BY building_name, unit_name NULLS LAST, room_name, room_id
+    </select>
+
+    <insert id="insertAttachment" useGeneratedKeys="true" keyProperty="attachmentId" keyColumn="attachment_id">
+        INSERT INTO t_repair_project_attachment (
+            project_id, tenant_id, object_key, original_file_name, content_type,
+            file_size, etag, sha256, uploaded_by_account_id, uploaded_by_user_id
+        ) VALUES (
+            #{projectId}, #{tenantId}, #{objectKey}, #{originalFileName}, #{contentType},
+            #{fileSize}, #{etag}, #{sha256}, #{uploadedByAccountId}, #{uploadedByUserId}
+        )
+    </insert>
+
+    <select id="findAttachment"
+            resultType="com.pangu.infrastructure.persistence.entity.RepairProjectAttachmentRow">
+        SELECT attachment_id, project_id, tenant_id, object_key, original_file_name,
+               content_type, file_size, etag, sha256, uploaded_by_account_id,
+               uploaded_by_user_id, create_time
+        FROM t_repair_project_attachment
+        WHERE attachment_id = #{attachmentId}
+          AND project_id = #{projectId}
+          AND tenant_id = #{tenantId}
+    </select>
+
+    <select id="listAttachments"
+            resultType="com.pangu.infrastructure.persistence.entity.RepairProjectAttachmentRow">
+        SELECT attachment_id, project_id, tenant_id, object_key, original_file_name,
+               content_type, file_size, etag, sha256, uploaded_by_account_id,
+               uploaded_by_user_id, create_time
+        FROM t_repair_project_attachment
+        WHERE project_id = #{projectId} AND tenant_id = #{tenantId}
+        ORDER BY create_time DESC, attachment_id DESC
+    </select>
+
+    <insert id="linkPlanAttachment">
+        INSERT INTO t_repair_plan_attachment (plan_id, attachment_id, purpose, sort_order)
+        VALUES (#{planId}, #{attachmentId}, #{purpose}, #{sortOrder})
+    </insert>
+
+    <select id="listPlanAttachments"
+            resultType="com.pangu.infrastructure.persistence.entity.RepairPlanAttachmentRow">
+        SELECT link.attachment_id, link.purpose, link.sort_order
+        FROM t_repair_plan_attachment link
+        JOIN t_repair_plan_version plan ON plan.plan_id = link.plan_id
+        WHERE link.plan_id = #{planId} AND plan.tenant_id = #{tenantId}
+        ORDER BY link.sort_order, link.attachment_id
+    </select>
+
+    <update id="lockPlan">
+        UPDATE t_repair_plan_version
+        SET status = 'LOCKED', snapshot_hash = #{snapshotHash},
+            locked_by_user_id = #{lockedByUserId}, locked_at = CURRENT_TIMESTAMP
+        WHERE plan_id = #{planId}
+          AND project_id = #{projectId}
+          AND tenant_id = #{tenantId}
+          AND status = 'DRAFT'
+    </update>
+
+    <update id="supersedeLockedPlans">
+        UPDATE t_repair_plan_version
+        SET status = 'SUPERSEDED'
+        WHERE project_id = #{projectId}
+          AND tenant_id = #{tenantId}
+          AND plan_id &lt;&gt; #{exceptPlanId}
+          AND status = 'LOCKED'
+    </update>
+
+    <update id="activatePlan">
+        UPDATE t_repair_project
+        SET active_plan_id = #{planId}, status = 'PLAN_LOCKED',
+            version = version + 1, update_time = CURRENT_TIMESTAMP
+        WHERE project_id = #{projectId}
+          AND tenant_id = #{tenantId}
+          AND version = #{expectedVersion}
+          AND status IN ('DRAFT', 'PLAN_LOCKED')
+    </update>
+
+    <update id="advanceStatus">
+        UPDATE t_repair_project
+        SET status = #{nextStatus}, version = version + 1, update_time = CURRENT_TIMESTAMP
+        WHERE project_id = #{projectId}
+          AND tenant_id = #{tenantId}
+          AND status = #{expectedStatus}
+          AND version = #{expectedVersion}
+    </update>
+
+    <insert id="insertEvent">
+        INSERT INTO t_repair_project_event (
+            project_id, tenant_id, action, actor_account_id, actor_user_id, payload_json
+        ) VALUES (
+            #{projectId}, #{tenantId}, #{action}, #{actorAccountId}, #{actorUserId},
+            CAST(#{payloadJson} AS JSONB)
+        )
+    </insert>
+
+    <insert id="insertOwnerEvent">
+        INSERT INTO t_repair_project_event (
+            project_id, tenant_id, action, actor_account_id, actor_user_id,
+            actor_owner_uid, payload_json
+        ) VALUES (
+            #{projectId}, #{tenantId}, #{action}, #{actorAccountId}, NULL,
+            #{actorOwnerUid}, CAST(#{payloadJson} AS JSONB)
+        )
+    </insert>
+</mapper>

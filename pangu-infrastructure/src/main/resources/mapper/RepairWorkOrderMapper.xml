@@ -1425,6 +1425,14 @@
         LIMIT 1
     </select>
 
+    <select id="activeUserBelongsToDept" resultType="boolean">
+        SELECT EXISTS (
+            SELECT 1
+            FROM sys_user
+            WHERE user_id = #{userId} AND dept_id = #{deptId} AND status = '0'
+        )
+    </select>
+
     <insert id="insertContract">
         INSERT INTO t_repair_contract (
             work_order_id, tenant_id, supplier_dept_id, supplier_name, contract_amount,
@@ -1526,119 +1534,6 @@
           AND contract_id = #{contractId}
         ORDER BY payment_request_id DESC
         LIMIT 1
-    </select>
-
-    <delete id="deleteAcceptanceScope">
-        DELETE FROM t_repair_acceptance_scope
-        WHERE work_order_id = #{workOrderId}
-          AND tenant_id = #{tenantId}
-    </delete>
-
-    <insert id="insertAcceptanceScope">
-        INSERT INTO t_repair_acceptance_scope (
-            work_order_id, tenant_id, room_id, affected_reason, created_by_user_id
-        ) VALUES (
-            #{workOrderId}, #{tenantId}, #{roomId}, #{affectedReason}, #{createdByUserId}
-        )
-    </insert>
-
-    <select id="roomInAcceptanceScope" resultType="boolean">
-        SELECT EXISTS (
-            SELECT 1 FROM t_repair_acceptance_scope
-            WHERE work_order_id = #{workOrderId}
-              AND tenant_id = #{tenantId}
-              AND room_id = #{roomId}
-        )
-    </select>
-
-    <select id="ownerOwnsAcceptanceRoom" resultType="boolean">
-        SELECT EXISTS (
-            SELECT 1
-            FROM t_repair_acceptance_scope scope
-            JOIN c_owner_property property
-              ON property.tenant_id = scope.tenant_id
-             AND property.room_id = scope.room_id
-             AND property.account_status = 1
-            WHERE scope.work_order_id = #{workOrderId}
-              AND scope.tenant_id = #{tenantId}
-              AND scope.room_id = #{roomId}
-              AND property.uid = #{uid}
-        )
-    </select>
-
-    <select id="listOwnerAcceptanceRooms" resultType="long">
-        SELECT DISTINCT scope.room_id
-        FROM t_repair_acceptance_scope scope
-        JOIN c_owner_property property
-          ON property.tenant_id = scope.tenant_id
-         AND property.room_id = scope.room_id
-         AND property.account_status = 1
-        WHERE scope.work_order_id = #{workOrderId}
-          AND scope.tenant_id = #{tenantId}
-          AND property.uid = #{uid}
-        ORDER BY scope.room_id
-    </select>
-
-    <insert id="insertAcceptanceRecord">
-        INSERT INTO t_repair_acceptance_record (
-            work_order_id, tenant_id, room_id, participant_type, participant_account_id,
-            participant_user_id, participant_name, conclusion, opinion, signature_hash,
-            evidence_hash, submitted_by_user_id
-        ) VALUES (
-            #{workOrderId}, #{tenantId}, #{record.roomId}, #{record.participantType},
-            #{record.participantAccountId}, #{record.participantUserId}, #{record.participantName},
-            #{record.conclusion}, #{record.opinion}, #{record.signatureHash},
-            #{record.evidenceHash}, #{record.submittedByUserId}
-        )
-    </insert>
-
-    <select id="summarizeAcceptance"
-            resultType="com.pangu.infrastructure.persistence.entity.RepairAcceptanceSummaryRow">
-        WITH owner_latest AS (
-            SELECT DISTINCT ON (room_id) participant_type, room_id, conclusion
-            FROM t_repair_acceptance_record
-            WHERE work_order_id = #{workOrderId}
-              AND tenant_id = #{tenantId}
-              AND participant_type = 'AFFECTED_OWNER'
-            ORDER BY room_id, submitted_at DESC, acceptance_record_id DESC
-        ), witness_latest AS (
-            SELECT DISTINCT ON (participant_type) participant_type, room_id, conclusion
-            FROM t_repair_acceptance_record
-            WHERE work_order_id = #{workOrderId}
-              AND tenant_id = #{tenantId}
-              AND participant_type &lt;&gt; 'AFFECTED_OWNER'
-            ORDER BY participant_type, submitted_at DESC, acceptance_record_id DESC
-        ), latest AS (
-            SELECT * FROM owner_latest
-            UNION ALL
-            SELECT * FROM witness_latest
-        ), affected AS (
-            SELECT room_id
-            FROM t_repair_acceptance_scope
-            WHERE work_order_id = #{workOrderId}
-              AND tenant_id = #{tenantId}
-        )
-        SELECT
-            (SELECT COUNT(1)::INT FROM affected) AS affected_room_count,
-            (SELECT COUNT(1)::INT FROM affected room
-             WHERE EXISTS (
-                 SELECT 1 FROM latest record
-                 WHERE record.participant_type = 'AFFECTED_OWNER'
-                   AND record.room_id = room.room_id
-                   AND record.conclusion IN ('PASSED', 'AUTHORIZED')
-             )) AS passed_affected_room_count,
-            (SELECT COUNT(1)::INT FROM latest
-             WHERE conclusion = 'RECTIFICATION_REQUIRED') AS rectification_count,
-            (SELECT COUNT(1)::INT FROM latest
-             WHERE participant_type = 'AFFECTED_OWNER' AND conclusion = 'UNREACHABLE') AS unreachable_count,
-            EXISTS (
-                SELECT 1 FROM latest
-                WHERE participant_type = 'OWNER_REPRESENTATIVE' AND conclusion = 'PASSED'
-            ) AS owner_representative_passed,
-            EXISTS (
-                SELECT 1 FROM latest
-                WHERE participant_type = 'PROPERTY_REPRESENTATIVE' AND conclusion = 'PASSED'
-            ) AS property_representative_passed
     </select>
 
     <insert id="insertEvent"

@@ -55,6 +55,17 @@
         LIMIT 1
     </select>
 
+    <!-- 首页读侧只允许读取已公示快照；以发布时间而不是草稿创建时间决定“最近”。 -->
+    <select id="selectLatestPublished" resultMap="FinanceDisclosureRowMap">
+        SELECT <include refid="all_columns"/>
+        FROM t_finance_disclosure_snapshot
+        WHERE tenant_id = #{tenantId}
+          AND disclosure_type = #{disclosureType}
+          AND status = #{publishedStatus}
+        ORDER BY published_at DESC, snapshot_id DESC
+        LIMIT 1
+    </select>
+
     <insert id="insert"
             parameterType="com.pangu.infrastructure.persistence.entity.FinanceDisclosureRow"
             useGeneratedKeys="true"

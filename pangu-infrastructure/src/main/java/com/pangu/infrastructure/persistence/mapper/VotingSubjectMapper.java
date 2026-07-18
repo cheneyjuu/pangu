@@ -85,22 +85,23 @@ public interface VotingSubjectMapper {
                                                   @Param("limit") int limit,
                                                   @Param("offset") int offset);
 
-    // ============= M4-1 管理端分页查询 =============
+    // ============= M4-1 管理端工作台分页查询 =============
 
     /**
-     * 管理端议题分页：tenant 恒在 + status/type 可选筛选，按 create_time 倒序。
-     * status/type 为 {@code null} 时该条件省略。
+     * 管理端议题分页：tenant 恒在；发起人、status、type 均为可选筛选，按 create_time 倒序。
      */
-    List<VotingSubjectRow> selectAdminPage(@Param("tenantId") Long tenantId,
-                                            @Param("status") Integer status,
-                                            @Param("type") Integer type,
-                                            @Param("limit") int limit,
-                                            @Param("offset") int offset);
+    List<VotingSubjectRow> selectWorkbenchPage(@Param("tenantId") Long tenantId,
+                                                @Param("proposedByUserId") Long proposedByUserId,
+                                                @Param("status") Integer status,
+                                                @Param("type") Integer type,
+                                                @Param("limit") int limit,
+                                                @Param("offset") int offset);
 
-    /** 管理端议题分页计数：where 条件与 {@link #selectAdminPage} 一致。 */
-    long countAdminPage(@Param("tenantId") Long tenantId,
-                        @Param("status") Integer status,
-                        @Param("type") Integer type);
+    /** 管理端议题分页计数：where 条件与 {@link #selectWorkbenchPage} 一致。 */
+    long countWorkbenchPage(@Param("tenantId") Long tenantId,
+                            @Param("proposedByUserId") Long proposedByUserId,
+                            @Param("status") Integer status,
+                            @Param("type") Integer type);
 
     // ============= HANDOVER_LOCK 换届熔断 =============
 

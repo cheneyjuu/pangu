@@ -1,3 +1,4 @@
+// 关联业务：定义报修事项从登记、核验、勘验到工程项目交接的状态边界。
 package com.pangu.domain.model.repair;
 
 import java.util.Set;
@@ -11,6 +12,7 @@ public enum RepairWorkOrderStatus {
     ASSIGNED,
     SURVEYING,
     SURVEY_COMPLETED,
+    PROJECT_LINKED,
     PLAN_SUBMITTED,
     QUOTE_COLLECTING,
     QUOTE_SUBMITTED,

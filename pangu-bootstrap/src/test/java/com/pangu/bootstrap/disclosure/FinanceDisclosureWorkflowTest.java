@@ -2,6 +2,7 @@ package com.pangu.bootstrap.disclosure;
 
 import com.pangu.application.disclosure.FinanceDisclosureApplicationException;
 import com.pangu.application.disclosure.FinanceDisclosureApplicationService;
+import com.pangu.application.disclosure.PublishedMaintenanceFundSummary;
 import com.pangu.application.disclosure.command.CompareCommand;
 import com.pangu.application.disclosure.command.ComposeCommand;
 import com.pangu.application.disclosure.command.LockAndPublishCommand;
@@ -208,6 +209,36 @@ public class FinanceDisclosureWorkflowTest {
                 () -> service.getReadablePublishedSnapshot(snap.getSnapshotId(), 99999L));
         assertEquals(FinanceDisclosureApplicationException.Reason.SNAPSHOT_NOT_FOUND,
                 ex.getReason());
+    }
+
+    @Test
+    public void latestPublishedMaintenanceFundSummary_usesPublishedSnapshotAndLedgerDirections() {
+        // 无已公示快照是正常状态，首页必须据此显示空态而不是实时账目。
+        assertTrue(service.getLatestPublishedMaintenanceFundSummary(TEST_TENANT_ID).isEmpty());
+
+        Long accountId = seedAccount(new BigDecimal("1000.00"));
+        seedEntry(accountId, 3, 1, new BigDecimal("120.50"), "2026-05-10 10:00:00");
+        seedEntry(accountId, 4, 2, new BigDecimal("80.25"), "2026-05-11 10:00:00");
+        setRole("COMMITTEE_DIRECTOR", COMPOSE_USER);
+        FinanceDisclosureSnapshot published = service.compose(new ComposeCommand(
+                TEST_TENANT_ID, "2026-05", DisclosureType.MAINTENANCE_FUND, COMPOSE_USER));
+        setRole("COMMITTEE_DIRECTOR", PUBLISH_USER);
+        service.lockAndPublish(new LockAndPublishCommand(
+                TEST_TENANT_ID, published.getSnapshotId(), PUBLISH_USER));
+
+        // 后续草稿即使期间更晚，也不得覆盖业主首页可读的已公示事实。
+        seedEntry(accountId, 3, 1, new BigDecimal("999.00"), "2026-06-10 10:00:00");
+        setRole("COMMITTEE_DIRECTOR", COMPOSE_USER);
+        service.compose(new ComposeCommand(
+                TEST_TENANT_ID, "2026-06", DisclosureType.MAINTENANCE_FUND, COMPOSE_USER));
+
+        PublishedMaintenanceFundSummary summary = service
+                .getLatestPublishedMaintenanceFundSummary(TEST_TENANT_ID)
+                .orElseThrow();
+        assertEquals("2026-05", summary.period());
+        assertEquals(0, summary.inflowAmount().compareTo(new BigDecimal("120.50")));
+        assertEquals(0, summary.outflowAmount().compareTo(new BigDecimal("80.25")));
+        assertNotNull(summary.publishedAt());
     }
 
     @Test

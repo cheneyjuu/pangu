@@ -192,7 +192,10 @@ public class ControllerIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.user_info.role_key", is("PROPERTY_MANAGER")))
                 .andExpect(jsonPath("$.data.user_info.permissions", hasItem("repair:workorder:read")))
+                .andExpect(jsonPath("$.data.user_info.permissions", hasItem("repair:supplier:manage")))
                 .andExpect(jsonPath("$.data.user_info.permissions", hasItem("fund:account:read")))
+                .andExpect(jsonPath("$.data.user_info.menu_permissions", hasItem("subject-proposal")))
+                .andExpect(jsonPath("$.data.user_info.menu_permissions", not(hasItem("term-management"))))
                 .andReturn().getResponse().getContentAsString();
 
         Map<String, Object> responseMap = objectMapper.readValue(responseJson, Map.class);
@@ -206,6 +209,11 @@ public class ControllerIntegrationTest {
         Map<String, Object> menusResponse = objectMapper.readValue(menusJson, Map.class);
         List<Map<String, Object>> modules = (List<Map<String, Object>>) menusResponse.get("data");
 
+        assertTrue(modules.stream()
+                        .flatMap(module -> ((List<Map<String, Object>>) module.get("pages")).stream())
+                        .noneMatch(page -> "term-management".equals(page.get("id"))),
+                "物业经理不负责业委会换届流程，导航不得下发换届管理");
+
         assertTrue(modules.stream().noneMatch(module -> "assets".equals(module.get("id"))),
                 "旧资产与维修一级菜单不应继续下发");
 
@@ -217,6 +225,7 @@ public class ControllerIntegrationTest {
         List<Map<String, Object>> propertyPages = (List<Map<String, Object>>) propertyModule.get("pages");
         assertTrue(propertyPages.stream().anyMatch(page -> "assets".equals(page.get("id"))));
         assertTrue(propertyPages.stream().anyMatch(page -> "work-orders".equals(page.get("id"))));
+        assertTrue(propertyPages.stream().anyMatch(page -> "repair-suppliers".equals(page.get("id"))));
         assertTrue(propertyPages.stream().anyMatch(page -> "engineering".equals(page.get("id"))));
         assertTrue(propertyPages.stream().noneMatch(page -> "property-mgmt".equals(page.get("id"))));
 
@@ -237,7 +246,8 @@ public class ControllerIntegrationTest {
         // V1.1 seed: 李四纯业主 phone=13800000113 / account_id=999913 / c_user.uid=70002（无 sys_user 分身）
         Map<String, Object> request = Map.of(
                 "username", "13800000113",
-                "smsCode", "123456"
+                "smsCode", "123456",
+                "clientPortal", "OWNER"
         );
 
         String responseJson = mockMvc.perform(post("/api/v1/auth/login")

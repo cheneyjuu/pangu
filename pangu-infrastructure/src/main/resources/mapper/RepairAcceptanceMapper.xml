@@ -1,0 +1,177 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 关联业务：持久化楼栋维修与全小区公共维修各自的验收规则和角色证据。 -->
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pangu.infrastructure.persistence.mapper.RepairAcceptanceMapper">
+
+    <select id="ownerOwnsRoom" resultType="boolean">
+        SELECT EXISTS (
+            SELECT 1
+            FROM c_owner_property
+            WHERE tenant_id = #{tenantId}
+              AND building_id = #{buildingId}
+              AND room_id = #{roomId}
+              AND uid = #{ownerUid}
+              AND account_status = 1
+        )
+    </select>
+
+    <select id="insertPolicy" resultType="long">
+        INSERT INTO t_repair_acceptance_policy_snapshot (
+            work_order_id, tenant_id, workflow_type, policy_hash, affected_owner_count,
+            minimum_affected_owner_participants, minimum_affected_owner_approvals,
+            version, locked_by_user_id
+        )
+        SELECT
+            #{workOrderId}, #{tenantId}, #{workflowType}, #{policyHash}, #{affectedOwnerCount},
+            #{minimumParticipants}, #{minimumApprovals}, COALESCE(MAX(version), 0) + 1,
+            #{lockedByUserId}
+        FROM t_repair_acceptance_policy_snapshot
+        WHERE work_order_id = #{workOrderId}
+        RETURNING policy_id
+    </select>
+
+    <update id="supersedeActivePolicy">
+        UPDATE t_repair_acceptance_policy_snapshot
+        SET status = 'SUPERSEDED'
+        WHERE work_order_id = #{workOrderId}
+          AND tenant_id = #{tenantId}
+          AND status = 'ACTIVE'
+    </update>
+
+    <insert id="insertAffectedOwner">
+        INSERT INTO t_repair_acceptance_affected_owner (
+            policy_id, tenant_id, room_id, owner_uid, affected_reason
+        ) VALUES (
+            #{policyId}, #{tenantId}, #{roomId}, #{ownerUid}, #{affectedReason}
+        )
+    </insert>
+
+    <select id="findPolicy"
+            resultType="com.pangu.infrastructure.persistence.entity.RepairAcceptancePolicyRow">
+        SELECT policy_id, work_order_id, tenant_id, workflow_type, policy_hash,
+               affected_owner_count, minimum_affected_owner_participants,
+               minimum_affected_owner_approvals, locked_by_user_id, locked_at
+        FROM t_repair_acceptance_policy_snapshot
+        WHERE work_order_id = #{workOrderId}
+          AND tenant_id = #{tenantId}
+          AND status = 'ACTIVE'
+    </select>
+
+    <select id="ownerIncluded" resultType="boolean">
+        SELECT EXISTS (
+            SELECT 1
+            FROM t_repair_acceptance_affected_owner
+            WHERE policy_id = #{policyId}
+              AND tenant_id = #{tenantId}
+              AND room_id = #{roomId}
+              AND owner_uid = #{ownerUid}
+        )
+    </select>
+
+    <select id="listOwnerRooms" resultType="long">
+        SELECT affected.room_id
+        FROM t_repair_acceptance_affected_owner affected
+        JOIN t_repair_acceptance_policy_snapshot policy ON policy.policy_id = affected.policy_id
+        WHERE policy.work_order_id = #{workOrderId}
+          AND policy.tenant_id = #{tenantId}
+          AND policy.status = 'ACTIVE'
+          AND affected.owner_uid = #{ownerUid}
+        ORDER BY affected.room_id
+    </select>
+
+    <select id="insertRound" resultType="long">
+        INSERT INTO t_repair_acceptance (
+            work_order_id, tenant_id, policy_id, round_no, submitted_by_user_id
+        )
+        SELECT #{workOrderId}, #{tenantId}, #{policyId},
+               COALESCE(MAX(round_no), 0) + 1, #{submittedByUserId}
+        FROM t_repair_acceptance
+        WHERE work_order_id = #{workOrderId}
+        RETURNING acceptance_id
+    </select>
+
+    <select id="findRoundById"
+            resultType="com.pangu.infrastructure.persistence.entity.RepairAcceptanceRoundRow">
+        SELECT acceptance_id, work_order_id, tenant_id, policy_id, round_no, status
+        FROM t_repair_acceptance
+        WHERE acceptance_id = #{acceptanceId}
+          AND tenant_id = #{tenantId}
+    </select>
+
+    <select id="findCollectingRound"
+            resultType="com.pangu.infrastructure.persistence.entity.RepairAcceptanceRoundRow">
+        SELECT acceptance_id, work_order_id, tenant_id, policy_id, round_no, status
+        FROM t_repair_acceptance
+        WHERE work_order_id = #{workOrderId}
+          AND tenant_id = #{tenantId}
+          AND status = 'COLLECTING'
+        ORDER BY round_no DESC
+        LIMIT 1
+    </select>
+
+    <insert id="insertParty">
+        INSERT INTO t_repair_acceptance_party (
+            acceptance_id, tenant_id, participant_key, party_role, room_id, owner_uid,
+            participant_account_id, participant_user_id, participant_name,
+            participant_organization, committee_position, conclusion, opinion, submission_method,
+            signature_hash, evidence_hash, seal_usage_id, submitted_by_user_id
+        ) VALUES (
+            #{acceptanceId}, #{tenantId}, #{party.participantKey}, #{party.partyRole},
+            #{party.roomId}, #{party.ownerUid}, #{party.participantAccountId},
+            #{party.participantUserId}, #{party.participantName},
+            #{party.participantOrganization}, #{party.committeePosition},
+            #{party.conclusion}, #{party.opinion}, #{party.submissionMethod}, #{party.signatureHash},
+            #{party.evidenceHash}, #{party.sealUsageId}, #{party.submittedByUserId}
+        )
+    </insert>
+
+    <select id="summarize"
+            resultType="com.pangu.infrastructure.persistence.entity.RepairAcceptanceFactsRow">
+        WITH latest AS (
+            SELECT DISTINCT ON (participant_key)
+                   participant_key, party_role, owner_uid, conclusion
+            FROM t_repair_acceptance_party
+            WHERE acceptance_id = #{acceptanceId}
+              AND tenant_id = #{tenantId}
+            ORDER BY participant_key, submitted_at DESC, party_id DESC
+        ), acceptance_policy AS (
+            SELECT policy.affected_owner_count
+            FROM t_repair_acceptance acceptance
+            JOIN t_repair_acceptance_policy_snapshot policy ON policy.policy_id = acceptance.policy_id
+            WHERE acceptance.acceptance_id = #{acceptanceId}
+              AND acceptance.tenant_id = #{tenantId}
+        )
+        SELECT
+            COALESCE((SELECT affected_owner_count FROM acceptance_policy), 0) AS affected_owner_count,
+            COUNT(DISTINCT owner_uid) FILTER (
+                WHERE party_role = 'AFFECTED_OWNER'
+            )::INT AS participating_affected_owner_count,
+            COUNT(DISTINCT owner_uid) FILTER (
+                WHERE party_role = 'AFFECTED_OWNER' AND conclusion = 'PASSED'
+            )::INT AS passed_affected_owner_count,
+            COUNT(1) FILTER (WHERE conclusion = 'RECTIFICATION_REQUIRED')::INT AS rectification_count,
+            COALESCE(BOOL_OR(party_role = 'BUILDING_LEADER' AND conclusion = 'PASSED'), FALSE)
+                AS building_leader_passed,
+            COALESCE(BOOL_OR(party_role = 'COMMITTEE_EXECUTIVE_APPROVER' AND conclusion = 'PASSED'), FALSE)
+                AS committee_executive_passed,
+            COALESCE(BOOL_OR(party_role = 'COMMITTEE_SEAL_OPERATOR' AND conclusion = 'PASSED'), FALSE)
+                AS committee_seal_applied,
+            COALESCE(BOOL_OR(party_role = 'PROPERTY_TECHNICAL_COSIGNER' AND conclusion = 'PASSED'), FALSE)
+                AS property_technical_cosigned,
+            COALESCE(BOOL_OR(party_role = 'THIRD_PARTY_TECHNICAL_COSIGNER' AND conclusion = 'PASSED'), FALSE)
+                AS third_party_technical_cosigned
+        FROM latest
+    </select>
+
+    <update id="completeRound">
+        UPDATE t_repair_acceptance
+        SET status = #{status},
+            completed_by_user_id = #{completedByUserId},
+            completed_at = CURRENT_TIMESTAMP,
+            completion_remark = #{completionRemark}
+        WHERE acceptance_id = #{acceptanceId}
+          AND tenant_id = #{tenantId}
+          AND status = 'COLLECTING'
+    </update>
+</mapper>

@@ -108,7 +108,7 @@ public interface VotingSubjectRepository {
     List<VotingSubject> findVisibleForOwner(Long tenantId, List<Long> buildingIds, int limit, int offset);
 
     /**
-     * B/G 管理端议题分页查询（M4-1）。
+     * 管理端议题工作台分页查询（M4-1）。
      *
      * <p>过滤规则：
      * <ol>
@@ -117,18 +117,21 @@ public interface VotingSubjectRepository {
      *   <li>{@code type}：非空时按议题类型精确筛选，{@code null} 表示不限类型。</li>
      * </ol>
      *
-     * <p>与 {@link #findVisibleForOwner} 的区别：管理端列表覆盖全部状态（含 DRAFT/CANCELLED），
-     * 受众是社区级及以上角色，安全边界由租户 + endpoint 的 {@code @PreAuthorize} 共同保证，
-     * 不经业主 ABAC scope 过滤。
+     * <p>与 {@link #findVisibleForOwner} 的区别：管理端列表覆盖全部状态（含 DRAFT/CANCELLED）。
+     * 具备 {@code voting:subject:audit} 的治理角色传入 {@code proposedByUserId=null} 查看租户内全部议题；
+     * 仅具备立项权限的服务角色必须传入当前工作身份，只能查看本人发起的议题。
      *
      * @param tenantId 租户 ID（必填）
-     * @param status   状态筛选，{@code null} 不限
-     * @param type     类型筛选，{@code null} 不限
-     * @param page     页码（1-based）
-     * @param size     页大小
+     * @param proposedByUserId 发起人工作身份；{@code null} 表示治理角色可查看租户内全部议题
+     * @param status           状态筛选，{@code null} 不限
+     * @param type             类型筛选，{@code null} 不限
+     * @param page             页码（1-based）
+     * @param size             页大小
      * @return 当前页议题 + 满足条件的总条数
      */
-    Page<VotingSubject> pageForAdmin(Long tenantId, SubjectStatus status, SubjectType type, int page, int size);
+    Page<VotingSubject> pageForWorkbench(Long tenantId, Long proposedByUserId,
+                                         SubjectStatus status, SubjectType type,
+                                         int page, int size);
 
     // ============= HANDOVER_LOCK 换届熔断 =============
 

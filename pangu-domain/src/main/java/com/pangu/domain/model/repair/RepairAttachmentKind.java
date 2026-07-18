@@ -11,5 +11,7 @@ public enum RepairAttachmentKind {
     QUOTE_DOCUMENT,
     APPROVAL_DOCUMENT,
     SOLITAIRE_SCREENSHOT,
-    GOVERNANCE_SEALED_DOCUMENT
+    GOVERNANCE_SEALED_DOCUMENT,
+    /** 全小区公共维修竣工验收表的业委会盖章结果。 */
+    ACCEPTANCE_SEALED_DOCUMENT
 }

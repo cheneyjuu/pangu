@@ -48,6 +48,9 @@ platform:
       provider-mode: tencent
       tencent:
         rule-id: test-rule-id
+    wechat-mini-program:
+      app-id: wx-prod-context-test
+      app-secret: TEST_WECHAT_MINI_PROGRAM_SECRET
   voting:
     sms-provider-mode: http
     sms-provider:

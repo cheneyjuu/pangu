@@ -3,6 +3,8 @@ package com.pangu.bootstrap.persistence;
 import com.pangu.domain.gateway.CommitteeKeyRevocationGateway;
 import com.pangu.domain.model.attestation.JudicialChainPort;
 import com.pangu.domain.context.UserContextHolder;
+import com.pangu.domain.repository.ElectronicSealProvider;
+import com.pangu.domain.repository.EnterpriseVerificationProvider;
 import com.pangu.infrastructure.persistence.mapper.OwnerPropertyMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -49,6 +51,12 @@ public class ProductionEmptyContextTest {
 
     @MockBean
     private CommitteeKeyRevocationGateway committeeKeyRevocationGateway;
+
+    @MockBean
+    private ElectronicSealProvider electronicSealProvider;
+
+    @MockBean
+    private EnterpriseVerificationProvider enterpriseVerificationProvider;
 
     @BeforeEach
     public void setUp() {

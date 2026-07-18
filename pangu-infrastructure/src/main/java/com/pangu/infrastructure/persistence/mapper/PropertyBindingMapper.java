@@ -18,6 +18,8 @@ public interface PropertyBindingMapper {
 
     List<RosterRow> selectActiveRosters(@Param("tenantId") Long tenantId);
 
+    List<RosterRow> selectActiveRostersForBindingOptions(@Param("tenantId") Long tenantId);
+
     String selectTenantName(@Param("tenantId") Long tenantId);
 
     RosterRow selectRosterById(@Param("rosterId") Long rosterId);

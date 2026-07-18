@@ -60,6 +60,8 @@ mybatis:
 
 # 平台业务与安全策略参数
 platform:
+  # 对外 API 基址用于生成小程序可直接加载的同源短期资源地址；生产必须显式覆盖。
+  public-api-base-url: ${PANGU_PUBLIC_API_BASE_URL:http://localhost:8080/pangu/api/v1}
   attestation:
     # outbox-pending 仅用于开发/测试：落 outbox 并返回 STUB-*，不具备司法链法律效力。
     provider: outbox-pending

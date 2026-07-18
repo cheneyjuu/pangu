@@ -3,8 +3,6 @@ package com.pangu.domain.repository;
 
 import com.pangu.domain.model.asset.OwnerPropertyDetail;
 import com.pangu.domain.model.repair.RepairBuildingDecisionSnapshot;
-import com.pangu.domain.model.repair.RepairAcceptanceRecord;
-import com.pangu.domain.model.repair.RepairAcceptanceSummary;
 import com.pangu.domain.model.repair.RepairApprovalAttachment;
 import com.pangu.domain.model.repair.RepairContractSignature;
 import com.pangu.domain.model.repair.RepairDecisionRoom;
@@ -248,6 +246,8 @@ public interface RepairWorkOrderRepository {
 
     Optional<String> findActiveCommitteePosition(Long tenantId, Long userId);
 
+    boolean activeUserBelongsToDept(Long userId, Long deptId);
+
     Long insertContract(Long workOrderId,
                         Long tenantId,
                         Long supplierDeptId,
@@ -283,22 +283,6 @@ public interface RepairWorkOrderRepository {
                               BigDecimal requestedAmount,
                               String conditionEvidenceHash,
                               Long requestedByUserId);
-
-    void replaceAcceptanceScope(Long workOrderId,
-                                Long tenantId,
-                                Long createdByUserId,
-                                List<Long> roomIds,
-                                List<String> affectedReasons);
-
-    boolean roomInAcceptanceScope(Long workOrderId, Long tenantId, Long roomId);
-
-    boolean ownerOwnsAcceptanceRoom(Long workOrderId, Long tenantId, Long roomId, Long uid);
-
-    List<Long> listOwnerAcceptanceRooms(Long workOrderId, Long tenantId, Long uid);
-
-    void insertAcceptanceRecord(Long workOrderId, Long tenantId, RepairAcceptanceRecord record);
-
-    RepairAcceptanceSummary summarizeAcceptance(Long workOrderId, Long tenantId);
 
     void insertEvent(RepairWorkOrderEvent event);
 
