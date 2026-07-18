@@ -1,4 +1,4 @@
-// 关联业务：实现维修工程项目、实施方案版本、工程项、费用分摊及受影响业主快照与项目附件的数据访问。
+// 关联业务：实现维修工程项目、单一决定范围、维修点位、可信资金切片、实施方案版本及项目附件的数据访问。
 package com.pangu.infrastructure.repository;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -11,12 +11,14 @@ import com.pangu.domain.model.repair.RepairProject.AllocationBasis;
 import com.pangu.domain.model.repair.RepairProject.Attachment;
 import com.pangu.domain.model.repair.RepairProject.EvidenceRequirement;
 import com.pangu.domain.model.repair.RepairProject.EligibleAffectedOwner;
-import com.pangu.domain.model.repair.RepairProject.Item;
+import com.pangu.domain.model.repair.RepairProject.DecisionScope;
+import com.pangu.domain.model.repair.RepairProject.FundingSlice;
 import com.pangu.domain.model.repair.RepairProject.PaymentMilestone;
 import com.pangu.domain.model.repair.RepairProject.PlanAttachment;
 import com.pangu.domain.model.repair.RepairProject.PlanAffectedOwner;
 import com.pangu.domain.model.repair.RepairProject.PlanVersion;
 import com.pangu.domain.model.repair.RepairProject.Status;
+import com.pangu.domain.model.repair.RepairProject.WorkPoint;
 import com.pangu.domain.model.repair.RepairSupplierSelectionMethod;
 import com.pangu.domain.model.repair.RepairWorkflowType;
 import com.pangu.domain.repository.RepairProjectRepository;
@@ -28,7 +30,9 @@ import com.pangu.infrastructure.persistence.entity.RepairPlanAttachmentRow;
 import com.pangu.infrastructure.persistence.entity.RepairPlanVersionRow;
 import com.pangu.infrastructure.persistence.entity.RepairProjectAttachmentRow;
 import com.pangu.infrastructure.persistence.entity.RepairProjectProcessEventRow;
-import com.pangu.infrastructure.persistence.entity.RepairProjectItemRow;
+import com.pangu.infrastructure.persistence.entity.RepairDecisionScopeRow;
+import com.pangu.infrastructure.persistence.entity.RepairFundingSliceRow;
+import com.pangu.infrastructure.persistence.entity.RepairWorkPointRow;
 import com.pangu.infrastructure.persistence.entity.RepairProjectRow;
 import com.pangu.infrastructure.persistence.mapper.RepairProjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -69,16 +73,43 @@ public class RepairProjectRepositoryImpl implements RepairProjectRepository {
     }
 
     @Override
-    public Item insertItem(Item item) {
-        RepairProjectItemRow row = toRow(item);
-        mapper.insertItem(row);
+    public DecisionScope insertDecisionScope(DecisionScope decisionScope) {
+        RepairDecisionScopeRow row = toRow(decisionScope);
+        mapper.insertDecisionScope(row);
+        return findDecisionScope(decisionScope.projectId(), decisionScope.tenantId()).orElseThrow();
+    }
+
+    @Override
+    public Optional<DecisionScope> findDecisionScope(Long projectId, Long tenantId) {
+        return Optional.ofNullable(mapper.findDecisionScope(projectId, tenantId)).map(this::toDomain);
+    }
+
+    @Override
+    public int updateDecisionScopeVerification(
+            Long projectId,
+            Long tenantId,
+            RepairProject.DecisionScopeVerificationStatus verificationStatus,
+            String verificationBasis) {
+        return mapper.updateDecisionScopeVerification(
+                projectId, tenantId, verificationStatus.name(), verificationBasis);
+    }
+
+    @Override
+    public List<FundingSlice> listFundingSlices(Long decisionScopeId, Long tenantId) {
+        return mapper.listFundingSlices(decisionScopeId, tenantId).stream().map(this::toDomain).toList();
+    }
+
+    @Override
+    public WorkPoint insertWorkPoint(WorkPoint workPoint) {
+        RepairWorkPointRow row = toRow(workPoint);
+        mapper.insertWorkPoint(row);
         row.setLinkedWorkOrderIds(List.of());
         return toDomain(row);
     }
 
     @Override
-    public void linkItemToWorkOrder(Long itemId, Long workOrderId, Long tenantId) {
-        mapper.linkItemToWorkOrder(itemId, workOrderId, tenantId);
+    public void linkWorkPointToWorkOrder(Long workPointId, Long workOrderId, Long tenantId) {
+        mapper.linkWorkPointToWorkOrder(workPointId, workOrderId, tenantId);
     }
 
     @Override
@@ -147,10 +178,10 @@ public class RepairProjectRepositoryImpl implements RepairProjectRepository {
     }
 
     @Override
-    public List<Item> listItems(Long planId, Long tenantId) {
-        return mapper.listItems(planId, tenantId).stream()
+    public List<WorkPoint> listWorkPoints(Long planId, Long tenantId) {
+        return mapper.listWorkPoints(planId, tenantId).stream()
                 .map(row -> {
-                    row.setLinkedWorkOrderIds(mapper.listLinkedWorkOrderIds(row.getItemId()));
+                    row.setLinkedWorkOrderIds(mapper.listLinkedWorkOrderIds(row.getWorkPointId()));
                     return toDomain(row);
                 })
                 .toList();
@@ -249,8 +280,8 @@ public class RepairProjectRepositoryImpl implements RepairProjectRepository {
         return new RepairProject(
                 row.getProjectId(), row.getProjectNo(), row.getTenantId(), row.getProjectName(),
                 RepairWorkflowType.valueOf(row.getWorkflowType()), RepairProject.ScopeType.valueOf(row.getScopeType()),
-                row.getBuildingId(), row.getUnitName(), RepairProject.FundSource.valueOf(row.getFundSource()),
-                RepairProject.GovernancePath.valueOf(row.getGovernancePath()),
+                row.getBuildingId(), row.getUnitName(), enumOrNull(RepairProject.FundSource.class, row.getFundSource()),
+                enumOrNull(RepairProject.GovernancePath.class, row.getGovernancePath()),
                 RepairProject.Status.valueOf(row.getStatus()), row.getActivePlanId(), row.getVersion(),
                 row.getCreatedByAccountId(), row.getCreatedByUserId(), row.getCreateTime(), row.getUpdateTime());
     }
@@ -269,8 +300,8 @@ public class RepairProjectRepositoryImpl implements RepairProjectRepository {
         row.setScopeType(project.scopeType().name());
         row.setBuildingId(project.buildingId());
         row.setUnitName(project.unitName());
-        row.setFundSource(project.fundSource().name());
-        row.setGovernancePath(project.governancePath().name());
+        row.setFundSource(nameOrNull(project.fundSource()));
+        row.setGovernancePath(nameOrNull(project.governancePath()));
         row.setStatus(project.status().name());
         row.setCreatedByAccountId(project.createdByAccountId());
         row.setCreatedByUserId(project.createdByUserId());
@@ -281,10 +312,10 @@ public class RepairProjectRepositoryImpl implements RepairProjectRepository {
         return new PlanVersion(
                 row.getPlanId(), row.getProjectId(), row.getTenantId(), row.getVersionNo(),
                 row.getPlanDescription(), row.getBudgetTotal(),
-                RepairProject.FundSource.valueOf(row.getFundSource()),
-                RepairProject.AllocationRuleType.valueOf(row.getAllocationRuleType()),
+                enumOrNull(RepairProject.FundSource.class, row.getFundSource()),
+                enumOrNull(RepairProject.AllocationRuleType.class, row.getAllocationRuleType()),
                 row.getAllocationRuleDescription(),
-                RepairSupplierSelectionMethod.valueOf(row.getSupplierSelectionMethod()),
+                enumOrNull(RepairSupplierSelectionMethod.class, row.getSupplierSelectionMethod()),
                 row.getSupplierSelectionReason(), row.getConstructionManagementRequirements(),
                 readJson(row.getEvidenceRequirementsJson(), EVIDENCE_REQUIREMENTS_TYPE),
                 row.getSafetyRequirements(), row.getAcceptanceMethod(),
@@ -292,9 +323,9 @@ public class RepairProjectRepositoryImpl implements RepairProjectRepository {
                 row.getAffectedOwnerScopeDescription(), row.getMinimumAffectedOwnerAcceptors(),
                 enumOrNull(RepairProject.AffectedOwnerPassRule.class, row.getAffectedOwnerPassRule()),
                 row.getAffectedOwnerApprovalRatio(),
-                RepairProject.SettlementMethod.valueOf(row.getSettlementMethod()),
+                enumOrNull(RepairProject.SettlementMethod.class, row.getSettlementMethod()),
                 row.getPlannedStartDate(), row.getPlannedCompletionDate(), row.getWarrantyDays(),
-                RepairProject.GovernancePath.valueOf(row.getGovernancePath()),
+                enumOrNull(RepairProject.GovernancePath.class, row.getGovernancePath()),
                 Integer.valueOf(1).equals(row.getPriceReviewRequired()),
                 readJson(row.getPaymentMilestonesJson(), PAYMENT_MILESTONES_TYPE),
                 RepairProject.PlanStatus.valueOf(row.getStatus()), row.getSnapshotHash(),
@@ -310,10 +341,10 @@ public class RepairProjectRepositoryImpl implements RepairProjectRepository {
         row.setVersionNo(plan.versionNo());
         row.setPlanDescription(plan.planDescription());
         row.setBudgetTotal(plan.budgetTotal());
-        row.setFundSource(plan.fundSource().name());
-        row.setAllocationRuleType(plan.allocationRuleType().name());
+        row.setFundSource(nameOrNull(plan.fundSource()));
+        row.setAllocationRuleType(nameOrNull(plan.allocationRuleType()));
         row.setAllocationRuleDescription(plan.allocationRuleDescription());
-        row.setSupplierSelectionMethod(plan.supplierSelectionMethod().name());
+        row.setSupplierSelectionMethod(nameOrNull(plan.supplierSelectionMethod()));
         row.setSupplierSelectionReason(plan.supplierSelectionReason());
         row.setConstructionManagementRequirements(plan.constructionManagementRequirements());
         row.setEvidenceRequirementsJson(writeJson(plan.evidenceRequirements()));
@@ -324,11 +355,11 @@ public class RepairProjectRepositoryImpl implements RepairProjectRepository {
         row.setMinimumAffectedOwnerAcceptors(plan.minimumAffectedOwnerAcceptors());
         row.setAffectedOwnerPassRule(nameOrNull(plan.affectedOwnerPassRule()));
         row.setAffectedOwnerApprovalRatio(plan.affectedOwnerApprovalRatio());
-        row.setSettlementMethod(plan.settlementMethod().name());
+        row.setSettlementMethod(nameOrNull(plan.settlementMethod()));
         row.setPlannedStartDate(plan.plannedStartDate());
         row.setPlannedCompletionDate(plan.plannedCompletionDate());
         row.setWarrantyDays(plan.warrantyDays());
-        row.setGovernancePath(plan.governancePath().name());
+        row.setGovernancePath(nameOrNull(plan.governancePath()));
         row.setPriceReviewRequired(plan.priceReviewRequired() ? 1 : 0);
         row.setPaymentMilestonesJson(writeJson(plan.paymentMilestones()));
         row.setStatus(plan.status().name());
@@ -337,31 +368,79 @@ public class RepairProjectRepositoryImpl implements RepairProjectRepository {
         return row;
     }
 
-    private Item toDomain(RepairProjectItemRow row) {
-        return new Item(
-                row.getItemId(), row.getProjectId(), row.getPlanId(), row.getTenantId(), row.getItemNo(),
-                row.getBuildingId(), row.getUnitName(), row.getRoomId(), row.getLocationText(),
-                row.getWorkContent(), row.getQuantity(), row.getUnit(), row.getEstimatedUnitPrice(),
-                row.getEstimatedAmount(), row.getSortOrder(), row.getLinkedWorkOrderIds(), row.getCreateTime());
+    private DecisionScope toDomain(RepairDecisionScopeRow row) {
+        return new DecisionScope(
+                row.getDecisionScopeId(), row.getProjectId(), row.getTenantId(),
+                RepairProject.ScopeType.valueOf(row.getScopeType()), row.getBuildingId(), row.getUnitName(),
+                RepairProject.DecisionScopeVerificationStatus.valueOf(row.getVerificationStatus()),
+                row.getVerificationBasis(), Boolean.TRUE.equals(row.getLegacyReadOnly()), row.getCreateTime());
     }
 
-    private RepairProjectItemRow toRow(Item item) {
-        RepairProjectItemRow row = new RepairProjectItemRow();
-        row.setItemId(item.itemId());
-        row.setProjectId(item.projectId());
-        row.setPlanId(item.planId());
-        row.setTenantId(item.tenantId());
-        row.setItemNo(item.itemNo());
-        row.setBuildingId(item.buildingId());
-        row.setUnitName(item.unitName());
-        row.setRoomId(item.roomId());
-        row.setLocationText(item.locationText());
-        row.setWorkContent(item.workContent());
-        row.setQuantity(item.quantity());
-        row.setUnit(item.unit());
-        row.setEstimatedUnitPrice(item.estimatedUnitPrice());
-        row.setEstimatedAmount(item.estimatedAmount());
-        row.setSortOrder(item.sortOrder());
+    private FundingSlice toDomain(RepairFundingSliceRow row) {
+        return new FundingSlice(
+                row.getFundingSliceId(), row.getDecisionScopeId(), row.getProjectId(), row.getTenantId(),
+                RepairProject.FundingSourceType.valueOf(row.getSourceType()), row.getSourceRecordType(),
+                row.getSourceRecordId(), row.getLedgerReference(), row.getAllocationSnapshotHash(),
+                row.getApprovedAmount(), RepairProject.FundingSliceVerificationStatus.valueOf(
+                        row.getVerificationStatus()),
+                Boolean.TRUE.equals(row.getLegacyReadOnly()), row.getVerifiedAt(), row.getCreateTime());
+    }
+
+    private RepairDecisionScopeRow toRow(DecisionScope decisionScope) {
+        RepairDecisionScopeRow row = new RepairDecisionScopeRow();
+        row.setDecisionScopeId(decisionScope.decisionScopeId());
+        row.setProjectId(decisionScope.projectId());
+        row.setTenantId(decisionScope.tenantId());
+        row.setScopeType(decisionScope.scopeType().name());
+        row.setBuildingId(decisionScope.buildingId());
+        row.setUnitName(decisionScope.unitName());
+        row.setVerificationStatus(decisionScope.verificationStatus().name());
+        row.setVerificationBasis(decisionScope.verificationBasis());
+        row.setLegacyReadOnly(decisionScope.legacyReadOnly());
+        row.setCreateTime(decisionScope.createTime());
+        return row;
+    }
+
+    private WorkPoint toDomain(RepairWorkPointRow row) {
+        return new WorkPoint(
+                row.getWorkPointId(), row.getProjectId(), row.getPlanId(), row.getTenantId(),
+                row.getBusinessName(), row.getBuildingId(), row.getUnitName(),
+                RepairProject.WorkPointLocationType.valueOf(row.getLocationType()),
+                row.getReferenceRoomId(), row.getCommonAreaName(), row.getSpaceName(), row.getOrientation(),
+                row.getComponent(), row.getSpecificPart(), row.getSymptom(),
+                RepairProject.WorkPointCauseStatus.valueOf(row.getCauseStatus()), row.getCauseBasis(),
+                row.getProposedMeasure(), row.getTechnicalRequirements(), row.getQuantity(), row.getUnit(),
+                row.getPreliminaryEstimatedAmount(), row.getEstimateSource(), row.getSortOrder(),
+                Boolean.TRUE.equals(row.getLegacyReadOnly()), row.getLinkedWorkOrderIds(), row.getCreateTime());
+    }
+
+    private RepairWorkPointRow toRow(WorkPoint workPoint) {
+        RepairWorkPointRow row = new RepairWorkPointRow();
+        row.setWorkPointId(workPoint.workPointId());
+        row.setProjectId(workPoint.projectId());
+        row.setPlanId(workPoint.planId());
+        row.setTenantId(workPoint.tenantId());
+        row.setBusinessName(workPoint.businessName());
+        row.setBuildingId(workPoint.buildingId());
+        row.setUnitName(workPoint.unitName());
+        row.setLocationType(workPoint.locationType().name());
+        row.setReferenceRoomId(workPoint.referenceRoomId());
+        row.setCommonAreaName(workPoint.commonAreaName());
+        row.setSpaceName(workPoint.spaceName());
+        row.setOrientation(workPoint.orientation());
+        row.setComponent(workPoint.component());
+        row.setSpecificPart(workPoint.specificPart());
+        row.setSymptom(workPoint.symptom());
+        row.setCauseStatus(workPoint.causeStatus().name());
+        row.setCauseBasis(workPoint.causeBasis());
+        row.setProposedMeasure(workPoint.proposedMeasure());
+        row.setTechnicalRequirements(workPoint.technicalRequirements());
+        row.setQuantity(workPoint.quantity());
+        row.setUnit(workPoint.unit());
+        row.setPreliminaryEstimatedAmount(workPoint.preliminaryEstimatedAmount());
+        row.setEstimateSource(workPoint.estimateSource());
+        row.setSortOrder(workPoint.sortOrder());
+        row.setLegacyReadOnly(workPoint.legacyReadOnly());
         return row;
     }
 
@@ -445,7 +524,7 @@ public class RepairProjectRepositoryImpl implements RepairProjectRepository {
 
     private <T> T readJson(String value, TypeReference<T> type) {
         try {
-            return objectMapper.readValue(value, type);
+            return objectMapper.readValue(value == null || value.isBlank() ? "[]" : value, type);
         } catch (JsonProcessingException ex) {
             throw new IllegalStateException("维修实施方案 JSON 反序列化失败", ex);
         }

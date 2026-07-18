@@ -225,7 +225,7 @@ public class RepairProjectSourcingRepositoryImpl implements RepairProjectSourcin
 
     private QuoteLine toDomain(QuoteLineRow row) {
         return new QuoteLine(
-                row.getQuoteLineId(), row.getQuoteId(), row.getProjectItemId(), row.getProjectItemNo(),
+                row.getQuoteLineId(), row.getQuoteId(), row.getWorkPointId(), row.getWorkPointName(),
                 row.getLineNo(), row.getItemName(), QuoteLineType.valueOf(row.getLineType()),
                 row.getWorkDescription(), row.getSpecificationModel(), row.getBrand(),
                 row.getProcurementMethod(), row.getQuantity(), row.getUnit(),
@@ -236,7 +236,7 @@ public class RepairProjectSourcingRepositoryImpl implements RepairProjectSourcin
         QuoteLineRow row = new QuoteLineRow();
         row.setQuoteLineId(quoteLine.quoteLineId());
         row.setQuoteId(quoteId);
-        row.setProjectItemId(quoteLine.projectItemId());
+        row.setWorkPointId(quoteLine.workPointId());
         row.setLineNo(quoteLine.lineNo());
         row.setItemName(quoteLine.itemName());
         row.setLineType(quoteLine.lineType().name());

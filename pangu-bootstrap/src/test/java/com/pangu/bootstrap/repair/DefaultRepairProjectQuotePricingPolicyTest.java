@@ -1,11 +1,11 @@
-// 关联业务：验证维修工程结构化报价必须覆盖锁定工程项、按明细计价并与报价原件总额一致。
+// 关联业务：验证维修工程结构化报价可选关联维修点位、按明细计价并与报价原件总额一致。
 package com.pangu.bootstrap.repair;
 
 import com.pangu.application.repair.DefaultRepairProjectQuotePricingPolicy;
 import com.pangu.domain.model.repair.RepairProjectSourcing.QuoteLineDraft;
 import com.pangu.domain.model.repair.RepairProjectSourcing.QuoteLineType;
 import com.pangu.domain.policy.RepairProjectQuotePricingPolicy.Input;
-import com.pangu.domain.policy.RepairProjectQuotePricingPolicy.ScopeItem;
+import com.pangu.domain.policy.RepairProjectQuotePricingPolicy.ScopeWorkPoint;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
@@ -21,9 +21,9 @@ class DefaultRepairProjectQuotePricingPolicyTest {
             new DefaultRepairProjectQuotePricingPolicy();
 
     @Test
-    void calculatesMultipleCostLinesAndPreservesTheirPlanItemBinding() {
+    void calculatesMultipleCostLinesAndPreservesTheirWorkPointBinding() {
         var decision = policy.evaluate(new Input(
-                List.of(new ScopeItem(101L, "ITEM-1"), new ScopeItem(102L, "ITEM-2")),
+                List.of(new ScopeWorkPoint(101L, "地库 A 区排水泵"), new ScopeWorkPoint(102L, "地库 B 区控制柜")),
                 List.of(
                         line(101L, "排水泵", QuoteLineType.MATERIAL_EQUIPMENT, "2", "台", "1320"),
                         line(101L, "人工", QuoteLineType.LABOR_SERVICE, "2", "工", "450"),
@@ -36,24 +36,24 @@ class DefaultRepairProjectQuotePricingPolicyTest {
         assertEquals(new BigDecimal("407.70"), decision.taxAmount());
         assertEquals(new BigDecimal("4937.70"), decision.calculatedAmount());
         assertEquals(3, decision.normalizedLines().size());
-        assertEquals("ITEM-1", decision.normalizedLines().get(0).projectItemNo());
+        assertEquals("地库 A 区排水泵", decision.normalizedLines().get(0).workPointName());
         assertEquals(2, decision.normalizedLines().get(1).lineNo());
         assertEquals(new BigDecimal("990.00"), decision.normalizedLines().get(2).amountExcludingTax());
     }
 
     @Test
-    void rejectsMissingScopeItemsAndHeaderAmountMismatch() {
-        var missing = policy.evaluate(new Input(
-                List.of(new ScopeItem(101L, "ITEM-1"), new ScopeItem(102L, "ITEM-2")),
-                List.of(line(101L, "人工", QuoteLineType.LABOR_SERVICE, "1", "项", "900")),
+    void rejectsUnknownWorkPointAndHeaderAmountMismatch() {
+        var unknownWorkPoint = policy.evaluate(new Input(
+                List.of(new ScopeWorkPoint(101L, "地库 A 区排水泵"), new ScopeWorkPoint(102L, "地库 B 区控制柜")),
+                List.of(line(103L, "人工", QuoteLineType.LABOR_SERVICE, "1", "项", "900")),
                 new BigDecimal("981"), new BigDecimal("9"), 10, 365, true));
         var mismatch = policy.evaluate(new Input(
-                List.of(new ScopeItem(101L, "ITEM-1")),
+                List.of(new ScopeWorkPoint(101L, "地库 A 区排水泵")),
                 List.of(line(101L, "人工", QuoteLineType.LABOR_SERVICE, "1", "项", "900")),
                 new BigDecimal("982"), new BigDecimal("9"), 10, 365, true));
 
-        assertFalse(missing.allowed());
-        assertEquals("报价明细必须覆盖全部实施方案工程项，缺少：ITEM-2", missing.rejectionReason());
+        assertFalse(unknownWorkPoint.allowed());
+        assertEquals("报价明细包含当前实施方案以外的维修点位", unknownWorkPoint.rejectionReason());
         assertFalse(mismatch.allowed());
         assertEquals("含税报价总额必须与报价明细合计一致", mismatch.rejectionReason());
     }
@@ -61,7 +61,7 @@ class DefaultRepairProjectQuotePricingPolicyTest {
     @Test
     void rejectsQuoteWithoutOriginalAmountConfirmation() {
         var decision = policy.evaluate(new Input(
-                List.of(new ScopeItem(101L, "ITEM-1")),
+                List.of(new ScopeWorkPoint(101L, "地库 A 区排水泵")),
                 List.of(line(101L, "人工", QuoteLineType.LABOR_SERVICE, "1", "项", "900")),
                 new BigDecimal("981"), new BigDecimal("9"), 10, 365, false));
 
@@ -70,14 +70,14 @@ class DefaultRepairProjectQuotePricingPolicyTest {
     }
 
     private QuoteLineDraft line(
-            Long projectItemId,
+            Long workPointId,
             String itemName,
             QuoteLineType lineType,
             String quantity,
             String unit,
             String unitPrice) {
         return new QuoteLineDraft(
-                projectItemId, itemName, lineType, "按报价原件", null, null, null,
+                workPointId, itemName, lineType, "按报价原件", null, null, null,
                 new BigDecimal(quantity), unit, new BigDecimal(unitPrice), "不含税单价");
     }
 }

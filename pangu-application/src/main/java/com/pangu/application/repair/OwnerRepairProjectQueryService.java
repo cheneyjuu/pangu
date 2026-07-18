@@ -4,12 +4,12 @@ package com.pangu.application.repair;
 import com.pangu.domain.context.UserContext;
 import com.pangu.domain.context.UserContextHolder;
 import com.pangu.domain.model.repair.RepairProject;
-import com.pangu.domain.model.repair.RepairProject.AllocationRoom;
 import com.pangu.domain.model.repair.RepairProject.Attachment;
-import com.pangu.domain.model.repair.RepairProject.Item;
+import com.pangu.domain.model.repair.RepairProject.FundingSlice;
 import com.pangu.domain.model.repair.RepairProject.PlanAttachment;
 import com.pangu.domain.model.repair.RepairProject.PlanStatus;
 import com.pangu.domain.model.repair.RepairProject.PlanVersion;
+import com.pangu.domain.model.repair.RepairProject.WorkPoint;
 import com.pangu.domain.model.repair.RepairProjectSourcing.Quote;
 import com.pangu.domain.model.repair.RepairProjectSourcing.QuoteLine;
 import com.pangu.domain.model.repair.RepairProjectSourcing.Selection;
@@ -74,8 +74,10 @@ public class OwnerRepairProjectQueryService {
 
     private OwnerRepairProjectDisclosure toDisclosure(
             Long workOrderId, RepairProject project, PlanVersion plan) {
-        List<Item> items = projectRepository.listItems(plan.planId(), project.tenantId());
-        List<AllocationRoom> allocation = projectRepository.listAllocationRooms(plan.planId(), project.tenantId());
+        List<WorkPoint> workPoints = projectRepository.listWorkPoints(plan.planId(), project.tenantId());
+        List<FundingSlice> fundingSlices = projectRepository.findDecisionScope(project.projectId(), project.tenantId())
+                .map(scope -> projectRepository.listFundingSlices(scope.decisionScopeId(), project.tenantId()))
+                .orElseGet(List::of);
         Map<Long, Attachment> attachmentsById = projectRepository
                 .listAttachments(project.projectId(), project.tenantId())
                 .stream()
@@ -108,16 +110,10 @@ public class OwnerRepairProjectQueryService {
                 new OwnerRepairProjectDisclosure.PublishedPlan(
                         plan.planId(), plan.versionNo(), narrativeImageService.resolveForPlan(
                                 plan.planId(), project.tenantId(), plan.planDescription()),
-                        plan.budgetTotal(), plan.allocationRuleType(), plan.allocationRuleDescription(),
-                        plan.supplierSelectionMethod(), plan.supplierSelectionReason(),
+                        plan.budgetTotal(), plan.supplierSelectionMethod(), plan.supplierSelectionReason(),
                         publishedSelection(selection, selectedQuote),
-                        plan.constructionManagementRequirements(), plan.evidenceRequirements(),
-                        plan.safetyRequirements(), plan.acceptanceMethod(),
-                        plan.affectedOwnerScopeDescription(), plan.minimumAffectedOwnerAcceptors(),
-                        plan.affectedOwnerPassRule(), plan.affectedOwnerApprovalRatio(),
-                        plan.settlementMethod(), plan.plannedStartDate(), plan.plannedCompletionDate(),
-                        plan.warrantyDays(), plan.priceReviewRequired(), plan.paymentMilestones(),
-                        items.stream().map(this::toItem).toList(), allocationSummary(allocation),
+                        workPoints.stream().map(this::toWorkPoint).toList(),
+                        fundingSlices.stream().map(this::toFundingSlice).toList(),
                         attachments, plan.lockedAt()));
     }
 
@@ -146,26 +142,26 @@ public class OwnerRepairProjectQueryService {
                 .multiply(taxMultiplier)
                 .setScale(2, RoundingMode.HALF_UP);
         return new OwnerRepairProjectDisclosure.PublishedQuoteLine(
-                line.projectItemId(), line.projectItemNo(), line.lineNo(), line.itemName(),
+                line.workPointId(), line.workPointName(), line.lineNo(), line.itemName(),
                 line.lineType(), line.workDescription(), line.specificationModel(), line.brand(),
                 line.procurementMethod(), line.quantity(), line.unit(),
                 line.unitPriceExcludingTax(), line.amountExcludingTax(),
                 taxIncludedUnitPrice, quoteTaxRate, taxIncludedAmount, line.remark());
     }
 
-    private OwnerRepairProjectDisclosure.PublishedItem toItem(Item item) {
-        return new OwnerRepairProjectDisclosure.PublishedItem(
-                item.itemId(), item.itemNo(), item.locationText(), item.workContent(),
-                item.quantity(), item.unit(), item.estimatedUnitPrice(), item.estimatedAmount());
+    private OwnerRepairProjectDisclosure.PublishedWorkPoint toWorkPoint(WorkPoint workPoint) {
+        return new OwnerRepairProjectDisclosure.PublishedWorkPoint(
+                workPoint.workPointId(), workPoint.businessName(), workPoint.buildingId(), workPoint.unitName(),
+                workPoint.locationType(), workPoint.referenceRoomId(), workPoint.commonAreaName(),
+                workPoint.spaceName(), workPoint.orientation(), workPoint.component(), workPoint.specificPart(),
+                workPoint.symptom(), workPoint.causeStatus(), workPoint.causeBasis(), workPoint.proposedMeasure(),
+                workPoint.technicalRequirements(), workPoint.quantity(), workPoint.unit(),
+                workPoint.preliminaryEstimatedAmount(), workPoint.estimateSource());
     }
 
-    private OwnerRepairProjectDisclosure.AllocationSummary allocationSummary(List<AllocationRoom> allocation) {
-        return new OwnerRepairProjectDisclosure.AllocationSummary(
-                allocation.stream().map(AllocationRoom::roomId).distinct().count(),
-                allocation.stream().map(AllocationRoom::ownerUid).distinct().count(),
-                allocation.stream().map(AllocationRoom::buildArea)
-                        .filter(java.util.Objects::nonNull)
-                        .reduce(BigDecimal.ZERO, BigDecimal::add));
+    private OwnerRepairProjectDisclosure.PublishedFundingSlice toFundingSlice(FundingSlice fundingSlice) {
+        return new OwnerRepairProjectDisclosure.PublishedFundingSlice(
+                fundingSlice.sourceType(), fundingSlice.approvedAmount());
     }
 
     private Optional<OwnerRepairProjectDisclosure.PublishedAttachment> toAttachment(

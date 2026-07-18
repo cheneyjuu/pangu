@@ -1,4 +1,4 @@
-// 关联业务：验证共有部分维修工程从邀价、报价修订、比价推荐到方案锁定形成同一审计链。
+// 关联业务：验证草稿阶段可询价，报价明细可选关联维修点位且税率、税额只以报价单头为准。
 package com.pangu.bootstrap.repair;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -19,16 +19,13 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
-import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 import static org.hamcrest.Matchers.is;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -46,8 +43,8 @@ class RepairProjectSourcingFlowTest {
     private static final long TENANT = 10001L;
     private static final long ACCOUNT_PROPERTY_MANAGER = 999821L;
     private static final long USER_PROPERTY_MANAGER = 800201L;
-    private static final String PROJECT_PREFIX = "IT-项目询价-";
-    private static final String SUPPLIER_PREFIX = "IT-项目询价供应商-";
+    private static final String PROJECT_PREFIX = "IT-维修点位询价-";
+    private static final String SUPPLIER_PREFIX = "IT-维修点位询价供应商-";
 
     @Autowired private MockMvc mockMvc;
     @Autowired private ObjectMapper objectMapper;
@@ -60,22 +57,20 @@ class RepairProjectSourcingFlowTest {
 
     @BeforeEach
     void setUp() throws Exception {
-        propertyToken = token(ACCOUNT_PROPERTY_MANAGER, "SYS_USER", USER_PROPERTY_MANAGER);
+        propertyToken = jwtTokenProvider.generateToken(
+                ACCOUNT_PROPERTY_MANAGER, "SYS_USER", USER_PROPERTY_MANAGER, TENANT);
         buildingId = jdbcTemplate.queryForObject("""
-                SELECT op.building_id
-                FROM c_owner_property op
-                WHERE op.tenant_id = ?
-                  AND op.account_status = 1
-                  AND op.verify_status = 'VERIFIED'
-                GROUP BY op.building_id
-                ORDER BY COUNT(DISTINCT op.room_id) DESC, op.building_id
+                SELECT building_id
+                FROM c_owner_property
+                WHERE tenant_id = ? AND account_status = 1
+                GROUP BY building_id
+                ORDER BY COUNT(DISTINCT room_id) DESC, building_id
                 LIMIT 1
                 """, Long.class, TENANT);
         when(objectStorage.put(anyString(), any(byte[].class), anyString(), anyString()))
                 .thenAnswer(invocation -> new RepairEvidenceObjectStorage.StoredObjectMetadata(
                         ((byte[]) invocation.getArgument(1)).length,
-                        invocation.getArgument(2),
-                        "sourcing-etag"));
+                        invocation.getArgument(2), "sourcing-etag"));
         when(objectStorage.createDownloadUrl(anyString(), any()))
                 .thenReturn(URI.create("https://oss.example.test/repair-project-sourcing").toURL());
     }
@@ -113,181 +108,106 @@ class RepairProjectSourcingFlowTest {
     }
 
     @Test
-    void competitiveSourcingRequiresInvitationsConfirmedQuotesAndSelectionBeforePlanLock() throws Exception {
-        List<Long> suppliers = List.of(
-                registerVerifiedSupplier(), registerVerifiedSupplier(), registerVerifiedSupplier());
+    void draftQuoteUsesOptionalWorkPointAndHeaderTaxWhileSelectionStaysBlocked() throws Exception {
         JsonNode created = data(postOk("/api/v1/admin/repair-projects", propertyToken, projectRequest()));
         long projectId = created.path("project").path("projectId").asLong();
-        long planId = created.path("plans").get(0).path("planId").asLong();
-        long projectItemId = created.path("currentPlanItems").get(0).path("itemId").asLong();
+        long workPointId = created.path("currentPlanWorkPoints").get(0).path("workPointId").asLong();
+        long supplierDeptId = registerVerifiedSupplier();
 
         JsonNode invited = data(postOk(sourcingPath(projectId, "/invitations"), propertyToken, Map.of(
-                "supplierDeptIds", suppliers,
+                "supplierDeptIds", List.of(supplierDeptId),
                 "deadline", LocalDateTime.now().plusDays(3))));
-        assertEquals(3, invited.path("invitations").size());
+        assertEquals(1, invited.path("invitations").size());
 
-        String firstSupplierToken = createSupplierIdentity(suppliers.get(0));
+        String supplierToken = createSupplierIdentity(supplierDeptId);
         JsonNode opportunities = data(getOk(
-                "/api/v1/supplier/repair-projects/quote-opportunities", firstSupplierToken));
+                "/api/v1/supplier/repair-projects/quote-opportunities", supplierToken));
         JsonNode opportunity = opportunities.get(0);
         assertEquals(projectId, opportunity.path("projectId").asLong());
-        assertTrue(opportunity.path("items").get(0).path("estimatedUnitPrice").isMissingNode());
-        long firstInvitationId = opportunity.path("invitation").path("invitationId").asLong();
-        long firstAttachment = upload(projectId, "供应商一报价.pdf", "supplier-one", firstSupplierToken);
-        mockMvc.perform(post("/api/v1/supplier/repair-projects/" + projectId + "/quotes")
-                        .header("Authorization", bearer(firstSupplierToken))
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(json(Map.of(
-                                "invitationId", firstInvitationId,
-                                "quoteAmount", 982,
-                                "taxRate", 9,
-                                "quoteSummary", "金额与明细不一致的报价",
-                                "attachmentId", firstAttachment,
-                                "constructionPeriodDays", 10,
-                                "warrantyDays", 365,
-                                "originalAmountConfirmed", true,
-                                "quoteLines", List.of(quoteLine(projectItemId, 90))))))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.msg", is("含税报价总额必须与报价明细合计一致")));
-        JsonNode firstQuote = data(postOk(
-                "/api/v1/supplier/repair-projects/" + projectId + "/quotes",
-                firstSupplierToken, Map.of(
-                        "invitationId", firstInvitationId,
-                        "quoteAmount", 981,
-                        "taxRate", 9,
-                        "quoteSummary", "供应商在线提交首版报价",
-                        "attachmentId", firstAttachment,
-                        "constructionPeriodDays", 10,
-                        "warrantyDays", 365,
-                        "originalAmountConfirmed", true,
-                        "quoteLines", List.of(quoteLine(projectItemId, 90)))));
-        assertEquals("ONLINE_CONFIRMED", firstQuote.path("confirmationStatus").asText());
-        assertEquals(10, firstQuote.path("constructionPeriodDays").asInt());
-        assertTrue(firstQuote.path("originalAmountConfirmed").asBoolean());
-        assertEquals(1, firstQuote.path("quoteLines").size());
-        assertEquals(900, firstQuote.path("amountExcludingTax").asInt());
-        assertEquals(9, firstQuote.path("taxRate").asInt());
-        assertEquals(81, firstQuote.path("taxAmount").asInt());
-        assertEquals(900, firstQuote.path("quoteLines").get(0).path("amountExcludingTax").asInt());
+        assertEquals(workPointId, opportunity.path("workPoints").get(0).path("workPointId").asLong());
+        assertTrue(opportunity.path("items").isMissingNode());
 
-        long secondAttachment = upload(projectId, "供应商二纸质报价.pdf", "supplier-two", propertyToken);
-        JsonNode secondQuote = data(postOk(sourcingPath(projectId, "/quotes"), propertyToken, Map.ofEntries(
-                Map.entry("supplierDeptId", suppliers.get(1)),
-                Map.entry("quoteAmount", 1013.70),
-                Map.entry("taxRate", 9),
-                Map.entry("quoteSummary", "物业代录纸质报价"),
-                Map.entry("attachmentId", secondAttachment),
-                Map.entry("confirmationStatus", "OFFLINE_EVIDENCE_VERIFIED"),
-                Map.entry("originalSource", "PAPER"),
-                Map.entry("constructionPeriodDays", 12),
-                Map.entry("warrantyDays", 365),
-                Map.entry("originalAmountConfirmed", true),
-                Map.entry("quoteLines", List.of(quoteLine(projectItemId, 93))))));
+        long invitationId = opportunity.path("invitation").path("invitationId").asLong();
+        long attachmentId = upload(projectId, "供应商报价原件.pdf", "quote", supplierToken);
+
+        mockMvc.perform(post("/api/v1/supplier/repair-projects/" + projectId + "/quotes")
+                        .header("Authorization", bearer(supplierToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(quoteRequest(invitationId, attachmentId, workPointId + 1))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.msg", is("报价明细包含当前实施方案以外的维修点位")));
+
+        JsonNode quote = data(postOk(
+                "/api/v1/supplier/repair-projects/" + projectId + "/quotes",
+                supplierToken, quoteRequest(invitationId, attachmentId, workPointId)));
+        assertEquals("ONLINE_CONFIRMED", quote.path("confirmationStatus").asText());
+        assertEquals(1000, quote.path("amountExcludingTax").asInt());
+        assertEquals(9, quote.path("taxRate").asInt());
+        assertEquals(90, quote.path("taxAmount").asInt());
+        assertEquals(1090, quote.path("quoteAmount").asInt());
+        assertEquals(workPointId, quote.path("quoteLines").get(0).path("workPointId").asLong());
+        assertTrue(quote.path("quoteLines").get(1).path("workPointId").isNull());
 
         mockMvc.perform(post(sourcingPath(projectId, "/selection"))
                         .header("Authorization", bearer(propertyToken))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(json(Map.of("quoteId", firstQuote.path("quoteId").asLong()))))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.msg", is("有效报价不足 3 家时必须说明继续推荐的理由")));
-
-        JsonNode selected = data(postOk(sourcingPath(projectId, "/selection"), propertyToken, Map.of(
-                "quoteId", firstQuote.path("quoteId").asLong(),
-                "recommendationReason", "综合施工组织和报价选择",
-                "insufficientQuoteReason", "第三家供应商在截止日前未响应")));
-        assertEquals(suppliers.get(0).longValue(), selected.path("selection").path("supplierDeptId").asLong());
-        assertEquals(981, selected.path("selection").path("quoteAmount").asInt());
-        assertEquals(2, selected.path("quotes").size());
-        assertEquals(secondQuote.path("quoteId").asLong(), selected.path("quotes").get(1).path("quoteId").asLong());
-        assertEquals(2, count("""
-                SELECT COUNT(*) FROM t_repair_project_supplier_quote_line line
-                JOIN t_repair_project_supplier_quote quote ON quote.quote_id = line.quote_id
-                WHERE quote.project_id = ?
-                """, projectId));
-
-        long photoAttachment = upload(projectId, "现场照片.jpg", "site", propertyToken);
-        postOk("/api/v1/admin/repair-projects/" + projectId + "/plans/" + planId + "/attachments",
-                propertyToken, Map.of("attachmentId", photoAttachment, "purpose", "SITE_PHOTO"));
-        JsonNode locked = data(postOk(
-                "/api/v1/admin/repair-projects/" + projectId + "/plans/" + planId + "/lock",
-                propertyToken, Map.of("expectedProjectVersion", 0)));
-        assertEquals("PLAN_LOCKED", locked.path("project").path("status").asText());
-        assertFalse(locked.path("plans").get(0).path("snapshotHash").asText().isBlank());
-        JsonNode lockedSourcing = data(getOk(sourcingPath(projectId, ""), propertyToken));
-        assertEquals(firstQuote.path("quoteId").asLong(),
-                lockedSourcing.path("selection").path("quoteId").asLong());
-        JsonNode revised = data(postOk(
-                "/api/v1/admin/repair-projects/" + projectId + "/plan-versions",
-                propertyToken, Map.of(
-                        "expectedProjectVersion", 1,
-                        "plan", projectRequest().get("plan"))));
-        long revisionPlanId = revised.path("plans").get(0).path("planId").asLong();
-        data(postOk(sourcingPath(projectId, "/invitations"), propertyToken, Map.of(
-                "supplierDeptIds", suppliers,
-                "deadline", LocalDateTime.now().plusDays(3))));
-        JsonNode revisionOpportunities = data(getOk(
-                "/api/v1/supplier/repair-projects/quote-opportunities", firstSupplierToken));
-        assertEquals(revisionPlanId, revisionOpportunities.get(0).path("planId").asLong());
-        assertEquals(1, count("""
-                SELECT COUNT(*) FROM t_repair_project_event
-                WHERE project_id = ? AND action = 'PROJECT_SUPPLIER_SELECTED'
-                """, projectId));
+                        .content(json(Map.of("quoteId", quote.path("quoteId").asLong()))))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.msg", is(
+                        "当前项目尚未接入可信的决定或授权快照，不能定商；中选报价不属于建项草稿前置条件")));
     }
 
     private Map<String, Object> projectRequest() {
+        Map<String, Object> point = new LinkedHashMap<>();
+        point.put("businessName", "楼栋公共区域排水泵维修点");
+        point.put("buildingId", buildingId);
+        point.put("locationType", "COMMON_AREA");
+        point.put("commonAreaName", "地下车库排水泵房");
+        point.put("component", "排水泵及控制柜");
+        point.put("specificPart", "泵组和控制柜连接部位");
+        point.put("symptom", "设备运行异常并伴随排水不畅");
+        point.put("causeStatus", "PENDING_INVESTIGATION");
+        point.put("proposedMeasure", "在完成专业勘验后更换故障部件并恢复排水能力");
+        point.put("linkedWorkOrderIds", List.of());
+
         Map<String, Object> plan = new LinkedHashMap<>();
-        plan.put("planDescription", "楼栋外墙维修范围与施工方案");
-        plan.put("budgetTotal", 1000);
-        plan.put("allocationRuleType", "BY_BUILDING_AREA");
-        plan.put("allocationRuleDescription", "按锁定房屋建筑面积分摊");
-        plan.put("supplierSelectionMethod", "COMPETITIVE_QUOTATION");
-        plan.put("supplierSelectionReason", "采用竞争性询价形成施工报价");
-        plan.put("constructionManagementRequirements", "物业核验工程量和过程资料");
-        plan.put("evidenceRequirements", evidenceRequirements());
-        plan.put("safetyRequirements", "设置围挡并落实高空作业防护");
-        plan.put("acceptanceMethod", "按锁定工程项和过程资料验收");
-        plan.put("affectedOwnerScopeDescription", "本楼栋受影响业主");
-        plan.put("minimumAffectedOwnerAcceptors", 1);
-        plan.put("affectedOwnerPassRule", "ALL");
-        plan.put("affectedOwnerApprovalRatio", 1);
-        plan.put("settlementMethod", "ACTUAL_QUANTITY");
-        plan.put("plannedStartDate", LocalDate.now().plusDays(7));
-        plan.put("plannedCompletionDate", LocalDate.now().plusDays(30));
-        plan.put("warrantyDays", 365);
-        plan.put("priceReviewRequired", true);
-        plan.put("paymentMilestones", paymentMilestones());
+        plan.put("planDescription", "本草稿记录维修点位和询价边界，报价行与点位不强制一一对应。");
+        plan.put("budgetTotal", 1090);
+        plan.put("workPoints", List.of(point));
         plan.put("attachments", List.of());
-        plan.put("items", List.of(Map.ofEntries(
-                Map.entry("itemNo", "WALL-1"),
-                Map.entry("buildingId", buildingId),
-                Map.entry("locationText", "楼栋外墙"),
-                Map.entry("workContent", "清理空鼓并修复外墙防水层"),
-                Map.entry("quantity", 10),
-                Map.entry("unit", "平方米"),
-                Map.entry("estimatedUnitPrice", 100),
-                Map.entry("estimatedAmount", 1000),
-                Map.entry("linkedWorkOrderIds", List.of()))));
         return Map.of(
                 "projectName", PROJECT_PREFIX + System.nanoTime(),
                 "scopeType", "BUILDING",
                 "buildingId", buildingId,
-                "fundSource", "BUILDING_MAINTENANCE_FUND",
-                "governancePath", "BUILDING_REPAIR_DECISION",
                 "plan", plan);
     }
 
-    private Map<String, Object> quoteLine(long projectItemId, int unitPrice) {
+    private Map<String, Object> quoteRequest(long invitationId, long attachmentId, long workPointId) {
         return Map.of(
-                "projectItemId", projectItemId,
-                "itemName", "外墙防水修复",
-                "lineType", "CONSTRUCTION_MEASURE",
-                "workDescription", "清理空鼓并修复外墙防水层",
-                "specificationModel", "按现场工程量",
-                "brand", "同等质量材料",
-                "quantity", 10,
-                "unit", "平方米",
-                "unitPriceExcludingTax", unitPrice,
-                "remark", "含材料、人工和清运，不含税单价");
+                "invitationId", invitationId,
+                "quoteAmount", 1090,
+                "taxRate", 9,
+                "quoteSummary", "报价原件已核对，税率以报价单头为准",
+                "attachmentId", attachmentId,
+                "constructionPeriodDays", 10,
+                "warrantyDays", 365,
+                "originalAmountConfirmed", true,
+                "quoteLines", List.of(
+                        Map.of(
+                                "workPointId", workPointId,
+                                "itemName", "排水泵维修材料和人工",
+                                "lineType", "CONSTRUCTION_MEASURE",
+                                "workDescription", "按勘验结论维修泵组和控制柜",
+                                "quantity", 1,
+                                "unit", "项",
+                                "unitPriceExcludingTax", 900),
+                        Map.of(
+                                "itemName", "运输和清运",
+                                "lineType", "TRANSPORT_CLEANUP",
+                                "workDescription", "项目通用运输和清运费用",
+                                "quantity", 1,
+                                "unit", "项",
+                                "unitPriceExcludingTax", 100)));
     }
 
     private long registerVerifiedSupplier() throws Exception {
@@ -324,14 +244,12 @@ class RepairProjectSourcingFlowTest {
                 SELECT ?, role_id, 'ORG_ONLY', ?
                 FROM sys_role WHERE role_key = 'SERVICE_PROVIDER_STAFF'
                 """, userId, USER_PROPERTY_MANAGER);
-        // 供应商组织可服务多个小区，真实登录令牌不携带单一 tenant_id。
         return jwtTokenProvider.generateToken(accountId, "SYS_USER", userId, null);
     }
 
     private long upload(long projectId, String fileName, String content, String token) throws Exception {
-        String contentType = fileName.endsWith(".jpg") ? "image/jpeg" : "application/pdf";
         MockMultipartFile file = new MockMultipartFile(
-                "file", fileName, contentType, content.getBytes(StandardCharsets.UTF_8));
+                "file", fileName, "application/pdf", content.getBytes(StandardCharsets.UTF_8));
         String response = mockMvc.perform(multipart(
                         "/api/v1/admin/repair-projects/" + projectId + "/attachments")
                         .file(file)
@@ -339,28 +257,6 @@ class RepairProjectSourcingFlowTest {
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
         return objectMapper.readTree(response).path("data").path("attachmentId").asLong();
-    }
-
-    private List<Map<String, Object>> evidenceRequirements() {
-        List<Map<String, Object>> result = new ArrayList<>();
-        for (String stage : List.of(
-                "BEFORE_CONSTRUCTION", "MATERIAL_ENTRY", "DURING_CONSTRUCTION",
-                "CONCEALED_WORK", "COMPLETION", "ACCEPTANCE")) {
-            result.add(Map.of("stage", stage, "description", stage + " 原始证据", "required", true));
-        }
-        return result;
-    }
-
-    private List<Map<String, Object>> paymentMilestones() {
-        return List.of(
-                Map.of("type", "ADVANCE", "maximumContractRatio", 0.30,
-                        "requiredEvidenceCodes", List.of("SIGNED_CONTRACT")),
-                Map.of("type", "PROGRESS", "maximumContractRatio", 0.80,
-                        "requiredEvidenceCodes", List.of("PROGRESS_RECORD")),
-                Map.of("type", "COMPLETION", "maximumContractRatio", 0.90,
-                        "requiredEvidenceCodes", List.of("ACCEPTANCE", "SETTLEMENT")),
-                Map.of("type", "WARRANTY_RELEASE", "maximumContractRatio", 1.00,
-                        "requiredEvidenceCodes", List.of("WARRANTY_EXPIRED_CERTIFICATE")));
     }
 
     private String postOk(String path, String token, Object body) throws Exception {
@@ -380,14 +276,6 @@ class RepairProjectSourcingFlowTest {
 
     private JsonNode data(String response) throws Exception {
         return objectMapper.readTree(response).path("data");
-    }
-
-    private int count(String sql, Object... args) {
-        return jdbcTemplate.queryForObject(sql, Integer.class, args);
-    }
-
-    private String token(long accountId, String identityType, long identityId) {
-        return jwtTokenProvider.generateToken(accountId, identityType, identityId, TENANT);
     }
 
     private String sourcingPath(long projectId, String suffix) {

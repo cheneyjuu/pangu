@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- 关联业务：持久化维修工程项目、实施方案版本、工程项、费用分摊及受影响业主快照与项目附件。 -->
+<!-- 关联业务：持久化维修工程项目、单一决定范围、维修点位、实施方案版本、费用分摊及受影响业主快照与项目附件。 -->
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.pangu.infrastructure.persistence.mapper.RepairProjectMapper">
 
@@ -91,14 +91,14 @@
                project.version, project.created_by_account_id, project.created_by_user_id,
                project.create_time, project.update_time
         FROM t_repair_project project
-        JOIN t_repair_project_item item
-          ON item.project_id = project.project_id
-         AND item.plan_id = project.active_plan_id
-         AND item.tenant_id = project.tenant_id
-        JOIN t_repair_project_item_case item_case
-          ON item_case.item_id = item.item_id
-         AND item_case.tenant_id = project.tenant_id
-        WHERE item_case.work_order_id = #{workOrderId}
+        JOIN t_repair_work_point work_point
+          ON work_point.project_id = project.project_id
+         AND work_point.plan_id = project.active_plan_id
+         AND work_point.tenant_id = project.tenant_id
+        JOIN t_repair_work_point_source source
+          ON source.work_point_id = work_point.work_point_id
+         AND source.tenant_id = project.tenant_id
+        WHERE source.work_order_id = #{workOrderId}
           AND project.tenant_id = #{tenantId}
         ORDER BY project.update_time DESC, project.project_id DESC
         LIMIT 1
@@ -173,36 +173,79 @@
         FOR UPDATE
     </select>
 
-    <insert id="insertItem" useGeneratedKeys="true" keyProperty="itemId" keyColumn="item_id">
-        INSERT INTO t_repair_project_item (
-            project_id, plan_id, tenant_id, item_no, building_id, unit_name, room_id,
-            location_text, work_content, quantity, unit, estimated_unit_price,
-            estimated_amount, sort_order
+    <insert id="insertDecisionScope" useGeneratedKeys="true"
+            keyProperty="decisionScopeId" keyColumn="decision_scope_id">
+        INSERT INTO t_repair_project_decision_scope (
+            project_id, tenant_id, scope_type, building_id, unit_name,
+            verification_status, verification_basis, legacy_read_only
         ) VALUES (
-            #{projectId}, #{planId}, #{tenantId}, #{itemNo}, #{buildingId}, #{unitName}, #{roomId},
-            #{locationText}, #{workContent}, #{quantity}, #{unit}, #{estimatedUnitPrice},
-            #{estimatedAmount}, #{sortOrder}
+            #{projectId}, #{tenantId}, #{scopeType}, #{buildingId}, #{unitName},
+            #{verificationStatus}, #{verificationBasis}, #{legacyReadOnly}
         )
     </insert>
 
-    <insert id="linkItemToWorkOrder">
-        INSERT INTO t_repair_project_item_case (item_id, work_order_id, tenant_id)
-        VALUES (#{itemId}, #{workOrderId}, #{tenantId})
+    <select id="findDecisionScope" resultType="com.pangu.infrastructure.persistence.entity.RepairDecisionScopeRow">
+        SELECT decision_scope_id, project_id, tenant_id, scope_type, building_id, unit_name,
+               verification_status, verification_basis, legacy_read_only, create_time
+        FROM t_repair_project_decision_scope
+        WHERE project_id = #{projectId} AND tenant_id = #{tenantId}
+    </select>
+
+    <update id="updateDecisionScopeVerification">
+        UPDATE t_repair_project_decision_scope
+        SET verification_status = #{verificationStatus}, verification_basis = #{verificationBasis}
+        WHERE project_id = #{projectId}
+          AND tenant_id = #{tenantId}
+          AND legacy_read_only = FALSE
+    </update>
+
+    <select id="listFundingSlices"
+            resultType="com.pangu.infrastructure.persistence.entity.RepairFundingSliceRow">
+        SELECT funding_slice_id, decision_scope_id, project_id, tenant_id, source_type,
+               source_record_type, source_record_id, ledger_reference, allocation_snapshot_hash,
+               approved_amount, verification_status, legacy_read_only, verified_at, create_time
+        FROM t_repair_funding_slice
+        WHERE decision_scope_id = #{decisionScopeId}
+          AND tenant_id = #{tenantId}
+        ORDER BY funding_slice_id
+    </select>
+
+    <insert id="insertWorkPoint" useGeneratedKeys="true" keyProperty="workPointId" keyColumn="work_point_id">
+        INSERT INTO t_repair_work_point (
+            project_id, plan_id, tenant_id, business_name, building_id, unit_name,
+            location_type, reference_room_id, common_area_name, space_name, orientation,
+            component, specific_part, symptom, cause_status, cause_basis, proposed_measure,
+            technical_requirements, quantity, unit, preliminary_estimated_amount,
+            estimate_source, sort_order, legacy_read_only
+        ) VALUES (
+            #{projectId}, #{planId}, #{tenantId}, #{businessName}, #{buildingId}, #{unitName},
+            #{locationType}, #{referenceRoomId}, #{commonAreaName}, #{spaceName}, #{orientation},
+            #{component}, #{specificPart}, #{symptom}, #{causeStatus}, #{causeBasis}, #{proposedMeasure},
+            #{technicalRequirements}, #{quantity}, #{unit}, #{preliminaryEstimatedAmount},
+            #{estimateSource}, #{sortOrder}, #{legacyReadOnly}
+        )
     </insert>
 
-    <select id="listItems" resultType="com.pangu.infrastructure.persistence.entity.RepairProjectItemRow">
-        SELECT item_id, project_id, plan_id, tenant_id, item_no, building_id, unit_name,
-               room_id, location_text, work_content, quantity, unit, estimated_unit_price,
-               estimated_amount, sort_order, create_time
-        FROM t_repair_project_item
+    <insert id="linkWorkPointToWorkOrder">
+        INSERT INTO t_repair_work_point_source (work_point_id, work_order_id, tenant_id)
+        VALUES (#{workPointId}, #{workOrderId}, #{tenantId})
+    </insert>
+
+    <select id="listWorkPoints" resultType="com.pangu.infrastructure.persistence.entity.RepairWorkPointRow">
+        SELECT work_point_id, project_id, plan_id, tenant_id, business_name, building_id, unit_name,
+               location_type, reference_room_id, common_area_name, space_name, orientation,
+               component, specific_part, symptom, cause_status, cause_basis, proposed_measure,
+               technical_requirements, quantity, unit, preliminary_estimated_amount, estimate_source,
+               sort_order, legacy_read_only, create_time
+        FROM t_repair_work_point
         WHERE plan_id = #{planId} AND tenant_id = #{tenantId}
-        ORDER BY sort_order, item_id
+        ORDER BY sort_order, work_point_id
     </select>
 
     <select id="listLinkedWorkOrderIds" resultType="long">
         SELECT work_order_id
-        FROM t_repair_project_item_case
-        WHERE item_id = #{itemId}
+        FROM t_repair_work_point_source
+        WHERE work_point_id = #{workPointId}
         ORDER BY work_order_id
     </select>
 

@@ -53,7 +53,7 @@ public final class RepairProjectExecutionCommands {
     }
 
     public record SubmitExecutionRecord(
-            Long itemId,
+            Long workPointId,
             EvidenceStage stage,
             String description,
             LocalDateTime occurredAt,
@@ -71,7 +71,7 @@ public final class RepairProjectExecutionCommands {
     }
 
     public record SubmitMaterialInspection(
-            Long itemId,
+            Long workPointId,
             String materialName,
             String brand,
             String model,
@@ -95,6 +95,7 @@ public final class RepairProjectExecutionCommands {
 
     public record SubmitSettlement(
             Long settlementAttachmentId,
+            BigDecimal taxRate,
             List<Item> items
     ) {
         public SubmitSettlement {
@@ -102,11 +103,10 @@ public final class RepairProjectExecutionCommands {
         }
 
         public record Item(
-                Long projectItemId,
+                Long workPointId,
                 BigDecimal actualQuantity,
                 String unit,
                 BigDecimal actualUnitPrice,
-                BigDecimal taxRate,
                 String varianceReason
         ) {
         }

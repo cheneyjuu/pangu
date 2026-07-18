@@ -1,8 +1,6 @@
-// 关联业务：创建维修工程项目，并由后端依据范围、资金账簿和治理依据确定流程。
+// 关联业务：创建单一决定范围下的维修工程筹备草稿；资金、治理和验收依据不从范围推导。
 package com.pangu.application.repair.command;
 
-import com.pangu.domain.model.repair.RepairProject.FundSource;
-import com.pangu.domain.model.repair.RepairProject.GovernancePath;
 import com.pangu.domain.model.repair.RepairProject.ScopeType;
 
 public record CreateRepairProjectCommand(
@@ -10,8 +8,6 @@ public record CreateRepairProjectCommand(
         ScopeType scopeType,
         Long buildingId,
         String unitName,
-        FundSource fundSource,
-        GovernancePath governancePath,
         RepairPlanDraftCommand plan
 ) {
 }

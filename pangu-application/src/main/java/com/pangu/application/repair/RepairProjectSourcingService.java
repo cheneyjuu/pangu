@@ -8,25 +8,21 @@ import com.pangu.application.repair.command.RepairProjectSourcingCommands.Submit
 import com.pangu.domain.context.UserContext;
 import com.pangu.domain.model.repair.RepairProject;
 import com.pangu.domain.model.repair.RepairProject.Attachment;
-import com.pangu.domain.model.repair.RepairProject.Item;
 import com.pangu.domain.model.repair.RepairProject.PlanStatus;
 import com.pangu.domain.model.repair.RepairProject.PlanVersion;
 import com.pangu.domain.model.repair.RepairProject.Status;
+import com.pangu.domain.model.repair.RepairProject.WorkPoint;
 import com.pangu.domain.model.repair.RepairProjectSourcing;
 import com.pangu.domain.model.repair.RepairProjectSourcing.Details;
 import com.pangu.domain.model.repair.RepairProjectSourcing.Invitation;
 import com.pangu.domain.model.repair.RepairProjectSourcing.InvitationStatus;
 import com.pangu.domain.model.repair.RepairProjectSourcing.InvitationType;
 import com.pangu.domain.model.repair.RepairProjectSourcing.Quote;
-import com.pangu.domain.model.repair.RepairProjectSourcing.Selection;
 import com.pangu.domain.model.repair.RepairQuoteConfirmationStatus;
 import com.pangu.domain.model.repair.RepairQuoteSubmissionSource;
 import com.pangu.domain.model.repair.RepairSupplierQuoteStatus;
-import com.pangu.domain.model.repair.RepairSupplierSelectionMethod;
 import com.pangu.domain.policy.RepairProjectQuotePricingPolicy;
-import com.pangu.domain.policy.RepairProjectQuotePricingPolicy.ScopeItem;
-import com.pangu.domain.policy.RepairSupplierSelectionPolicy;
-import com.pangu.domain.policy.RepairSupplierSelectionPolicy.Input;
+import com.pangu.domain.policy.RepairProjectQuotePricingPolicy.ScopeWorkPoint;
 import com.pangu.domain.repository.RepairProjectRepository;
 import com.pangu.domain.repository.RepairProjectSourcingRepository;
 import com.pangu.domain.repository.RepairWorkOrderRepository;
@@ -57,7 +53,6 @@ public class RepairProjectSourcingService {
     private final RepairProjectSourcingRepository sourcingRepository;
     private final RepairWorkOrderRepository workOrderRepository;
     private final RepairProjectQuotePricingPolicy quotePricingPolicy;
-    private final RepairSupplierSelectionPolicy selectionPolicy;
     private final SupplierActivationService supplierActivationService;
     private final RepairNarrativeImageService narrativeImageService;
 
@@ -178,9 +173,10 @@ public class RepairProjectSourcingService {
                 ? RepairQuoteConfirmationStatus.ONLINE_CONFIRMED
                 : propertyConfirmationStatus(command.confirmationStatus());
         String originalSource = supplierSubmission ? null : requireText(command.originalSource(), "原始报价来源");
-        List<Item> planItems = projectRepository.listItems(context.plan().planId(), tenantId);
+        List<WorkPoint> planWorkPoints = projectRepository.listWorkPoints(context.plan().planId(), tenantId);
         var pricing = quotePricingPolicy.evaluate(new RepairProjectQuotePricingPolicy.Input(
-                planItems.stream().map(item -> new ScopeItem(item.itemId(), item.itemNo())).toList(),
+                planWorkPoints.stream().map(workPoint -> new ScopeWorkPoint(
+                        workPoint.workPointId(), workPoint.businessName())).toList(),
                 command.quoteLines(), command.quoteAmount(), command.taxRate(), command.constructionPeriodDays(),
                 command.warrantyDays(), command.originalAmountConfirmed()));
         if (!pricing.allowed()) {
@@ -216,50 +212,8 @@ public class RepairProjectSourcingService {
     @Transactional
     public Details selectQuote(Long projectId, SelectQuote command) {
         UserContext actor = support.requireSysActor(PROPERTY_ROLES, "仅物业项目人员可形成中选供应商建议");
-        DraftContext context = draftContext(projectId, actor.tenantId(), true);
-        if (command == null || command.quoteId() == null) {
-            throw support.invalid("quoteId 必填");
-        }
-        Quote quote = sourcingRepository.findQuote(
-                        command.quoteId(), projectId, context.plan().planId(), actor.tenantId())
-                .orElseThrow(() -> support.notFound("项目报价不存在 quoteId=" + command.quoteId()));
-        if (quote.quoteStatus() != RepairSupplierQuoteStatus.ACTIVE
-                || !quote.confirmationStatus().confirmedForContract()) {
-            throw support.invalid("只能从当前有效且已经供应商确认或线下核验的报价中定商");
-        }
-        if (!workOrderRepository.supplierVerified(actor.tenantId(), quote.supplierDeptId())) {
-            throw support.invalid("中选施工单位必须完成当前小区企业核验");
-        }
-        if (quote.quoteAmount().compareTo(context.plan().budgetTotal()) > 0) {
-            throw support.invalid("中选报价不能超过当前实施方案预算");
-        }
-        RepairSupplierSelectionMethod method = context.plan().supplierSelectionMethod();
-        boolean frameworkValid = method != RepairSupplierSelectionMethod.FRAMEWORK_SUPPLIER
-                || command.frameworkRelationId() != null
-                && workOrderRepository.frameworkRelationActive(
-                        command.frameworkRelationId(), actor.tenantId(), quote.supplierDeptId(), null);
-        var decision = selectionPolicy.evaluate(new Input(
-                method,
-                sourcingRepository.countInitialInvitedSuppliers(
-                        projectId, context.plan().planId(), actor.tenantId()),
-                sourcingRepository.countActiveConfirmedQuotes(
-                        projectId, context.plan().planId(), actor.tenantId()),
-                trim(command.recommendationReason()), trim(command.insufficientQuoteReason()),
-                frameworkValid));
-        if (!decision.allowed()) {
-            throw support.invalid(decision.rejectionReason());
-        }
-        Selection selection = sourcingRepository.insertSelection(new Selection(
-                null, projectId, context.plan().planId(), actor.tenantId(), quote.quoteId(),
-                quote.supplierDeptId(), quote.supplierName(), quote.quoteAmount(), method,
-                trim(command.recommendationReason()), trim(command.insufficientQuoteReason()),
-                command.frameworkRelationId(), actor.userId(), null));
-        support.event(context.projectContext(), actor, "PROJECT_SUPPLIER_SELECTED", Map.of(
-                "planId", context.plan().planId(), "selectionId", selection.selectionId(),
-                "quoteId", selection.quoteId(), "supplierDeptId", selection.supplierDeptId(),
-                "selectionMethod", selection.selectionMethod().name(),
-                "quoteAmount", selection.quoteAmount()));
-        return details(context);
+        draftContext(projectId, actor.tenantId(), true);
+        throw support.conflict("当前项目尚未接入可信的决定或授权快照，不能定商；中选报价不属于建项草稿前置条件");
     }
 
     @Transactional(readOnly = true)
@@ -281,10 +235,14 @@ public class RepairProjectSourcingService {
                 .filter(candidate -> candidate.planId().equals(invitation.planId()))
                 .findFirst()
                 .orElseThrow(() -> support.notFound("维修工程实施方案不存在"));
-        List<SupplierItem> items = projectRepository.listItems(plan.planId(), tenantId).stream()
-                .map(item -> new SupplierItem(
-                        item.itemId(), item.itemNo(), item.locationText(), item.workContent(),
-                        item.quantity(), item.unit()))
+        List<SupplierWorkPoint> workPoints = projectRepository.listWorkPoints(plan.planId(), tenantId).stream()
+                .map(workPoint -> new SupplierWorkPoint(
+                        workPoint.workPointId(), workPoint.businessName(), workPoint.buildingId(),
+                        workPoint.unitName(), workPoint.locationType(), workPoint.referenceRoomId(),
+                        workPoint.commonAreaName(), workPoint.spaceName(), workPoint.orientation(),
+                        workPoint.component(), workPoint.specificPart(), workPoint.symptom(),
+                        workPoint.proposedMeasure(), workPoint.technicalRequirements(),
+                        workPoint.quantity(), workPoint.unit()))
                 .toList();
         Quote latestQuote = sourcingRepository.findLatestSupplierQuote(
                 project.projectId(), plan.planId(), tenantId, actor.deptId()).orElse(null);
@@ -293,7 +251,7 @@ public class RepairProjectSourcingService {
                 narrativeImageService.resolveForPlan(plan.planId(), tenantId, plan.planDescription()),
                 plan.constructionManagementRequirements(), plan.safetyRequirements(),
                 plan.plannedStartDate(), plan.plannedCompletionDate(), plan.warrantyDays(),
-                items, invitation, latestQuote);
+                workPoints, invitation, latestQuote);
     }
 
     private Invitation resolvePropertyInvitation(
@@ -307,15 +265,12 @@ public class RepairProjectSourcingService {
                     .orElseThrow(() -> support.notFound("维修工程邀价不存在"));
             return requireUsableInvitation(invitation);
         }
-        if (context.plan().supplierSelectionMethod() == RepairSupplierSelectionMethod.COMPETITIVE_QUOTATION) {
-            return sourcingRepository.listInvitations(
-                            context.project().projectId(), context.plan().planId(), context.project().tenantId()).stream()
-                    .filter(candidate -> candidate.supplierDeptId().equals(supplierDeptId))
-                    .filter(candidate -> candidate.status() == InvitationStatus.PENDING)
-                    .findFirst()
-                    .orElseThrow(() -> support.invalid("竞争性询价只能录入已受邀供应商的报价"));
-        }
-        return null;
+        return sourcingRepository.listInvitations(
+                        context.project().projectId(), context.plan().planId(), context.project().tenantId()).stream()
+                .filter(candidate -> candidate.supplierDeptId().equals(supplierDeptId))
+                .filter(candidate -> candidate.status() == InvitationStatus.PENDING)
+                .findFirst()
+                .orElseThrow(() -> support.invalid("物业代录报价必须关联有效邀价"));
     }
 
     private Invitation supplierInvitation(Long projectId, Long supplierDeptId, Long invitationId) {
@@ -443,20 +398,30 @@ public class RepairProjectSourcingService {
             LocalDate plannedStartDate,
             LocalDate plannedCompletionDate,
             Integer warrantyDays,
-            List<SupplierItem> items,
+            List<SupplierWorkPoint> workPoints,
             Invitation invitation,
             Quote latestQuote
     ) {
         public SupplierOpportunity {
-            items = items == null ? List.of() : List.copyOf(items);
+            workPoints = workPoints == null ? List.of() : List.copyOf(workPoints);
         }
     }
 
-    public record SupplierItem(
-            Long itemId,
-            String itemNo,
-            String locationText,
-            String workContent,
+    public record SupplierWorkPoint(
+            Long workPointId,
+            String businessName,
+            Long buildingId,
+            String unitName,
+            RepairProject.WorkPointLocationType locationType,
+            Long referenceRoomId,
+            String commonAreaName,
+            String spaceName,
+            String orientation,
+            String component,
+            String specificPart,
+            String symptom,
+            String proposedMeasure,
+            String technicalRequirements,
             BigDecimal quantity,
             String unit
     ) {

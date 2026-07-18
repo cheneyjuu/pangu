@@ -68,7 +68,7 @@ public final class RepairProjectSourcingRequests {
     }
 
     public record QuoteLineRequest(
-            @NotNull Long projectItemId,
+            Long workPointId,
             @NotBlank @Size(max = 200) String itemName,
             @NotNull QuoteLineType lineType,
             @Size(max = 1000) String workDescription,
@@ -82,7 +82,7 @@ public final class RepairProjectSourcingRequests {
     ) {
         public QuoteLineDraft toDraft() {
             return new QuoteLineDraft(
-                    projectItemId, itemName, lineType, workDescription,
+                    workPointId, itemName, lineType, workDescription,
                     specificationModel, brand, procurementMethod, quantity,
                     unit, unitPriceExcludingTax, remark);
         }

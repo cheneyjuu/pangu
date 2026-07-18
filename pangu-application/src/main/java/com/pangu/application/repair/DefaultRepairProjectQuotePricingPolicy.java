@@ -1,4 +1,4 @@
-// 关联业务：按锁定工程项计算维修报价明细，阻止范围遗漏、金额不一致和未确认原件的报价入库。
+// 关联业务：按维修点位校验报价引用并计算报价头税额，允许运输、清运等不直接对应点位的报价行。
 package com.pangu.application.repair;
 
 import com.pangu.domain.model.repair.RepairProjectSourcing.QuoteLine;
@@ -12,10 +12,8 @@ import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 @Component
 public class DefaultRepairProjectQuotePricingPolicy implements RepairProjectQuotePricingPolicy {
@@ -35,8 +33,8 @@ public class DefaultRepairProjectQuotePricingPolicy implements RepairProjectQuot
     }
 
     private Decision evaluateRequired(Input input) {
-        if (input == null || input.scopeItems().isEmpty()) {
-            reject("当前实施方案没有可报价的工程项");
+        if (input == null || input.scopeWorkPoints().isEmpty()) {
+            reject("当前实施方案没有可报价的维修点位");
         }
         if (input.quoteLines().isEmpty()) {
             reject("请填写报价明细");
@@ -58,25 +56,25 @@ public class DefaultRepairProjectQuotePricingPolicy implements RepairProjectQuot
         BigDecimal taxRate = range(
                 input.taxRate(), BigDecimal.ZERO, new BigDecimal("100"), 3, "报价税率");
 
-        Map<Long, ScopeItem> scopeById = new LinkedHashMap<>();
-        for (ScopeItem scopeItem : input.scopeItems()) {
-            if (scopeItem == null || scopeItem.projectItemId() == null) {
-                reject("实施方案工程项无效");
+        Map<Long, ScopeWorkPoint> scopeById = new LinkedHashMap<>();
+        for (ScopeWorkPoint scopeWorkPoint : input.scopeWorkPoints()) {
+            if (scopeWorkPoint == null || scopeWorkPoint.workPointId() == null) {
+                reject("实施方案维修点位无效");
             }
-            scopeById.put(scopeItem.projectItemId(), scopeItem);
+            scopeById.put(scopeWorkPoint.workPointId(), scopeWorkPoint);
         }
 
-        Map<Long, Integer> lineNumbers = new HashMap<>();
-        Set<Long> coveredItems = new LinkedHashSet<>();
         List<QuoteLine> normalized = new ArrayList<>();
         BigDecimal amountExcludingTax = BigDecimal.ZERO.setScale(2);
         for (QuoteLineDraft draft : input.quoteLines()) {
-            if (draft == null || draft.projectItemId() == null) {
-                reject("每条报价明细必须关联实施方案工程项");
+            if (draft == null) {
+                reject("报价明细不能为空");
             }
-            ScopeItem scopeItem = scopeById.get(draft.projectItemId());
-            if (scopeItem == null) {
-                reject("报价明细包含当前实施方案以外的工程项");
+            ScopeWorkPoint scopeWorkPoint = draft.workPointId() == null
+                    ? null
+                    : scopeById.get(draft.workPointId());
+            if (draft.workPointId() != null && scopeWorkPoint == null) {
+                reject("报价明细包含当前实施方案以外的维修点位");
             }
             String itemName = requiredText(draft.itemName(), 200, "报价项目名称");
             QuoteLineType lineType = draft.lineType();
@@ -99,25 +97,18 @@ public class DefaultRepairProjectQuotePricingPolicy implements RepairProjectQuot
             if (lineAmount.compareTo(MAX_MONEY) > 0) {
                 reject("单条报价明细金额超出系统可记录范围");
             }
-            int lineNo = lineNumbers.merge(draft.projectItemId(), 1, Integer::sum);
+            int lineNo = normalized.size() + 1;
             normalized.add(new QuoteLine(
-                    null, null, draft.projectItemId(), scopeItem.itemNo(), lineNo,
+                    null, null, draft.workPointId(),
+                    scopeWorkPoint == null ? null : scopeWorkPoint.businessName(), lineNo,
                     itemName, lineType, workDescription, specificationModel, brand,
                     procurementMethod, quantity, unit, unitPrice, lineAmount, remark));
-            coveredItems.add(draft.projectItemId());
             amountExcludingTax = amountExcludingTax.add(lineAmount);
             if (amountExcludingTax.compareTo(MAX_MONEY) > 0) {
                 reject("报价明细不含税合计超出系统可记录范围");
             }
         }
 
-        if (!coveredItems.equals(scopeById.keySet())) {
-            List<String> missing = scopeById.values().stream()
-                    .filter(item -> !coveredItems.contains(item.projectItemId()))
-                    .map(ScopeItem::itemNo)
-                    .toList();
-            reject("报价明细必须覆盖全部实施方案工程项，缺少：" + String.join("、", missing));
-        }
         if (amountExcludingTax.signum() <= 0) {
             reject("报价明细不含税总额必须大于 0");
         }

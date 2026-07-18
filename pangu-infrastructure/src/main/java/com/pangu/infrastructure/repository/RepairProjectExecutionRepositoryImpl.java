@@ -426,7 +426,7 @@ public class RepairProjectExecutionRepositoryImpl implements RepairProjectExecut
         row.setRecordId(value.recordId());
         row.setProjectId(value.projectId());
         row.setPlanId(value.planId());
-        row.setItemId(value.itemId());
+        row.setWorkPointId(value.workPointId());
         row.setTenantId(value.tenantId());
         row.setStage(value.stage().name());
         row.setDescription(value.description());
@@ -441,7 +441,7 @@ public class RepairProjectExecutionRepositoryImpl implements RepairProjectExecut
     }
 
     private ExecutionRecord execution(ExecutionRecordRow row, List<Long> attachmentIds) {
-        return new ExecutionRecord(row.getRecordId(), row.getProjectId(), row.getPlanId(), row.getItemId(),
+        return new ExecutionRecord(row.getRecordId(), row.getProjectId(), row.getPlanId(), row.getWorkPointId(),
                 row.getTenantId(), RepairProject.EvidenceStage.valueOf(row.getStage()), row.getDescription(),
                 row.getOccurredAt(), row.getSubmittedByUserId(), row.getVerifiedByUserId(),
                 VerificationStatus.valueOf(row.getVerificationStatus()), row.getVerificationOpinion(),
@@ -453,7 +453,7 @@ public class RepairProjectExecutionRepositoryImpl implements RepairProjectExecut
         row.setInspectionId(value.inspectionId());
         row.setProjectId(value.projectId());
         row.setPlanId(value.planId());
-        row.setItemId(value.itemId());
+        row.setWorkPointId(value.workPointId());
         row.setTenantId(value.tenantId());
         row.setMaterialName(value.materialName());
         row.setBrand(value.brand());
@@ -473,7 +473,7 @@ public class RepairProjectExecutionRepositoryImpl implements RepairProjectExecut
     }
 
     private MaterialInspection material(MaterialInspectionRow row, List<Long> photoIds) {
-        return new MaterialInspection(row.getInspectionId(), row.getProjectId(), row.getPlanId(), row.getItemId(),
+        return new MaterialInspection(row.getInspectionId(), row.getProjectId(), row.getPlanId(), row.getWorkPointId(),
                 row.getTenantId(), row.getMaterialName(), row.getBrand(), row.getModel(), row.getSpecification(),
                 row.getQuantity(), row.getUnit(), row.getManufacturer(), row.getQualificationAttachmentId(),
                 photoIds, row.getSubmittedByUserId(), VerificationStatus.valueOf(row.getStatus()),
@@ -490,6 +490,7 @@ public class RepairProjectExecutionRepositoryImpl implements RepairProjectExecut
         row.setVersionNo(value.versionNo());
         row.setStatus(value.status().name());
         row.setSubtotalAmount(value.subtotalAmount());
+        row.setTaxRate(value.taxRate());
         row.setTaxAmount(value.taxAmount());
         row.setTotalAmount(value.totalAmount());
         row.setSettlementAttachmentId(value.settlementAttachmentId());
@@ -504,7 +505,7 @@ public class RepairProjectExecutionRepositoryImpl implements RepairProjectExecut
     private Settlement settlement(SettlementRow row, List<SettlementItem> items) {
         return new Settlement(row.getSettlementId(), row.getProjectId(), row.getPlanId(), row.getContractId(),
                 row.getTenantId(), row.getVersionNo(), SettlementStatus.valueOf(row.getStatus()),
-                row.getSubtotalAmount(), row.getTaxAmount(), row.getTotalAmount(),
+                row.getSubtotalAmount(), row.getTaxRate(), row.getTaxAmount(), row.getTotalAmount(),
                 row.getSettlementAttachmentId(), row.getSubmittedByUserId(), row.getVerifiedByUserId(),
                 row.getVerificationOpinion(), row.getSubmittedAt(), row.getVerifiedAt(), items);
     }
@@ -513,22 +514,19 @@ public class RepairProjectExecutionRepositoryImpl implements RepairProjectExecut
         SettlementItemRow row = new SettlementItemRow();
         row.setSettlementItemId(value.settlementItemId());
         row.setSettlementId(value.settlementId());
-        row.setProjectItemId(value.projectItemId());
+        row.setWorkPointId(value.workPointId());
         row.setActualQuantity(value.actualQuantity());
         row.setUnit(value.unit());
         row.setActualUnitPrice(value.actualUnitPrice());
         row.setAmountExcludingTax(value.amountExcludingTax());
-        row.setTaxRate(value.taxRate());
-        row.setTaxAmount(value.taxAmount());
-        row.setAmountIncludingTax(value.amountIncludingTax());
         row.setVarianceReason(value.varianceReason());
         return row;
     }
 
     private SettlementItem settlementItem(SettlementItemRow row) {
-        return new SettlementItem(row.getSettlementItemId(), row.getSettlementId(), row.getProjectItemId(),
+        return new SettlementItem(row.getSettlementItemId(), row.getSettlementId(), row.getWorkPointId(),
                 row.getActualQuantity(), row.getUnit(), row.getActualUnitPrice(), row.getAmountExcludingTax(),
-                row.getTaxRate(), row.getTaxAmount(), row.getAmountIncludingTax(), row.getVarianceReason());
+                row.getVarianceReason());
     }
 
     private AcceptancePolicyRow acceptancePolicyRow(AcceptancePolicy value) {

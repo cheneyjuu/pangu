@@ -1,4 +1,4 @@
-// 关联业务：持久化维修工程项目、实施方案版本、工程项、费用分摊及受影响业主快照与项目附件。
+// 关联业务：持久化维修工程项目、单一决定范围、维修点位、可信资金切片、实施方案版本及项目附件。
 package com.pangu.domain.repository;
 
 import com.pangu.domain.model.repair.RepairProject;
@@ -6,12 +6,14 @@ import com.pangu.domain.model.repair.RepairProjectProcessEvent;
 import com.pangu.domain.model.repair.RepairProject.AllocationRoom;
 import com.pangu.domain.model.repair.RepairProject.AllocationBasis;
 import com.pangu.domain.model.repair.RepairProject.Attachment;
-import com.pangu.domain.model.repair.RepairProject.Item;
+import com.pangu.domain.model.repair.RepairProject.DecisionScope;
+import com.pangu.domain.model.repair.RepairProject.FundingSlice;
 import com.pangu.domain.model.repair.RepairProject.EligibleAffectedOwner;
 import com.pangu.domain.model.repair.RepairProject.PlanAttachment;
 import com.pangu.domain.model.repair.RepairProject.PlanAffectedOwner;
 import com.pangu.domain.model.repair.RepairProject.PlanVersion;
 import com.pangu.domain.model.repair.RepairProject.Status;
+import com.pangu.domain.model.repair.RepairProject.WorkPoint;
 
 import java.util.List;
 import java.util.Optional;
@@ -22,9 +24,24 @@ public interface RepairProjectRepository {
 
     PlanVersion insertPlan(PlanVersion plan);
 
-    Item insertItem(Item item);
+    DecisionScope insertDecisionScope(DecisionScope decisionScope);
 
-    void linkItemToWorkOrder(Long itemId, Long workOrderId, Long tenantId);
+    Optional<DecisionScope> findDecisionScope(Long projectId, Long tenantId);
+
+    int updateDecisionScopeVerification(
+            Long projectId,
+            Long tenantId,
+            RepairProject.DecisionScopeVerificationStatus verificationStatus,
+            String verificationBasis);
+
+    /**
+     * 资金切片只能由可信账簿/责任认定/决定适配器写入；建项草稿只读查询其冻结前置条件。
+     */
+    List<FundingSlice> listFundingSlices(Long decisionScopeId, Long tenantId);
+
+    WorkPoint insertWorkPoint(WorkPoint workPoint);
+
+    void linkWorkPointToWorkOrder(Long workPointId, Long workOrderId, Long tenantId);
 
     List<AllocationRoom> snapshotAllocationRooms(
             Long planId, Long tenantId, RepairProject.ScopeType scopeType, Long buildingId, String unitName);
@@ -52,7 +69,7 @@ public interface RepairProjectRepository {
 
     Optional<PlanVersion> findPlanForUpdate(Long planId, Long projectId, Long tenantId);
 
-    List<Item> listItems(Long planId, Long tenantId);
+    List<WorkPoint> listWorkPoints(Long planId, Long tenantId);
 
     List<AllocationRoom> listAllocationRooms(Long planId, Long tenantId);
 

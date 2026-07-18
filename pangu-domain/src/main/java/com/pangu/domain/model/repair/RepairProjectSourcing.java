@@ -74,7 +74,7 @@ public final class RepairProjectSourcing {
         }
     }
 
-    /** 报价明细类别决定录入时展示哪些业务字段，不改变其必须绑定方案工程项的边界。 */
+    /** 报价明细类别决定录入时展示哪些业务字段；运输、清运等综合费用可以不直接对应某一个维修点位。 */
     public enum QuoteLineType {
         MATERIAL_EQUIPMENT,
         LABOR_SERVICE,
@@ -84,14 +84,13 @@ public final class RepairProjectSourcing {
     }
 
     /**
-     * 报价明细绑定锁定工程项，但允许供应商在工程项下拆分材料、人工、运输等构成。
-     * 工程范围仍由 projectItemId 指向的方案工程项决定，报价行不能新增方案外范围。
+     * 报价明细可引用维修点位，但报价行不是维修点位的替代物，也不要求一一覆盖。
      */
     public record QuoteLine(
             Long quoteLineId,
             Long quoteId,
-            Long projectItemId,
-            String projectItemNo,
+            Long workPointId,
+            String workPointName,
             Integer lineNo,
             String itemName,
             QuoteLineType lineType,
@@ -109,7 +108,7 @@ public final class RepairProjectSourcing {
 
     /** 供应商或物业代录时提交的未计价报价行。 */
     public record QuoteLineDraft(
-            Long projectItemId,
+            Long workPointId,
             String itemName,
             QuoteLineType lineType,
             String workDescription,

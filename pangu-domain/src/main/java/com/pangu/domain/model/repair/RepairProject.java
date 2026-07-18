@@ -1,4 +1,4 @@
-// 关联业务：维修工程项目、不可变实施方案、工程项、费用分摊及受影响业主快照与项目附件。
+// 关联业务：维修工程项目、单一决定范围、维修点位、资金切片、不可变实施方案及项目附件。
 package com.pangu.domain.model.repair;
 
 import java.math.BigDecimal;
@@ -42,6 +42,24 @@ public record RepairProject(
         COMMUNITY_MAINTENANCE_FUND
     }
 
+    /**
+     * 资金切片的真实来源类型。项目范围不是资金来源，只有来自可信账簿、责任认定或有效决定的切片才能进入冻结校验。
+     */
+    public enum FundingSourceType {
+        SPECIAL_MAINTENANCE_LEDGER,
+        PUBLIC_REVENUE_LEDGER,
+        LIABLE_PARTY,
+        DEVELOPER_WARRANTY,
+        OWNER_SELF_FUNDING
+    }
+
+    /** 资金来源、承担范围和金额快照的核验状态。 */
+    public enum FundingSliceVerificationStatus {
+        CONFIRMED,
+        PENDING_VERIFICATION,
+        LEGACY_READ_ONLY
+    }
+
     public enum GovernancePath {
         BUILDING_REPAIR_DECISION,
         COMMUNITY_ASSEMBLY_DECISION
@@ -65,6 +83,26 @@ public record RepairProject(
         DRAFT,
         LOCKED,
         SUPERSEDED
+    }
+
+    /** 决定范围经勘验和权利边界核验后的状态；待核验范围只能保留草稿。 */
+    public enum DecisionScopeVerificationStatus {
+        CONFIRMED,
+        PENDING_VERIFICATION,
+        LEGACY_READ_ONLY
+    }
+
+    /** 维修点位的结构化参照对象，公共部位不得伪造房屋编号。 */
+    public enum WorkPointLocationType {
+        REFERENCE_ROOM,
+        COMMON_AREA
+    }
+
+    /** 原因结论必须与可核验依据一起保存，不能把推测写成既成事实。 */
+    public enum WorkPointCauseStatus {
+        PENDING_INVESTIGATION,
+        CONFIRMED,
+        UNCONFIRMED
     }
 
     public enum AllocationRuleType {
@@ -186,26 +224,75 @@ public record RepairProject(
         }
     }
 
-    public record Item(
-            Long itemId,
+    /** 一个工程只能有一个既有共有与决定范围，不承载跨范围合并。 */
+    public record DecisionScope(
+            Long decisionScopeId,
+            Long projectId,
+            Long tenantId,
+            ScopeType scopeType,
+            Long buildingId,
+            String unitName,
+            DecisionScopeVerificationStatus verificationStatus,
+            String verificationBasis,
+            boolean legacyReadOnly,
+            LocalDateTime createTime
+    ) {
+    }
+
+    /**
+     * 资金承担的最小不可伪造关系。来源记录由可信账簿/责任认定/有效决定适配器写入，建项表单不得直接写入。
+     */
+    public record FundingSlice(
+            Long fundingSliceId,
+            Long decisionScopeId,
+            Long projectId,
+            Long tenantId,
+            FundingSourceType sourceType,
+            String sourceRecordType,
+            String sourceRecordId,
+            String ledgerReference,
+            String allocationSnapshotHash,
+            BigDecimal approvedAmount,
+            FundingSliceVerificationStatus verificationStatus,
+            boolean legacyReadOnly,
+            LocalDateTime verifiedAt,
+            LocalDateTime createTime
+    ) {
+    }
+
+    /**
+     * 可勘验的维修对象；报价、合同和结算明细可引用点位，但并不与点位一一等同。
+     */
+    public record WorkPoint(
+            Long workPointId,
             Long projectId,
             Long planId,
             Long tenantId,
-            String itemNo,
+            String businessName,
             Long buildingId,
             String unitName,
-            Long roomId,
-            String locationText,
-            String workContent,
+            WorkPointLocationType locationType,
+            Long referenceRoomId,
+            String commonAreaName,
+            String spaceName,
+            String orientation,
+            String component,
+            String specificPart,
+            String symptom,
+            WorkPointCauseStatus causeStatus,
+            String causeBasis,
+            String proposedMeasure,
+            String technicalRequirements,
             BigDecimal quantity,
             String unit,
-            BigDecimal estimatedUnitPrice,
-            BigDecimal estimatedAmount,
+            BigDecimal preliminaryEstimatedAmount,
+            String estimateSource,
             Integer sortOrder,
+            boolean legacyReadOnly,
             List<Long> linkedWorkOrderIds,
             LocalDateTime createTime
     ) {
-        public Item {
+        public WorkPoint {
             linkedWorkOrderIds = linkedWorkOrderIds == null ? List.of() : List.copyOf(linkedWorkOrderIds);
         }
     }
@@ -321,20 +408,20 @@ public record RepairProject(
 
     public record Details(
             RepairProject project,
+            DecisionScope decisionScope,
             List<PlanVersion> plans,
-            List<Item> currentPlanItems,
-            List<AllocationRoom> currentPlanAllocationRooms,
-            AllocationBasis currentPlanAllocationBasis,
+            List<WorkPoint> currentPlanWorkPoints,
+            List<FundingSlice> fundingSlices,
             List<PlanAffectedOwner> currentPlanAffectedOwners,
             List<Attachment> attachments,
             List<PlanAttachment> currentPlanAttachments
     ) {
         public Details {
             plans = plans == null ? List.of() : List.copyOf(plans);
-            currentPlanItems = currentPlanItems == null ? List.of() : List.copyOf(currentPlanItems);
-            currentPlanAllocationRooms = currentPlanAllocationRooms == null
+            currentPlanWorkPoints = currentPlanWorkPoints == null
                     ? List.of()
-                    : List.copyOf(currentPlanAllocationRooms);
+                    : List.copyOf(currentPlanWorkPoints);
+            fundingSlices = fundingSlices == null ? List.of() : List.copyOf(fundingSlices);
             currentPlanAffectedOwners = currentPlanAffectedOwners == null
                     ? List.of()
                     : List.copyOf(currentPlanAffectedOwners);

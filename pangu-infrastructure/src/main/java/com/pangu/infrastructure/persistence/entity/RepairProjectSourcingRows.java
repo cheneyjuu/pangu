@@ -62,8 +62,8 @@ public final class RepairProjectSourcingRows {
     public static class QuoteLineRow {
         private Long quoteLineId;
         private Long quoteId;
-        private Long projectItemId;
-        private String projectItemNo;
+        private Long workPointId;
+        private String workPointName;
         private Integer lineNo;
         private String itemName;
         private String lineType;

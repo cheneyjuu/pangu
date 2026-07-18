@@ -14,7 +14,6 @@ import com.pangu.application.repair.command.RepairProjectExecutionCommands.Verif
 import com.pangu.domain.context.UserContext;
 import com.pangu.domain.model.propertyservice.PropertyServiceEnterprise;
 import com.pangu.domain.model.propertyservice.PropertyServiceOrganization;
-import com.pangu.domain.model.repair.RepairProject;
 import com.pangu.domain.model.repair.RepairProject.Attachment;
 import com.pangu.domain.model.repair.RepairProject.EvidenceRequirement;
 import com.pangu.domain.model.repair.RepairProject.EvidenceStage;
@@ -191,11 +190,10 @@ public class RepairProjectExecutionService {
     @Transactional
     public ExecutionRecord submitExecutionRecord(Long projectId, SubmitExecutionRecord command) {
         UserContext actor = support.requireSysActor(EXECUTION_SUBMIT_ROLES, "当前角色无权提交施工过程记录");
-        require(command != null && command.itemId() != null && command.stage() != null,
-                "itemId 和 stage 必填");
+        require(command != null && command.stage() != null, "stage 必填");
         Context context = support.loadForUpdate(projectId, actor.tenantId(), Status.IN_PROGRESS);
         assertSupplierMatchesContract(actor, context);
-        support.item(context, command.itemId());
+        support.workPoint(context, command.workPointId());
         String description = requiredText(command.description(), "description");
         LocalDateTime occurredAt = command.occurredAt();
         if (occurredAt == null || occurredAt.isAfter(LocalDateTime.now().plusMinutes(5))) {
@@ -203,14 +201,17 @@ public class RepairProjectExecutionService {
         }
         support.attachments(context, command.attachmentIds(), "施工阶段原始证据");
         ExecutionRecord record = executionRepository.insertExecutionRecord(new ExecutionRecord(
-                null, projectId, context.plan().planId(), command.itemId(), actor.tenantId(),
+                null, projectId, context.plan().planId(), command.workPointId(), actor.tenantId(),
                 command.stage(), description, occurredAt, actor.userId(), null,
                 VerificationStatus.PENDING, null, null, command.attachmentIds(), null));
         executionRepository.insertExecutionAttachments(
                 record.recordId(), actor.tenantId(), command.attachmentIds());
-        support.event(context, actor, "PROJECT_EXECUTION_RECORDED", Map.of(
-                "recordId", record.recordId(), "itemId", command.itemId(),
-                "stage", command.stage().name(), "attachmentCount", command.attachmentIds().size()));
+        Map<String, Object> event = new LinkedHashMap<>();
+        event.put("recordId", record.recordId());
+        event.put("workPointId", command.workPointId());
+        event.put("stage", command.stage().name());
+        event.put("attachmentCount", command.attachmentIds().size());
+        support.event(context, actor, "PROJECT_EXECUTION_RECORDED", event);
         return executionRepository.findExecutionRecord(record.recordId(), projectId, actor.tenantId()).orElseThrow();
     }
 
@@ -241,17 +242,17 @@ public class RepairProjectExecutionService {
     public MaterialInspection submitMaterialInspection(
             Long projectId, SubmitMaterialInspection command) {
         UserContext actor = support.requireSysActor(EXECUTION_SUBMIT_ROLES, "当前角色无权提交材料进场记录");
-        require(command != null && command.itemId() != null, "itemId 必填");
+        require(command != null, "材料进场记录不能为空");
         Context context = support.loadForUpdate(projectId, actor.tenantId(), Status.IN_PROGRESS);
         assertSupplierMatchesContract(actor, context);
-        support.item(context, command.itemId());
+        support.workPoint(context, command.workPointId());
         requirePositive(command.quantity(), "quantity");
         Attachment qualification = support.attachment(
                 context, command.qualificationAttachmentId(), "材料合格证明");
         document(qualification, "材料合格证明");
         support.attachments(context, command.photoAttachmentIds(), "材料进场照片");
         MaterialInspection inspection = executionRepository.insertMaterialInspection(new MaterialInspection(
-                null, projectId, context.plan().planId(), command.itemId(), actor.tenantId(),
+                null, projectId, context.plan().planId(), command.workPointId(), actor.tenantId(),
                 requiredText(command.materialName(), "materialName"), requiredText(command.brand(), "brand"),
                 requiredText(command.model(), "model"), requiredText(command.specification(), "specification"),
                 command.quantity(), requiredText(command.unit(), "unit"),
@@ -260,9 +261,11 @@ public class RepairProjectExecutionService {
                 null, null, null, null));
         executionRepository.insertMaterialPhotos(
                 inspection.inspectionId(), actor.tenantId(), command.photoAttachmentIds());
-        support.event(context, actor, "PROJECT_MATERIAL_SUBMITTED", Map.of(
-                "inspectionId", inspection.inspectionId(), "itemId", command.itemId(),
-                "materialName", inspection.materialName()));
+        Map<String, Object> event = new LinkedHashMap<>();
+        event.put("inspectionId", inspection.inspectionId());
+        event.put("workPointId", command.workPointId());
+        event.put("materialName", inspection.materialName());
+        support.event(context, actor, "PROJECT_MATERIAL_SUBMITTED", event);
         return executionRepository.findMaterialInspection(
                 inspection.inspectionId(), projectId, actor.tenantId()).orElseThrow();
     }
@@ -307,11 +310,11 @@ public class RepairProjectExecutionService {
         Attachment settlementAttachment = support.attachment(
                 context, command.settlementAttachmentId(), "竣工结算单");
         document(settlementAttachment, "竣工结算单");
+        BigDecimal taxRate = settlementTaxRate(command.taxRate());
         List<SettlementItem> items = settlementItems(context, command.items());
         BigDecimal subtotal = items.stream().map(SettlementItem::amountExcludingTax)
                 .reduce(BigDecimal.ZERO, BigDecimal::add).setScale(2, RoundingMode.HALF_UP);
-        BigDecimal tax = items.stream().map(SettlementItem::taxAmount)
-                .reduce(BigDecimal.ZERO, BigDecimal::add).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal tax = subtotal.multiply(taxRate).movePointLeft(2).setScale(2, RoundingMode.HALF_UP);
         BigDecimal total = subtotal.add(tax).setScale(2, RoundingMode.HALF_UP);
         if (total.compareTo(contract.contractAmount()) > 0) {
             throw support.invalid("实际结算超过合同金额，必须先完成变更审批或补充协议");
@@ -319,12 +322,12 @@ public class RepairProjectExecutionService {
         Settlement settlement = executionRepository.insertSettlement(new Settlement(
                 null, projectId, context.plan().planId(), contract.contractId(), actor.tenantId(),
                 executionRepository.nextSettlementVersion(projectId, actor.tenantId()),
-                SettlementStatus.SUBMITTED, subtotal, tax, total, settlementAttachment.attachmentId(),
+                SettlementStatus.SUBMITTED, subtotal, taxRate, tax, total, settlementAttachment.attachmentId(),
                 actor.userId(), null, null, null, null, items));
         executionRepository.insertSettlementItems(settlement.settlementId(), items);
         support.event(context, actor, "PROJECT_SETTLEMENT_SUBMITTED", Map.of(
-                "settlementId", settlement.settlementId(), "itemCount", items.size(),
-                "totalAmount", total));
+                "settlementId", settlement.settlementId(), "detailCount", items.size(),
+                "taxRate", taxRate, "totalAmount", total));
         return executionRepository.findActiveSettlement(projectId, actor.tenantId()).orElseThrow();
     }
 
@@ -439,42 +442,30 @@ public class RepairProjectExecutionService {
     }
 
     private List<SettlementItem> settlementItems(Context context, List<SubmitSettlement.Item> submitted) {
-        require(submitted != null && !submitted.isEmpty(), "结算工程项不能为空");
-        Map<Long, SubmitSettlement.Item> byId = new LinkedHashMap<>();
-        for (SubmitSettlement.Item item : submitted) {
-            require(item != null && item.projectItemId() != null, "projectItemId 必填");
-            if (byId.put(item.projectItemId(), item) != null) {
-                throw support.invalid("同一工程项不能重复结算 itemId=" + item.projectItemId());
-            }
-        }
-        if (!byId.keySet().equals(context.items().stream()
-                .map(RepairProject.Item::itemId).collect(java.util.stream.Collectors.toSet()))) {
-            throw support.invalid("竣工结算必须覆盖锁定方案的全部工程项且不得增加范围");
-        }
+        require(submitted != null && !submitted.isEmpty(), "结算明细不能为空");
         List<SettlementItem> result = new ArrayList<>();
-        for (RepairProject.Item planItem : context.items()) {
-            SubmitSettlement.Item item = byId.get(planItem.itemId());
+        for (SubmitSettlement.Item item : submitted) {
+            require(item != null, "结算明细不能为空");
+            support.workPoint(context, item.workPointId());
             requireNonNegative(item.actualQuantity(), "actualQuantity");
             requireNonNegative(item.actualUnitPrice(), "actualUnitPrice");
-            require(item.taxRate() != null && item.taxRate().compareTo(BigDecimal.ZERO) >= 0
-                    && item.taxRate().compareTo(BigDecimal.ONE) <= 0, "taxRate 必须在 0 到 1 之间");
-            if (!planItem.unit().equals(requiredText(item.unit(), "unit"))) {
-                throw support.invalid("结算单位与锁定方案不一致 itemId=" + planItem.itemId());
-            }
-            boolean changed = item.actualQuantity().compareTo(planItem.quantity()) != 0
-                    || item.actualUnitPrice().compareTo(planItem.estimatedUnitPrice()) != 0;
-            if (changed && text(item.varianceReason()) == null) {
-                throw support.invalid("实际数量或单价变化必须填写差异原因 itemId=" + planItem.itemId());
-            }
             BigDecimal excludingTax = item.actualQuantity().multiply(item.actualUnitPrice())
                     .setScale(2, RoundingMode.HALF_UP);
-            BigDecimal tax = excludingTax.multiply(item.taxRate()).setScale(2, RoundingMode.HALF_UP);
             result.add(new SettlementItem(
-                    null, null, planItem.itemId(), item.actualQuantity(), planItem.unit(),
-                    item.actualUnitPrice(), excludingTax, item.taxRate(), tax,
-                    excludingTax.add(tax), text(item.varianceReason())));
+                    null, null, item.workPointId(), item.actualQuantity(), requiredText(item.unit(), "unit"),
+                    item.actualUnitPrice(), excludingTax, text(item.varianceReason())));
         }
         return result;
+    }
+
+    private BigDecimal settlementTaxRate(BigDecimal value) {
+        require(value != null && value.compareTo(BigDecimal.ZERO) >= 0
+                && value.compareTo(new BigDecimal("100")) <= 0, "taxRate 必须在 0 到 100 之间");
+        try {
+            return value.setScale(3, RoundingMode.UNNECESSARY);
+        } catch (ArithmeticException ex) {
+            throw support.invalid("taxRate 最多保留 3 位小数");
+        }
     }
 
     private List<ContractSignature> validatedSignatures(

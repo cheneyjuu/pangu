@@ -136,11 +136,11 @@
 
     <insert id="insertQuoteLine" useGeneratedKeys="true" keyProperty="quoteLineId" keyColumn="quote_line_id">
         INSERT INTO t_repair_project_supplier_quote_line (
-            quote_id, project_item_id, line_no, item_name, line_type, work_description,
+            quote_id, work_point_id, line_no, item_name, line_type, work_description,
             specification_model, brand, procurement_method, quantity, unit,
             unit_price_excluding_tax, amount_excluding_tax, remark
         ) VALUES (
-            #{quoteId}, #{projectItemId}, #{lineNo}, #{itemName}, #{lineType}, #{workDescription},
+            #{quoteId}, #{workPointId}, #{lineNo}, #{itemName}, #{lineType}, #{workDescription},
             #{specificationModel}, #{brand}, #{procurementMethod}, #{quantity}, #{unit},
             #{unitPriceExcludingTax}, #{amountExcludingTax}, #{remark}
         )
@@ -190,18 +190,18 @@
 
     <select id="listQuoteLines"
             resultType="com.pangu.infrastructure.persistence.entity.RepairProjectSourcingRows$QuoteLineRow">
-        SELECT line.quote_line_id, line.quote_id, line.project_item_id,
-               item.item_no AS project_item_no, line.line_no, line.item_name,
+        SELECT line.quote_line_id, line.quote_id, line.work_point_id,
+               work_point.business_name AS work_point_name, line.line_no, line.item_name,
                line.line_type, line.work_description, line.specification_model, line.brand,
                line.procurement_method, line.quantity, line.unit,
                line.unit_price_excluding_tax, line.amount_excluding_tax, line.remark
         FROM t_repair_project_supplier_quote_line line
-        JOIN t_repair_project_item item ON item.item_id = line.project_item_id
+        LEFT JOIN t_repair_work_point work_point ON work_point.work_point_id = line.work_point_id
         WHERE line.quote_id IN
         <foreach collection="quoteIds" item="quoteId" open="(" separator="," close=")">
             #{quoteId}
         </foreach>
-        ORDER BY line.quote_id, item.sort_order, line.line_no, line.quote_line_id
+        ORDER BY line.quote_id, COALESCE(work_point.sort_order, 2147483647), line.line_no, line.quote_line_id
     </select>
 
     <update id="supersedeQuote">

@@ -1,4 +1,4 @@
-// 关联业务：校验维修工程结构化报价覆盖范围、逐行计价和报价原件一致性确认。
+// 关联业务：校验维修工程结构化报价与可选维修点位引用、逐行计价和报价原件一致性确认。
 package com.pangu.domain.policy;
 
 import com.pangu.domain.model.repair.RepairProjectSourcing.QuoteLine;
@@ -12,11 +12,11 @@ public interface RepairProjectQuotePricingPolicy {
 
     Decision evaluate(Input input);
 
-    record ScopeItem(Long projectItemId, String itemNo) {
+    record ScopeWorkPoint(Long workPointId, String businessName) {
     }
 
     record Input(
-            List<ScopeItem> scopeItems,
+            List<ScopeWorkPoint> scopeWorkPoints,
             List<QuoteLineDraft> quoteLines,
             BigDecimal declaredAmount,
             BigDecimal taxRate,
@@ -25,7 +25,7 @@ public interface RepairProjectQuotePricingPolicy {
             boolean originalAmountConfirmed
     ) {
         public Input {
-            scopeItems = scopeItems == null ? List.of() : List.copyOf(scopeItems);
+            scopeWorkPoints = scopeWorkPoints == null ? List.of() : List.copyOf(scopeWorkPoints);
             quoteLines = quoteLines == null ? List.of() : List.copyOf(quoteLines);
         }
     }

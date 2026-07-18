@@ -91,14 +91,14 @@ public final class RepairProjectExecutionRequests {
     }
 
     public record ExecutionRecordRequest(
-            @NotNull @Positive Long itemId,
+            @Positive Long workPointId,
             @NotNull EvidenceStage stage,
             @NotBlank @Size(max = 1000) String description,
             @NotNull LocalDateTime occurredAt,
             @NotEmpty List<@NotNull @Positive Long> attachmentIds
     ) {
         public SubmitExecutionRecord toCommand() {
-            return new SubmitExecutionRecord(itemId, stage, description, occurredAt, attachmentIds);
+            return new SubmitExecutionRecord(workPointId, stage, description, occurredAt, attachmentIds);
         }
     }
 
@@ -116,7 +116,7 @@ public final class RepairProjectExecutionRequests {
     }
 
     public record MaterialInspectionRequest(
-            @NotNull @Positive Long itemId,
+            @Positive Long workPointId,
             @NotBlank @Size(max = 160) String materialName,
             @NotBlank @Size(max = 160) String brand,
             @NotBlank @Size(max = 160) String model,
@@ -129,32 +129,32 @@ public final class RepairProjectExecutionRequests {
     ) {
         public SubmitMaterialInspection toCommand() {
             return new SubmitMaterialInspection(
-                    itemId, materialName, brand, model, specification, quantity, unit,
+                    workPointId, materialName, brand, model, specification, quantity, unit,
                     manufacturer, qualificationAttachmentId, photoAttachmentIds);
         }
     }
 
     public record SettlementRequest(
             @NotNull @Positive Long settlementAttachmentId,
+            @NotNull @DecimalMin("0") @DecimalMax("100") BigDecimal taxRate,
             @NotEmpty List<@Valid SettlementItemRequest> items
     ) {
         public SubmitSettlement toCommand() {
             return new SubmitSettlement(
-                    settlementAttachmentId, items.stream().map(SettlementItemRequest::toCommand).toList());
+                    settlementAttachmentId, taxRate, items.stream().map(SettlementItemRequest::toCommand).toList());
         }
     }
 
     public record SettlementItemRequest(
-            @NotNull @Positive Long projectItemId,
+            @Positive Long workPointId,
             @NotNull @DecimalMin("0") BigDecimal actualQuantity,
             @NotBlank @Size(max = 32) String unit,
             @NotNull @DecimalMin("0") BigDecimal actualUnitPrice,
-            @NotNull @DecimalMin("0") @DecimalMax("1") BigDecimal taxRate,
             @Size(max = 1000) String varianceReason
     ) {
         SubmitSettlement.Item toCommand() {
             return new SubmitSettlement.Item(
-                    projectItemId, actualQuantity, unit, actualUnitPrice, taxRate, varianceReason);
+                    workPointId, actualQuantity, unit, actualUnitPrice, varianceReason);
         }
     }
 

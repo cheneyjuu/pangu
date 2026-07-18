@@ -63,7 +63,7 @@ public final class RepairProjectExecutionRows {
         private Long recordId;
         private Long projectId;
         private Long planId;
-        private Long itemId;
+        private Long workPointId;
         private Long tenantId;
         private String stage;
         private String description;
@@ -81,7 +81,7 @@ public final class RepairProjectExecutionRows {
         private Long inspectionId;
         private Long projectId;
         private Long planId;
-        private Long itemId;
+        private Long workPointId;
         private Long tenantId;
         private String materialName;
         private String brand;
@@ -109,6 +109,7 @@ public final class RepairProjectExecutionRows {
         private Integer versionNo;
         private String status;
         private BigDecimal subtotalAmount;
+        private BigDecimal taxRate;
         private BigDecimal taxAmount;
         private BigDecimal totalAmount;
         private Long settlementAttachmentId;
@@ -123,14 +124,11 @@ public final class RepairProjectExecutionRows {
     public static class SettlementItemRow {
         private Long settlementItemId;
         private Long settlementId;
-        private Long projectItemId;
+        private Long workPointId;
         private BigDecimal actualQuantity;
         private String unit;
         private BigDecimal actualUnitPrice;
         private BigDecimal amountExcludingTax;
-        private BigDecimal taxRate;
-        private BigDecimal taxAmount;
-        private BigDecimal amountIncludingTax;
         private String varianceReason;
     }
 

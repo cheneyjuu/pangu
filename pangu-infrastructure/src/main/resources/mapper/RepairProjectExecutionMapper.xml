@@ -81,10 +81,10 @@
 
     <insert id="insertExecutionRecord" useGeneratedKeys="true" keyProperty="recordId" keyColumn="record_id">
         INSERT INTO t_repair_execution_record (
-            project_id, plan_id, item_id, tenant_id, stage, description,
+            project_id, plan_id, work_point_id, tenant_id, stage, description,
             occurred_at, submitted_by_user_id, verification_status
         ) VALUES (
-            #{projectId}, #{planId}, #{itemId}, #{tenantId}, #{stage}, #{description},
+            #{projectId}, #{planId}, #{workPointId}, #{tenantId}, #{stage}, #{description},
             #{occurredAt}, #{submittedByUserId}, #{verificationStatus}
         )
     </insert>
@@ -103,7 +103,7 @@
     </update>
 
     <sql id="executionColumns">
-        record_id, project_id, plan_id, item_id, tenant_id, stage, description,
+        record_id, project_id, plan_id, work_point_id, tenant_id, stage, description,
         occurred_at, submitted_by_user_id, verification_status, verified_by_user_id,
         verification_opinion, verified_at, create_time
     </sql>
@@ -133,11 +133,11 @@
     <insert id="insertMaterialInspection" useGeneratedKeys="true"
             keyProperty="inspectionId" keyColumn="inspection_id">
         INSERT INTO t_repair_material_inspection (
-            project_id, plan_id, item_id, tenant_id, material_name, brand, model,
+            project_id, plan_id, work_point_id, tenant_id, material_name, brand, model,
             specification, quantity, unit, manufacturer, qualification_attachment_id,
             submitted_by_user_id, status
         ) VALUES (
-            #{projectId}, #{planId}, #{itemId}, #{tenantId}, #{materialName}, #{brand}, #{model},
+            #{projectId}, #{planId}, #{workPointId}, #{tenantId}, #{materialName}, #{brand}, #{model},
             #{specification}, #{quantity}, #{unit}, #{manufacturer}, #{qualificationAttachmentId},
             #{submittedByUserId}, #{status}
         )
@@ -157,7 +157,7 @@
     </update>
 
     <sql id="materialColumns">
-        inspection_id, project_id, plan_id, item_id, tenant_id, material_name,
+        inspection_id, project_id, plan_id, work_point_id, tenant_id, material_name,
         brand, model, specification, quantity, unit, manufacturer,
         qualification_attachment_id, submitted_by_user_id, status,
         verified_by_user_id, verification_opinion, verified_at, create_time
@@ -189,11 +189,11 @@
             keyProperty="settlementId" keyColumn="settlement_id">
         INSERT INTO t_repair_project_settlement (
             project_id, plan_id, contract_id, tenant_id, version_no, status,
-            subtotal_amount, tax_amount, total_amount, settlement_attachment_id,
+            subtotal_amount, tax_rate, tax_amount, total_amount, settlement_attachment_id,
             submitted_by_user_id
         ) VALUES (
             #{projectId}, #{planId}, #{contractId}, #{tenantId}, #{versionNo}, #{status},
-            #{subtotalAmount}, #{taxAmount}, #{totalAmount}, #{settlementAttachmentId},
+            #{subtotalAmount}, #{taxRate}, #{taxAmount}, #{totalAmount}, #{settlementAttachmentId},
             #{submittedByUserId}
         )
     </insert>
@@ -207,18 +207,18 @@
     <insert id="insertSettlementItem" useGeneratedKeys="true"
             keyProperty="settlementItemId" keyColumn="settlement_item_id">
         INSERT INTO t_repair_project_settlement_item (
-            settlement_id, project_item_id, actual_quantity, unit, actual_unit_price,
-            amount_excluding_tax, tax_rate, tax_amount, amount_including_tax, variance_reason
+            settlement_id, work_point_id, actual_quantity, unit, actual_unit_price,
+            amount_excluding_tax, variance_reason
         ) VALUES (
-            #{settlementId}, #{projectItemId}, #{actualQuantity}, #{unit}, #{actualUnitPrice},
-            #{amountExcludingTax}, #{taxRate}, #{taxAmount}, #{amountIncludingTax}, #{varianceReason}
+            #{settlementId}, #{workPointId}, #{actualQuantity}, #{unit}, #{actualUnitPrice},
+            #{amountExcludingTax}, #{varianceReason}
         )
     </insert>
 
     <select id="findActiveSettlement"
             resultType="com.pangu.infrastructure.persistence.entity.RepairProjectExecutionRows$SettlementRow">
         SELECT settlement_id, project_id, plan_id, contract_id, tenant_id, version_no,
-               status, subtotal_amount, tax_amount, total_amount, settlement_attachment_id,
+               status, subtotal_amount, tax_rate, tax_amount, total_amount, settlement_attachment_id,
                submitted_by_user_id, verified_by_user_id, verification_opinion,
                submitted_at, verified_at
         FROM t_repair_project_settlement
@@ -230,9 +230,8 @@
 
     <select id="listSettlementItems"
             resultType="com.pangu.infrastructure.persistence.entity.RepairProjectExecutionRows$SettlementItemRow">
-        SELECT settlement_item_id, settlement_id, project_item_id, actual_quantity, unit,
-               actual_unit_price, amount_excluding_tax, tax_rate, tax_amount,
-               amount_including_tax, variance_reason
+        SELECT settlement_item_id, settlement_id, work_point_id, actual_quantity, unit,
+               actual_unit_price, amount_excluding_tax, variance_reason
         FROM t_repair_project_settlement_item
         WHERE settlement_id = #{settlementId}
         ORDER BY settlement_item_id

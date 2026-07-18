@@ -103,7 +103,7 @@ public final class RepairProjectExecution {
             Long recordId,
             Long projectId,
             Long planId,
-            Long itemId,
+            Long workPointId,
             Long tenantId,
             RepairProject.EvidenceStage stage,
             String description,
@@ -125,7 +125,7 @@ public final class RepairProjectExecution {
             Long inspectionId,
             Long projectId,
             Long planId,
-            Long itemId,
+            Long workPointId,
             Long tenantId,
             String materialName,
             String brand,
@@ -157,6 +157,7 @@ public final class RepairProjectExecution {
             Integer versionNo,
             SettlementStatus status,
             BigDecimal subtotalAmount,
+            BigDecimal taxRate,
             BigDecimal taxAmount,
             BigDecimal totalAmount,
             Long settlementAttachmentId,
@@ -175,14 +176,11 @@ public final class RepairProjectExecution {
     public record SettlementItem(
             Long settlementItemId,
             Long settlementId,
-            Long projectItemId,
+            Long workPointId,
             BigDecimal actualQuantity,
             String unit,
             BigDecimal actualUnitPrice,
             BigDecimal amountExcludingTax,
-            BigDecimal taxRate,
-            BigDecimal taxAmount,
-            BigDecimal amountIncludingTax,
             String varianceReason
     ) {
     }

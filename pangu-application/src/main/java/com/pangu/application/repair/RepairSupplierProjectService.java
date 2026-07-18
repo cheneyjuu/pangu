@@ -1,10 +1,10 @@
-// 关联业务：为施工单位工作台提供仅限本企业合同项目的工程项、施工记录、材料和结算视图。
+// 关联业务：为施工单位工作台提供仅限本企业合同项目的维修点位、施工记录、材料和结算视图。
 package com.pangu.application.repair;
 
 import com.pangu.domain.context.UserContext;
 import com.pangu.domain.model.repair.RepairProject;
 import com.pangu.domain.model.repair.RepairProject.Attachment;
-import com.pangu.domain.model.repair.RepairProject.Item;
+import com.pangu.domain.model.repair.RepairProject.WorkPoint;
 import com.pangu.domain.model.repair.RepairProject.PlanStatus;
 import com.pangu.domain.model.repair.RepairProject.PlanVersion;
 import com.pangu.domain.model.repair.RepairProjectExecution.Contract;
@@ -55,7 +55,7 @@ public class RepairSupplierProjectService {
         return new SupplierProjectDetails(
                 project,
                 plan,
-                projectRepository.listItems(plan.planId(), actor.context().tenantId()),
+                projectRepository.listWorkPoints(plan.planId(), actor.context().tenantId()),
                 projectRepository.listAttachments(projectId, actor.context().tenantId()),
                 contract,
                 executionService.details(projectId));
@@ -91,13 +91,13 @@ public class RepairSupplierProjectService {
     public record SupplierProjectDetails(
             RepairProject project,
             PlanVersion activePlan,
-            List<Item> items,
+            List<WorkPoint> workPoints,
             List<Attachment> attachments,
             Contract contract,
             Details execution
     ) {
         public SupplierProjectDetails {
-            items = items == null ? List.of() : List.copyOf(items);
+            workPoints = workPoints == null ? List.of() : List.copyOf(workPoints);
             attachments = attachments == null ? List.of() : List.copyOf(attachments);
         }
     }

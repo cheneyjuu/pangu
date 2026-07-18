@@ -1,19 +1,12 @@
-// 关联业务：校验维修工程结构化实施方案、受影响业主确认、施工证据、验收规则和付款节点输入。
+// 关联业务：校验维修工程筹备草稿的预算、维修点位与原始附件引用；资金、决定、验收、付款和定商不能由建项表单声明。
 package com.pangu.interfaces.web.controller.dto.repair;
 
 import com.pangu.application.repair.command.RepairPlanDraftCommand;
-import com.pangu.domain.model.repair.RepairProject.AffectedOwnerPassRule;
 import com.pangu.domain.model.repair.RepairProject.AttachmentPurpose;
-import com.pangu.domain.model.repair.RepairProject.EvidenceRequirement;
-import com.pangu.domain.model.repair.RepairProject.EvidenceStage;
-import com.pangu.domain.model.repair.RepairProject.PaymentMilestone;
-import com.pangu.domain.model.repair.RepairProject.PaymentMilestoneType;
-import com.pangu.domain.model.repair.RepairProject.SettlementMethod;
-import com.pangu.domain.model.repair.RepairSupplierSelectionMethod;
+import com.pangu.domain.model.repair.RepairProject.WorkPointCauseStatus;
+import com.pangu.domain.model.repair.RepairProject.WorkPointLocationType;
 import jakarta.validation.Valid;
-import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
-import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
@@ -26,94 +19,47 @@ import java.util.List;
 public record RepairPlanRequest(
         @NotBlank @Size(max = 16000) String planDescription,
         @NotNull @DecimalMin(value = "0.01") BigDecimal budgetTotal,
-        RepairSupplierSelectionMethod supplierSelectionMethod,
-        @Size(max = 1000) String supplierSelectionReason,
-        @NotBlank @Size(max = 8000) String constructionManagementRequirements,
-        @NotEmpty List<@Valid EvidenceRequirementRequest> evidenceRequirements,
-        @NotBlank @Size(max = 8000) String safetyRequirements,
-        @NotBlank @Size(max = 4000) String acceptanceMethod,
-        List<@Valid AffectedOwnerRequest> affectedOwners,
-        @Size(max = 1000) String affectedOwnerAdjustmentReason,
-        @Min(1) Integer minimumAffectedOwnerAcceptors,
-        AffectedOwnerPassRule affectedOwnerPassRule,
-        @DecimalMin(value = "0.0001") @DecimalMax("1.0000") BigDecimal affectedOwnerApprovalRatio,
-        @NotNull SettlementMethod settlementMethod,
-        @NotNull LocalDate plannedStartDate,
-        @NotNull LocalDate plannedCompletionDate,
-        @NotNull @Min(0) Integer warrantyDays,
-        boolean priceReviewRequired,
-        @NotEmpty List<@Valid PaymentMilestoneRequest> paymentMilestones,
-        @NotEmpty List<@Valid ItemRequest> items,
+        @NotEmpty List<@Valid WorkPointRequest> workPoints,
         List<@Valid AttachmentReferenceRequest> attachments
 ) {
 
     public RepairPlanDraftCommand toCommand() {
         return new RepairPlanDraftCommand(
                 planDescription, budgetTotal,
-                supplierSelectionMethod, supplierSelectionReason,
-                constructionManagementRequirements,
-                evidenceRequirements.stream().map(EvidenceRequirementRequest::toDomain).toList(),
-                safetyRequirements, acceptanceMethod,
-                affectedOwners == null
-                        ? List.of()
-                        : affectedOwners.stream().map(AffectedOwnerRequest::toCommand).toList(),
-                affectedOwnerAdjustmentReason,
-                minimumAffectedOwnerAcceptors, affectedOwnerPassRule, affectedOwnerApprovalRatio,
-                settlementMethod, plannedStartDate, plannedCompletionDate, warrantyDays,
-                priceReviewRequired,
-                paymentMilestones.stream().map(PaymentMilestoneRequest::toDomain).toList(),
-                items.stream().map(ItemRequest::toCommand).toList(),
+                workPoints.stream().map(WorkPointRequest::toCommand).toList(),
                 attachments == null
                         ? List.of()
                         : attachments.stream().map(AttachmentReferenceRequest::toCommand).toList());
     }
 
-    public record AffectedOwnerRequest(
-            @NotNull Long roomId,
-            @Size(max = 500) String affectedReason
-    ) {
-        RepairPlanDraftCommand.AffectedOwnerDraft toCommand() {
-            return new RepairPlanDraftCommand.AffectedOwnerDraft(roomId, affectedReason);
-        }
-    }
-
-    public record EvidenceRequirementRequest(
-            @NotNull EvidenceStage stage,
-            @NotBlank @Size(max = 1000) String description,
-            boolean required
-    ) {
-        EvidenceRequirement toDomain() {
-            return new EvidenceRequirement(stage, description, required);
-        }
-    }
-
-    public record PaymentMilestoneRequest(
-            @NotNull PaymentMilestoneType type,
-            @NotNull @DecimalMin(value = "0.0001") @DecimalMax("1.0000") BigDecimal maximumContractRatio,
-            @NotEmpty List<@NotBlank @Size(max = 64) String> requiredEvidenceCodes
-    ) {
-        PaymentMilestone toDomain() {
-            return new PaymentMilestone(type, maximumContractRatio, requiredEvidenceCodes);
-        }
-    }
-
-    public record ItemRequest(
-            @NotBlank @Size(max = 40) String itemNo,
+    /** 录入对象是可定位的维修点位，而非报价数量和单价的承载行。 */
+    public record WorkPointRequest(
+            @NotBlank @Size(max = 160) String businessName,
             Long buildingId,
             @Size(max = 64) String unitName,
-            Long roomId,
-            @NotBlank @Size(max = 240) String locationText,
-            @NotBlank @Size(max = 4000) String workContent,
-            @NotNull @DecimalMin(value = "0.001") BigDecimal quantity,
-            @NotBlank @Size(max = 32) String unit,
-            @NotNull @DecimalMin("0.00") BigDecimal estimatedUnitPrice,
-            @NotNull @DecimalMin("0.00") BigDecimal estimatedAmount,
+            @NotNull WorkPointLocationType locationType,
+            Long referenceRoomId,
+            @Size(max = 160) String commonAreaName,
+            @Size(max = 160) String spaceName,
+            @Size(max = 80) String orientation,
+            @Size(max = 160) String component,
+            @Size(max = 240) String specificPart,
+            @NotBlank @Size(max = 4000) String symptom,
+            @NotNull WorkPointCauseStatus causeStatus,
+            @Size(max = 4000) String causeBasis,
+            @NotBlank @Size(max = 4000) String proposedMeasure,
+            @Size(max = 4000) String technicalRequirements,
+            @DecimalMin(value = "0.001") BigDecimal quantity,
+            @Size(max = 32) String unit,
+            @DecimalMin("0.00") BigDecimal preliminaryEstimatedAmount,
+            @Size(max = 500) String estimateSource,
             List<@NotNull Long> linkedWorkOrderIds
     ) {
-        RepairPlanDraftCommand.ItemDraft toCommand() {
-            return new RepairPlanDraftCommand.ItemDraft(
-                    itemNo, buildingId, unitName, roomId, locationText, workContent,
-                    quantity, unit, estimatedUnitPrice, estimatedAmount,
+        RepairPlanDraftCommand.WorkPointDraft toCommand() {
+            return new RepairPlanDraftCommand.WorkPointDraft(
+                    businessName, buildingId, unitName, locationType, referenceRoomId, commonAreaName,
+                    spaceName, orientation, component, specificPart, symptom, causeStatus, causeBasis,
+                    proposedMeasure, technicalRequirements, quantity, unit, preliminaryEstimatedAmount, estimateSource,
                     linkedWorkOrderIds == null ? List.of() : linkedWorkOrderIds);
         }
     }

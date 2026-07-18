@@ -1,4 +1,4 @@
-// 关联业务：统一维修工程应用服务的租户身份、项目锁、锁定方案、附件和审计事件校验。
+// 关联业务：统一维修工程应用服务的租户身份、项目锁、锁定方案、可选维修点位、附件和审计事件校验。
 package com.pangu.application.repair;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -7,7 +7,7 @@ import com.pangu.domain.context.UserContext;
 import com.pangu.domain.context.UserContextHolder;
 import com.pangu.domain.model.repair.RepairProject;
 import com.pangu.domain.model.repair.RepairProject.Attachment;
-import com.pangu.domain.model.repair.RepairProject.Item;
+import com.pangu.domain.model.repair.RepairProject.WorkPoint;
 import com.pangu.domain.model.repair.RepairProject.PlanStatus;
 import com.pangu.domain.model.repair.RepairProject.PlanVersion;
 import com.pangu.domain.model.repair.RepairProject.Status;
@@ -108,11 +108,15 @@ class RepairProjectApplicationSupport {
         attachmentIds.forEach(id -> attachment(context, id, label));
     }
 
-    Item item(Context context, Long itemId) {
-        return context.items().stream()
-                .filter(item -> item.itemId().equals(itemId))
+    /** 项目通用专业明细可不绑定点位；一旦填写点位，必须属于当前锁定方案。 */
+    WorkPoint workPoint(Context context, Long workPointId) {
+        if (workPointId == null) {
+            return null;
+        }
+        return context.workPoints().stream()
+                .filter(workPoint -> workPoint.workPointId().equals(workPointId))
                 .findFirst()
-                .orElseThrow(() -> invalid("工程项不属于当前锁定方案 itemId=" + itemId));
+                .orElseThrow(() -> invalid("维修点位不属于当前锁定方案 workPointId=" + workPointId));
     }
 
     void advance(Context context, Status nextStatus) {
@@ -173,8 +177,8 @@ class RepairProjectApplicationSupport {
                         && candidate.status() == PlanStatus.LOCKED)
                 .findFirst()
                 .orElseThrow(() -> conflict("项目没有有效的锁定实施方案"));
-        List<Item> items = projectRepository.listItems(plan.planId(), project.tenantId());
-        return new Context(project, plan, items);
+        List<WorkPoint> workPoints = projectRepository.listWorkPoints(plan.planId(), project.tenantId());
+        return new Context(project, plan, workPoints);
     }
 
     private void requireStatus(RepairProject project, Status... statuses) {
@@ -186,9 +190,9 @@ class RepairProjectApplicationSupport {
         throw conflict("当前项目状态不允许该动作 status=" + project.status());
     }
 
-    record Context(RepairProject project, PlanVersion plan, List<Item> items) {
+    record Context(RepairProject project, PlanVersion plan, List<WorkPoint> workPoints) {
         Context {
-            items = List.copyOf(items);
+            workPoints = List.copyOf(workPoints);
         }
     }
 }

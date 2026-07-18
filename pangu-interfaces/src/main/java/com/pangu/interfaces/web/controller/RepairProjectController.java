@@ -1,4 +1,4 @@
-// 关联业务：暴露维修工程项目台账、实施方案版本、受影响业主预览、项目附件和方案锁定后台接口。
+// 关联业务：暴露维修工程筹备草稿、决定范围复核、实施方案版本、项目附件和方案冻结后台接口。
 package com.pangu.interfaces.web.controller;
 
 import com.pangu.application.repair.RepairProjectAttachmentService;
@@ -19,6 +19,7 @@ import com.pangu.interfaces.web.controller.dto.repair.RepairAttachmentDownloadTi
 import com.pangu.interfaces.web.controller.dto.repair.RepairPlanAttachmentLinkRequest;
 import com.pangu.interfaces.web.controller.dto.repair.RepairNarrativeImageResponse;
 import com.pangu.interfaces.web.controller.dto.repair.RepairProjectPageRequest;
+import com.pangu.interfaces.web.controller.dto.repair.ReverifyRepairDecisionScopeRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
@@ -31,7 +32,6 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestPart;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -62,24 +62,6 @@ public class RepairProjectController extends BaseController {
         return success(PageResponse.from(result, item -> item));
     }
 
-    @GetMapping("/allocation-preview")
-    @PreAuthorize("hasAuthority('repair:workorder:manage')")
-    public Result<RepairProject.AllocationPreview> allocationPreview(
-            @RequestParam("scopeType") RepairProject.ScopeType scopeType,
-            @RequestParam(value = "buildingId", required = false) Long buildingId,
-            @RequestParam(value = "unitName", required = false) String unitName) {
-        return success(projectService.previewAllocation(scopeType, buildingId, unitName));
-    }
-
-    @GetMapping("/affected-owner-preview")
-    @PreAuthorize("hasAuthority('repair:workorder:manage')")
-    public Result<RepairProject.AffectedOwnerPreview> affectedOwnerPreview(
-            @RequestParam("scopeType") RepairProject.ScopeType scopeType,
-            @RequestParam("buildingId") Long buildingId,
-            @RequestParam(value = "unitName", required = false) String unitName) {
-        return success(projectService.previewAffectedOwners(scopeType, buildingId, unitName));
-    }
-
     @PostMapping(value = "/narrative-images", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @PreAuthorize("hasAuthority('repair:workorder:manage')")
     public Result<RepairNarrativeImageResponse> uploadNarrativeImage(
@@ -108,7 +90,7 @@ public class RepairProjectController extends BaseController {
         return success("正文图片已删除", null);
     }
 
-    @GetMapping("/{projectId}")
+    @GetMapping("/{projectId:\\d+}")
     @PreAuthorize("hasAuthority('repair:workorder:read')")
     public Result<RepairProject.Details> detail(@PathVariable("projectId") Long projectId) {
         return success(projectService.findProject(projectId));
@@ -131,6 +113,15 @@ public class RepairProjectController extends BaseController {
             @Valid @RequestBody CreateRepairPlanVersionRequest request) {
         return success("实施方案新版本已创建",
                 projectService.createPlanVersion(projectId, request.toCommand()));
+    }
+
+    @PostMapping("/{projectId}/decision-scope/reverify")
+    @PreAuthorize("hasAuthority('repair:workorder:manage')")
+    public Result<RepairProject.Details> reverifyDecisionScope(
+            @PathVariable("projectId") Long projectId,
+            @Valid @RequestBody ReverifyRepairDecisionScopeRequest request) {
+        return success("决定范围已重新核验",
+                projectService.reverifyDecisionScope(projectId, request.expectedProjectVersion()));
     }
 
     @PostMapping("/{projectId}/plans/{planId}/attachments")

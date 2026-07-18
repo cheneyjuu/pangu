@@ -1,4 +1,4 @@
-// 关联业务：读写维修工程项目、不可变实施方案、工程项、费用分摊及受影响业主快照和项目附件。
+// 关联业务：读写维修工程项目、单一决定范围、维修点位、可信资金切片、不可变实施方案及项目附件。
 package com.pangu.infrastructure.persistence.mapper;
 
 import com.pangu.infrastructure.persistence.entity.RepairPlanAllocationRoomRow;
@@ -9,7 +9,9 @@ import com.pangu.infrastructure.persistence.entity.RepairPlanAttachmentRow;
 import com.pangu.infrastructure.persistence.entity.RepairPlanVersionRow;
 import com.pangu.infrastructure.persistence.entity.RepairProjectAttachmentRow;
 import com.pangu.infrastructure.persistence.entity.RepairProjectProcessEventRow;
-import com.pangu.infrastructure.persistence.entity.RepairProjectItemRow;
+import com.pangu.infrastructure.persistence.entity.RepairDecisionScopeRow;
+import com.pangu.infrastructure.persistence.entity.RepairFundingSliceRow;
+import com.pangu.infrastructure.persistence.entity.RepairWorkPointRow;
 import com.pangu.infrastructure.persistence.entity.RepairProjectRow;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -46,15 +48,28 @@ public interface RepairProjectMapper {
                                            @Param("projectId") Long projectId,
                                            @Param("tenantId") Long tenantId);
 
-    int insertItem(RepairProjectItemRow row);
+    int insertDecisionScope(RepairDecisionScopeRow row);
 
-    int linkItemToWorkOrder(@Param("itemId") Long itemId,
-                            @Param("workOrderId") Long workOrderId,
-                            @Param("tenantId") Long tenantId);
+    RepairDecisionScopeRow findDecisionScope(@Param("projectId") Long projectId,
+                                             @Param("tenantId") Long tenantId);
 
-    List<RepairProjectItemRow> listItems(@Param("planId") Long planId, @Param("tenantId") Long tenantId);
+    int updateDecisionScopeVerification(@Param("projectId") Long projectId,
+                                        @Param("tenantId") Long tenantId,
+                                        @Param("verificationStatus") String verificationStatus,
+                                        @Param("verificationBasis") String verificationBasis);
 
-    List<Long> listLinkedWorkOrderIds(@Param("itemId") Long itemId);
+    List<RepairFundingSliceRow> listFundingSlices(@Param("decisionScopeId") Long decisionScopeId,
+                                                   @Param("tenantId") Long tenantId);
+
+    int insertWorkPoint(RepairWorkPointRow row);
+
+    int linkWorkPointToWorkOrder(@Param("workPointId") Long workPointId,
+                                 @Param("workOrderId") Long workOrderId,
+                                 @Param("tenantId") Long tenantId);
+
+    List<RepairWorkPointRow> listWorkPoints(@Param("planId") Long planId, @Param("tenantId") Long tenantId);
+
+    List<Long> listLinkedWorkOrderIds(@Param("workPointId") Long workPointId);
 
     int snapshotAllocationRooms(@Param("planId") Long planId,
                                 @Param("tenantId") Long tenantId,
