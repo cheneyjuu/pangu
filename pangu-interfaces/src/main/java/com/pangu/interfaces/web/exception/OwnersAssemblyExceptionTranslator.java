@@ -1,3 +1,4 @@
+// 关联业务：将业主大会办理异常稳定映射为管理端可识别的业务错误响应。
 package com.pangu.interfaces.web.exception;
 
 import com.pangu.application.assembly.OwnersAssemblyApplicationException;
@@ -20,6 +21,7 @@ public final class OwnersAssemblyExceptionTranslator {
             case OPID_OUT_OF_SCOPE -> OwnersAssemblyErrorCode.OPID_OUT_OF_SCOPE;
             case VOTE_ALREADY_CAST -> OwnersAssemblyErrorCode.VOTE_ALREADY_CAST;
             case CONCURRENT_MODIFICATION -> OwnersAssemblyErrorCode.CONCURRENT_MODIFICATION;
+            case STORAGE_UNAVAILABLE -> OwnersAssemblyErrorCode.STORAGE_UNAVAILABLE;
         };
     }
 }

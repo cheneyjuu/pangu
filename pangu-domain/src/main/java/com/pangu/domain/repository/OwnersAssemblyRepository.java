@@ -1,8 +1,11 @@
+// 关联业务：定义业主大会会前事项、材料、公示安排、送达和投票记录的持久化端口。
 package com.pangu.domain.repository;
 
 import com.pangu.domain.model.assembly.OwnersAssemblyDeliveryRecord;
+import com.pangu.domain.model.assembly.OwnersAssemblyMaterial;
 import com.pangu.domain.model.assembly.OwnersAssemblyPackage;
 import com.pangu.domain.model.assembly.OwnersAssemblySession;
+import com.pangu.domain.model.assembly.OwnersAssemblySubjectDraft;
 import com.pangu.domain.model.assembly.OwnersAssemblyVoteRecord;
 
 import java.time.Instant;
@@ -15,17 +18,33 @@ public interface OwnersAssemblyRepository {
 
     Optional<OwnersAssemblySession> findSession(Long sessionId, Long tenantId);
 
+    List<OwnersAssemblySession> listSessions(Long tenantId);
+
+    int updateSessionStatus(Long sessionId, Long tenantId, String status);
+
     OwnersAssemblyPackage insertPackage(OwnersAssemblyPackage ballotPackage);
 
     Optional<OwnersAssemblyPackage> findPackage(Long packageId, Long tenantId);
 
     Optional<OwnersAssemblyPackage> findPackageForUpdate(Long packageId, Long tenantId);
 
+    Optional<OwnersAssemblyPackage> findLatestPackageBySession(Long sessionId, Long tenantId);
+
     Optional<OwnersAssemblyPackage> findPackageBySubjectId(Long subjectId);
 
     void linkSubject(Long packageId, Long tenantId, Long subjectId);
 
     List<Long> listSubjectIds(Long packageId, Long tenantId);
+
+    OwnersAssemblySubjectDraft insertSubjectDraft(OwnersAssemblySubjectDraft draft);
+
+    List<OwnersAssemblySubjectDraft> listSubjectDrafts(Long sessionId, Long tenantId);
+
+    OwnersAssemblyMaterial insertMaterial(OwnersAssemblyMaterial material);
+
+    Optional<OwnersAssemblyMaterial> findMaterial(Long materialId, Long sessionId, Long tenantId);
+
+    List<OwnersAssemblyMaterial> listMaterials(Long sessionId, Long tenantId);
 
     int lockPackage(Long packageId,
                     Long tenantId,

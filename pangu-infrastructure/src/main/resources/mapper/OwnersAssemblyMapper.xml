@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!-- 关联业务：持久化业主大会会前事项、材料、公示安排、纸质送达和投票记录。 -->
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.pangu.infrastructure.persistence.mapper.OwnersAssemblyMapper">
@@ -32,6 +33,35 @@
         <result property="voteEndAt" column="vote_end_at"/>
         <result property="lockedByUserId" column="locked_by_user_id"/>
         <result property="lockedAt" column="locked_at"/>
+    </resultMap>
+
+    <resultMap id="SubjectDraftMap" type="com.pangu.infrastructure.persistence.entity.OwnersAssemblySubjectDraftRow">
+        <id property="draftId" column="draft_id"/>
+        <result property="sessionId" column="session_id"/>
+        <result property="tenantId" column="tenant_id"/>
+        <result property="subjectType" column="subject_type"/>
+        <result property="scope" column="scope"/>
+        <result property="scopeReferenceId" column="scope_reference_id"/>
+        <result property="title" column="title"/>
+        <result property="content" column="content"/>
+        <result property="proposedByUserId" column="proposed_by_user_id"/>
+        <result property="createTime" column="create_time"/>
+    </resultMap>
+
+    <resultMap id="MaterialMap" type="com.pangu.infrastructure.persistence.entity.OwnersAssemblyMaterialRow">
+        <id property="materialId" column="material_id"/>
+        <result property="sessionId" column="session_id"/>
+        <result property="tenantId" column="tenant_id"/>
+        <result property="materialType" column="material_type"/>
+        <result property="objectKey" column="object_key"/>
+        <result property="originalFileName" column="original_file_name"/>
+        <result property="contentType" column="content_type"/>
+        <result property="fileSize" column="file_size"/>
+        <result property="etag" column="etag"/>
+        <result property="contentSha256" column="content_sha256"/>
+        <result property="uploadedByAccountId" column="uploaded_by_account_id"/>
+        <result property="uploadedByUserId" column="uploaded_by_user_id"/>
+        <result property="createTime" column="create_time"/>
     </resultMap>
 
     <resultMap id="DeliveryMap" type="com.pangu.infrastructure.persistence.entity.OwnersAssemblyDeliveryRecordRow">
@@ -80,6 +110,20 @@
           AND tenant_id = #{tenantId}
     </select>
 
+    <select id="listSessions" resultMap="SessionMap">
+        SELECT session_id, tenant_id, title, preparation_mode, status, created_by_user_id, create_time
+        FROM t_owners_assembly_session
+        WHERE tenant_id = #{tenantId}
+        ORDER BY create_time DESC, session_id DESC
+    </select>
+
+    <update id="updateSessionStatus">
+        UPDATE t_owners_assembly_session
+        SET status = #{status}, update_time = CURRENT_TIMESTAMP
+        WHERE session_id = #{sessionId}
+          AND tenant_id = #{tenantId}
+    </update>
+
     <insert id="insertPackage" useGeneratedKeys="true" keyProperty="packageId" keyColumn="package_id">
         INSERT INTO t_owners_assembly_package (
             session_id, tenant_id, package_version, status, voting_channel_policy,
@@ -107,6 +151,15 @@
         FOR UPDATE
     </select>
 
+    <select id="findLatestPackageBySession" resultMap="PackageMap">
+        SELECT *
+        FROM t_owners_assembly_package
+        WHERE session_id = #{sessionId}
+          AND tenant_id = #{tenantId}
+        ORDER BY package_version DESC, package_id DESC
+        LIMIT 1
+    </select>
+
     <select id="findPackageBySubjectId" resultMap="PackageMap">
         SELECT p.*
         FROM t_owners_assembly_package p
@@ -125,6 +178,52 @@
         WHERE package_id = #{packageId}
           AND tenant_id = #{tenantId}
         ORDER BY assembly_subject_id
+    </select>
+
+    <insert id="insertSubjectDraft" useGeneratedKeys="true" keyProperty="draftId" keyColumn="draft_id">
+        INSERT INTO t_owners_assembly_subject_draft (
+            session_id, tenant_id, subject_type, scope, scope_reference_id,
+            title, content, proposed_by_user_id
+        ) VALUES (
+            #{sessionId}, #{tenantId}, #{subjectType}, #{scope}, #{scopeReferenceId},
+            #{title}, #{content}, #{proposedByUserId}
+        )
+    </insert>
+
+    <select id="listSubjectDrafts" resultMap="SubjectDraftMap">
+        SELECT *
+        FROM t_owners_assembly_subject_draft
+        WHERE session_id = #{sessionId}
+          AND tenant_id = #{tenantId}
+        ORDER BY draft_id
+    </select>
+
+    <insert id="insertMaterial" useGeneratedKeys="true" keyProperty="materialId" keyColumn="material_id">
+        INSERT INTO t_owners_assembly_material (
+            session_id, tenant_id, material_type, object_key, original_file_name,
+            content_type, file_size, etag, content_sha256,
+            uploaded_by_account_id, uploaded_by_user_id
+        ) VALUES (
+            #{sessionId}, #{tenantId}, #{materialType}, #{objectKey}, #{originalFileName},
+            #{contentType}, #{fileSize}, #{etag}, #{contentSha256},
+            #{uploadedByAccountId}, #{uploadedByUserId}
+        )
+    </insert>
+
+    <select id="findMaterial" resultMap="MaterialMap">
+        SELECT *
+        FROM t_owners_assembly_material
+        WHERE material_id = #{materialId}
+          AND session_id = #{sessionId}
+          AND tenant_id = #{tenantId}
+    </select>
+
+    <select id="listMaterials" resultMap="MaterialMap">
+        SELECT *
+        FROM t_owners_assembly_material
+        WHERE session_id = #{sessionId}
+          AND tenant_id = #{tenantId}
+        ORDER BY material_id
     </select>
 
     <update id="lockPackage">

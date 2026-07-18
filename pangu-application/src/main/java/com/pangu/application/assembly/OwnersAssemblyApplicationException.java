@@ -1,3 +1,4 @@
+// 关联业务：统一表达业主大会办理过程中的权限、状态、材料和计票业务异常。
 package com.pangu.application.assembly;
 
 public class OwnersAssemblyApplicationException extends RuntimeException {
@@ -13,7 +14,8 @@ public class OwnersAssemblyApplicationException extends RuntimeException {
         OPID_NOT_OWNED,
         OPID_OUT_OF_SCOPE,
         VOTE_ALREADY_CAST,
-        CONCURRENT_MODIFICATION
+        CONCURRENT_MODIFICATION,
+        STORAGE_UNAVAILABLE
     }
 
     private final Reason reason;

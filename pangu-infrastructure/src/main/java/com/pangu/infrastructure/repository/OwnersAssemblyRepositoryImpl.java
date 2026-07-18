@@ -1,15 +1,22 @@
+// 关联业务：实现业主大会会议、表决安排、事项草案和原始材料的持久化边界。
 package com.pangu.infrastructure.repository;
 
 import com.pangu.domain.model.assembly.OwnersAssemblyDeliveryRecord;
+import com.pangu.domain.model.assembly.OwnersAssemblyMaterial;
 import com.pangu.domain.model.assembly.OwnersAssemblyPackage;
 import com.pangu.domain.model.assembly.OwnersAssemblySession;
+import com.pangu.domain.model.assembly.OwnersAssemblySubjectDraft;
 import com.pangu.domain.model.assembly.OwnersAssemblyVoteRecord;
 import com.pangu.domain.repository.OwnersAssemblyRepository;
 import com.pangu.infrastructure.persistence.entity.OwnersAssemblyDeliveryRecordRow;
+import com.pangu.infrastructure.persistence.entity.OwnersAssemblyMaterialRow;
 import com.pangu.infrastructure.persistence.entity.OwnersAssemblyPackageRow;
 import com.pangu.infrastructure.persistence.entity.OwnersAssemblySessionRow;
+import com.pangu.infrastructure.persistence.entity.OwnersAssemblySubjectDraftRow;
 import com.pangu.infrastructure.persistence.entity.OwnersAssemblyVoteRecordRow;
 import com.pangu.infrastructure.persistence.mapper.OwnersAssemblyMapper;
+import com.pangu.domain.model.voting.SubjectType;
+import com.pangu.domain.model.voting.VotingScope;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Repository;
 
@@ -40,6 +47,16 @@ public class OwnersAssemblyRepositoryImpl implements OwnersAssemblyRepository {
     }
 
     @Override
+    public List<OwnersAssemblySession> listSessions(Long tenantId) {
+        return mapper.listSessions(tenantId).stream().map(this::toDomain).toList();
+    }
+
+    @Override
+    public int updateSessionStatus(Long sessionId, Long tenantId, String status) {
+        return mapper.updateSessionStatus(sessionId, tenantId, status);
+    }
+
+    @Override
     public OwnersAssemblyPackage insertPackage(OwnersAssemblyPackage ballotPackage) {
         OwnersAssemblyPackageRow row = toRow(ballotPackage);
         mapper.insertPackage(row);
@@ -57,6 +74,11 @@ public class OwnersAssemblyRepositoryImpl implements OwnersAssemblyRepository {
     }
 
     @Override
+    public Optional<OwnersAssemblyPackage> findLatestPackageBySession(Long sessionId, Long tenantId) {
+        return Optional.ofNullable(mapper.findLatestPackageBySession(sessionId, tenantId)).map(this::toDomain);
+    }
+
+    @Override
     public Optional<OwnersAssemblyPackage> findPackageBySubjectId(Long subjectId) {
         return Optional.ofNullable(mapper.findPackageBySubjectId(subjectId)).map(this::toDomain);
     }
@@ -69,6 +91,42 @@ public class OwnersAssemblyRepositoryImpl implements OwnersAssemblyRepository {
     @Override
     public List<Long> listSubjectIds(Long packageId, Long tenantId) {
         return mapper.listSubjectIds(packageId, tenantId);
+    }
+
+    @Override
+    public OwnersAssemblySubjectDraft insertSubjectDraft(OwnersAssemblySubjectDraft draft) {
+        OwnersAssemblySubjectDraftRow row = toRow(draft);
+        mapper.insertSubjectDraft(row);
+        return new OwnersAssemblySubjectDraft(
+                row.getDraftId(), draft.sessionId(), draft.tenantId(), draft.subjectType(), draft.scope(),
+                draft.scopeReferenceId(), draft.title(), draft.content(),
+                draft.proposedByUserId(), draft.createTime());
+    }
+
+    @Override
+    public List<OwnersAssemblySubjectDraft> listSubjectDrafts(Long sessionId, Long tenantId) {
+        return mapper.listSubjectDrafts(sessionId, tenantId).stream().map(this::toDomain).toList();
+    }
+
+    @Override
+    public OwnersAssemblyMaterial insertMaterial(OwnersAssemblyMaterial material) {
+        OwnersAssemblyMaterialRow row = toRow(material);
+        mapper.insertMaterial(row);
+        return new OwnersAssemblyMaterial(
+                row.getMaterialId(), material.sessionId(), material.tenantId(), material.materialType(),
+                material.objectKey(), material.originalFileName(), material.contentType(), material.fileSize(),
+                material.etag(), material.contentSha256(), material.uploadedByAccountId(),
+                material.uploadedByUserId(), material.createTime());
+    }
+
+    @Override
+    public Optional<OwnersAssemblyMaterial> findMaterial(Long materialId, Long sessionId, Long tenantId) {
+        return Optional.ofNullable(mapper.findMaterial(materialId, sessionId, tenantId)).map(this::toDomain);
+    }
+
+    @Override
+    public List<OwnersAssemblyMaterial> listMaterials(Long sessionId, Long tenantId) {
+        return mapper.listMaterials(sessionId, tenantId).stream().map(this::toDomain).toList();
     }
 
     @Override
@@ -162,6 +220,23 @@ public class OwnersAssemblyRepositoryImpl implements OwnersAssemblyRepository {
                 toInstant(row.getCreateTime()));
     }
 
+    private OwnersAssemblySubjectDraft toDomain(OwnersAssemblySubjectDraftRow row) {
+        return new OwnersAssemblySubjectDraft(
+                row.getDraftId(), row.getSessionId(), row.getTenantId(),
+                SubjectType.valueOf(row.getSubjectType()), VotingScope.valueOf(row.getScope()),
+                row.getScopeReferenceId(), row.getTitle(), row.getContent(),
+                row.getProposedByUserId(), toInstant(row.getCreateTime()));
+    }
+
+    private OwnersAssemblyMaterial toDomain(OwnersAssemblyMaterialRow row) {
+        return new OwnersAssemblyMaterial(
+                row.getMaterialId(), row.getSessionId(), row.getTenantId(),
+                OwnersAssemblyMaterial.MaterialType.valueOf(row.getMaterialType()), row.getObjectKey(),
+                row.getOriginalFileName(), row.getContentType(), row.getFileSize(), row.getEtag(),
+                row.getContentSha256(), row.getUploadedByAccountId(), row.getUploadedByUserId(),
+                toInstant(row.getCreateTime()));
+    }
+
     private OwnersAssemblySessionRow toRow(OwnersAssemblySession domain) {
         OwnersAssemblySessionRow row = new OwnersAssemblySessionRow();
         row.setSessionId(domain.sessionId());
@@ -170,6 +245,37 @@ public class OwnersAssemblyRepositoryImpl implements OwnersAssemblyRepository {
         row.setPreparationMode(domain.preparationMode());
         row.setStatus(domain.status());
         row.setCreatedByUserId(domain.createdByUserId());
+        return row;
+    }
+
+    private OwnersAssemblySubjectDraftRow toRow(OwnersAssemblySubjectDraft domain) {
+        OwnersAssemblySubjectDraftRow row = new OwnersAssemblySubjectDraftRow();
+        row.setDraftId(domain.draftId());
+        row.setSessionId(domain.sessionId());
+        row.setTenantId(domain.tenantId());
+        row.setSubjectType(domain.subjectType().name());
+        row.setScope(domain.scope().name());
+        row.setScopeReferenceId(domain.scopeReferenceId());
+        row.setTitle(domain.title());
+        row.setContent(domain.content());
+        row.setProposedByUserId(domain.proposedByUserId());
+        return row;
+    }
+
+    private OwnersAssemblyMaterialRow toRow(OwnersAssemblyMaterial domain) {
+        OwnersAssemblyMaterialRow row = new OwnersAssemblyMaterialRow();
+        row.setMaterialId(domain.materialId());
+        row.setSessionId(domain.sessionId());
+        row.setTenantId(domain.tenantId());
+        row.setMaterialType(domain.materialType().name());
+        row.setObjectKey(domain.objectKey());
+        row.setOriginalFileName(domain.originalFileName());
+        row.setContentType(domain.contentType());
+        row.setFileSize(domain.fileSize());
+        row.setEtag(domain.etag());
+        row.setContentSha256(domain.contentSha256());
+        row.setUploadedByAccountId(domain.uploadedByAccountId());
+        row.setUploadedByUserId(domain.uploadedByUserId());
         return row;
     }
 

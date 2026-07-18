@@ -1,3 +1,4 @@
+// 关联业务：定义业主大会会前材料、公示、投票和结算过程的稳定错误码。
 package com.pangu.interfaces.web.exception;
 
 public enum OwnersAssemblyErrorCode implements ErrorCode {
@@ -12,7 +13,8 @@ public enum OwnersAssemblyErrorCode implements ErrorCode {
     OPID_NOT_OWNED(42608, "该房产身份不属于当前用户", 403, ErrorType.BIZ, false),
     OPID_OUT_OF_SCOPE(42609, "该房产不在本表决范围内或不具备投票资格", 403, ErrorType.BIZ, false),
     VOTE_ALREADY_CAST(42610, "该房产已有有效票，不能重复投票", 409, ErrorType.BIZ, false),
-    CONCURRENT_MODIFICATION(42611, "业主大会表决状态已被并发修改，请刷新后重试", 409, ErrorType.SYSTEM, true);
+    CONCURRENT_MODIFICATION(42611, "业主大会表决状态已被并发修改，请刷新后重试", 409, ErrorType.SYSTEM, true),
+    STORAGE_UNAVAILABLE(42612, "业主大会原始材料存储暂不可用，请稍后重试", 503, ErrorType.SYSTEM, true);
 
     private final int code;
     private final String message;

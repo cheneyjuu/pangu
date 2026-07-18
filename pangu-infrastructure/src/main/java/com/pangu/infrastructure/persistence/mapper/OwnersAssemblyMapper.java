@@ -1,8 +1,11 @@
+// 关联业务：映射业主大会会前事项、材料、公示安排、纸质送达和投票记录的数据库访问。
 package com.pangu.infrastructure.persistence.mapper;
 
 import com.pangu.infrastructure.persistence.entity.OwnersAssemblyDeliveryRecordRow;
+import com.pangu.infrastructure.persistence.entity.OwnersAssemblyMaterialRow;
 import com.pangu.infrastructure.persistence.entity.OwnersAssemblyPackageRow;
 import com.pangu.infrastructure.persistence.entity.OwnersAssemblySessionRow;
+import com.pangu.infrastructure.persistence.entity.OwnersAssemblySubjectDraftRow;
 import com.pangu.infrastructure.persistence.entity.OwnersAssemblyVoteRecordRow;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -18,6 +21,12 @@ public interface OwnersAssemblyMapper {
     OwnersAssemblySessionRow findSession(@Param("sessionId") Long sessionId,
                                          @Param("tenantId") Long tenantId);
 
+    List<OwnersAssemblySessionRow> listSessions(@Param("tenantId") Long tenantId);
+
+    int updateSessionStatus(@Param("sessionId") Long sessionId,
+                            @Param("tenantId") Long tenantId,
+                            @Param("status") String status);
+
     int insertPackage(OwnersAssemblyPackageRow row);
 
     OwnersAssemblyPackageRow findPackage(@Param("packageId") Long packageId,
@@ -25,6 +34,9 @@ public interface OwnersAssemblyMapper {
 
     OwnersAssemblyPackageRow findPackageForUpdate(@Param("packageId") Long packageId,
                                                   @Param("tenantId") Long tenantId);
+
+    OwnersAssemblyPackageRow findLatestPackageBySession(@Param("sessionId") Long sessionId,
+                                                         @Param("tenantId") Long tenantId);
 
     OwnersAssemblyPackageRow findPackageBySubjectId(@Param("subjectId") Long subjectId);
 
@@ -34,6 +46,20 @@ public interface OwnersAssemblyMapper {
 
     List<Long> listSubjectIds(@Param("packageId") Long packageId,
                               @Param("tenantId") Long tenantId);
+
+    int insertSubjectDraft(OwnersAssemblySubjectDraftRow row);
+
+    List<OwnersAssemblySubjectDraftRow> listSubjectDrafts(@Param("sessionId") Long sessionId,
+                                                          @Param("tenantId") Long tenantId);
+
+    int insertMaterial(OwnersAssemblyMaterialRow row);
+
+    OwnersAssemblyMaterialRow findMaterial(@Param("materialId") Long materialId,
+                                           @Param("sessionId") Long sessionId,
+                                           @Param("tenantId") Long tenantId);
+
+    List<OwnersAssemblyMaterialRow> listMaterials(@Param("sessionId") Long sessionId,
+                                                   @Param("tenantId") Long tenantId);
 
     int lockPackage(@Param("packageId") Long packageId,
                     @Param("tenantId") Long tenantId,
