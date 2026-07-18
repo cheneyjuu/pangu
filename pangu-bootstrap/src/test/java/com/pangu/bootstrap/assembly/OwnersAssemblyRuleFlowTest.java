@@ -233,10 +233,17 @@ class OwnersAssemblyRuleFlowTest {
 
     private Map<String, Object> countingRule() {
         return Map.of(
-                "participationOwnerRatio", 0.5,
-                "participationAreaRatio", 0.5,
-                "approvalOwnerRatio", 0.5,
-                "approvalAreaRatio", 0.5);
+                "participationOwnerThreshold", threshold(1, 2, "AT_LEAST"),
+                "participationAreaThreshold", threshold(1, 2, "AT_LEAST"),
+                "approvalOwnerThreshold", threshold(1, 2, "GREATER_THAN"),
+                "approvalAreaThreshold", threshold(1, 2, "GREATER_THAN"));
+    }
+
+    private Map<String, Object> threshold(int numerator, int denominator, String comparison) {
+        return Map.of(
+                "numerator", numerator,
+                "denominator", denominator,
+                "comparison", comparison);
     }
 
     private Map<String, Object> allSourceReferences() {

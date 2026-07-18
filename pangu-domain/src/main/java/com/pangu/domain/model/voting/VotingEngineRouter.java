@@ -24,6 +24,14 @@ public interface VotingEngineRouter {
                                                   Denominator denom);
 
     /**
+     * 以冻结规则快照结算；仅适用于已明确计票规则的一般、重大决议。
+     */
+    VotingResult<? extends VotingSubject> settle(VotingSubject subject,
+                                                  List<VoteItem> validVotes,
+                                                  Denominator denom,
+                                                  VotingSettlementPolicy settlementPolicy);
+
+    /**
      * 议题类型未注册引擎时抛出（如 ELECTION 引擎需 ElectionSubject 加载链路尚未接入）。
      */
     class UnsupportedSubjectTypeException extends RuntimeException {

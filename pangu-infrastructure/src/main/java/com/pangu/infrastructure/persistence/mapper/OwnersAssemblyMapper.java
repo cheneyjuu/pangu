@@ -4,6 +4,7 @@ package com.pangu.infrastructure.persistence.mapper;
 import com.pangu.infrastructure.persistence.entity.OwnersAssemblyDeliveryRecordRow;
 import com.pangu.infrastructure.persistence.entity.OwnersAssemblyMaterialRow;
 import com.pangu.infrastructure.persistence.entity.OwnersAssemblyPackageRow;
+import com.pangu.infrastructure.persistence.entity.OwnersAssemblyRuleSnapshotRow;
 import com.pangu.infrastructure.persistence.entity.OwnersAssemblySessionRow;
 import com.pangu.infrastructure.persistence.entity.OwnersAssemblySubjectDraftRow;
 import com.pangu.infrastructure.persistence.entity.OwnersAssemblyVoteRecordRow;
@@ -21,6 +22,9 @@ public interface OwnersAssemblyMapper {
     OwnersAssemblySessionRow findSession(@Param("sessionId") Long sessionId,
                                          @Param("tenantId") Long tenantId);
 
+    OwnersAssemblySessionRow findSessionForUpdate(@Param("sessionId") Long sessionId,
+                                                  @Param("tenantId") Long tenantId);
+
     List<OwnersAssemblySessionRow> listSessions(@Param("tenantId") Long tenantId);
 
     int updateSessionStatus(@Param("sessionId") Long sessionId,
@@ -28,6 +32,14 @@ public interface OwnersAssemblyMapper {
                             @Param("status") String status);
 
     int insertPackage(OwnersAssemblyPackageRow row);
+
+    int insertRuleSnapshot(OwnersAssemblyRuleSnapshotRow row);
+
+    OwnersAssemblyRuleSnapshotRow findRuleSnapshotBySession(@Param("sessionId") Long sessionId,
+                                                             @Param("tenantId") Long tenantId);
+
+    OwnersAssemblyRuleSnapshotRow findRuleSnapshot(@Param("ruleSnapshotId") Long ruleSnapshotId,
+                                                    @Param("tenantId") Long tenantId);
 
     OwnersAssemblyPackageRow findPackage(@Param("packageId") Long packageId,
                                          @Param("tenantId") Long tenantId);

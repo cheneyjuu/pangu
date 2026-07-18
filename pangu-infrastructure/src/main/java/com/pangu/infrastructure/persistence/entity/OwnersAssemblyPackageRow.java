@@ -9,6 +9,7 @@ public class OwnersAssemblyPackageRow {
     private Long packageId;
     private Long sessionId;
     private Long tenantId;
+    private Long ruleSnapshotId;
     private Integer packageVersion;
     private String status;
     private String votingChannelPolicy;

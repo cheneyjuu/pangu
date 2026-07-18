@@ -18,6 +18,7 @@
         <id property="packageId" column="package_id"/>
         <result property="sessionId" column="session_id"/>
         <result property="tenantId" column="tenant_id"/>
+        <result property="ruleSnapshotId" column="rule_snapshot_id"/>
         <result property="packageVersion" column="package_version"/>
         <result property="status" column="status"/>
         <result property="votingChannelPolicy" column="voting_channel_policy"/>
@@ -33,6 +34,23 @@
         <result property="voteEndAt" column="vote_end_at"/>
         <result property="lockedByUserId" column="locked_by_user_id"/>
         <result property="lockedAt" column="locked_at"/>
+    </resultMap>
+
+    <resultMap id="RuleSnapshotMap" type="com.pangu.infrastructure.persistence.entity.OwnersAssemblyRuleSnapshotRow">
+        <id property="ruleSnapshotId" column="rule_snapshot_id"/>
+        <result property="sessionId" column="session_id"/>
+        <result property="tenantId" column="tenant_id"/>
+        <result property="ruleId" column="rule_id"/>
+        <result property="ruleName" column="rule_name"/>
+        <result property="ruleVersion" column="rule_version"/>
+        <result property="effectiveDate" column="effective_date"/>
+        <result property="sourceFileName" column="source_file_name"/>
+        <result property="sourceSha256" column="source_sha256"/>
+        <result property="configurationJson" column="configuration_json"/>
+        <result property="configurationSha256" column="configuration_sha256"/>
+        <result property="snapshottedByAccountId" column="snapshotted_by_account_id"/>
+        <result property="snapshottedByUserId" column="snapshotted_by_user_id"/>
+        <result property="createTime" column="create_time"/>
     </resultMap>
 
     <resultMap id="SubjectDraftMap" type="com.pangu.infrastructure.persistence.entity.OwnersAssemblySubjectDraftRow">
@@ -110,6 +128,14 @@
           AND tenant_id = #{tenantId}
     </select>
 
+    <select id="findSessionForUpdate" resultMap="SessionMap">
+        SELECT session_id, tenant_id, title, preparation_mode, status, created_by_user_id, create_time
+        FROM t_owners_assembly_session
+        WHERE session_id = #{sessionId}
+          AND tenant_id = #{tenantId}
+        FOR UPDATE
+    </select>
+
     <select id="listSessions" resultMap="SessionMap">
         SELECT session_id, tenant_id, title, preparation_mode, status, created_by_user_id, create_time
         FROM t_owners_assembly_session
@@ -126,15 +152,45 @@
 
     <insert id="insertPackage" useGeneratedKeys="true" keyProperty="packageId" keyColumn="package_id">
         INSERT INTO t_owners_assembly_package (
-            session_id, tenant_id, package_version, status, voting_channel_policy,
+            session_id, tenant_id, rule_snapshot_id, package_version, status, voting_channel_policy,
             public_notice_days, announcement_hash, attachment_manifest_hash,
             ballot_template_hash, electronic_seal_hash, vote_start_at, vote_end_at
         ) VALUES (
-            #{sessionId}, #{tenantId}, #{packageVersion}, #{status}, #{votingChannelPolicy},
+            #{sessionId}, #{tenantId}, #{ruleSnapshotId}, #{packageVersion}, #{status}, #{votingChannelPolicy},
             #{publicNoticeDays}, #{announcementHash}, #{attachmentManifestHash},
             #{ballotTemplateHash}, #{electronicSealHash}, #{voteStartAt}, #{voteEndAt}
         )
     </insert>
+
+    <insert id="insertRuleSnapshot" useGeneratedKeys="true" keyProperty="ruleSnapshotId" keyColumn="rule_snapshot_id">
+        INSERT INTO t_owners_assembly_rule_snapshot (
+            session_id, tenant_id, rule_id, rule_name, rule_version, effective_date,
+            source_file_name, source_sha256, configuration_json, configuration_sha256,
+            snapshotted_by_account_id, snapshotted_by_user_id
+        ) VALUES (
+            #{sessionId}, #{tenantId}, #{ruleId}, #{ruleName}, #{ruleVersion}, #{effectiveDate},
+            #{sourceFileName}, #{sourceSha256}, CAST(#{configurationJson} AS jsonb), #{configurationSha256},
+            #{snapshottedByAccountId}, #{snapshottedByUserId}
+        )
+    </insert>
+
+    <select id="findRuleSnapshotBySession" resultMap="RuleSnapshotMap">
+        SELECT rule_snapshot_id, session_id, tenant_id, rule_id, rule_name, rule_version, effective_date,
+               source_file_name, source_sha256, configuration_json::text AS configuration_json,
+               configuration_sha256, snapshotted_by_account_id, snapshotted_by_user_id, create_time
+        FROM t_owners_assembly_rule_snapshot
+        WHERE session_id = #{sessionId}
+          AND tenant_id = #{tenantId}
+    </select>
+
+    <select id="findRuleSnapshot" resultMap="RuleSnapshotMap">
+        SELECT rule_snapshot_id, session_id, tenant_id, rule_id, rule_name, rule_version, effective_date,
+               source_file_name, source_sha256, configuration_json::text AS configuration_json,
+               configuration_sha256, snapshotted_by_account_id, snapshotted_by_user_id, create_time
+        FROM t_owners_assembly_rule_snapshot
+        WHERE rule_snapshot_id = #{ruleSnapshotId}
+          AND tenant_id = #{tenantId}
+    </select>
 
     <select id="findPackage" resultMap="PackageMap">
         SELECT *

@@ -1,7 +1,6 @@
 package com.pangu.domain.model.voting;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.util.List;
 
 /**
@@ -10,11 +9,23 @@ import java.util.List;
  */
 public class MajorDecisionEngine extends AbstractVotingEngine<VotingSubject, VotingResult<VotingSubject>> {
 
+    private static final VotingDecisionRule DEFAULT_RULE = new VotingDecisionRule(
+            new VotingThreshold(2, 3, VotingThreshold.Comparison.AT_LEAST),
+            new VotingThreshold(2, 3, VotingThreshold.Comparison.AT_LEAST),
+            new VotingThreshold(3, 4, VotingThreshold.Comparison.AT_LEAST),
+            new VotingThreshold(3, 4, VotingThreshold.Comparison.AT_LEAST));
+
+    @Override
+    protected VotingDecisionRule defaultDecisionRule() {
+        return DEFAULT_RULE;
+    }
+
     @Override
     protected VotingResult<VotingSubject> calculateResult(VotingSubject subject, List<VoteItem> validVotes, 
                                                           BigDecimal totalArea, long totalOwnerCount, 
                                                           BigDecimal participatingArea, long participatingOwnerCount, 
-                                                          boolean quorumSatisfied) {
+                                                          boolean quorumSatisfied,
+                                                          VotingDecisionRule decisionRule) {
         
         // 1. 基于 Stream 计算选择 SUPPORT 的专有面积总和
         BigDecimal supportArea = validVotes.stream()
@@ -30,11 +41,10 @@ public class MajorDecisionEngine extends AbstractVotingEngine<VotingSubject, Vot
         boolean passed = false;
 
         if (quorumSatisfied && participatingOwnerCount > 0 && participatingArea.compareTo(BigDecimal.ZERO) > 0) {
-            // 赞成面积比率必须达到 3/4 及以上 (>= 75%)，即 4 * supportArea >= 3 * participatingArea
-            boolean areaPassed = supportArea.multiply(new BigDecimal("4"))
-                    .compareTo(participatingArea.multiply(new BigDecimal("3"))) >= 0;
-            // 赞成人数比率必须达到 3/4 及以上 (>= 75%)，即 4 * supportOwnerCount >= 3 * participatingOwnerCount
-            boolean ownerPassed = supportOwnerCount * 4 >= participatingOwnerCount * 3;
+            boolean areaPassed = decisionRule.approvalAreaThreshold()
+                    .isSatisfied(supportArea, participatingArea);
+            boolean ownerPassed = decisionRule.approvalOwnerThreshold()
+                    .isSatisfied(supportOwnerCount, participatingOwnerCount);
 
             passed = areaPassed && ownerPassed;
         }

@@ -1,7 +1,6 @@
 package com.pangu.domain.model.voting;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.util.List;
 
 /**
@@ -9,11 +8,23 @@ import java.util.List;
  */
 public class GeneralDecisionEngine extends AbstractVotingEngine<VotingSubject, VotingResult<VotingSubject>> {
 
+    private static final VotingDecisionRule DEFAULT_RULE = new VotingDecisionRule(
+            new VotingThreshold(2, 3, VotingThreshold.Comparison.AT_LEAST),
+            new VotingThreshold(2, 3, VotingThreshold.Comparison.AT_LEAST),
+            new VotingThreshold(1, 2, VotingThreshold.Comparison.GREATER_THAN),
+            new VotingThreshold(1, 2, VotingThreshold.Comparison.GREATER_THAN));
+
+    @Override
+    protected VotingDecisionRule defaultDecisionRule() {
+        return DEFAULT_RULE;
+    }
+
     @Override
     protected VotingResult<VotingSubject> calculateResult(VotingSubject subject, List<VoteItem> validVotes, 
                                                           BigDecimal totalArea, long totalOwnerCount, 
                                                           BigDecimal participatingArea, long participatingOwnerCount, 
-                                                          boolean quorumSatisfied) {
+                                                          boolean quorumSatisfied,
+                                                          VotingDecisionRule decisionRule) {
         
         // 1. 基于 Stream 函数式计算所有选择 SUPPORT 的投票专有面积总和
         BigDecimal supportArea = validVotes.stream()
@@ -29,10 +40,10 @@ public class GeneralDecisionEngine extends AbstractVotingEngine<VotingSubject, V
         boolean passed = false;
 
         if (quorumSatisfied && participatingOwnerCount > 0 && participatingArea.compareTo(BigDecimal.ZERO) > 0) {
-            // 赞成面积比率必须过半数 (> 50%)，即 2 * supportArea > participatingArea
-            boolean areaPassed = supportArea.multiply(new BigDecimal("2")).compareTo(participatingArea) > 0;
-            // 赞成人数比率必须过半数 (> 50%)，即 2 * supportOwnerCount > participatingOwnerCount
-            boolean ownerPassed = supportOwnerCount * 2 > participatingOwnerCount;
+            boolean areaPassed = decisionRule.approvalAreaThreshold()
+                    .isSatisfied(supportArea, participatingArea);
+            boolean ownerPassed = decisionRule.approvalOwnerThreshold()
+                    .isSatisfied(supportOwnerCount, participatingOwnerCount);
 
             passed = areaPassed && ownerPassed;
         }

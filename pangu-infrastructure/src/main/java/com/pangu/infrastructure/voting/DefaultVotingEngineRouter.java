@@ -10,6 +10,7 @@ import com.pangu.domain.model.voting.SubjectType;
 import com.pangu.domain.model.voting.VoteItem;
 import com.pangu.domain.model.voting.VotingEngineRouter;
 import com.pangu.domain.model.voting.VotingResult;
+import com.pangu.domain.model.voting.VotingSettlementPolicy;
 import com.pangu.domain.model.voting.VotingSubject;
 import com.pangu.domain.repository.ElectionCandidateRegistry;
 import lombok.RequiredArgsConstructor;
@@ -56,6 +57,31 @@ public class DefaultVotingEngineRouter implements VotingEngineRouter {
                         electionCandidateRegistry.findApprovedCandidates(electionSubject.getSubjectId()));
                 yield electionVotingEngine.settle(electionSubject, validVotes, denom);
             }
+        };
+    }
+
+    @Override
+    public VotingResult<? extends VotingSubject> settle(VotingSubject subject,
+                                                         List<VoteItem> validVotes,
+                                                         Denominator denom,
+                                                         VotingSettlementPolicy settlementPolicy) {
+        if (settlementPolicy == null) {
+            return settle(subject, validVotes, denom);
+        }
+        settlementPolicy.requireExecutable();
+        SubjectType type = subject.getSubjectType();
+        if (type == null) {
+            throw new IllegalArgumentException("subject.subjectType must not be null");
+        }
+        return switch (type) {
+            case GENERAL -> ((AbstractVotingEngine<VotingSubject, VotingResult<VotingSubject>>)
+                    (AbstractVotingEngine<?, ?>) generalDecisionEngine).settle(
+                            subject, validVotes, denom, settlementPolicy.decisionRule());
+            case MAJOR -> ((AbstractVotingEngine<VotingSubject, VotingResult<VotingSubject>>)
+                    (AbstractVotingEngine<?, ?>) majorDecisionEngine).settle(
+                            subject, validVotes, denom, settlementPolicy.decisionRule());
+            case ELECTION -> throw new UnsupportedSubjectTypeException(
+                    "业主大会议事规则快照不能用于业委会选举事项");
         };
     }
 }

@@ -4,15 +4,10 @@ package com.pangu.interfaces.web.controller;
 import com.pangu.application.assembly.OwnersAssemblyApplicationException;
 import com.pangu.application.assembly.OwnersAssemblyApplicationService;
 import com.pangu.application.assembly.OwnersAssemblyWorkspace;
-import com.pangu.application.assembly.command.AddAssemblySubjectCommand;
-import com.pangu.application.assembly.command.CastAssemblyOnlineVoteCommand;
-import com.pangu.application.assembly.command.CastAssemblyPaperVoteCommand;
 import com.pangu.application.assembly.command.CastAssemblyPaperVoteWithMaterialCommand;
 import com.pangu.application.assembly.command.ConfirmAssemblyArrangementCommand;
-import com.pangu.application.assembly.command.CreateBallotPackageCommand;
 import com.pangu.application.assembly.command.CreateAssemblySubjectDraftCommand;
 import com.pangu.application.assembly.command.CreateOwnersAssemblySessionCommand;
-import com.pangu.application.assembly.command.RecordAssemblyDeliveryCommand;
 import com.pangu.application.assembly.command.RecordAssemblyDeliveryWithMaterialCommand;
 import com.pangu.application.assembly.command.UploadOwnersAssemblyMaterialCommand;
 import com.pangu.domain.model.assembly.OwnersAssemblyMaterial.MaterialType;
@@ -20,28 +15,21 @@ import com.pangu.domain.model.assembly.OwnersAssemblyDeliveryRecord;
 import com.pangu.domain.model.assembly.OwnersAssemblyPackage;
 import com.pangu.domain.model.assembly.OwnersAssemblySession;
 import com.pangu.domain.model.assembly.OwnersAssemblyVoteRecord;
-import com.pangu.domain.model.voting.VotingSubject;
 import com.pangu.interfaces.security.SecurityUtils;
-import com.pangu.interfaces.web.controller.dto.assembly.AddAssemblySubjectRequest;
-import com.pangu.interfaces.web.controller.dto.assembly.CastAssemblyOnlineVoteRequest;
-import com.pangu.interfaces.web.controller.dto.assembly.CastAssemblyPaperVoteRequest;
 import com.pangu.interfaces.web.controller.dto.assembly.CastAssemblyPaperVoteWithMaterialRequest;
 import com.pangu.interfaces.web.controller.dto.assembly.ConfirmAssemblyArrangementRequest;
-import com.pangu.interfaces.web.controller.dto.assembly.CreateBallotPackageRequest;
 import com.pangu.interfaces.web.controller.dto.assembly.CreateAssemblySubjectDraftRequest;
 import com.pangu.interfaces.web.controller.dto.assembly.CreateOwnersAssemblySessionRequest;
 import com.pangu.interfaces.web.controller.dto.assembly.OwnersAssemblyArrangementResponse;
 import com.pangu.interfaces.web.controller.dto.assembly.OwnersAssemblyDeliveryResponse;
 import com.pangu.interfaces.web.controller.dto.assembly.OwnersAssemblyFormalSubjectResponse;
 import com.pangu.interfaces.web.controller.dto.assembly.OwnersAssemblyMaterialResponse;
-import com.pangu.interfaces.web.controller.dto.assembly.OwnersAssemblyPackageResponse;
 import com.pangu.interfaces.web.controller.dto.assembly.OwnersAssemblySessionResponse;
 import com.pangu.interfaces.web.controller.dto.assembly.OwnersAssemblySubjectDraftResponse;
 import com.pangu.interfaces.web.controller.dto.assembly.OwnersAssemblyVoteResponse;
-import com.pangu.interfaces.web.controller.dto.assembly.RecordAssemblyDeliveryRequest;
+import com.pangu.interfaces.web.controller.dto.assembly.OwnersAssemblyRuleSnapshotResponse;
 import com.pangu.interfaces.web.controller.dto.assembly.RecordAssemblyDeliveryWithMaterialRequest;
 import com.pangu.interfaces.web.controller.dto.assembly.OwnersAssemblyWorkspaceResponse;
-import com.pangu.interfaces.web.controller.dto.voting.AdminSubjectResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -139,7 +127,6 @@ public class OwnersAssemblyController extends BaseController {
         OwnersAssemblyPackage arrangement = service.confirmArrangement(new ConfirmAssemblyArrangementCommand(
                 sessionId,
                 requireTenantId(),
-                request.publicNoticeDays(),
                 request.voteStartAt(),
                 request.voteEndAt(),
                 request.publicNoticeMaterialId(),
@@ -202,118 +189,6 @@ public class OwnersAssemblyController extends BaseController {
                 .body(success("纸质选票已录入", OwnersAssemblyVoteResponse.from(vote)));
     }
 
-    @PostMapping("/owners-assemblies/{sessionId}/packages")
-    @PreAuthorize("hasAuthority('voting:subject:create')")
-    public ResponseEntity<Result<OwnersAssemblyPackageResponse>> createPackage(
-            @PathVariable("sessionId") Long sessionId,
-            @Valid @RequestBody CreateBallotPackageRequest request) {
-        OwnersAssemblyPackage ballotPackage = service.createPackage(new CreateBallotPackageCommand(
-                sessionId,
-                requireTenantId(),
-                request.votingChannelPolicy(),
-                request.publicNoticeDays(),
-                request.announcementHash(),
-                request.attachmentManifestHash(),
-                request.ballotTemplateHash(),
-                request.electronicSealHash(),
-                request.voteStartAt(),
-                request.voteEndAt()));
-        return ResponseEntity.status(HttpStatus.CREATED)
-                .body(success("表决包已创建", OwnersAssemblyPackageResponse.from(ballotPackage)));
-    }
-
-    @PostMapping("/owners-assembly-packages/{packageId}/subjects")
-    @PreAuthorize("hasAuthority('voting:subject:create')")
-    public ResponseEntity<Result<AdminSubjectResponse>> addSubject(
-            @PathVariable("packageId") Long packageId,
-            @Valid @RequestBody AddAssemblySubjectRequest request) {
-        VotingSubject subject = service.addSubject(new AddAssemblySubjectCommand(
-                packageId,
-                requireTenantId(),
-                request.subjectType(),
-                request.scope(),
-                request.scopeReferenceId(),
-                request.title(),
-                request.content(),
-                requireUserId(),
-                request.partyRatioFloor()));
-        return ResponseEntity.status(HttpStatus.CREATED)
-                .body(success("表决事项已加入表决包", AdminSubjectResponse.from(subject)));
-    }
-
-    @PostMapping("/owners-assembly-packages/{packageId}/lock")
-    @PreAuthorize("hasAuthority('voting:subject:publish')")
-    public Result<OwnersAssemblyPackageResponse> lockPackage(@PathVariable("packageId") Long packageId) {
-        return success("表决包已锁定并进入公示",
-                OwnersAssemblyPackageResponse.from(service.lockPackage(packageId, requireTenantId())));
-    }
-
-    @PostMapping("/owners-assembly-packages/{packageId}/open-voting")
-    @PreAuthorize("hasAuthority('voting:subject:publish')")
-    public Result<OwnersAssemblyPackageResponse> openVoting(@PathVariable("packageId") Long packageId) {
-        return success("表决包已进入投票",
-                OwnersAssemblyPackageResponse.from(service.openVoting(packageId, requireTenantId())));
-    }
-
-    @PostMapping("/owners-assembly-packages/{packageId}/deliveries")
-    @PreAuthorize("hasAuthority('voting:subject:audit')")
-    public ResponseEntity<Result<OwnersAssemblyDeliveryResponse>> recordDelivery(
-            @PathVariable("packageId") Long packageId,
-            @Valid @RequestBody RecordAssemblyDeliveryRequest request) {
-        OwnersAssemblyDeliveryRecord delivery = service.recordDelivery(new RecordAssemblyDeliveryCommand(
-                packageId,
-                requireTenantId(),
-                request.opid(),
-                request.deliveryChannel(),
-                request.deliveryMethod(),
-                request.evidenceHash(),
-                requireUserId()));
-        return ResponseEntity.status(HttpStatus.CREATED)
-                .body(success("送达留痕已记录", OwnersAssemblyDeliveryResponse.from(delivery)));
-    }
-
-    @PostMapping("/owners-assembly-packages/{packageId}/paper-votes")
-    @PreAuthorize("hasAuthority('voting:subject:audit')")
-    public ResponseEntity<Result<OwnersAssemblyVoteResponse>> castPaperVote(
-            @PathVariable("packageId") Long packageId,
-            @Valid @RequestBody CastAssemblyPaperVoteRequest request) {
-        OwnersAssemblyVoteRecord vote = service.castPaperVote(new CastAssemblyPaperVoteCommand(
-                packageId,
-                request.subjectId(),
-                requireTenantId(),
-                request.opid(),
-                request.choice(),
-                request.ballotFileHash(),
-                requireUserId()));
-        return ResponseEntity.status(HttpStatus.CREATED)
-                .body(success("纸质投票已录入", OwnersAssemblyVoteResponse.from(vote)));
-    }
-
-    @PostMapping("/me/owners-assembly-packages/{packageId}/online-votes")
-    @PreAuthorize("isAuthenticated()")
-    public ResponseEntity<Result<OwnersAssemblyVoteResponse>> castOnlineVote(
-            @PathVariable("packageId") Long packageId,
-            @Valid @RequestBody CastAssemblyOnlineVoteRequest request) {
-        OwnersAssemblyVoteRecord vote = service.castOnlineVote(new CastAssemblyOnlineVoteCommand(
-                packageId,
-                request.subjectId(),
-                requireTenantId(),
-                request.opid(),
-                requireUid(),
-                request.choice(),
-                request.ballotFileHash(),
-                request.signatureHash()));
-        return ResponseEntity.status(HttpStatus.CREATED)
-                .body(success("线上投票成功", OwnersAssemblyVoteResponse.from(vote)));
-    }
-
-    @PostMapping("/owners-assembly-packages/{packageId}/settle")
-    @PreAuthorize("hasAuthority('voting:subject:audit')")
-    public Result<OwnersAssemblyPackageResponse> settle(@PathVariable("packageId") Long packageId) {
-        return success("表决包已结算",
-                OwnersAssemblyPackageResponse.from(service.settlePackage(packageId, requireTenantId())));
-    }
-
     private Long requireTenantId() {
         Long tenantId = SecurityUtils.getTenantId();
         if (tenantId == null) {
@@ -330,14 +205,6 @@ public class OwnersAssemblyController extends BaseController {
         return userId;
     }
 
-    private Long requireUid() {
-        Long uid = SecurityUtils.getUid();
-        if (uid == null) {
-            throw new OwnersAssemblyApplicationException(FORBIDDEN, "未识别到业主身份");
-        }
-        return uid;
-    }
-
     private MaterialType parseMaterialType(String value) {
         try {
             return MaterialType.valueOf(value == null ? "" : value.trim().toUpperCase());
@@ -351,6 +218,7 @@ public class OwnersAssemblyController extends BaseController {
         return new OwnersAssemblyWorkspaceResponse(
                 OwnersAssemblySessionResponse.from(workspace.assembly()),
                 OwnersAssemblyArrangementResponse.from(workspace.arrangement()),
+                OwnersAssemblyRuleSnapshotResponse.from(workspace.ruleSnapshot()),
                 workspace.draftSubjects().stream().map(OwnersAssemblySubjectDraftResponse::from).toList(),
                 workspace.formalSubjects().stream().map(OwnersAssemblyFormalSubjectResponse::from).toList(),
                 workspace.materials().stream().map(OwnersAssemblyMaterialResponse::from).toList());

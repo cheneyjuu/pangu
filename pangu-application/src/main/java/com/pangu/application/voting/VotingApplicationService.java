@@ -15,6 +15,7 @@ import com.pangu.domain.model.voting.VoteItem;
 import com.pangu.domain.model.voting.VotingDenominatorResolver;
 import com.pangu.domain.model.voting.VotingEngineRouter;
 import com.pangu.domain.model.voting.VotingResult;
+import com.pangu.domain.model.voting.VotingSettlementPolicy;
 import com.pangu.domain.model.voting.VotingSubject;
 import com.pangu.domain.repository.VoteItemRepository;
 import com.pangu.domain.repository.VotingResultRepository;
@@ -73,6 +74,20 @@ public class VotingApplicationService {
      */
     @Transactional
     public VotingResultRepository.Snapshot settle(SettleSubjectCommand cmd) {
+        return settle(cmd, null);
+    }
+
+    /**
+     * 以业务流程冻结的计票规则结算议题。
+     *
+     * <p>传入规则快照时，结果摘要和司法链存证必须同时记录来源，避免以后把通用默认门槛
+     * 误解释为当时会议的实际议事规则。
+     */
+    @Transactional
+    public VotingResultRepository.Snapshot settle(SettleSubjectCommand cmd, VotingSettlementPolicy settlementPolicy) {
+        if (settlementPolicy != null) {
+            settlementPolicy.requireExecutable();
+        }
         // 1. 行锁 + 幂等校验
         VotingSubject subject = subjectRepository.findByIdForUpdate(cmd.subjectId())
                 .orElseThrow(() -> new VotingApplicationException(
@@ -113,7 +128,9 @@ public class VotingApplicationService {
         // 5. 引擎结算（按议题类型路由）
         VotingResult<? extends VotingSubject> result;
         try {
-            result = engineRouter.settle(subject, votes, denom);
+            result = settlementPolicy == null
+                    ? engineRouter.settle(subject, votes, denom)
+                    : engineRouter.settle(subject, votes, denom, settlementPolicy);
         } catch (VotingEngineRouter.UnsupportedSubjectTypeException e) {
             throw new VotingApplicationException(
                     VotingApplicationException.Reason.SUBJECT_TYPE_NOT_SUPPORTED,
@@ -124,14 +141,14 @@ public class VotingApplicationService {
         int newSettleVersion = resultRepository.findBySubjectId(cmd.subjectId())
                 .map(s -> s.statisticsVersion() + 1)
                 .orElse(1);
-        String payloadJson = serializeResult(result, effectiveRatio, denom, newSettleVersion);
+        String payloadJson = serializeResult(result, effectiveRatio, denom, newSettleVersion, settlementPolicy);
         String localHash = PayloadHasher.sha256Hex(payloadJson);
         AttestationPayload payload = new AttestationPayload(
                 "VOTING_RESULT_ATTEST",
                 cmd.subjectId(),
                 subject.getTenantId(),
                 localHash,
-                buildBusinessPayload(result, effectiveRatio, denom, newSettleVersion),
+                buildBusinessPayload(result, effectiveRatio, denom, newSettleVersion, settlementPolicy),
                 Instant.now());
         AttestationReceipt receipt;
         try {
@@ -172,7 +189,8 @@ public class VotingApplicationService {
     private String serializeResult(VotingResult<? extends VotingSubject> result,
                                     BigDecimal effectiveRatio,
                                     Denominator denom,
-                                    int statisticsVersion) {
+                                    int statisticsVersion,
+                                    VotingSettlementPolicy settlementPolicy) {
         StringBuilder sb = new StringBuilder(256);
         sb.append('{');
         appendJson(sb, "subjectId", result.getSubject().getSubjectId()); sb.append(',');
@@ -190,6 +208,11 @@ public class VotingApplicationService {
         appendJson(sb, "effectivePartyRatioFloor", effectiveRatio.toPlainString()); sb.append(',');
         appendJson(sb, "denominatorSnapshotId", denom.snapshotId()); sb.append(',');
         appendJson(sb, "denominatorAggregateHash", denom.snapshotHash());
+        if (settlementPolicy != null) {
+            sb.append(',');
+            appendJson(sb, "ownersAssemblyRuleSnapshotId", settlementPolicy.ruleSnapshotId()); sb.append(',');
+            appendJson(sb, "ownersAssemblyRuleConfigurationSha256", settlementPolicy.ruleConfigurationSha256());
+        }
         sb.append('}');
         return sb.toString();
     }
@@ -197,7 +220,8 @@ public class VotingApplicationService {
     private Map<String, Object> buildBusinessPayload(VotingResult<? extends VotingSubject> result,
                                                       BigDecimal effectiveRatio,
                                                       Denominator denom,
-                                                      int statisticsVersion) {
+                                                      int statisticsVersion,
+                                                      VotingSettlementPolicy settlementPolicy) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("subjectId", result.getSubject().getSubjectId());
         payload.put("subjectType", result.getSubject().getSubjectType() == null
@@ -208,6 +232,10 @@ public class VotingApplicationService {
         payload.put("effectivePartyRatioFloor", effectiveRatio.toPlainString());
         payload.put("denominatorSnapshotId", denom.snapshotId());
         payload.put("denominatorAggregateHash", denom.snapshotHash());
+        if (settlementPolicy != null) {
+            payload.put("ownersAssemblyRuleSnapshotId", settlementPolicy.ruleSnapshotId());
+            payload.put("ownersAssemblyRuleConfigurationSha256", settlementPolicy.ruleConfigurationSha256());
+        }
         return payload;
     }
 

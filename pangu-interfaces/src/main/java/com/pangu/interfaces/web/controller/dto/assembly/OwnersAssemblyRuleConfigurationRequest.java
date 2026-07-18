@@ -2,8 +2,8 @@
 package com.pangu.interfaces.web.controller.dto.assembly;
 
 import com.pangu.domain.model.assembly.OwnersAssemblyRuleConfiguration;
+import com.pangu.domain.model.voting.VotingThreshold;
 
-import java.math.BigDecimal;
 import java.util.EnumMap;
 import java.util.Map;
 import java.util.Set;
@@ -79,17 +79,17 @@ public record OwnersAssemblyRuleConfigurationRequest(
     }
 
     public record CountingRuleRequest(
-            BigDecimal participationOwnerRatio,
-            BigDecimal participationAreaRatio,
-            BigDecimal approvalOwnerRatio,
-            BigDecimal approvalAreaRatio
+            VotingThreshold participationOwnerThreshold,
+            VotingThreshold participationAreaThreshold,
+            VotingThreshold approvalOwnerThreshold,
+            VotingThreshold approvalAreaThreshold
     ) {
         OwnersAssemblyRuleConfiguration.CountingRule toDomain() {
             return new OwnersAssemblyRuleConfiguration.CountingRule(
-                    participationOwnerRatio,
-                    participationAreaRatio,
-                    approvalOwnerRatio,
-                    approvalAreaRatio);
+                    participationOwnerThreshold,
+                    participationAreaThreshold,
+                    approvalOwnerThreshold,
+                    approvalAreaThreshold);
         }
     }
 

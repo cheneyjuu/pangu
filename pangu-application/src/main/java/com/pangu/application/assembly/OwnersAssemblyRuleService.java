@@ -12,6 +12,7 @@ import com.pangu.domain.model.assembly.OwnersAssemblyRule;
 import com.pangu.domain.model.assembly.OwnersAssemblyRuleAudit;
 import com.pangu.domain.model.assembly.OwnersAssemblyRuleConfiguration;
 import com.pangu.domain.model.assembly.OwnersAssemblyRuleFieldConfirmation;
+import com.pangu.domain.model.voting.VotingThreshold;
 import com.pangu.domain.repository.CommitteePositionRepository;
 import com.pangu.domain.repository.OwnersAssemblyRuleDocumentStorage;
 import com.pangu.domain.repository.OwnersAssemblyRuleRepository;
@@ -19,7 +20,6 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.math.BigDecimal;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
@@ -406,10 +406,10 @@ public class OwnersAssemblyRuleService {
             if (rule == null) {
                 throw new OwnersAssemblyApplicationException(PARAM_INVALID, "请明确 " + type + " 事项的计票阈值");
             }
-            validateRatio(rule.participationOwnerRatio(), type + " 参与人数比例");
-            validateRatio(rule.participationAreaRatio(), type + " 参与面积比例");
-            validateRatio(rule.approvalOwnerRatio(), type + " 同意人数比例");
-            validateRatio(rule.approvalAreaRatio(), type + " 同意面积比例");
+            validateThreshold(rule.participationOwnerThreshold(), type + " 参与人数比例");
+            validateThreshold(rule.participationAreaThreshold(), type + " 参与面积比例");
+            validateThreshold(rule.approvalOwnerThreshold(), type + " 同意人数比例");
+            validateThreshold(rule.approvalAreaThreshold(), type + " 同意面积比例");
         }
     }
 
@@ -427,9 +427,12 @@ public class OwnersAssemblyRuleService {
         }
     }
 
-    private void validateRatio(BigDecimal value, String field) {
-        if (value == null || value.compareTo(BigDecimal.ZERO) < 0 || value.compareTo(BigDecimal.ONE) > 0) {
-            throw new OwnersAssemblyApplicationException(PARAM_INVALID, field + " 必须在 0 到 1 之间");
+    private void validateThreshold(VotingThreshold threshold, String field) {
+        if (threshold == null || threshold.numerator() == null || threshold.denominator() == null
+                || threshold.comparison() == null || threshold.numerator() < 0
+                || threshold.denominator() <= 0 || threshold.numerator() > threshold.denominator()) {
+            throw new OwnersAssemblyApplicationException(
+                    PARAM_INVALID, field + " 必须填写有效分子、分母和比较方式");
         }
     }
 

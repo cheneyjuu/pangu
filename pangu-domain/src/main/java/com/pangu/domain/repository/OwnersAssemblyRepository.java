@@ -4,6 +4,7 @@ package com.pangu.domain.repository;
 import com.pangu.domain.model.assembly.OwnersAssemblyDeliveryRecord;
 import com.pangu.domain.model.assembly.OwnersAssemblyMaterial;
 import com.pangu.domain.model.assembly.OwnersAssemblyPackage;
+import com.pangu.domain.model.assembly.OwnersAssemblyRuleSnapshot;
 import com.pangu.domain.model.assembly.OwnersAssemblySession;
 import com.pangu.domain.model.assembly.OwnersAssemblySubjectDraft;
 import com.pangu.domain.model.assembly.OwnersAssemblyVoteRecord;
@@ -18,11 +19,19 @@ public interface OwnersAssemblyRepository {
 
     Optional<OwnersAssemblySession> findSession(Long sessionId, Long tenantId);
 
+    Optional<OwnersAssemblySession> findSessionForUpdate(Long sessionId, Long tenantId);
+
     List<OwnersAssemblySession> listSessions(Long tenantId);
 
     int updateSessionStatus(Long sessionId, Long tenantId, String status);
 
     OwnersAssemblyPackage insertPackage(OwnersAssemblyPackage ballotPackage);
+
+    OwnersAssemblyRuleSnapshot insertRuleSnapshot(OwnersAssemblyRuleSnapshot ruleSnapshot);
+
+    Optional<OwnersAssemblyRuleSnapshot> findRuleSnapshotBySession(Long sessionId, Long tenantId);
+
+    Optional<OwnersAssemblyRuleSnapshot> findRuleSnapshot(Long ruleSnapshotId, Long tenantId);
 
     Optional<OwnersAssemblyPackage> findPackage(Long packageId, Long tenantId);
 

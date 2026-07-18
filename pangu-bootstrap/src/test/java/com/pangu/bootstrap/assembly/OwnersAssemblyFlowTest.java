@@ -1,8 +1,9 @@
-// 关联业务：验证业主大会的会前事项、公示安排与纸质/线上表决状态机。
+// 关联业务：验证业主大会只能依据已确认议事规则进入纸质书面征询，并冻结本次会次的规则快照。
 package com.pangu.bootstrap.assembly;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.pangu.domain.model.assembly.OwnersAssemblyRuleConfiguration;
 import com.pangu.domain.repository.RepairEvidenceObjectStorage;
 import com.pangu.interfaces.security.JwtTokenProvider;
 import org.junit.jupiter.api.AfterEach;
@@ -19,12 +20,13 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 import static org.hamcrest.Matchers.is;
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.times;
@@ -38,13 +40,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @SpringBootTest
 @AutoConfigureMockMvc
-public class OwnersAssemblyFlowTest {
+class OwnersAssemblyFlowTest {
 
     private static final long TENANT = 10001L;
-    private static final long ACC_DIRECTOR = 999811L;
-    private static final long USR_DIRECTOR = 800101L;
-    private static final long ACC_OWNER = 999913L;
-    private static final long UID_OWNER = 70002L;
+    private static final long ACCOUNT_PROPERTY_MANAGER = 999821L;
+    private static final long USER_PROPERTY_MANAGER = 800201L;
+    private static final long ACCOUNT_DIRECTOR = 999811L;
+    private static final long USER_DIRECTOR = 800101L;
+    private static final String ASSEMBLY_TITLE_PREFIX = "IT-业主大会-";
+    private static final String RULE_NAME_PREFIX = "IT-业主大会办理规则-";
 
     @Autowired private MockMvc mockMvc;
     @Autowired private ObjectMapper objectMapper;
@@ -52,8 +56,14 @@ public class OwnersAssemblyFlowTest {
     @Autowired private JdbcTemplate jdbcTemplate;
     @MockBean private RepairEvidenceObjectStorage objectStorage;
 
+    private Long previousActiveRuleId;
+
     @BeforeEach
-    public void setUpObjectStorage() {
+    void setUp() {
+        previousActiveRuleId = jdbcTemplate.query(
+                "SELECT rule_id FROM t_owners_assembly_rule WHERE tenant_id = ? AND status = 'ACTIVE'",
+                resultSet -> resultSet.next() ? resultSet.getLong(1) : null,
+                TENANT);
         when(objectStorage.put(anyString(), any(byte[].class), anyString(), anyString()))
                 .thenAnswer(invocation -> new RepairEvidenceObjectStorage.StoredObjectMetadata(
                         ((byte[]) invocation.getArgument(1)).length,
@@ -62,147 +72,55 @@ public class OwnersAssemblyFlowTest {
     }
 
     @AfterEach
-    public void clean() {
-        jdbcTemplate.update("DELETE FROM t_owners_assembly_session WHERE title LIKE 'IT-业主大会-%'");
+    void clean() {
+        jdbcTemplate.update("DELETE FROM t_owners_assembly_session WHERE title LIKE ?", ASSEMBLY_TITLE_PREFIX + "%");
         jdbcTemplate.update("""
                 DELETE FROM t_vote_item
                 WHERE subject_id IN (
-                    SELECT subject_id FROM t_voting_subject WHERE title LIKE 'IT-业主大会-%'
+                    SELECT subject_id FROM t_voting_subject WHERE title LIKE ?
                 )
-                """);
+                """, ASSEMBLY_TITLE_PREFIX + "%");
         jdbcTemplate.update("""
                 DELETE FROM t_voting_result
                 WHERE subject_id IN (
-                    SELECT subject_id FROM t_voting_subject WHERE title LIKE 'IT-业主大会-%'
+                    SELECT subject_id FROM t_voting_subject WHERE title LIKE ?
                 )
-                """);
-        jdbcTemplate.update("DELETE FROM t_voting_subject WHERE title LIKE 'IT-业主大会-%'");
-        jdbcTemplate.update("UPDATE c_user SET auth_level = 2 WHERE uid = ?", UID_OWNER);
-    }
-
-    @Test
-    public void paperAndOnlineAssembly_onlineRealNameVoteSupersedesPaperBeforeDeadline() throws Exception {
-        jdbcTemplate.update("UPDATE c_user SET auth_level = 3 WHERE uid = ?", UID_OWNER);
-        Long opid = jdbcTemplate.queryForObject("""
-                SELECT opid FROM c_owner_property
-                WHERE uid = ? AND tenant_id = ? AND building_id = 30001
-                ORDER BY opid LIMIT 1
-                """, Long.class, UID_OWNER, TENANT);
-        String directorToken = token(ACC_DIRECTOR, "SYS_USER", USR_DIRECTOR);
-        String ownerToken = token(ACC_OWNER, "C_USER", UID_OWNER);
-        Instant voteStartAt = Instant.now().minus(1, ChronoUnit.HOURS);
-        Instant voteEndAt = Instant.now().plus(1, ChronoUnit.DAYS);
-
-        long sessionId = createSession(directorToken);
-        long packageId = createPackage(directorToken, sessionId, voteStartAt, voteEndAt);
-        long subjectId = addSubject(directorToken, packageId);
-
-        mockMvc.perform(post("/api/v1/owners-assembly-packages/" + packageId + "/lock")
-                        .header("Authorization", "Bearer " + directorToken))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.status", is("PUBLIC_NOTICE")))
-                .andExpect(jsonPath("$.data.packageHash").isNotEmpty());
+                """, ASSEMBLY_TITLE_PREFIX + "%");
+        jdbcTemplate.update("DELETE FROM t_voting_subject WHERE title LIKE ?", ASSEMBLY_TITLE_PREFIX + "%");
         jdbcTemplate.update("""
-                UPDATE t_owners_assembly_package
-                SET public_notice_end_at = CURRENT_TIMESTAMP - INTERVAL '1 minute'
-                WHERE package_id = ?
-                """, packageId);
-
-        mockMvc.perform(post("/api/v1/owners-assembly-packages/" + packageId + "/open-voting")
-                        .header("Authorization", "Bearer " + directorToken))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.status", is("VOTING")));
-
-        mockMvc.perform(get("/api/v1/me/voting-subjects/" + subjectId)
-                        .header("Authorization", "Bearer " + ownerToken))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.subject.assemblyPackage.packageId", is((int) packageId)))
-                .andExpect(jsonPath("$.data.subject.assemblyPackage.votingChannelPolicy", is("PAPER_AND_ONLINE")))
-                .andExpect(jsonPath("$.data.subject.assemblyPackage.onlineAllowed", is(true)))
-                .andExpect(jsonPath("$.data.subject.assemblyPackage.ballotTemplateHash", is("ballot-template-hash")));
-
-        recordDelivery(directorToken, packageId, opid, "PAPER", "HAND_DELIVERY", "paper-delivery-hash");
-        mockMvc.perform(post("/api/v1/owners-assembly-packages/" + packageId + "/paper-votes")
-                        .header("Authorization", "Bearer " + directorToken)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(json(Map.of(
-                                "subjectId", subjectId,
-                                "opid", opid,
-                                "choice", "SUPPORT",
-                                "ballotFileHash", "paper-ballot-hash"))))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.data.voteChannel", is("PAPER")));
-
-        recordDelivery(directorToken, packageId, opid, "ONLINE", "APP_PUSH", "online-delivery-hash");
-        mockMvc.perform(post("/api/v1/me/owners-assembly-packages/" + packageId + "/online-votes")
-                        .header("Authorization", "Bearer " + ownerToken)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(json(Map.of(
-                                "subjectId", subjectId,
-                                "opid", opid,
-                                "choice", "AGAINST",
-                                "ballotFileHash", "online-ballot-hash",
-                                "signatureHash", "owner-esign-hash"))))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.data.voteChannel", is("ONLINE")))
-                .andExpect(jsonPath("$.data.valid", is(true)));
-
-        Integer activeOnlineVotes = jdbcTemplate.queryForObject("""
-                SELECT COUNT(1)
-                FROM t_vote_item
-                WHERE subject_id = ? AND opid = ? AND valid_flag = 1
-                  AND vote_channel = 1 AND choice = 2
-                """, Integer.class, subjectId, opid);
-        Integer invalidPaperVotes = jdbcTemplate.queryForObject("""
-                SELECT COUNT(1)
-                FROM t_vote_item
-                WHERE subject_id = ? AND opid = ? AND valid_flag = 0
-                  AND vote_channel = 2
-                """, Integer.class, subjectId, opid);
-        Integer invalidAssemblyPaperRecords = jdbcTemplate.queryForObject("""
-                SELECT COUNT(1)
-                FROM t_owners_assembly_vote_record
-                WHERE subject_id = ? AND opid = ? AND valid_flag = 0
-                  AND vote_channel = 'PAPER'
-                """, Integer.class, subjectId, opid);
-        assertEquals(1, activeOnlineVotes);
-        assertEquals(1, invalidPaperVotes);
-        assertEquals(1, invalidAssemblyPaperRecords);
-
-        mockMvc.perform(post("/api/v1/me/owners-assembly-packages/" + packageId + "/online-votes")
-                        .header("Authorization", "Bearer " + ownerToken)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(json(Map.of(
-                                "subjectId", subjectId,
-                                "opid", opid,
-                                "choice", "SUPPORT",
-                                "ballotFileHash", "online-ballot-hash-2",
-                                "signatureHash", "owner-esign-hash-2"))))
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code", is(42610)));
+                DELETE FROM t_owners_assembly_rule_field_confirmation
+                WHERE rule_id IN (
+                    SELECT rule_id FROM t_owners_assembly_rule WHERE rule_name LIKE ?
+                )
+                """, RULE_NAME_PREFIX + "%");
+        jdbcTemplate.update("""
+                DELETE FROM t_owners_assembly_rule_audit
+                WHERE rule_id IN (
+                    SELECT rule_id FROM t_owners_assembly_rule WHERE rule_name LIKE ?
+                )
+                """, RULE_NAME_PREFIX + "%");
+        jdbcTemplate.update("DELETE FROM t_owners_assembly_rule WHERE rule_name LIKE ?", RULE_NAME_PREFIX + "%");
+        if (previousActiveRuleId != null) {
+            jdbcTemplate.update("""
+                    UPDATE t_owners_assembly_rule
+                    SET status = 'ACTIVE', update_time = CURRENT_TIMESTAMP
+                    WHERE rule_id = ?
+                    """, previousActiveRuleId);
+        }
     }
 
     @Test
-    public void writtenAssembly_canDraftSubjectsBeforeConfirmingPublicNoticeArrangement() throws Exception {
-        String directorToken = token(ACC_DIRECTOR, "SYS_USER", USR_DIRECTOR);
-        String title = "IT-业主大会-书面征询-" + System.nanoTime();
-        String createResponse = mockMvc.perform(post("/api/v1/owners-assemblies")
-                        .header("Authorization", "Bearer " + directorToken)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(json(Map.of(
-                                "title", title,
-                                "preparationMode", "WRITTEN_DECISION"))))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.data.status", is("PREPARING")))
-                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
-        long sessionId = objectMapper.readTree(createResponse).path("data").path("sessionId").asLong();
+    void writtenAssemblyCanDraftSubjectsBeforeFormalRuleGate() throws Exception {
+        String directorToken = token(ACCOUNT_DIRECTOR, USER_DIRECTOR);
+        String title = ASSEMBLY_TITLE_PREFIX + "书面征询-" + System.nanoTime();
+        long sessionId = createWrittenSession(directorToken, title);
 
         mockMvc.perform(post("/api/v1/owners-assemblies/" + sessionId + "/subjects")
                         .header("Authorization", "Bearer " + directorToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(Map.of(
                                 "subjectType", "MAJOR",
-                                "title", "IT-业主大会-公共区域改造方案-" + System.nanoTime(),
+                                "title", ASSEMBLY_TITLE_PREFIX + "公共区域改造方案-" + System.nanoTime(),
                                 "content", "公共区域改造方案及其附件索引"))))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.data.subjectType", is("MAJOR")));
@@ -211,88 +129,104 @@ public class OwnersAssemblyFlowTest {
                         .header("Authorization", "Bearer " + directorToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.assembly.title", is(title)))
-                .andExpect(jsonPath("$.data.assembly.preparationMode", is("WRITTEN_DECISION")))
                 .andExpect(jsonPath("$.data.arrangement").doesNotExist())
-                .andExpect(jsonPath("$.data.draftSubjects.length()", is(1)))
-                .andExpect(jsonPath("$.data.draftSubjects[0].subjectType", is("MAJOR")))
-                .andExpect(jsonPath("$.data.draftSubjects[0].partyRatioFloor").doesNotExist());
+                .andExpect(jsonPath("$.data.ruleSnapshot").doesNotExist())
+                .andExpect(jsonPath("$.data.draftSubjects.length()", is(1)));
     }
 
     @Test
-    public void writtenAssembly_confirmsPaperOnlyArrangementFromUploadedMaterialsWithoutExposingTechnicalFields() throws Exception {
-        String directorToken = token(ACC_DIRECTOR, "SYS_USER", USR_DIRECTOR);
-        String title = "IT-业主大会-材料归档-" + System.nanoTime();
-        long sessionId = createWrittenSession(directorToken, title);
-
-        mockMvc.perform(post("/api/v1/owners-assemblies/" + sessionId + "/subjects")
-                        .header("Authorization", "Bearer " + directorToken)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(json(Map.of(
-                                "subjectType", "MAJOR",
-                                "title", "IT-业主大会-公共区域改造方案-" + System.nanoTime(),
-                                "content", "公共区域改造方案及其附件索引"))))
-                .andExpect(status().isCreated());
-
-        long publicNoticeMaterialId = uploadMaterial(
-                directorToken, sessionId, "PUBLIC_NOTICE", "公示公告.pdf", "application/pdf", "notice");
-        long planMaterialId = uploadMaterial(
-                directorToken, sessionId, "PLAN_ATTACHMENT", "改造方案.pdf", "application/pdf", "plan");
-        long ballotTemplateMaterialId = uploadMaterial(
-                directorToken, sessionId, "PAPER_BALLOT_TEMPLATE", "盖章选票模板.pdf", "application/pdf", "ballot");
+    void formalArrangementBlocksRuleCapabilitiesWithoutACompleteEvidenceStateMachine() throws Exception {
+        String propertyToken = token(ACCOUNT_PROPERTY_MANAGER, USER_PROPERTY_MANAGER);
+        String directorToken = token(ACCOUNT_DIRECTOR, USER_DIRECTOR);
+        activateRule(propertyToken, directorToken, "需要结果公告", 7, 0, 7);
+        long sessionId = prepareFormalArrangement(directorToken);
 
         mockMvc.perform(post("/api/v1/owners-assemblies/" + sessionId + "/arrangement")
                         .header("Authorization", "Bearer " + directorToken)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(json(Map.of(
-                                "publicNoticeDays", 7,
-                                "voteStartAt", Instant.now().plus(8, ChronoUnit.DAYS).toString(),
-                                "voteEndAt", Instant.now().plus(15, ChronoUnit.DAYS).toString(),
-                                "publicNoticeMaterialId", publicNoticeMaterialId,
-                                "planAttachmentMaterialIds", List.of(planMaterialId),
-                                "ballotTemplateMaterialId", ballotTemplateMaterialId))))
+                        .content(arrangementRequest(sessionId, directorToken)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.msg").value("当前系统尚未建模独立的结果公告阶段；规则要求结果公告期限时不能进入正式办理"));
+    }
+
+    @Test
+    void formalArrangementFreezesActiveRuleAndDerivesPaperOnlySettingsFromIt() throws Exception {
+        String propertyToken = token(ACCOUNT_PROPERTY_MANAGER, USER_PROPERTY_MANAGER);
+        String directorToken = token(ACCOUNT_DIRECTOR, USER_DIRECTOR);
+        String firstVersion = "2026-IT-" + System.nanoTime();
+        activateRule(propertyToken, directorToken, firstVersion, 7, 0, 0);
+        long sessionId = prepareFormalArrangement(directorToken);
+
+        mockMvc.perform(post("/api/v1/owners-assemblies/" + sessionId + "/arrangement")
+                        .header("Authorization", "Bearer " + directorToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(arrangementRequest(sessionId, directorToken)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status", is("PACKAGE_DRAFT")))
                 .andExpect(jsonPath("$.data.votingChannelPolicy", is("PAPER_ONLY")))
                 .andExpect(jsonPath("$.data.packageId").doesNotExist())
-                .andExpect(jsonPath("$.data.announcementHash").doesNotExist());
+                .andExpect(jsonPath("$.data.publicNoticeDays", is(7)));
 
         mockMvc.perform(get("/api/v1/owners-assemblies/" + sessionId + "/workspace")
                         .header("Authorization", "Bearer " + directorToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.arrangement.votingChannelPolicy", is("PAPER_ONLY")))
-                .andExpect(jsonPath("$.data.arrangement.packageId").doesNotExist())
-                .andExpect(jsonPath("$.data.formalSubjects.length()", is(1)))
+                .andExpect(jsonPath("$.data.ruleSnapshot.ruleVersion", is(firstVersion)))
+                .andExpect(jsonPath("$.data.ruleSnapshot.planPublicityDays", is(7)))
+                .andExpect(jsonPath("$.data.ruleSnapshot.validDeliveryMethods[0]", is("DOOR_TO_DOOR")))
                 .andExpect(jsonPath("$.data.materials.length()", is(3)))
                 .andExpect(jsonPath("$.data.materials[0].objectKey").doesNotExist())
                 .andExpect(jsonPath("$.data.materials[0].contentSha256").doesNotExist());
 
-        verify(objectStorage, times(3)).put(anyString(), any(byte[].class), anyString(), anyString());
+        activateRule(propertyToken, directorToken, "2026-IT-replacement-" + System.nanoTime(), 10, 0, 0);
+        mockMvc.perform(get("/api/v1/owners-assemblies/" + sessionId + "/workspace")
+                        .header("Authorization", "Bearer " + directorToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.ruleSnapshot.ruleVersion", is(firstVersion)))
+                .andExpect(jsonPath("$.data.ruleSnapshot.planPublicityDays", is(7)));
+
+        verify(objectStorage, times(5)).put(anyString(), any(byte[].class), anyString(), anyString());
     }
 
     @Test
-    public void newAssemblyWorkflow_rejectsOnlineAndHybridMeetingModeUntilIdentityBindingIsVerified() throws Exception {
-        String directorToken = token(ACC_DIRECTOR, "SYS_USER", USR_DIRECTOR);
+    void newAssemblyWorkflowRejectsMeetingModesWithoutImplementableEvidenceChain() throws Exception {
+        String directorToken = token(ACCOUNT_DIRECTOR, USER_DIRECTOR);
 
         mockMvc.perform(post("/api/v1/owners-assemblies")
                         .header("Authorization", "Bearer " + directorToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(Map.of(
-                                "title", "IT-业主大会-不允许线上混合模式-" + System.nanoTime(),
+                                "title", ASSEMBLY_TITLE_PREFIX + "不允许线上混合模式-" + System.nanoTime(),
                                 "preparationMode", "ONLINE_AND_OFFLINE"))))
                 .andExpect(status().isBadRequest());
     }
 
-    private long createSession(String token) throws Exception {
-        String response = mockMvc.perform(post("/api/v1/owners-assemblies")
+    private long prepareFormalArrangement(String token) throws Exception {
+        long sessionId = createWrittenSession(token, ASSEMBLY_TITLE_PREFIX + "材料归档-" + System.nanoTime());
+        mockMvc.perform(post("/api/v1/owners-assemblies/" + sessionId + "/subjects")
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(Map.of(
-                                "title", "IT-业主大会-公共维修-" + System.nanoTime(),
-                                "preparationMode", "FULL"))))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.data.status", is("PREPARING")))
-                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
-        return objectMapper.readTree(response).path("data").path("sessionId").asLong();
+                                "subjectType", "MAJOR",
+                                "title", ASSEMBLY_TITLE_PREFIX + "公共区域改造方案-" + System.nanoTime(),
+                                "content", "公共区域改造方案及其附件索引"))))
+                .andExpect(status().isCreated());
+        return sessionId;
+    }
+
+    private String arrangementRequest(long sessionId, String token) throws Exception {
+        long publicNoticeMaterialId = uploadMaterial(
+                token, sessionId, "PUBLIC_NOTICE", "公示公告.pdf", "application/pdf", "notice");
+        long planMaterialId = uploadMaterial(
+                token, sessionId, "PLAN_ATTACHMENT", "改造方案.pdf", "application/pdf", "plan");
+        long ballotTemplateMaterialId = uploadMaterial(
+                token, sessionId, "PAPER_BALLOT_TEMPLATE", "盖章选票模板.pdf", "application/pdf", "ballot");
+        return json(Map.of(
+                "voteStartAt", Instant.now().plus(8, ChronoUnit.DAYS).toString(),
+                "voteEndAt", Instant.now().plus(15, ChronoUnit.DAYS).toString(),
+                "publicNoticeMaterialId", publicNoticeMaterialId,
+                "planAttachmentMaterialIds", List.of(planMaterialId),
+                "ballotTemplateMaterialId", ballotTemplateMaterialId));
     }
 
     private long createWrittenSession(String token, String title) throws Exception {
@@ -305,6 +239,99 @@ public class OwnersAssemblyFlowTest {
                 .andExpect(status().isCreated())
                 .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
         return objectMapper.readTree(response).path("data").path("sessionId").asLong();
+    }
+
+    private void activateRule(String propertyToken,
+                              String directorToken,
+                              String version,
+                              int planPublicityDays,
+                              int meetingNoticeDays,
+                              int resultAnnouncementDays) throws Exception {
+        String ruleName = RULE_NAME_PREFIX + version;
+        MockMultipartFile configurationPart = new MockMultipartFile(
+                "configuration",
+                "configuration.json",
+                MediaType.APPLICATION_JSON_VALUE,
+                objectMapper.writeValueAsBytes(compatibleConfiguration(
+                        planPublicityDays, meetingNoticeDays, resultAnnouncementDays)));
+        MockMultipartFile sourceFile = new MockMultipartFile(
+                "file",
+                "业主大会议事规则.pdf",
+                MediaType.APPLICATION_PDF_VALUE,
+                "source-rule".getBytes(StandardCharsets.UTF_8));
+        String response = mockMvc.perform(multipart("/api/v1/admin/owners-assembly-rules/drafts")
+                        .file(configurationPart)
+                        .file(sourceFile)
+                        .param("ruleName", ruleName)
+                        .param("ruleVersion", version)
+                        .param("effectiveDate", LocalDate.now().minusDays(1).toString())
+                        .param("changeReason", "集成测试规则录入")
+                        .header("Authorization", "Bearer " + propertyToken))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+        long ruleId = objectMapper.readTree(response).path("data").path("ruleId").asLong();
+        mockMvc.perform(post("/api/v1/admin/owners-assembly-rules/" + ruleId + "/submit")
+                        .header("Authorization", "Bearer " + propertyToken))
+                .andExpect(status().isOk());
+        for (OwnersAssemblyRuleConfiguration.RuleConfigurationField field
+                : OwnersAssemblyRuleConfiguration.RuleConfigurationField.values()) {
+            mockMvc.perform(post("/api/v1/admin/owners-assembly-rules/" + ruleId
+                            + "/field-confirmations/" + field.name() + "/confirm")
+                            .header("Authorization", "Bearer " + directorToken))
+                    .andExpect(status().isOk());
+        }
+        mockMvc.perform(post("/api/v1/admin/owners-assembly-rules/" + ruleId + "/activate")
+                        .header("Authorization", "Bearer " + directorToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status", is("ACTIVE")));
+    }
+
+    private Map<String, Object> compatibleConfiguration(int planPublicityDays,
+                                                          int meetingNoticeDays,
+                                                          int resultAnnouncementDays) {
+        Map<String, Object> configuration = new LinkedHashMap<>();
+        configuration.put("allowedMeetingForms", List.of("WRITTEN_CONSULTATION"));
+        configuration.put("planPublicityDays", planPublicityDays);
+        configuration.put("meetingNoticeDays", meetingNoticeDays);
+        configuration.put("validDeliveryMethods", List.of("DOOR_TO_DOOR"));
+        configuration.put("nonResponsePolicy", "NOT_PARTICIPATED");
+        configuration.put("proxyVotingPolicy", "NOT_ALLOWED");
+        configuration.put("votingChannelPolicy", "PAPER_ONLY");
+        configuration.put("onlineIdentityVerificationRequired", false);
+        configuration.put("paperBallotSealRequired", true);
+        configuration.put("duplicateVotePolicy", "NOT_APPLICABLE");
+        configuration.put("countingRules", Map.of(
+                "GENERAL", countingRule(),
+                "MAJOR", countingRule()));
+        configuration.put("resultAnnouncementDays", resultAnnouncementDays);
+        configuration.put("sourceClauseReferences", allSourceReferences());
+        return configuration;
+    }
+
+    private Map<String, Object> countingRule() {
+        return Map.of(
+                "participationOwnerThreshold", threshold(1, 2, "AT_LEAST"),
+                "participationAreaThreshold", threshold(1, 2, "AT_LEAST"),
+                "approvalOwnerThreshold", threshold(1, 2, "GREATER_THAN"),
+                "approvalAreaThreshold", threshold(1, 2, "GREATER_THAN"));
+    }
+
+    private Map<String, Object> threshold(int numerator, int denominator, String comparison) {
+        return Map.of(
+                "numerator", numerator,
+                "denominator", denominator,
+                "comparison", comparison);
+    }
+
+    private Map<String, Object> allSourceReferences() {
+        Map<String, Object> references = new LinkedHashMap<>();
+        for (OwnersAssemblyRuleConfiguration.RuleConfigurationField field
+                : OwnersAssemblyRuleConfiguration.RuleConfigurationField.values()) {
+            references.put(field.name(), Map.of(
+                    "pageNumber", 1,
+                    "clause", "第 1 条：" + field.name()));
+        }
+        return references;
     }
 
     private long uploadMaterial(String token,
@@ -324,62 +351,8 @@ public class OwnersAssemblyFlowTest {
         return objectMapper.readTree(response).path("data").path("materialId").asLong();
     }
 
-    private long createPackage(String token, long sessionId, Instant voteStartAt, Instant voteEndAt) throws Exception {
-        String response = mockMvc.perform(post("/api/v1/owners-assemblies/" + sessionId + "/packages")
-                        .header("Authorization", "Bearer " + token)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(json(Map.of(
-                                "votingChannelPolicy", "PAPER_AND_ONLINE",
-                                "publicNoticeDays", 7,
-                                "announcementHash", "announcement-hash",
-                                "attachmentManifestHash", "attachment-manifest-hash",
-                                "ballotTemplateHash", "ballot-template-hash",
-                                "electronicSealHash", "committee-e-seal-hash",
-                                "voteStartAt", voteStartAt.toString(),
-                                "voteEndAt", voteEndAt.toString()))))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.data.status", is("PACKAGE_DRAFT")))
-                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
-        return objectMapper.readTree(response).path("data").path("packageId").asLong();
-    }
-
-    private long addSubject(String token, long packageId) throws Exception {
-        String response = mockMvc.perform(post("/api/v1/owners-assembly-packages/" + packageId + "/subjects")
-                        .header("Authorization", "Bearer " + token)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(json(Map.of(
-                                "subjectType", "GENERAL",
-                                "scope", "BUILDING",
-                                "scopeReferenceId", 30001,
-                                "title", "IT-业主大会-1号楼公共维修事项-" + System.nanoTime(),
-                                "content", "1号楼公共维修事项纸质与线上双渠道表决"))))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.data.status", is("DRAFT")))
-                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
-        JsonNode data = objectMapper.readTree(response).path("data");
-        return data.path("subjectId").asLong();
-    }
-
-    private void recordDelivery(String token,
-                                long packageId,
-                                long opid,
-                                String channel,
-                                String method,
-                                String evidenceHash) throws Exception {
-        mockMvc.perform(post("/api/v1/owners-assembly-packages/" + packageId + "/deliveries")
-                        .header("Authorization", "Bearer " + token)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(json(Map.of(
-                                "opid", opid,
-                                "deliveryChannel", channel,
-                                "deliveryMethod", method,
-                                "evidenceHash", evidenceHash))))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.data.deliveryChannel", is(channel)));
-    }
-
-    private String token(long accountId, String identityType, long activeIdentityId) {
-        return jwtTokenProvider.generateToken(accountId, identityType, activeIdentityId, TENANT);
+    private String token(long accountId, long userId) {
+        return jwtTokenProvider.generateToken(accountId, "SYS_USER", userId, TENANT);
     }
 
     private String json(Object value) throws Exception {

@@ -1,3 +1,4 @@
+// 关联业务：保存业主大会正式公示、纸质表决和结算所依赖的已冻结规则快照与材料版本。
 package com.pangu.domain.model.assembly;
 
 import java.time.Instant;
@@ -7,6 +8,7 @@ public record OwnersAssemblyPackage(
         Long packageId,
         Long sessionId,
         Long tenantId,
+        Long ruleSnapshotId,
         Integer packageVersion,
         String status,
         String votingChannelPolicy,

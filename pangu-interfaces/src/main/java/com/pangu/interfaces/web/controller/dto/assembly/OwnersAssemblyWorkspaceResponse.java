@@ -6,6 +6,7 @@ import java.util.List;
 public record OwnersAssemblyWorkspaceResponse(
         OwnersAssemblySessionResponse assembly,
         OwnersAssemblyArrangementResponse arrangement,
+        OwnersAssemblyRuleSnapshotResponse ruleSnapshot,
         List<OwnersAssemblySubjectDraftResponse> draftSubjects,
         List<OwnersAssemblyFormalSubjectResponse> formalSubjects,
         List<OwnersAssemblyMaterialResponse> materials

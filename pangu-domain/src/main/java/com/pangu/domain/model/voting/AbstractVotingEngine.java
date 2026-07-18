@@ -24,7 +24,7 @@ import java.util.Set;
 public abstract class AbstractVotingEngine<S extends VotingSubject, R extends VotingResult<S>> {
 
     /**
-     * 结算模板方法：双重去重 + 双 2/3 法定门槛 + 委派子类策略。
+     * 结算模板方法：双重去重 + 引擎默认门槛 + 委派子类策略。
      *
      * @param subject     议题（含 scope / partyRatioFloor 等已被 application 写入的有效值）
      * @param validVotes  已过滤的有效投票列表
@@ -32,6 +32,18 @@ public abstract class AbstractVotingEngine<S extends VotingSubject, R extends Vo
      * @return 子类策略返回的最终结算报告
      */
     public final R settle(S subject, List<VoteItem> validVotes, Denominator denom) {
+        return settle(subject, validVotes, denom, defaultDecisionRule());
+    }
+
+    /**
+     * 以冻结的会议规则结算。
+     *
+     * <p>该重载仅由已锁定议事规则快照的正式业主大会调用；其他投票仍走上面的既有默认规则。
+     */
+    public final R settle(S subject,
+                          List<VoteItem> validVotes,
+                          Denominator denom,
+                          VotingDecisionRule decisionRule) {
         if (subject == null) {
             throw new IllegalArgumentException("subject must not be null");
         }
@@ -40,6 +52,9 @@ public abstract class AbstractVotingEngine<S extends VotingSubject, R extends Vo
         }
         if (denom == null) {
             throw new IllegalArgumentException("denominator must not be null");
+        }
+        if (decisionRule == null) {
+            throw new IllegalArgumentException("decisionRule must not be null");
         }
 
         BigDecimal totalArea = denom.totalArea();
@@ -59,23 +74,28 @@ public abstract class AbstractVotingEngine<S extends VotingSubject, R extends Vo
 
         long participatingOwnerCount = uniqueUids.size();
 
-        // 2. 双 2/3 法定门槛
-        boolean quorumSatisfied = checkQuorum(participatingArea, totalArea, participatingOwnerCount, totalOwnerCount);
+        // 2. 已冻结规则的双维度参与门槛
+        boolean quorumSatisfied = checkQuorum(
+                participatingArea, totalArea, participatingOwnerCount, totalOwnerCount, decisionRule);
 
         // 3. 委派子类策略
         return calculateResult(subject, validVotes, totalArea, totalOwnerCount,
-                participatingArea, participatingOwnerCount, quorumSatisfied);
+                participatingArea, participatingOwnerCount, quorumSatisfied, decisionRule);
     }
 
     private boolean checkQuorum(BigDecimal participatingArea, BigDecimal totalArea,
-                                 long participatingOwnerCount, long totalOwnerCount) {
-        // 专有面积参与率 >= 2/3，即 3 * participatingArea >= 2 * totalArea
-        boolean areaQuorum = participatingArea.multiply(new BigDecimal("3"))
-                .compareTo(totalArea.multiply(new BigDecimal("2"))) >= 0;
-        // 人数参与率 >= 2/3，即 3 * participatingOwnerCount >= 2 * totalOwnerCount
-        boolean ownerQuorum = participatingOwnerCount * 3 >= totalOwnerCount * 2;
+                                 long participatingOwnerCount,
+                                 long totalOwnerCount,
+                                 VotingDecisionRule decisionRule) {
+        boolean areaQuorum = decisionRule.participationAreaThreshold()
+                .isSatisfied(participatingArea, totalArea);
+        boolean ownerQuorum = decisionRule.participationOwnerThreshold()
+                .isSatisfied(participatingOwnerCount, totalOwnerCount);
         return areaQuorum && ownerQuorum;
     }
+
+    /** 既有非业主大会投票维持原有规则，不由平台配置替代小区已备案规则。 */
+    protected abstract VotingDecisionRule defaultDecisionRule();
 
     /**
      * 子类策略：双过半 / 双 3/4 / 差额选举多阶排序。
@@ -83,5 +103,6 @@ public abstract class AbstractVotingEngine<S extends VotingSubject, R extends Vo
     protected abstract R calculateResult(S subject, List<VoteItem> validVotes,
                                          BigDecimal totalArea, long totalOwnerCount,
                                          BigDecimal participatingArea, long participatingOwnerCount,
-                                         boolean quorumSatisfied);
+                                         boolean quorumSatisfied,
+                                         VotingDecisionRule decisionRule);
 }

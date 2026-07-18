@@ -1,7 +1,9 @@
 // 关联业务：以可回查原件条款的结构化配置表达业主大会会议、送达、表决和计票规则。
 package com.pangu.domain.model.assembly;
 
-import java.math.BigDecimal;
+import com.pangu.domain.model.voting.VotingDecisionRule;
+import com.pangu.domain.model.voting.VotingThreshold;
+
 import java.util.Collections;
 import java.util.EnumSet;
 import java.util.Map;
@@ -92,13 +94,26 @@ public record OwnersAssemblyRuleConfiguration(
         MAJOR
     }
 
-    /** 每类表决事项的参与与同意阈值，数值以 0 至 1 的比例保存。 */
+    /**
+     * 每类表决事项的参与与同意阈值，比例以分子、分母精确保存。
+     *
+     * <p>比例比较关系单独保存。旧版本若只有数值而没有比较关系，不得推定为“超过”或“达到”，
+     * 只能重新核对后用于正式办理。
+     */
     public record CountingRule(
-            BigDecimal participationOwnerRatio,
-            BigDecimal participationAreaRatio,
-            BigDecimal approvalOwnerRatio,
-            BigDecimal approvalAreaRatio
+            VotingThreshold participationOwnerThreshold,
+            VotingThreshold participationAreaThreshold,
+            VotingThreshold approvalOwnerThreshold,
+            VotingThreshold approvalAreaThreshold
     ) {
+
+        public VotingDecisionRule toVotingDecisionRule() {
+            return new VotingDecisionRule(
+                    participationOwnerThreshold,
+                    participationAreaThreshold,
+                    approvalOwnerThreshold,
+                    approvalAreaThreshold);
+        }
     }
 
     /** 指向规则原件页码和条款位置，供核对与争议复查使用。 */

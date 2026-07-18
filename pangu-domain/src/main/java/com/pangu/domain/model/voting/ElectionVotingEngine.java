@@ -16,11 +16,23 @@ import java.util.stream.Collectors;
  */
 public class ElectionVotingEngine extends AbstractVotingEngine<ElectionSubject, ElectionVotingResult> {
 
+    private static final VotingDecisionRule DEFAULT_RULE = new VotingDecisionRule(
+            new VotingThreshold(2, 3, VotingThreshold.Comparison.AT_LEAST),
+            new VotingThreshold(2, 3, VotingThreshold.Comparison.AT_LEAST),
+            new VotingThreshold(1, 2, VotingThreshold.Comparison.GREATER_THAN),
+            new VotingThreshold(1, 2, VotingThreshold.Comparison.GREATER_THAN));
+
+    @Override
+    protected VotingDecisionRule defaultDecisionRule() {
+        return DEFAULT_RULE;
+    }
+
     @Override
     protected ElectionVotingResult calculateResult(ElectionSubject subject, List<VoteItem> validVotes,
                                                     BigDecimal totalArea, long totalOwnerCount,
                                                     BigDecimal participatingArea, long participatingOwnerCount,
-                                                    boolean quorumSatisfied) {
+                                                    boolean quorumSatisfied,
+                                                    VotingDecisionRule decisionRule) {
 
         List<CandidateElectionResult> candidateResults = new ArrayList<>();
 

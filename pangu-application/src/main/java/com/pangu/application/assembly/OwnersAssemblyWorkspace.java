@@ -3,6 +3,7 @@ package com.pangu.application.assembly;
 
 import com.pangu.domain.model.assembly.OwnersAssemblyMaterial;
 import com.pangu.domain.model.assembly.OwnersAssemblyPackage;
+import com.pangu.domain.model.assembly.OwnersAssemblyRuleSnapshot;
 import com.pangu.domain.model.assembly.OwnersAssemblySession;
 import com.pangu.domain.model.assembly.OwnersAssemblySubjectDraft;
 import com.pangu.domain.model.voting.VotingSubject;
@@ -12,6 +13,7 @@ import java.util.List;
 public record OwnersAssemblyWorkspace(
         OwnersAssemblySession assembly,
         OwnersAssemblyPackage arrangement,
+        OwnersAssemblyRuleSnapshot ruleSnapshot,
         List<OwnersAssemblySubjectDraft> draftSubjects,
         List<VotingSubject> formalSubjects,
         List<OwnersAssemblyMaterial> materials

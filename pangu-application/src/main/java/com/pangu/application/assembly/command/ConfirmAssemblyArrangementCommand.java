@@ -7,7 +7,6 @@ import java.util.List;
 public record ConfirmAssemblyArrangementCommand(
         Long sessionId,
         Long tenantId,
-        Integer publicNoticeDays,
         Instant voteStartAt,
         Instant voteEndAt,
         Long publicNoticeMaterialId,

@@ -1,9 +1,13 @@
-// 关联业务：实现业主大会会议、表决安排、事项草案和原始材料的持久化边界。
+// 关联业务：实现业主大会会议、表决安排、材料及冻结议事规则快照的持久化边界。
 package com.pangu.infrastructure.repository;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pangu.domain.model.assembly.OwnersAssemblyDeliveryRecord;
 import com.pangu.domain.model.assembly.OwnersAssemblyMaterial;
 import com.pangu.domain.model.assembly.OwnersAssemblyPackage;
+import com.pangu.domain.model.assembly.OwnersAssemblyRuleConfiguration;
+import com.pangu.domain.model.assembly.OwnersAssemblyRuleSnapshot;
 import com.pangu.domain.model.assembly.OwnersAssemblySession;
 import com.pangu.domain.model.assembly.OwnersAssemblySubjectDraft;
 import com.pangu.domain.model.assembly.OwnersAssemblyVoteRecord;
@@ -11,6 +15,7 @@ import com.pangu.domain.repository.OwnersAssemblyRepository;
 import com.pangu.infrastructure.persistence.entity.OwnersAssemblyDeliveryRecordRow;
 import com.pangu.infrastructure.persistence.entity.OwnersAssemblyMaterialRow;
 import com.pangu.infrastructure.persistence.entity.OwnersAssemblyPackageRow;
+import com.pangu.infrastructure.persistence.entity.OwnersAssemblyRuleSnapshotRow;
 import com.pangu.infrastructure.persistence.entity.OwnersAssemblySessionRow;
 import com.pangu.infrastructure.persistence.entity.OwnersAssemblySubjectDraftRow;
 import com.pangu.infrastructure.persistence.entity.OwnersAssemblyVoteRecordRow;
@@ -33,6 +38,7 @@ public class OwnersAssemblyRepositoryImpl implements OwnersAssemblyRepository {
     private static final ZoneId ZONE = ZoneId.systemDefault();
 
     private final OwnersAssemblyMapper mapper;
+    private final ObjectMapper objectMapper;
 
     @Override
     public OwnersAssemblySession insertSession(OwnersAssemblySession session) {
@@ -44,6 +50,11 @@ public class OwnersAssemblyRepositoryImpl implements OwnersAssemblyRepository {
     @Override
     public Optional<OwnersAssemblySession> findSession(Long sessionId, Long tenantId) {
         return Optional.ofNullable(mapper.findSession(sessionId, tenantId)).map(this::toDomain);
+    }
+
+    @Override
+    public Optional<OwnersAssemblySession> findSessionForUpdate(Long sessionId, Long tenantId) {
+        return Optional.ofNullable(mapper.findSessionForUpdate(sessionId, tenantId)).map(this::toDomain);
     }
 
     @Override
@@ -61,6 +72,23 @@ public class OwnersAssemblyRepositoryImpl implements OwnersAssemblyRepository {
         OwnersAssemblyPackageRow row = toRow(ballotPackage);
         mapper.insertPackage(row);
         return findPackage(row.getPackageId(), ballotPackage.tenantId()).orElseThrow();
+    }
+
+    @Override
+    public OwnersAssemblyRuleSnapshot insertRuleSnapshot(OwnersAssemblyRuleSnapshot ruleSnapshot) {
+        OwnersAssemblyRuleSnapshotRow row = toRow(ruleSnapshot);
+        mapper.insertRuleSnapshot(row);
+        return findRuleSnapshot(row.getRuleSnapshotId(), ruleSnapshot.tenantId()).orElseThrow();
+    }
+
+    @Override
+    public Optional<OwnersAssemblyRuleSnapshot> findRuleSnapshotBySession(Long sessionId, Long tenantId) {
+        return Optional.ofNullable(mapper.findRuleSnapshotBySession(sessionId, tenantId)).map(this::toDomain);
+    }
+
+    @Override
+    public Optional<OwnersAssemblyRuleSnapshot> findRuleSnapshot(Long ruleSnapshotId, Long tenantId) {
+        return Optional.ofNullable(mapper.findRuleSnapshot(ruleSnapshotId, tenantId)).map(this::toDomain);
     }
 
     @Override
@@ -284,6 +312,7 @@ public class OwnersAssemblyRepositoryImpl implements OwnersAssemblyRepository {
                 row.getPackageId(),
                 row.getSessionId(),
                 row.getTenantId(),
+                row.getRuleSnapshotId(),
                 row.getPackageVersion(),
                 row.getStatus(),
                 row.getVotingChannelPolicy(),
@@ -306,6 +335,7 @@ public class OwnersAssemblyRepositoryImpl implements OwnersAssemblyRepository {
         row.setPackageId(domain.packageId());
         row.setSessionId(domain.sessionId());
         row.setTenantId(domain.tenantId());
+        row.setRuleSnapshotId(domain.ruleSnapshotId());
         row.setPackageVersion(domain.packageVersion());
         row.setStatus(domain.status());
         row.setVotingChannelPolicy(domain.votingChannelPolicy());
@@ -318,6 +348,42 @@ public class OwnersAssemblyRepositoryImpl implements OwnersAssemblyRepository {
         row.setVoteStartAt(toLocal(domain.voteStartAt()));
         row.setVoteEndAt(toLocal(domain.voteEndAt()));
         row.setLockedByUserId(domain.lockedByUserId());
+        return row;
+    }
+
+    private OwnersAssemblyRuleSnapshot toDomain(OwnersAssemblyRuleSnapshotRow row) {
+        return new OwnersAssemblyRuleSnapshot(
+                row.getRuleSnapshotId(),
+                row.getSessionId(),
+                row.getTenantId(),
+                row.getRuleId(),
+                row.getRuleName(),
+                row.getRuleVersion(),
+                row.getEffectiveDate(),
+                row.getSourceFileName(),
+                row.getSourceSha256(),
+                configurationFromJson(row.getConfigurationJson()),
+                row.getConfigurationSha256(),
+                row.getSnapshottedByAccountId(),
+                row.getSnapshottedByUserId(),
+                toInstant(row.getCreateTime()));
+    }
+
+    private OwnersAssemblyRuleSnapshotRow toRow(OwnersAssemblyRuleSnapshot domain) {
+        OwnersAssemblyRuleSnapshotRow row = new OwnersAssemblyRuleSnapshotRow();
+        row.setRuleSnapshotId(domain.ruleSnapshotId());
+        row.setSessionId(domain.sessionId());
+        row.setTenantId(domain.tenantId());
+        row.setRuleId(domain.ruleId());
+        row.setRuleName(domain.ruleName());
+        row.setRuleVersion(domain.ruleVersion());
+        row.setEffectiveDate(domain.effectiveDate());
+        row.setSourceFileName(domain.sourceFileName());
+        row.setSourceSha256(domain.sourceSha256());
+        row.setConfigurationJson(configurationToJson(domain.configuration()));
+        row.setConfigurationSha256(domain.configurationSha256());
+        row.setSnapshottedByAccountId(domain.snapshottedByAccountId());
+        row.setSnapshottedByUserId(domain.snapshottedByUserId());
         return row;
     }
 
@@ -380,5 +446,21 @@ public class OwnersAssemblyRepositoryImpl implements OwnersAssemblyRepository {
 
     private LocalDateTime toLocal(Instant value) {
         return value == null ? null : LocalDateTime.ofInstant(value, ZONE);
+    }
+
+    private OwnersAssemblyRuleConfiguration configurationFromJson(String json) {
+        try {
+            return objectMapper.readValue(json, OwnersAssemblyRuleConfiguration.class);
+        } catch (JsonProcessingException ex) {
+            throw new IllegalStateException("业主大会议事规则快照配置数据无法读取", ex);
+        }
+    }
+
+    private String configurationToJson(OwnersAssemblyRuleConfiguration configuration) {
+        try {
+            return objectMapper.writeValueAsString(configuration);
+        } catch (JsonProcessingException ex) {
+            throw new IllegalStateException("业主大会议事规则快照配置数据无法保存", ex);
+        }
     }
 }
