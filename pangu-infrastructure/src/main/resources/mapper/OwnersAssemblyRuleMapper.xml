@@ -1,0 +1,183 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 关联业务：持久化业主大会议事规则版本、其结构化配置和不可抵赖审计事件。 -->
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pangu.infrastructure.persistence.mapper.OwnersAssemblyRuleMapper">
+
+    <sql id="ruleColumns">
+        rule_id, tenant_id, rule_name, rule_version, effective_date, change_reason,
+        configuration_json::text AS configuration_json, configuration_sha256,
+        object_key, original_file_name, content_type, file_size, etag, sha256, status,
+        drafted_by_account_id, drafted_by_user_id,
+        submitted_by_account_id, submitted_by_user_id, submitted_at,
+        activated_by_account_id, activated_by_user_id, activated_at,
+        create_time, update_time
+    </sql>
+
+    <sql id="auditColumns">
+        audit_id, rule_id, tenant_id, event_type, configuration_sha256, change_reason,
+        actor_account_id, actor_user_id, actor_role_key, actor_committee_position, create_time
+    </sql>
+
+    <sql id="fieldConfirmationColumns">
+        confirmation_id, rule_id, tenant_id, configuration_sha256, field_key,
+        source_page_number, source_clause, status,
+        confirmed_by_account_id, confirmed_by_user_id, confirmed_by_committee_position, confirmed_at,
+        create_time, update_time
+    </sql>
+
+    <select id="findActive" resultType="com.pangu.infrastructure.persistence.entity.OwnersAssemblyRuleRow">
+        SELECT <include refid="ruleColumns"/>
+        FROM t_owners_assembly_rule
+        WHERE tenant_id = #{tenantId}
+          AND status = 'ACTIVE'
+          AND effective_date &lt;= CURRENT_DATE
+        ORDER BY effective_date DESC, rule_id DESC
+        LIMIT 1
+    </select>
+
+    <select id="findById" resultType="com.pangu.infrastructure.persistence.entity.OwnersAssemblyRuleRow">
+        SELECT <include refid="ruleColumns"/>
+        FROM t_owners_assembly_rule
+        WHERE rule_id = #{ruleId} AND tenant_id = #{tenantId}
+    </select>
+
+    <select id="findByIdForUpdate" resultType="com.pangu.infrastructure.persistence.entity.OwnersAssemblyRuleRow">
+        SELECT <include refid="ruleColumns"/>
+        FROM t_owners_assembly_rule
+        WHERE rule_id = #{ruleId} AND tenant_id = #{tenantId}
+        FOR UPDATE
+    </select>
+
+    <select id="listByTenant" resultType="com.pangu.infrastructure.persistence.entity.OwnersAssemblyRuleRow">
+        SELECT <include refid="ruleColumns"/>
+        FROM t_owners_assembly_rule
+        WHERE tenant_id = #{tenantId}
+        ORDER BY CASE status
+                     WHEN 'ACTIVE' THEN 0
+                     WHEN 'PENDING_CONFIRMATION' THEN 1
+                     WHEN 'DRAFT' THEN 2
+                     ELSE 3
+                 END,
+                 effective_date DESC,
+                 rule_id DESC
+    </select>
+
+    <select id="lockTenantRules" resultType="long">
+        SELECT tenant_id
+        FROM t_tenant_community
+        WHERE tenant_id = #{tenantId}
+        FOR UPDATE
+    </select>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="ruleId" keyColumn="rule_id">
+        INSERT INTO t_owners_assembly_rule (
+            tenant_id, rule_name, rule_version, effective_date, change_reason,
+            configuration_json, configuration_sha256,
+            object_key, original_file_name, content_type, file_size, etag, sha256, status,
+            drafted_by_account_id, drafted_by_user_id
+        ) VALUES (
+            #{tenantId}, #{ruleName}, #{ruleVersion}, #{effectiveDate}, #{changeReason},
+            CAST(#{configurationJson} AS jsonb), #{configurationSha256},
+            #{objectKey}, #{originalFileName}, #{contentType}, #{fileSize}, #{etag}, #{sha256}, #{status},
+            #{draftedByAccountId}, #{draftedByUserId}
+        )
+    </insert>
+
+    <update id="updateDraft">
+        UPDATE t_owners_assembly_rule
+        SET rule_name = #{ruleName},
+            rule_version = #{ruleVersion},
+            effective_date = #{effectiveDate},
+            change_reason = #{changeReason},
+            configuration_json = CAST(#{configurationJson} AS jsonb),
+            configuration_sha256 = #{configurationSha256},
+            update_time = CURRENT_TIMESTAMP
+        WHERE rule_id = #{ruleId}
+          AND tenant_id = #{tenantId}
+          AND status = 'DRAFT'
+    </update>
+
+    <update id="submitForConfirmation">
+        UPDATE t_owners_assembly_rule
+        SET status = 'PENDING_CONFIRMATION',
+            submitted_by_account_id = #{accountId},
+            submitted_by_user_id = #{userId},
+            submitted_at = CURRENT_TIMESTAMP,
+            update_time = CURRENT_TIMESTAMP
+        WHERE rule_id = #{ruleId}
+          AND tenant_id = #{tenantId}
+          AND status = 'DRAFT'
+    </update>
+
+    <insert id="insertFieldConfirmation" useGeneratedKeys="true" keyProperty="confirmationId" keyColumn="confirmation_id">
+        INSERT INTO t_owners_assembly_rule_field_confirmation (
+            rule_id, tenant_id, configuration_sha256, field_key,
+            source_page_number, source_clause, status
+        ) VALUES (
+            #{ruleId}, #{tenantId}, #{configurationSha256}, #{fieldKey},
+            #{sourcePageNumber}, #{sourceClause}, #{status}
+        )
+    </insert>
+
+    <select id="listFieldConfirmations"
+            resultType="com.pangu.infrastructure.persistence.entity.OwnersAssemblyRuleFieldConfirmationRow">
+        SELECT <include refid="fieldConfirmationColumns"/>
+        FROM t_owners_assembly_rule_field_confirmation
+        WHERE rule_id = #{ruleId}
+          AND tenant_id = #{tenantId}
+          AND configuration_sha256 = #{configurationSha256}
+        ORDER BY field_key ASC
+    </select>
+
+    <update id="confirmField">
+        UPDATE t_owners_assembly_rule_field_confirmation
+        SET status = 'CONFIRMED',
+            confirmed_by_account_id = #{accountId},
+            confirmed_by_user_id = #{userId},
+            confirmed_by_committee_position = #{committeePosition},
+            confirmed_at = CURRENT_TIMESTAMP,
+            update_time = CURRENT_TIMESTAMP
+        WHERE rule_id = #{ruleId}
+          AND tenant_id = #{tenantId}
+          AND configuration_sha256 = #{configurationSha256}
+          AND field_key = #{fieldKey}
+          AND status = 'PENDING'
+    </update>
+
+    <update id="supersedeActive">
+        UPDATE t_owners_assembly_rule
+        SET status = 'SUPERSEDED',
+            update_time = CURRENT_TIMESTAMP
+        WHERE tenant_id = #{tenantId}
+          AND status = 'ACTIVE'
+    </update>
+
+    <update id="activate">
+        UPDATE t_owners_assembly_rule
+        SET status = 'ACTIVE',
+            activated_by_account_id = #{accountId},
+            activated_by_user_id = #{userId},
+            activated_at = CURRENT_TIMESTAMP,
+            update_time = CURRENT_TIMESTAMP
+        WHERE rule_id = #{ruleId}
+          AND tenant_id = #{tenantId}
+          AND status = 'PENDING_CONFIRMATION'
+    </update>
+
+    <insert id="insertAudit" useGeneratedKeys="true" keyProperty="auditId" keyColumn="audit_id">
+        INSERT INTO t_owners_assembly_rule_audit (
+            rule_id, tenant_id, event_type, configuration_sha256, change_reason,
+            actor_account_id, actor_user_id, actor_role_key, actor_committee_position
+        ) VALUES (
+            #{ruleId}, #{tenantId}, #{eventType}, #{configurationSha256}, #{changeReason},
+            #{actorAccountId}, #{actorUserId}, #{actorRoleKey}, #{actorCommitteePosition}
+        )
+    </insert>
+
+    <select id="listAudits" resultType="com.pangu.infrastructure.persistence.entity.OwnersAssemblyRuleAuditRow">
+        SELECT <include refid="auditColumns"/>
+        FROM t_owners_assembly_rule_audit
+        WHERE rule_id = #{ruleId} AND tenant_id = #{tenantId}
+        ORDER BY audit_id ASC
+    </select>
+</mapper>

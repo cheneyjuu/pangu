@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 关联业务：提供当前届业委会主任或副主任身份的只读事实查询。 -->
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pangu.infrastructure.persistence.mapper.CommitteePositionMapper">
+    <select id="findActivePosition" resultType="string">
+        SELECT position
+        FROM t_committee_member_position
+        WHERE tenant_id = #{tenantId}
+          AND user_id = #{userId}
+          AND status = 1
+        ORDER BY CASE position
+                     WHEN 'DIRECTOR' THEN 1
+                     WHEN 'VICE_DIRECTOR' THEN 2
+                     ELSE 3
+                 END
+        LIMIT 1
+    </select>
+</mapper>
