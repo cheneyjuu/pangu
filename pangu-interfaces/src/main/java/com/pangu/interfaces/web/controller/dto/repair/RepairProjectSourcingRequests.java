@@ -90,13 +90,13 @@ public final class RepairProjectSourcingRequests {
 
     public record SelectQuoteRequest(
             @NotNull Long quoteId,
-            @Size(max = 1000) String recommendationReason,
-            @Size(max = 1000) String insufficientQuoteReason,
+            @NotBlank @Size(max = 1000) String selectionRationale,
+            @NotNull Long selectionEvidenceAttachmentId,
             Long frameworkRelationId
     ) {
         public RepairProjectSourcingCommands.SelectQuote toCommand() {
             return new RepairProjectSourcingCommands.SelectQuote(
-                    quoteId, recommendationReason, insufficientQuoteReason, frameworkRelationId);
+                    quoteId, selectionRationale, selectionEvidenceAttachmentId, frameworkRelationId);
         }
     }
 }

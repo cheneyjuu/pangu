@@ -34,6 +34,7 @@ public class RepairProjectProcessHistoryService {
             Map.entry("PROJECT_QUOTE_REVISIONS_REQUESTED", new HistoryDescriptor("要求供应商修订报价", "已发出报价修订要求。")),
             Map.entry("PROJECT_SUPPLIER_QUOTE_SUBMITTED", new HistoryDescriptor("收到供应商报价", "供应商报价原件已进入本轮比价。")),
             Map.entry("PROJECT_SUPPLIER_SELECTED", new HistoryDescriptor("形成中选供应商建议", "中选建议已绑定当前方案和报价。")),
+            Map.entry("PROJECT_SUPPLIER_SELECTION_CONFIRMED", new HistoryDescriptor("确认中选供应商", "业委会确认人已依据有效决定/授权和评审记录锁定中选报价。")),
             Map.entry("PLAN_LOCKED", new HistoryDescriptor("锁定实施方案", "方案、报价和现场材料已形成只读快照。")),
             Map.entry("BUILDING_DECISION_STARTED", new HistoryDescriptor("发起楼栋维修征询", "已锁定征询规则、送达规则和费用承担范围。")),
             Map.entry("BUILDING_DECISION_COMPLETED", new HistoryDescriptor("完成业主征询核验", "物业已归档原始证据并核验征询结果。")),

@@ -9,13 +9,17 @@ import com.pangu.domain.model.repair.RepairProjectGovernance.BuildingDecision;
 import com.pangu.domain.model.repair.RepairProjectGovernance.BuildingProcess;
 import com.pangu.domain.model.repair.RepairProjectGovernance.DecisionEntry;
 import com.pangu.domain.model.repair.RepairProjectGovernance.DecisionPolicySnapshot;
+import com.pangu.domain.model.repair.RepairProjectGovernance.GovernanceBasis;
 import com.pangu.domain.model.repair.RepairProjectGovernance.OwnerDecisionTask;
+import com.pangu.domain.model.repair.RepairProjectGovernance.SupplierSelectionEvaluationRule;
 import com.pangu.domain.model.repair.RepairVoteChoice;
+import com.pangu.domain.model.repair.RepairSupplierSelectionMethod;
 import com.pangu.domain.repository.RepairProjectGovernanceRepository;
 import com.pangu.infrastructure.persistence.entity.RepairProjectGovernanceRows.AssemblySubjectLinkRow;
 import com.pangu.infrastructure.persistence.entity.RepairProjectGovernanceRows.BuildingDecisionRow;
 import com.pangu.infrastructure.persistence.entity.RepairProjectGovernanceRows.BuildingProcessRow;
 import com.pangu.infrastructure.persistence.entity.RepairProjectGovernanceRows.DecisionEntryRow;
+import com.pangu.infrastructure.persistence.entity.RepairProjectGovernanceRows.GovernanceBasisRow;
 import com.pangu.infrastructure.persistence.entity.RepairProjectGovernanceRows.PolicySnapshotRow;
 import com.pangu.infrastructure.persistence.entity.RepairProjectGovernanceRows.ProjectSealUsageRow;
 import com.pangu.infrastructure.persistence.entity.RepairProjectGovernanceRows.OwnerDecisionTaskRow;
@@ -236,12 +240,41 @@ public class RepairProjectGovernanceRepositoryImpl implements RepairProjectGover
     }
 
     @Override
+    public Optional<GovernanceBasis> findActiveGovernanceBasis(Long projectId, Long planId, Long tenantId) {
+        return Optional.ofNullable(mapper.findActiveGovernanceBasis(projectId, planId, tenantId))
+                .map(this::toDomain);
+    }
+
+    @Override
     public void insertGovernanceBasis(Long projectId, Long planId, Long tenantId,
                                       String basisType, String referenceType, Long referenceId,
-                                      String snapshotHash, Long createdByUserId) {
+                                      String snapshotHash,
+                                      RepairSupplierSelectionMethod approvedSupplierSelectionMethod,
+                                      SupplierSelectionEvaluationRule approvedSupplierEvaluationRule,
+                                      Integer minimumInvitedSupplierCount,
+                                      Integer minimumValidQuoteCount,
+                                      String nonCompetitiveSelectionBasis,
+                                      Long createdByUserId) {
         mapper.insertGovernanceBasis(
                 projectId, planId, tenantId, basisType, referenceType,
-                referenceId, snapshotHash, createdByUserId);
+                referenceId, snapshotHash,
+                approvedSupplierSelectionMethod == null ? null : approvedSupplierSelectionMethod.name(),
+                approvedSupplierEvaluationRule == null ? null : approvedSupplierEvaluationRule.name(),
+                minimumInvitedSupplierCount, minimumValidQuoteCount, nonCompetitiveSelectionBasis,
+                createdByUserId);
+    }
+
+    private GovernanceBasis toDomain(GovernanceBasisRow row) {
+        return new GovernanceBasis(
+                row.getBasisId(), row.getProjectId(), row.getPlanId(), row.getTenantId(),
+                row.getBasisType(), row.getReferenceType(), row.getReferenceId(), row.getSnapshotHash(),
+                row.getApprovedSupplierSelectionMethod() == null ? null
+                        : RepairSupplierSelectionMethod.valueOf(row.getApprovedSupplierSelectionMethod()),
+                row.getApprovedSupplierEvaluationRule() == null ? null
+                        : SupplierSelectionEvaluationRule.valueOf(row.getApprovedSupplierEvaluationRule()),
+                row.getMinimumInvitedSupplierCount(), row.getMinimumValidQuoteCount(),
+                row.getNonCompetitiveSelectionBasis(), row.getStatus(), row.getCreatedByUserId(),
+                row.getCreateTime());
     }
 
     private DecisionPolicySnapshot toDomain(PolicySnapshotRow row) {

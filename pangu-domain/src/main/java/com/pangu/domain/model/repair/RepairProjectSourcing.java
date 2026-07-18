@@ -1,6 +1,8 @@
 // 关联业务：表达维修工程项目方案级邀价、报价版本和中选供应商快照。
 package com.pangu.domain.model.repair;
 
+import com.pangu.domain.model.repair.RepairProjectGovernance.SupplierSelectionEvaluationRule;
+
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -21,6 +23,15 @@ public final class RepairProjectSourcing {
     public enum InvitationType {
         INITIAL,
         REVISION
+    }
+
+    /**
+     * 定商授权的可用性由决定、用印和规则快照共同决定，不能由询价草稿或前端状态推导。
+     */
+    public enum SelectionAuthorizationStatus {
+        PENDING_AUTHORIZATION,
+        AUTHORIZED,
+        UNSUPPORTED_WORKFLOW
     }
 
     public record Invitation(
@@ -132,11 +143,34 @@ public final class RepairProjectSourcing {
             String supplierName,
             BigDecimal quoteAmount,
             RepairSupplierSelectionMethod selectionMethod,
-            String recommendationReason,
-            String insufficientQuoteReason,
+            SupplierSelectionEvaluationRule selectionEvaluationRule,
+            String selectionRationale,
+            Long selectionEvidenceAttachmentId,
+            Long governanceBasisId,
+            String governanceBasisHash,
             Long frameworkRelationId,
-            Long recommendedByUserId,
+            Long confirmedByUserId,
             LocalDateTime createTime
+    ) {
+    }
+
+    /**
+     * 管理端只读取已经封存的授权事实；当前操作者是否可确认由服务端按原审批人和现任职务计算。
+     */
+    public record SelectionAuthorization(
+            SelectionAuthorizationStatus status,
+            String blockingReason,
+            RepairSupplierSelectionMethod approvedSelectionMethod,
+            SupplierSelectionEvaluationRule approvedEvaluationRule,
+            Integer minimumInvitedSupplierCount,
+            Integer minimumValidQuoteCount,
+            String nonCompetitiveSelectionBasis,
+            BigDecimal approvedBudgetAmount,
+            Long governanceBasisId,
+            String governanceBasisHash,
+            Long buildingProcessId,
+            Long decisionId,
+            boolean currentActorMayConfirm
     ) {
     }
 
@@ -144,11 +178,15 @@ public final class RepairProjectSourcing {
             Long projectId,
             Long planId,
             RepairSupplierSelectionMethod selectionMethod,
+            SelectionAuthorization selectionAuthorization,
+            List<RepairFrameworkRelation> eligibleFrameworkRelations,
             List<Invitation> invitations,
             List<Quote> quotes,
             Selection selection
     ) {
         public Details {
+            eligibleFrameworkRelations = eligibleFrameworkRelations == null
+                    ? List.of() : List.copyOf(eligibleFrameworkRelations);
             invitations = invitations == null ? List.of() : List.copyOf(invitations);
             quotes = quotes == null ? List.of() : List.copyOf(quotes);
         }

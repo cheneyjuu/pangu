@@ -5,6 +5,7 @@ import com.pangu.infrastructure.persistence.entity.RepairProjectGovernanceRows.A
 import com.pangu.infrastructure.persistence.entity.RepairProjectGovernanceRows.BuildingDecisionRow;
 import com.pangu.infrastructure.persistence.entity.RepairProjectGovernanceRows.BuildingProcessRow;
 import com.pangu.infrastructure.persistence.entity.RepairProjectGovernanceRows.DecisionEntryRow;
+import com.pangu.infrastructure.persistence.entity.RepairProjectGovernanceRows.GovernanceBasisRow;
 import com.pangu.infrastructure.persistence.entity.RepairProjectGovernanceRows.PolicySnapshotRow;
 import com.pangu.infrastructure.persistence.entity.RepairProjectGovernanceRows.ProjectSealUsageRow;
 import com.pangu.infrastructure.persistence.entity.RepairProjectGovernanceRows.OwnerDecisionTaskRow;
@@ -141,6 +142,10 @@ public interface RepairProjectGovernanceMapper {
                                   @Param("result") String result,
                                   @Param("settledByUserId") Long settledByUserId);
 
+    GovernanceBasisRow findActiveGovernanceBasis(@Param("projectId") Long projectId,
+                                                 @Param("planId") Long planId,
+                                                 @Param("tenantId") Long tenantId);
+
     int insertGovernanceBasis(@Param("projectId") Long projectId,
                               @Param("planId") Long planId,
                               @Param("tenantId") Long tenantId,
@@ -148,5 +153,10 @@ public interface RepairProjectGovernanceMapper {
                               @Param("referenceType") String referenceType,
                               @Param("referenceId") Long referenceId,
                               @Param("snapshotHash") String snapshotHash,
+                              @Param("approvedSupplierSelectionMethod") String approvedSupplierSelectionMethod,
+                              @Param("approvedSupplierEvaluationRule") String approvedSupplierEvaluationRule,
+                              @Param("minimumInvitedSupplierCount") Integer minimumInvitedSupplierCount,
+                              @Param("minimumValidQuoteCount") Integer minimumValidQuoteCount,
+                              @Param("nonCompetitiveSelectionBasis") String nonCompetitiveSelectionBasis,
                               @Param("createdByUserId") Long createdByUserId);
 }

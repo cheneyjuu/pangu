@@ -8,6 +8,7 @@ import com.pangu.domain.model.repair.RepairProjectSourcing.Quote;
 import com.pangu.domain.model.repair.RepairProjectSourcing.QuoteLine;
 import com.pangu.domain.model.repair.RepairProjectSourcing.QuoteLineType;
 import com.pangu.domain.model.repair.RepairProjectSourcing.Selection;
+import com.pangu.domain.model.repair.RepairProjectGovernance.SupplierSelectionEvaluationRule;
 import com.pangu.domain.model.repair.RepairQuoteConfirmationStatus;
 import com.pangu.domain.model.repair.RepairQuoteSubmissionSource;
 import com.pangu.domain.model.repair.RepairSupplierQuoteStatus;
@@ -257,8 +258,10 @@ public class RepairProjectSourcingRepositoryImpl implements RepairProjectSourcin
                 row.getSelectionId(), row.getProjectId(), row.getPlanId(), row.getTenantId(),
                 row.getQuoteId(), row.getSupplierDeptId(), row.getSupplierName(), row.getQuoteAmount(),
                 RepairSupplierSelectionMethod.valueOf(row.getSelectionMethod()),
-                row.getRecommendationReason(), row.getInsufficientQuoteReason(),
-                row.getFrameworkRelationId(), row.getRecommendedByUserId(), row.getCreateTime());
+                SupplierSelectionEvaluationRule.valueOf(row.getSelectionEvaluationRule()),
+                row.getSelectionRationale(), row.getSelectionEvidenceAttachmentId(),
+                row.getGovernanceBasisId(), row.getGovernanceBasisHash(), row.getFrameworkRelationId(),
+                row.getConfirmedByUserId(), row.getCreateTime());
     }
 
     private SelectionRow toRow(Selection selection) {
@@ -272,10 +275,13 @@ public class RepairProjectSourcingRepositoryImpl implements RepairProjectSourcin
         row.setSupplierName(selection.supplierName());
         row.setQuoteAmount(selection.quoteAmount());
         row.setSelectionMethod(selection.selectionMethod().name());
-        row.setRecommendationReason(selection.recommendationReason());
-        row.setInsufficientQuoteReason(selection.insufficientQuoteReason());
+        row.setSelectionEvaluationRule(selection.selectionEvaluationRule().name());
+        row.setSelectionRationale(selection.selectionRationale());
+        row.setSelectionEvidenceAttachmentId(selection.selectionEvidenceAttachmentId());
+        row.setGovernanceBasisId(selection.governanceBasisId());
+        row.setGovernanceBasisHash(selection.governanceBasisHash());
         row.setFrameworkRelationId(selection.frameworkRelationId());
-        row.setRecommendedByUserId(selection.recommendedByUserId());
+        row.setConfirmedByUserId(selection.confirmedByUserId());
         return row;
     }
 }

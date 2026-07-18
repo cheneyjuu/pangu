@@ -49,8 +49,8 @@ public final class RepairProjectSourcingCommands {
 
     public record SelectQuote(
             Long quoteId,
-            String recommendationReason,
-            String insufficientQuoteReason,
+            String selectionRationale,
+            Long selectionEvidenceAttachmentId,
             Long frameworkRelationId
     ) {
     }

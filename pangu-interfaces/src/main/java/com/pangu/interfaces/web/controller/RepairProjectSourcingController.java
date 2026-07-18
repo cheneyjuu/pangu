@@ -1,4 +1,4 @@
-// 关联业务：暴露物业侧维修工程项目邀价、报价、比价推荐和中选供应商接口。
+// 关联业务：暴露维修工程项目邀价、报价，以及业委会依据有效授权确认中选供应商的接口。
 package com.pangu.interfaces.web.controller;
 
 import com.pangu.application.repair.RepairProjectSourcingService;
@@ -58,11 +58,11 @@ public class RepairProjectSourcingController extends BaseController {
     }
 
     @PostMapping("/selection")
-    @PreAuthorize("hasAuthority('repair:workorder:manage')")
-    public Result<Details> select(
+    @PreAuthorize("hasAuthority('repair:workorder:governance')")
+    public Result<Details> confirmSelection(
             @PathVariable("projectId") Long projectId,
             @Valid @RequestBody SelectQuoteRequest request) {
-        return success("维修工程中选供应商已形成",
+        return success("业委会已确认维修工程中选供应商",
                 sourcingService.selectQuote(projectId, request.toCommand()));
     }
 }

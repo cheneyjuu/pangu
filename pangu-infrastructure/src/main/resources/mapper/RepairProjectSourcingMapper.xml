@@ -240,12 +240,14 @@
     <insert id="insertSelection" useGeneratedKeys="true" keyProperty="selectionId" keyColumn="selection_id">
         INSERT INTO t_repair_project_supplier_selection (
             project_id, plan_id, tenant_id, quote_id, supplier_dept_id, supplier_name,
-            quote_amount, selection_method, recommendation_reason, insufficient_quote_reason,
-            framework_relation_id, recommended_by_user_id
+            quote_amount, selection_method, selection_evaluation_rule, selection_rationale,
+            selection_evidence_attachment_id, governance_basis_id, governance_basis_hash,
+            framework_relation_id, confirmed_by_user_id
         ) VALUES (
             #{projectId}, #{planId}, #{tenantId}, #{quoteId}, #{supplierDeptId}, #{supplierName},
-            #{quoteAmount}, #{selectionMethod}, #{recommendationReason}, #{insufficientQuoteReason},
-            #{frameworkRelationId}, #{recommendedByUserId}
+            #{quoteAmount}, #{selectionMethod}, #{selectionEvaluationRule}, #{selectionRationale},
+            #{selectionEvidenceAttachmentId}, #{governanceBasisId}, #{governanceBasisHash},
+            #{frameworkRelationId}, #{confirmedByUserId}
         )
     </insert>
 
@@ -253,18 +255,34 @@
             resultType="com.pangu.infrastructure.persistence.entity.RepairProjectSourcingRows$SelectionRow">
         SELECT selection.selection_id, selection.project_id, selection.plan_id, selection.tenant_id,
                selection.quote_id, selection.supplier_dept_id, selection.supplier_name,
-               selection.quote_amount, selection.selection_method, selection.recommendation_reason,
-               selection.insufficient_quote_reason, selection.framework_relation_id,
-               selection.recommended_by_user_id, selection.create_time
+               selection.quote_amount, selection.selection_method, selection.selection_evaluation_rule,
+               selection.selection_rationale, selection.selection_evidence_attachment_id,
+               selection.governance_basis_id, selection.governance_basis_hash,
+               selection.framework_relation_id, selection.confirmed_by_user_id, selection.create_time
         FROM t_repair_project_supplier_selection selection
         JOIN t_repair_project_supplier_quote quote
           ON quote.quote_id = selection.quote_id
          AND quote.project_id = selection.project_id
          AND quote.plan_id = selection.plan_id
          AND quote.tenant_id = selection.tenant_id
+        JOIN t_repair_governance_basis governance_basis
+          ON governance_basis.basis_id = selection.governance_basis_id
+         AND governance_basis.project_id = selection.project_id
+         AND governance_basis.plan_id = selection.plan_id
+         AND governance_basis.tenant_id = selection.tenant_id
+         AND governance_basis.status = 'ACTIVE'
+         AND governance_basis.snapshot_hash = selection.governance_basis_hash
+        JOIN t_repair_project_attachment evidence
+          ON evidence.attachment_id = selection.selection_evidence_attachment_id
+         AND evidence.project_id = selection.project_id
+         AND evidence.tenant_id = selection.tenant_id
         WHERE selection.project_id = #{projectId}
           AND selection.plan_id = #{planId}
           AND selection.tenant_id = #{tenantId}
+          AND selection.selection_evaluation_rule IS NOT NULL
+          AND selection.selection_evidence_attachment_id IS NOT NULL
+          AND selection.governance_basis_id IS NOT NULL
+          AND selection.governance_basis_hash IS NOT NULL
           AND quote.quote_status = 'ACTIVE'
           AND quote.confirmation_status IN ('ONLINE_CONFIRMED', 'OFFLINE_EVIDENCE_VERIFIED', 'CONTRACT_CONFIRMED')
         ORDER BY selection.create_time DESC, selection.selection_id DESC

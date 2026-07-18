@@ -89,10 +89,13 @@ public final class RepairProjectSourcingRows {
         private String supplierName;
         private BigDecimal quoteAmount;
         private String selectionMethod;
-        private String recommendationReason;
-        private String insufficientQuoteReason;
+        private String selectionEvaluationRule;
+        private String selectionRationale;
+        private Long selectionEvidenceAttachmentId;
+        private Long governanceBasisId;
+        private String governanceBasisHash;
         private Long frameworkRelationId;
-        private Long recommendedByUserId;
+        private Long confirmedByUserId;
         private LocalDateTime createTime;
     }
 }

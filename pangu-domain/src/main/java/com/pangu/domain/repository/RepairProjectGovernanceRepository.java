@@ -6,7 +6,10 @@ import com.pangu.domain.model.repair.RepairProjectGovernance.BuildingDecision;
 import com.pangu.domain.model.repair.RepairProjectGovernance.BuildingProcess;
 import com.pangu.domain.model.repair.RepairProjectGovernance.DecisionEntry;
 import com.pangu.domain.model.repair.RepairProjectGovernance.DecisionPolicySnapshot;
+import com.pangu.domain.model.repair.RepairProjectGovernance.GovernanceBasis;
 import com.pangu.domain.model.repair.RepairProjectGovernance.OwnerDecisionTask;
+import com.pangu.domain.model.repair.RepairProjectGovernance.SupplierSelectionEvaluationRule;
+import com.pangu.domain.model.repair.RepairSupplierSelectionMethod;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -87,7 +90,15 @@ public interface RepairProjectGovernanceRepository {
 
     int settleAssemblySubjectLink(Long linkId, Long tenantId, String result, Long settledByUserId);
 
+    Optional<GovernanceBasis> findActiveGovernanceBasis(Long projectId, Long planId, Long tenantId);
+
     void insertGovernanceBasis(Long projectId, Long planId, Long tenantId,
                                String basisType, String referenceType, Long referenceId,
-                               String snapshotHash, Long createdByUserId);
+                               String snapshotHash,
+                               RepairSupplierSelectionMethod approvedSupplierSelectionMethod,
+                               SupplierSelectionEvaluationRule approvedSupplierEvaluationRule,
+                               Integer minimumInvitedSupplierCount,
+                               Integer minimumValidQuoteCount,
+                               String nonCompetitiveSelectionBasis,
+                               Long createdByUserId);
 }

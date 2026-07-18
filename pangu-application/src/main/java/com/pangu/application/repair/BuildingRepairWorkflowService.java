@@ -7,6 +7,7 @@ import com.pangu.application.repair.command.ApproveBuildingRepairCommand;
 import com.pangu.application.repair.command.CompleteBuildingRepairDecisionCommand;
 import com.pangu.application.repair.command.ReviewBuildingRepairPriceCommand;
 import com.pangu.application.repair.command.SealBuildingRepairCommand;
+import com.pangu.application.repair.command.SealBuildingRepairCommand.SupplierSelectionAuthorization;
 import com.pangu.application.repair.command.StartBuildingRepairDecisionCommand;
 import com.pangu.application.repair.command.SubmitBuildingRepairOfficialDocumentCommand;
 import com.pangu.domain.context.UserContext;
@@ -32,9 +33,11 @@ import com.pangu.domain.model.repair.RepairProjectGovernance.DecisionPolicySnaps
 import com.pangu.domain.model.repair.RepairProjectGovernance.DecisionRoomParticipation;
 import com.pangu.domain.model.repair.RepairProjectGovernance.GovernanceResult;
 import com.pangu.domain.model.repair.RepairProjectGovernance.NonResponseRule;
+import com.pangu.domain.model.repair.RepairProjectGovernance.SupplierSelectionEvaluationRule;
 import com.pangu.domain.model.repair.RepairDecisionRule;
 import com.pangu.domain.repository.RepairDecisionRuleRepository;
 import com.pangu.domain.model.repair.RepairVoteChoice;
+import com.pangu.domain.model.repair.RepairSupplierSelectionMethod;
 import com.pangu.domain.model.repair.RepairWorkflowType;
 import com.pangu.domain.repository.RepairProjectGovernanceRepository;
 import com.pangu.domain.repository.RepairProjectRepository;
@@ -51,6 +54,7 @@ import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.HexFormat;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -71,6 +75,10 @@ public class BuildingRepairWorkflowService {
     private static final Set<String> REVIEW_MODES = Set.of(
             "INTERNAL_PRICE_REVIEW", "THIRD_PARTY_AUDIT", "NOT_REQUIRED");
     private static final Set<String> REVIEW_CONCLUSIONS = Set.of("APPROVED", "REJECTED");
+    private static final Set<RepairSupplierSelectionMethod> NON_COMPETITIVE_SELECTION_METHODS = Set.of(
+            RepairSupplierSelectionMethod.FRAMEWORK_SUPPLIER,
+            RepairSupplierSelectionMethod.DIRECT_AWARD,
+            RepairSupplierSelectionMethod.EMERGENCY_APPOINTMENT);
     private final RepairProjectRepository projectRepository;
     private final RepairProjectGovernanceRepository governanceRepository;
     private final RepairDecisionRuleRepository decisionRuleRepository;
@@ -275,14 +283,29 @@ public class BuildingRepairWorkflowService {
         if (!actor.hasPermission("committee:seal:use")) {
             throw new RepairWorkOrderApplicationException(FORBIDDEN, "当前业委会成员未获用印权限");
         }
-        if (command == null || command.expectedProcessVersion() == null || command.sealedAttachmentId() == null) {
-            throw invalid("expectedProcessVersion 和 sealedAttachmentId 均为必填项");
+        if (command == null || command.expectedProcessVersion() == null || command.sealedAttachmentId() == null
+                || command.supplierSelectionAuthorization() == null) {
+            throw invalid("expectedProcessVersion、sealedAttachmentId 和施工单位选择授权快照均为必填项");
         }
         RepairProject project = loadProjectForUpdate(projectId, actor.tenantId());
         requireBuildingProject(project, Status.GOVERNANCE_IN_PROGRESS);
         PlanVersion plan = activeLockedPlan(project);
         BuildingProcess process = activeProcessForUpdate(project, plan);
         requireProcess(process, BuildingProcessStatus.COMMITTEE_APPROVED, command.expectedProcessVersion());
+        SupplierSelectionAuthorization authorization = validateSupplierSelectionAuthorization(
+                command.supplierSelectionAuthorization());
+        DecisionPolicySnapshot policy = governanceRepository.findPolicySnapshot(
+                        process.policySnapshotId(), project.tenantId())
+                .orElseThrow(() -> notFound("楼栋维修规则快照不存在"));
+        BuildingDecision decision = governanceRepository.findBuildingDecision(
+                        process.decisionId(), project.tenantId())
+                .orElseThrow(() -> notFound("楼栋维修决定不存在"));
+        if (!GovernanceResult.PASSED.name().equals(decision.result())) {
+            throw conflict("楼栋维修决定未通过，不能用印并授权施工单位选择");
+        }
+        if (process.reviewedAmount() == null || process.reviewedAmount().compareTo(BigDecimal.ZERO) <= 0) {
+            throw conflict("楼栋维修缺少已通过的审价金额，不能用印并授权施工单位选择");
+        }
         Attachment source = attachment(
                 project, process.officialDocumentAttachmentId(), this::isDocument, "物业正式报审文件");
         Attachment sealed = attachment(
@@ -296,19 +319,33 @@ public class BuildingRepairWorkflowService {
             throw conflict("楼栋维修流程已变化，请刷新后重试");
         }
         String basisHash = sha256(String.join("|",
-                plan.snapshotHash(), process.processId().toString(), process.decisionId().toString(),
-                process.reviewedAmount().toPlainString(), sealed.sha256()));
+                value(plan.snapshotHash()), value(process.processId()), value(policy.policySnapshotId()),
+                value(policy.ruleHash()), value(process.decisionId()), value(decision.result()),
+                value(process.reviewedAmount()), value(source.sha256()), value(sealed.sha256()),
+                value(authorization.selectionMethod()), value(authorization.evaluationRule()),
+                value(authorization.minimumInvitedSupplierCount()), value(authorization.minimumValidQuoteCount()),
+                value(authorization.nonCompetitiveSelectionBasis())));
         governanceRepository.insertGovernanceBasis(
                 project.projectId(), plan.planId(), project.tenantId(),
                 "BUILDING_REPAIR_DECISION", "BUILDING_PROCESS", process.processId(),
-                basisHash, actor.userId());
+                basisHash, authorization.selectionMethod(), authorization.evaluationRule(),
+                authorization.minimumInvitedSupplierCount(), authorization.minimumValidQuoteCount(),
+                authorization.nonCompetitiveSelectionBasis(), actor.userId());
         if (projectRepository.advanceStatus(
                 project.projectId(), project.tenantId(), Status.GOVERNANCE_IN_PROGRESS,
                 Status.AUTHORIZED, project.version()) != 1) {
             throw conflict("项目状态已变化，请刷新后重试");
         }
-        event(project, actor, "BUILDING_GOVERNANCE_AUTHORIZED", Map.of(
-                "processId", process.processId(), "sealUsageId", usageId, "basisHash", basisHash));
+        Map<String, Object> authorizationEvent = new LinkedHashMap<>();
+        authorizationEvent.put("processId", process.processId());
+        authorizationEvent.put("sealUsageId", usageId);
+        authorizationEvent.put("basisHash", basisHash);
+        authorizationEvent.put("selectionMethod", authorization.selectionMethod().name());
+        authorizationEvent.put("evaluationRule", authorization.evaluationRule().name());
+        authorizationEvent.put("minimumInvitedSupplierCount", authorization.minimumInvitedSupplierCount());
+        authorizationEvent.put("minimumValidQuoteCount", authorization.minimumValidQuoteCount());
+        authorizationEvent.put("nonCompetitiveSelectionBasis", authorization.nonCompetitiveSelectionBasis());
+        event(project, actor, "BUILDING_GOVERNANCE_AUTHORIZED", authorizationEvent);
         return details(project, reloadProcess(project, plan));
     }
 
@@ -507,6 +544,48 @@ public class BuildingRepairWorkflowService {
                 || contentType.contains("spreadsheet"));
     }
 
+    /**
+     * 授权书未记载数量门槛时必须保留空值，系统不得套用三家报价等默认规则。
+     */
+    private SupplierSelectionAuthorization validateSupplierSelectionAuthorization(
+            SupplierSelectionAuthorization authorization) {
+        if (authorization.selectionMethod() == null || authorization.evaluationRule() == null) {
+            throw invalid("施工单位选择方式和评审规则均为必填项");
+        }
+        Integer invited = authorization.minimumInvitedSupplierCount();
+        Integer quotes = authorization.minimumValidQuoteCount();
+        if ((invited != null && invited <= 0) || (quotes != null && quotes <= 0)) {
+            throw invalid("授权文件中的最低数量必须大于 0");
+        }
+        if (invited != null && quotes != null && quotes > invited) {
+            throw invalid("授权文件中的最低有效报价数不得大于最低邀价数");
+        }
+        String nonCompetitiveBasis = trim(authorization.nonCompetitiveSelectionBasis());
+        if (authorization.selectionMethod() == RepairSupplierSelectionMethod.COMPETITIVE_QUOTATION) {
+            if (authorization.evaluationRule() != SupplierSelectionEvaluationRule.LOWEST_COMPLIANT_QUOTE
+                    && authorization.evaluationRule() != SupplierSelectionEvaluationRule.COMPREHENSIVE_EVALUATION) {
+                throw invalid("竞争性报价授权必须明确最低合格报价或综合评审规则");
+            }
+            if (nonCompetitiveBasis != null) {
+                throw invalid("竞争性报价授权不得填写非竞争定商依据");
+            }
+        } else if (NON_COMPETITIVE_SELECTION_METHODS.contains(authorization.selectionMethod())) {
+            if (authorization.evaluationRule() != SupplierSelectionEvaluationRule.AUTHORIZED_DIRECT_SELECTION) {
+                throw invalid("框架、直接或紧急定商必须使用授权直接选择规则");
+            }
+            if (nonCompetitiveBasis == null) {
+                throw invalid("非竞争定商必须填写授权文件中的明确依据");
+            }
+            if (invited != null || quotes != null) {
+                throw invalid("非竞争定商授权不得伪造最低邀价或报价数量门槛");
+            }
+        } else {
+            throw invalid("施工单位选择方式不合法");
+        }
+        return new SupplierSelectionAuthorization(
+                authorization.selectionMethod(), authorization.evaluationRule(), invited, quotes, nonCompetitiveBasis);
+    }
+
     private void requireBuildingProject(RepairProject project, Status expectedStatus) {
         if (project.workflowType() != RepairWorkflowType.BUILDING_REPAIR) {
             throw invalid("全小区公共维修不能进入楼栋维修治理流程");
@@ -579,6 +658,10 @@ public class BuildingRepairWorkflowService {
         }
         String trimmed = value.trim();
         return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private String value(Object value) {
+        return value == null ? "" : String.valueOf(value);
     }
 
     private RepairWorkOrderApplicationException invalid(String message) {

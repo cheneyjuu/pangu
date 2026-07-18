@@ -150,7 +150,7 @@ public class CommunityAssemblyRepairWorkflowService {
             governanceRepository.insertGovernanceBasis(
                     project.projectId(), plan.planId(), project.tenantId(),
                     "COMMUNITY_ASSEMBLY_DECISION", "ASSEMBLY_SUBJECT", link.subjectId(),
-                    basisHash, actor.userId());
+                    basisHash, null, null, null, null, null, actor.userId());
         }
         if (projectRepository.advanceStatus(
                 project.projectId(), project.tenantId(), Status.GOVERNANCE_IN_PROGRESS,

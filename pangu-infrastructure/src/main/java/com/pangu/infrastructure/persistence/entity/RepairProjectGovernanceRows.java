@@ -141,4 +141,25 @@ public final class RepairProjectGovernanceRows {
         private Long operatorUserId;
         private String remark;
     }
+
+    /** 已用印的决定/授权快照；选择规则为空的历史依据不能作为最终定商依据。 */
+    @Data
+    public static class GovernanceBasisRow {
+        private Long basisId;
+        private Long projectId;
+        private Long planId;
+        private Long tenantId;
+        private String basisType;
+        private String referenceType;
+        private Long referenceId;
+        private String snapshotHash;
+        private String approvedSupplierSelectionMethod;
+        private String approvedSupplierEvaluationRule;
+        private Integer minimumInvitedSupplierCount;
+        private Integer minimumValidQuoteCount;
+        private String nonCompetitiveSelectionBasis;
+        private String status;
+        private Long createdByUserId;
+        private LocalDateTime createTime;
+    }
 }

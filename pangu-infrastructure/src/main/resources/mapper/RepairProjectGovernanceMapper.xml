@@ -440,10 +440,34 @@
     <insert id="insertGovernanceBasis">
         INSERT INTO t_repair_governance_basis (
             project_id, plan_id, tenant_id, basis_type, reference_type,
-            reference_id, snapshot_hash, status, created_by_user_id
+            reference_id, snapshot_hash,
+            approved_supplier_selection_method, approved_supplier_evaluation_rule,
+            minimum_invited_supplier_count, minimum_valid_quote_count,
+            non_competitive_selection_basis,
+            status, created_by_user_id
         ) VALUES (
             #{projectId}, #{planId}, #{tenantId}, #{basisType}, #{referenceType},
-            #{referenceId}, #{snapshotHash}, 'ACTIVE', #{createdByUserId}
+            #{referenceId}, #{snapshotHash},
+            #{approvedSupplierSelectionMethod}, #{approvedSupplierEvaluationRule},
+            #{minimumInvitedSupplierCount}, #{minimumValidQuoteCount},
+            #{nonCompetitiveSelectionBasis},
+            'ACTIVE', #{createdByUserId}
         )
     </insert>
+
+    <select id="findActiveGovernanceBasis"
+            resultType="com.pangu.infrastructure.persistence.entity.RepairProjectGovernanceRows$GovernanceBasisRow">
+        SELECT basis_id, project_id, plan_id, tenant_id, basis_type, reference_type,
+               reference_id, snapshot_hash, approved_supplier_selection_method,
+               approved_supplier_evaluation_rule, minimum_invited_supplier_count,
+               minimum_valid_quote_count, non_competitive_selection_basis,
+               status, created_by_user_id, create_time
+        FROM t_repair_governance_basis
+        WHERE project_id = #{projectId}
+          AND plan_id = #{planId}
+          AND tenant_id = #{tenantId}
+          AND status = 'ACTIVE'
+        ORDER BY basis_id DESC
+        LIMIT 1
+    </select>
 </mapper>

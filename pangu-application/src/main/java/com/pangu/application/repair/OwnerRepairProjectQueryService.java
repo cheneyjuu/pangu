@@ -102,7 +102,6 @@ public class OwnerRepairProjectQueryService {
                         quoteAttachment.originalFileName(), quoteAttachment.contentType(), quoteAttachment.fileSize()));
             }
         }
-
         return new OwnerRepairProjectDisclosure(
                 workOrderId, project.projectId(), project.projectNo(), project.projectName(),
                 project.workflowType(), project.scopeType(), project.buildingId(), project.unitName(),
@@ -126,7 +125,7 @@ public class OwnerRepairProjectQueryService {
                 quote.quoteId(), quote.supplierDeptId(), quote.supplierName(),
                 quote.amountExcludingTax(), quote.taxRate(), quote.taxAmount(), quote.quoteAmount(),
                 quote.quoteSummary(), quote.attachmentId(), quote.constructionPeriodDays(), quote.warrantyDays(),
-                selection.selectionMethod(), selection.recommendationReason(), selection.insufficientQuoteReason(),
+                selection.selectionMethod(), null, null,
                 quote.quoteLines().stream().map(line -> publishedQuoteLine(line, quote.taxRate()))
                         .toList());
     }

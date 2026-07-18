@@ -37,6 +37,15 @@ public final class RepairProjectGovernance {
         FAILED
     }
 
+    /**
+     * 已通过的施工单位评审规则。没有可核验的规则时，不能把报价整理结果称为最终定商。
+     */
+    public enum SupplierSelectionEvaluationRule {
+        LOWEST_COMPLIANT_QUOTE,
+        COMPREHENSIVE_EVALUATION,
+        AUTHORIZED_DIRECT_SELECTION
+    }
+
     public record DecisionPolicySnapshot(
             Long policySnapshotId,
             Long projectId,
@@ -51,6 +60,29 @@ public final class RepairProjectGovernance {
             RepairLocalDecisionChannel decisionChannel,
             String deliveryRule,
             NonResponseRule nonResponseRule,
+            String status,
+            Long createdByUserId,
+            LocalDateTime createTime
+    ) {
+    }
+
+    /**
+     * 决定/授权流程产出的不可变治理依据；施工单位选择方式和规则必须与该依据一起固化。
+     */
+    public record GovernanceBasis(
+            Long basisId,
+            Long projectId,
+            Long planId,
+            Long tenantId,
+            String basisType,
+            String referenceType,
+            Long referenceId,
+            String snapshotHash,
+            RepairSupplierSelectionMethod approvedSupplierSelectionMethod,
+            SupplierSelectionEvaluationRule approvedSupplierEvaluationRule,
+            Integer minimumInvitedSupplierCount,
+            Integer minimumValidQuoteCount,
+            String nonCompetitiveSelectionBasis,
             String status,
             Long createdByUserId,
             LocalDateTime createTime
