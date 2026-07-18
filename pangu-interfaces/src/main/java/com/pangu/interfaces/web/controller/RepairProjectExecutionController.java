@@ -60,7 +60,7 @@ public class RepairProjectExecutionController extends BaseController {
     public Result<Contract> recordContract(
             @PathVariable("projectId") Long projectId,
             @Valid @RequestBody ContractRequest request) {
-        return success("维修三方合同已生效", executionService.recordEffectiveContract(projectId, request.toCommand()));
+        return success("维修施工合同已生效", executionService.recordEffectiveContract(projectId, request.toCommand()));
     }
 
     @PostMapping("/execution/start")

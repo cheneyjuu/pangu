@@ -1,4 +1,4 @@
-// 关联业务：编排维修工程审价、三方合同、开工、施工取证、材料进场和结构化竣工结算。
+// 关联业务：编排维修工程审价、按资金流程区分签约方的施工合同、开工、施工取证、材料进场和结构化竣工结算。
 package com.pangu.application.repair;
 
 import com.pangu.application.repair.RepairProjectApplicationSupport.Context;
@@ -12,6 +12,8 @@ import com.pangu.application.repair.command.RepairProjectExecutionCommands.Verif
 import com.pangu.application.repair.command.RepairProjectExecutionCommands.VerifyMaterialInspection;
 import com.pangu.application.repair.command.RepairProjectExecutionCommands.VerifySettlement;
 import com.pangu.domain.context.UserContext;
+import com.pangu.domain.model.propertyservice.PropertyServiceEnterprise;
+import com.pangu.domain.model.propertyservice.PropertyServiceOrganization;
 import com.pangu.domain.model.repair.RepairProject;
 import com.pangu.domain.model.repair.RepairProject.Attachment;
 import com.pangu.domain.model.repair.RepairProject.EvidenceRequirement;
@@ -40,6 +42,7 @@ import com.pangu.domain.repository.RepairProjectSourcingRepository;
 import com.pangu.domain.repository.RepairProjectGovernanceRepository;
 import com.pangu.domain.repository.RepairProjectRepository;
 import com.pangu.domain.repository.RepairWorkOrderRepository;
+import com.pangu.domain.repository.PropertyServiceOrganizationRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -74,6 +77,7 @@ public class RepairProjectExecutionService {
     private final RepairProjectSourcingRepository sourcingRepository;
     private final RepairProjectGovernanceRepository governanceRepository;
     private final RepairWorkOrderRepository workOrderRepository;
+    private final PropertyServiceOrganizationRepository propertyServiceOrganizationRepository;
 
     @Transactional
     public CostReview recordCostReview(Long projectId, RecordCostReview command) {
@@ -111,7 +115,7 @@ public class RepairProjectExecutionService {
 
     @Transactional
     public Contract recordEffectiveContract(Long projectId, RecordContract command) {
-        UserContext actor = support.requireSysActor(CONTRACT_ROLES, "仅物业经理可组织并归档维修三方合同");
+        UserContext actor = support.requireSysActor(CONTRACT_ROLES, "仅物业经理可组织并归档维修施工合同");
         require(command != null && command.expectedProjectVersion() != null,
                 "expectedProjectVersion 必填");
         Context context = support.loadForUpdate(projectId, actor.tenantId(), Status.AUTHORIZED);
@@ -141,9 +145,10 @@ public class RepairProjectExecutionService {
                 || command.contractAmount().compareTo(selection.quoteAmount()) > 0) {
             throw support.invalid("合同金额超过中选报价、锁定方案预算或有效审价金额");
         }
+        PropertyServiceEnterprise propertyEnterprise = requireActivePropertyContractParty(actor);
         Attachment contractAttachment = support.attachment(
-                context, command.contractAttachmentId(), "三方合同文件");
-        document(contractAttachment, "三方合同文件");
+                context, command.contractAttachmentId(), "施工合同文件");
+        document(contractAttachment, "施工合同文件");
         List<ContractSignature> signatures = validatedSignatures(
                 context, command.signatures(), actor, command.supplierDeptId());
         Contract contract = executionRepository.insertContract(new Contract(
@@ -163,6 +168,8 @@ public class RepairProjectExecutionService {
         support.event(context, actor, "PROJECT_CONTRACT_EFFECTIVE", Map.of(
                 "contractId", contract.contractId(), "supplierDeptId", contract.supplierDeptId(),
                 "contractAmount", contract.contractAmount(), "partyCount", bound.size(),
+                "propertyEnterpriseId", propertyEnterprise.enterpriseId(),
+                "propertyEnterpriseName", propertyEnterprise.legalName(),
                 "selectionId", selection.selectionId(), "quoteId", selection.quoteId()));
         return contract;
     }
@@ -175,7 +182,7 @@ public class RepairProjectExecutionService {
         Context context = support.loadForUpdate(projectId, actor.tenantId(), Status.CONTRACT_EFFECTIVE);
         requireVersion(context, command.expectedProjectVersion());
         Contract contract = executionRepository.findContract(projectId, actor.tenantId())
-                .orElseThrow(() -> support.conflict("项目没有已生效三方合同"));
+                .orElseThrow(() -> support.conflict("项目没有已生效施工合同"));
         support.advance(context, Status.IN_PROGRESS);
         support.event(context, actor, "PROJECT_WORK_STARTED", Map.of("contractId", contract.contractId()));
         return contract;
@@ -473,8 +480,8 @@ public class RepairProjectExecutionService {
     private List<ContractSignature> validatedSignatures(
             Context context, List<RecordContract.Signature> submitted,
             UserContext actor, Long supplierDeptId) {
-        require(submitted != null && submitted.size() == ContractPartyType.values().length,
-                "三方合同必须分别记录业主大会或相关业主、物业和施工单位签署");
+        Set<ContractPartyType> requiredParties = requiredContractParties(context.project().workflowType());
+        require(submitted != null, "合同签署方不能为空");
         Map<ContractPartyType, ContractSignature> signatures = new LinkedHashMap<>();
         for (RecordContract.Signature source : submitted) {
             require(source != null && source.partyType() != null && source.signatureMethod() != null,
@@ -495,10 +502,32 @@ public class RepairProjectExecutionService {
                 throw support.invalid("合同签署方不能重复 partyType=" + source.partyType());
             }
         }
-        if (!signatures.keySet().equals(EnumSet.allOf(ContractPartyType.class))) {
-            throw support.invalid("合同缺少法定三方签署记录");
+        if (!signatures.keySet().equals(requiredParties)) {
+            throw support.invalid("合同签署方不符合当前维修流程");
         }
         return List.copyOf(signatures.values());
+    }
+
+    private Set<ContractPartyType> requiredContractParties(RepairWorkflowType workflowType) {
+        // 楼栋维修由物业服务企业以自身名义与施工单位签约；业委会授权留在治理环节，不构成合同签约方。
+        if (workflowType == RepairWorkflowType.BUILDING_REPAIR) {
+            return EnumSet.of(ContractPartyType.PROPERTY, ContractPartyType.SUPPLIER);
+        }
+        return EnumSet.allOf(ContractPartyType.class);
+    }
+
+    /**
+     * 合同中的物业方必须来自当前小区已启用的物业服务企业及其项目部，不能由前端手填或仅按角色推定。
+     */
+    private PropertyServiceEnterprise requireActivePropertyContractParty(UserContext actor) {
+        PropertyServiceOrganization organization = propertyServiceOrganizationRepository
+                .findActiveByTenant(actor.tenantId())
+                .orElseThrow(() -> support.invalid("当前小区未启用物业服务组织，不能以物业服务企业名义签署合同"));
+        if (actor.deptId() == null || !actor.deptId().equals(organization.projectDeptId())) {
+            throw support.invalid("当前物业经理未挂接本小区已启用物业项目部，不能以物业服务企业名义签署合同");
+        }
+        return propertyServiceOrganizationRepository.findEnterpriseById(organization.enterpriseId())
+                .orElseThrow(() -> support.invalid("当前物业服务组织缺少已核验企业主体，不能签署合同"));
     }
 
     private void assertSignerIdentity(

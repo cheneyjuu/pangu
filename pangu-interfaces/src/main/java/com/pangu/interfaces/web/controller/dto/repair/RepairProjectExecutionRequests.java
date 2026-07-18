@@ -61,7 +61,7 @@ public final class RepairProjectExecutionRequests {
             @Size(max = 160) String supplierName,
             @NotNull @DecimalMin(value = "0", inclusive = false) BigDecimal contractAmount,
             @NotNull @Positive Long contractAttachmentId,
-            @NotNull @Size(min = 3, max = 3) List<@Valid ContractSignatureRequest> signatures
+            @NotNull @Size(min = 2, max = 3) List<@Valid ContractSignatureRequest> signatures
     ) {
         public RecordContract toCommand() {
             return new RecordContract(

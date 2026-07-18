@@ -61,7 +61,7 @@ public class RepairProjectPaymentService {
                 projectId, actor.tenantId(), Status.CONTRACT_EFFECTIVE, Status.IN_PROGRESS,
                 Status.PENDING_ACCEPTANCE, Status.COMPLETED, Status.WARRANTY);
         Contract contract = executionRepository.findContract(projectId, actor.tenantId())
-                .orElseThrow(() -> support.conflict("项目没有已生效三方合同"));
+                .orElseThrow(() -> support.conflict("项目没有已生效施工合同"));
         PaymentMilestone milestone = context.plan().paymentMilestones().stream()
                 .filter(candidate -> candidate.type() == command.milestoneType())
                 .findFirst()

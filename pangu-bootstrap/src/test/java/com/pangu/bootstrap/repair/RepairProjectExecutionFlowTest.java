@@ -1,14 +1,16 @@
-// 关联业务：验证楼栋维修三方合同、施工取证、材料、结算、楼组长与受影响业主验收、付款和披露闭环。
+// 关联业务：验证楼栋维修由物业与施工单位签约、施工取证、材料、结算、楼组长与受影响业主验收、付款和披露闭环。
 package com.pangu.bootstrap.repair;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pangu.domain.repository.RepairEvidenceObjectStorage;
+import com.pangu.infrastructure.security.crypto.Sm4Util;
 import com.pangu.interfaces.security.JwtTokenProvider;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
@@ -53,11 +55,14 @@ class RepairProjectExecutionFlowTest {
     private static final long UID_AFFECTED_OWNER = 70002L;
     private static final String PROJECT_PREFIX = "IT-工程执行维修-";
     private static final String SUPPLIER_PREFIX = "IT-工程执行供应商-";
+    private static final String PROPERTY_ENTERPRISE_NAME = "IT-工程执行物业服务有限公司";
+    private static final String PROPERTY_ENTERPRISE_USCC = "91310000A123456789";
 
     @Autowired private MockMvc mockMvc;
     @Autowired private ObjectMapper objectMapper;
     @Autowired private JwtTokenProvider jwtTokenProvider;
     @Autowired private JdbcTemplate jdbcTemplate;
+    @Value("${platform.security.sm4-key-hex}") private String sm4KeyHex;
     @MockBean private RepairEvidenceObjectStorage objectStorage;
 
     private String propertyToken;
@@ -72,6 +77,7 @@ class RepairProjectExecutionFlowTest {
         directorToken = token(ACCOUNT_DIRECTOR, "SYS_USER", USER_DIRECTOR);
         leaderToken = token(ACCOUNT_BUILDING_LEADER, "SYS_USER", USER_BUILDING_LEADER);
         ownerToken = token(ACCOUNT_AFFECTED_OWNER, "C_USER", UID_AFFECTED_OWNER);
+        activatePropertyServiceOrganization();
         leaderAssignmentId = jdbcTemplate.queryForObject("""
                 INSERT INTO sys_user_building(user_id, building_id, tenant_id, assigned_by, status)
                 VALUES (?, ?, ?, ?, 1)
@@ -218,20 +224,24 @@ class RepairProjectExecutionFlowTest {
                 WHERE supplier_dept_id IN (SELECT dept_id FROM sys_dept WHERE dept_name LIKE ?)
                 """, SUPPLIER_PREFIX + "%");
         jdbcTemplate.update("DELETE FROM sys_dept WHERE dept_name LIKE ?", SUPPLIER_PREFIX + "%");
+        deleteTestPropertyServiceOrganization();
         if (leaderAssignmentId != null) {
             jdbcTemplate.update("DELETE FROM sys_user_building WHERE assignment_id = ?", leaderAssignmentId);
         }
     }
 
     @Test
-    void buildingExecutionRequiresVerifiedEvidenceTwoOwnerSideRolesAndLegalPaymentLimits() throws Exception {
+    void buildingExecutionRequiresVerifiedEvidenceOwnerAcceptanceAndLegalPaymentLimits() throws Exception {
         LockedProject locked = createAndAuthorizeProject();
         long supplierDeptId = locked.supplierDeptId();
-        long contractFile = upload(locked.projectId(), "三方施工合同.pdf", "contract");
+        long contractFile = upload(locked.projectId(), "双方施工合同.pdf", "contract");
         long ownerSignature = upload(locked.projectId(), "业主方签署页.pdf", "owner-signature");
         long propertySignature = upload(locked.projectId(), "物业签署页.pdf", "property-signature");
         long supplierSignature = upload(locked.projectId(), "施工单位签署页.pdf", "supplier-signature");
         List<Map<String, Object>> signatures = List.of(
+                signature("PROPERTY", "物业项目经理", USER_PROPERTY_MANAGER, propertySignature),
+                signature("SUPPLIER", "施工单位负责人", null, supplierSignature));
+        List<Map<String, Object>> invalidThreePartySignatures = List.of(
                 signature("OWNERS_ASSEMBLY_OR_GROUP", "业委会主任", USER_DIRECTOR, ownerSignature),
                 signature("PROPERTY", "物业项目经理", USER_PROPERTY_MANAGER, propertySignature),
                 signature("SUPPLIER", "施工单位负责人", null, supplierSignature));
@@ -254,6 +264,14 @@ class RepairProjectExecutionFlowTest {
                 Map.ofEntries(
                         Map.entry("expectedProjectVersion", projectVersion(locked.projectId())),
                         Map.entry("supplierDeptId", supplierDeptId),
+                        Map.entry("contractAmount", 1000),
+                        Map.entry("contractAttachmentId", contractFile),
+                        Map.entry("signatures", invalidThreePartySignatures)),
+                "合同签署方不符合当前维修流程");
+        postBadRequest(projectPath(locked.projectId(), "/contract"), propertyToken,
+                Map.ofEntries(
+                        Map.entry("expectedProjectVersion", projectVersion(locked.projectId())),
+                        Map.entry("supplierDeptId", supplierDeptId),
                         Map.entry("contractAmount", 1001),
                         Map.entry("contractAttachmentId", contractFile),
                         Map.entry("signatures", signatures)),
@@ -268,6 +286,13 @@ class RepairProjectExecutionFlowTest {
                         Map.entry("signatures", signatures))));
         assertEquals("BUILDING_MAINTENANCE_FUND", contract.path("fundSource").asText());
         assertEquals("OFFLINE", contract.path("signingMethod").asText());
+        assertEquals(PROPERTY_ENTERPRISE_NAME, jdbcTemplate.queryForObject("""
+                SELECT payload_json ->> 'propertyEnterpriseName'
+                FROM t_repair_project_event
+                WHERE project_id = ? AND action = 'PROJECT_CONTRACT_EFFECTIVE'
+                ORDER BY event_id DESC
+                LIMIT 1
+                """, String.class, locked.projectId()));
         String supplierToken = createSupplierIdentity(supplierDeptId);
         JsonNode assignedProjects = data(getOk("/api/v1/supplier/repair-projects", supplierToken));
         assertEquals(locked.projectId(), assignedProjects.get(0).path("project").path("projectId").asLong());
@@ -469,6 +494,45 @@ class RepairProjectExecutionFlowTest {
                 Map.of("expectedProjectVersion", 0));
         jdbcTemplate.update("UPDATE t_repair_project SET status = 'AUTHORIZED' WHERE project_id = ?", projectId);
         return new LockedProject(projectId, itemId, selectedSupplier.supplierDeptId());
+    }
+
+    /**
+     * 工程执行只验证合同环节，不重复覆盖物业服务组织登记流程；这里准备一个已启用组织，
+     * 确保物业方的法定主体来自当前小区已核验企业而不是前端输入。
+     */
+    private void activatePropertyServiceOrganization() {
+        deleteTestPropertyServiceOrganization();
+        long enterpriseId = jdbcTemplate.queryForObject("""
+                INSERT INTO t_property_service_enterprise (legal_name, unified_social_credit_code)
+                VALUES (?, ?)
+                RETURNING enterprise_id
+                """, Long.class, PROPERTY_ENTERPRISE_NAME, PROPERTY_ENTERPRISE_USCC);
+        jdbcTemplate.update("""
+                INSERT INTO t_property_service_organization (
+                    tenant_id, enterprise_id, project_dept_id, project_dept_name,
+                    service_contact_name, service_contact_phone, service_basis,
+                    service_start_date, status, verified_by_account_id, verified_by_user_id, verified_at
+                ) VALUES (?, ?, 102, '求是物业项目部', ?, ?,
+                    'PRELIMINARY_PROPERTY_SERVICE', CURRENT_DATE, 'ACTIVE', ?, ?, CURRENT_TIMESTAMP)
+                """, TENANT, enterpriseId,
+                Sm4Util.encryptHex("赵经理", sm4KeyHex),
+                Sm4Util.encryptHex("13800000021", sm4KeyHex),
+                ACCOUNT_PROPERTY_MANAGER, USER_PROPERTY_MANAGER);
+    }
+
+    private void deleteTestPropertyServiceOrganization() {
+        jdbcTemplate.update("""
+                DELETE FROM t_property_service_organization
+                WHERE enterprise_id IN (
+                    SELECT enterprise_id
+                    FROM t_property_service_enterprise
+                    WHERE unified_social_credit_code = ?
+                )
+                """, PROPERTY_ENTERPRISE_USCC);
+        jdbcTemplate.update("""
+                DELETE FROM t_property_service_enterprise
+                WHERE unified_social_credit_code = ?
+                """, PROPERTY_ENTERPRISE_USCC);
     }
 
     private String createSupplierIdentity(long supplierDeptId) {
