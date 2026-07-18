@@ -239,11 +239,14 @@ class RepairProjectExecutionFlowTest {
         long propertySignature = upload(locked.projectId(), "物业签署页.pdf", "property-signature");
         long supplierSignature = upload(locked.projectId(), "施工单位签署页.pdf", "supplier-signature");
         List<Map<String, Object>> signatures = List.of(
-                signature("PROPERTY", "物业项目经理", USER_PROPERTY_MANAGER, propertySignature),
+                signature("PROPERTY", "物业项目经理", null, propertySignature),
                 signature("SUPPLIER", "施工单位负责人", null, supplierSignature));
         List<Map<String, Object>> invalidThreePartySignatures = List.of(
                 signature("OWNERS_ASSEMBLY_OR_GROUP", "业委会主任", USER_DIRECTOR, ownerSignature),
                 signature("PROPERTY", "物业项目经理", USER_PROPERTY_MANAGER, propertySignature),
+                signature("SUPPLIER", "施工单位负责人", null, supplierSignature));
+        List<Map<String, Object>> invalidElectronicSignatures = List.of(
+                signature("PROPERTY", "物业项目经理", null, propertySignature, "ELECTRONIC"),
                 signature("SUPPLIER", "施工单位负责人", null, supplierSignature));
         long nonSelectedSupplierDeptId = jdbcTemplate.queryForObject("""
                 SELECT supplier_dept_id
@@ -272,6 +275,14 @@ class RepairProjectExecutionFlowTest {
                 Map.ofEntries(
                         Map.entry("expectedProjectVersion", projectVersion(locked.projectId())),
                         Map.entry("supplierDeptId", supplierDeptId),
+                        Map.entry("contractAmount", 1000),
+                        Map.entry("contractAttachmentId", contractFile),
+                        Map.entry("signatures", invalidElectronicSignatures)),
+                "电子签署必须绑定系统工作身份 partyType=PROPERTY");
+        postBadRequest(projectPath(locked.projectId(), "/contract"), propertyToken,
+                Map.ofEntries(
+                        Map.entry("expectedProjectVersion", projectVersion(locked.projectId())),
+                        Map.entry("supplierDeptId", supplierDeptId),
                         Map.entry("contractAmount", 1001),
                         Map.entry("contractAttachmentId", contractFile),
                         Map.entry("signatures", signatures)),
@@ -286,6 +297,10 @@ class RepairProjectExecutionFlowTest {
                         Map.entry("signatures", signatures))));
         assertEquals("BUILDING_MAINTENANCE_FUND", contract.path("fundSource").asText());
         assertEquals("OFFLINE", contract.path("signingMethod").asText());
+        assertEquals(2, jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM t_repair_contract_signature
+                WHERE contract_id = ? AND signer_user_id IS NULL
+                """, Integer.class, contract.path("contractId").asLong()));
         assertEquals(PROPERTY_ENTERPRISE_NAME, jdbcTemplate.queryForObject("""
                 SELECT payload_json ->> 'propertyEnterpriseName'
                 FROM t_repair_project_event
@@ -581,13 +596,19 @@ class RepairProjectExecutionFlowTest {
 
     private Map<String, Object> signature(
             String partyType, String signerName, Long signerUserId, long attachmentId) {
+        return signature(partyType, signerName, signerUserId, attachmentId, "PAPER_SCAN");
+    }
+
+    private Map<String, Object> signature(
+            String partyType, String signerName, Long signerUserId, long attachmentId,
+            String signatureMethod) {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("partyType", partyType);
         result.put("signerName", signerName);
         if (signerUserId != null) {
             result.put("signerUserId", signerUserId);
         }
-        result.put("signatureMethod", "PAPER_SCAN");
+        result.put("signatureMethod", signatureMethod);
         result.put("signatureAttachmentId", attachmentId);
         result.put("signedAt", LocalDateTime.now().minusMinutes(1));
         return result;

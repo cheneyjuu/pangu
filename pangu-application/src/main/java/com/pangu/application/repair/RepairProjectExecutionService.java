@@ -533,20 +533,24 @@ public class RepairProjectExecutionService {
     private void assertSignerIdentity(
             RecordContract.Signature signature, UserContext actor, Long supplierDeptId) {
         Long signerUserId = signature.signerUserId();
-        if (signature.signatureMethod() == SignatureMethod.ELECTRONIC && signerUserId == null) {
-            throw support.invalid("电子签署必须绑定系统工作身份 partyType=" + signature.partyType());
+        // 纸质合同以已归档的签署页为凭证，办理人的系统身份已由合同和事件审计记录；
+        // 只有电子签署才需要把签约自然人与可核验的系统工作身份绑定。
+        if (signerUserId == null) {
+            if (signature.signatureMethod() == SignatureMethod.ELECTRONIC) {
+                throw support.invalid("电子签署必须绑定系统工作身份 partyType=" + signature.partyType());
+            }
+            return;
         }
         switch (signature.partyType()) {
             case OWNERS_ASSEMBLY_OR_GROUP -> {
-                if (signerUserId == null || workOrderRepository.findActiveCommitteePosition(
-                                actor.tenantId(), signerUserId)
+                if (workOrderRepository.findActiveCommitteePosition(actor.tenantId(), signerUserId)
                         .filter(position -> Set.of("DIRECTOR", "VICE_DIRECTOR").contains(position))
                         .isEmpty()) {
                     throw support.invalid("业主大会或相关业主方必须由在任主任或副主任代表签署");
                 }
             }
             case PROPERTY -> {
-                if (signerUserId == null || actor.deptId() == null
+                if (actor.deptId() == null
                         || !workOrderRepository.activeUserBelongsToDept(signerUserId, actor.deptId())) {
                     throw support.invalid("物业签署人必须是当前物业组织的在职人员");
                 }
