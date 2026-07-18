@@ -95,6 +95,12 @@ public class RepairProjectRepositoryImpl implements RepairProjectRepository {
     }
 
     @Override
+    public Optional<AllocationBasis> findAllocationSnapshotBasis(Long planId, Long tenantId) {
+        return Optional.ofNullable(mapper.findAllocationSnapshotBasis(planId, tenantId))
+                .map(this::toDomain);
+    }
+
+    @Override
     public void linkPlanAttachment(Long planId, PlanAttachment attachment) {
         mapper.linkPlanAttachment(
                 planId, attachment.attachmentId(), attachment.purpose().name(), attachment.sortOrder());

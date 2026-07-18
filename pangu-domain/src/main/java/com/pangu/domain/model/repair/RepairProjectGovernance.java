@@ -42,9 +42,12 @@ public final class RepairProjectGovernance {
             Long projectId,
             Long planId,
             Long tenantId,
+            Long ruleId,
+            String ruleName,
             Long ruleDocumentAttachmentId,
             String ruleVersion,
             String ruleHash,
+            LocalDateTime ruleEffectiveAt,
             RepairLocalDecisionChannel decisionChannel,
             String deliveryRule,
             NonResponseRule nonResponseRule,
@@ -120,11 +123,35 @@ public final class RepairProjectGovernance {
     ) {
     }
 
+    /** C 端业主在锁定费用承担范围内可参与的一项楼栋维修在线表决。 */
+    public record OwnerDecisionTask(
+            Long decisionId,
+            Long projectId,
+            Long planId,
+            String projectNo,
+            String projectName,
+            String scopeLabel,
+            Long roomId,
+            String roomName,
+            BigDecimal buildArea,
+            RepairVoteChoice myChoice
+    ) {
+    }
+
+    /** 管理端展示的逐房屋参与状态；个人选择仅在审计接口返回。 */
+    public record DecisionRoomParticipation(
+            Long roomId,
+            BigDecimal buildArea,
+            boolean participated,
+            RepairVoteChoice choice
+    ) {
+    }
+
     public record BuildingProcessDetails(
             BuildingProcess process,
             DecisionPolicySnapshot policySnapshot,
             BuildingDecision decision,
-            List<DecisionEntry> entries
+            List<DecisionRoomParticipation> entries
     ) {
         public BuildingProcessDetails {
             entries = entries == null ? List.of() : List.copyOf(entries);

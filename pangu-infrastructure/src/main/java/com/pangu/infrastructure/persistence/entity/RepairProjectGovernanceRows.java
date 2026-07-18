@@ -17,9 +17,12 @@ public final class RepairProjectGovernanceRows {
         private Long projectId;
         private Long planId;
         private Long tenantId;
+        private Long ruleId;
+        private String ruleName;
         private Long ruleDocumentAttachmentId;
         private String ruleVersion;
         private String ruleHash;
+        private LocalDateTime ruleEffectiveAt;
         private String decisionChannel;
         private String deliveryRule;
         private String nonResponseRule;
@@ -92,6 +95,20 @@ public final class RepairProjectGovernanceRows {
         private String choice;
         private BigDecimal buildArea;
         private String originalText;
+    }
+
+    @Data
+    public static class OwnerDecisionTaskRow {
+        private Long decisionId;
+        private Long projectId;
+        private Long planId;
+        private String projectNo;
+        private String projectName;
+        private String scopeLabel;
+        private Long roomId;
+        private String roomName;
+        private BigDecimal buildArea;
+        private String myChoice;
     }
 
     @Data

@@ -5,10 +5,13 @@ import com.pangu.application.repair.RepairProjectAcceptanceService;
 import com.pangu.application.repair.OwnerRepairProjectDisclosure;
 import com.pangu.application.repair.OwnerRepairProjectQueryService;
 import com.pangu.application.repair.RepairProjectAttachmentService;
+import com.pangu.application.repair.OwnerBuildingRepairDecisionService;
 import com.pangu.domain.model.repair.RepairProjectExecution.AcceptanceParty;
 import com.pangu.domain.model.repair.RepairProjectExecution.OwnerAcceptanceTask;
+import com.pangu.domain.model.repair.RepairProjectGovernance.OwnerDecisionTask;
 import com.pangu.interfaces.web.controller.dto.repair.RepairProjectExecutionRequests.OwnerAcceptanceRequest;
 import com.pangu.interfaces.web.controller.dto.repair.RepairAttachmentDownloadTicketResponse;
+import com.pangu.interfaces.web.controller.dto.repair.SubmitOwnerRepairProjectDecisionVoteRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -29,6 +32,7 @@ public class OwnerRepairProjectController extends BaseController {
     private final RepairProjectAcceptanceService acceptanceService;
     private final OwnerRepairProjectQueryService queryService;
     private final RepairProjectAttachmentService attachmentService;
+    private final OwnerBuildingRepairDecisionService decisionService;
 
     @GetMapping("/by-work-order/{workOrderId}")
     @PreAuthorize("isAuthenticated()")
@@ -44,6 +48,42 @@ public class OwnerRepairProjectController extends BaseController {
             @PathVariable("attachmentId") Long attachmentId) {
         return success(RepairAttachmentDownloadTicketResponse.from(
                 attachmentService.createOwnerDownloadTicket(workOrderId, attachmentId)));
+    }
+
+    @GetMapping("/decisions")
+    @PreAuthorize("isAuthenticated()")
+    public Result<List<OwnerDecisionTask>> decisionTasks() {
+        return success(decisionService.listTasks());
+    }
+
+    @GetMapping("/decisions/{decisionId}")
+    @PreAuthorize("isAuthenticated()")
+    public Result<OwnerDecisionTask> decisionTask(@PathVariable("decisionId") Long decisionId) {
+        return success(decisionService.task(decisionId));
+    }
+
+    @PostMapping("/decisions/{decisionId}/votes")
+    @PreAuthorize("isAuthenticated()")
+    public Result<OwnerDecisionTask> submitDecisionVote(
+            @PathVariable("decisionId") Long decisionId,
+            @Valid @RequestBody SubmitOwnerRepairProjectDecisionVoteRequest request) {
+        return success("楼栋维修在线表决已提交", decisionService.submit(decisionId, request.toCommand()));
+    }
+
+    @GetMapping("/decisions/{decisionId}/disclosure")
+    @PreAuthorize("isAuthenticated()")
+    public Result<OwnerRepairProjectDisclosure> decisionDisclosure(
+            @PathVariable("decisionId") Long decisionId) {
+        return success(queryService.findPublishedByDecision(decisionId).orElse(null));
+    }
+
+    @GetMapping("/decisions/{decisionId}/attachments/{attachmentId}/download-ticket")
+    @PreAuthorize("isAuthenticated()")
+    public Result<RepairAttachmentDownloadTicketResponse> decisionAttachmentTicket(
+            @PathVariable("decisionId") Long decisionId,
+            @PathVariable("attachmentId") Long attachmentId) {
+        return success(RepairAttachmentDownloadTicketResponse.from(
+                attachmentService.createOwnerDecisionDownloadTicket(decisionId, attachmentId)));
     }
 
     @GetMapping("/acceptance-tasks")

@@ -2,23 +2,13 @@
 package com.pangu.interfaces.web.controller.dto.repair;
 
 import com.pangu.application.repair.command.StartBuildingRepairDecisionCommand;
-import com.pangu.domain.model.repair.RepairProjectGovernance.NonResponseRule;
 import jakarta.validation.constraints.Min;
-import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
-import jakarta.validation.constraints.Size;
 
 public record StartBuildingRepairDecisionRequest(
-        @NotNull @Min(0) Integer expectedProjectVersion,
-        @NotNull Long ruleDocumentAttachmentId,
-        @NotBlank @Size(max = 64) String ruleVersion,
-        @NotBlank @Size(max = 1000) String deliveryRule,
-        @NotNull NonResponseRule nonResponseRule,
-        @NotBlank @Size(max = 200) String scopeLabel
+        @NotNull @Min(0) Integer expectedProjectVersion
 ) {
     public StartBuildingRepairDecisionCommand toCommand() {
-        return new StartBuildingRepairDecisionCommand(
-                expectedProjectVersion, ruleDocumentAttachmentId, ruleVersion,
-                deliveryRule, nonResponseRule, scopeLabel);
+        return new StartBuildingRepairDecisionCommand(expectedProjectVersion);
     }
 }

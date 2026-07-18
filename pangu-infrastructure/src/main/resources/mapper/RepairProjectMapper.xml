@@ -234,6 +234,39 @@
         GROUP BY community.property_area_name, community.tenant_name
     </select>
 
+    <select id="findAllocationSnapshotBasis"
+            resultType="com.pangu.infrastructure.persistence.entity.RepairAllocationBasisRow">
+        SELECT CASE
+                   WHEN project.scope_type = 'COMMUNITY' THEN
+                       COALESCE(community.property_area_name, community.tenant_name) || ' · 全小区'
+                   WHEN project.scope_type = 'BUILDING_UNIT' THEN
+                       COALESCE(community.property_area_name, community.tenant_name) || ' · '
+                       || COALESCE(MAX(roster.building_name), CONCAT(project.building_id::TEXT, ' 号楼'))
+                       || ' · ' || project.unit_name
+                   ELSE
+                       COALESCE(community.property_area_name, community.tenant_name) || ' · '
+                       || COALESCE(MAX(roster.building_name), CONCAT(project.building_id::TEXT, ' 号楼'))
+                       || ' · 整栋'
+               END AS scope_label,
+               COUNT(DISTINCT allocation.room_id)::BIGINT AS room_count,
+               COUNT(DISTINCT allocation.owner_uid)::BIGINT AS owner_count,
+               COALESCE(SUM(allocation.build_area), 0)::NUMERIC(14, 2) AS total_build_area
+        FROM t_repair_plan_allocation_room allocation
+        JOIN t_repair_plan_version plan
+          ON plan.plan_id = allocation.plan_id AND plan.tenant_id = allocation.tenant_id
+        JOIN t_repair_project project
+          ON project.project_id = plan.project_id AND project.tenant_id = plan.tenant_id
+        JOIN t_tenant_community community ON community.tenant_id = allocation.tenant_id
+        LEFT JOIN c_property_roster roster
+          ON roster.tenant_id = allocation.tenant_id
+         AND roster.room_id = allocation.room_id
+         AND roster.status = 'ACTIVE'
+        WHERE allocation.plan_id = #{planId}
+          AND allocation.tenant_id = #{tenantId}
+        GROUP BY community.property_area_name, community.tenant_name,
+                 project.scope_type, project.building_id, project.unit_name
+    </select>
+
     <select id="listAllocationRooms"
             resultType="com.pangu.infrastructure.persistence.entity.RepairPlanAllocationRoomRow">
         SELECT allocation_room_id, plan_id, tenant_id, room_id, building_id, unit_name,

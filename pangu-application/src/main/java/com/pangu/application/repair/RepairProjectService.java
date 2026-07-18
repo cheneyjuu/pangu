@@ -868,6 +868,8 @@ public class RepairProjectService {
                 plans,
                 currentPlanId == null ? List.of() : projectRepository.listItems(currentPlanId, tenantId),
                 currentPlanId == null ? List.of() : projectRepository.listAllocationRooms(currentPlanId, tenantId),
+                currentPlanId == null ? null : projectRepository.findAllocationSnapshotBasis(currentPlanId, tenantId)
+                        .orElse(null),
                 currentPlanId == null ? List.of() : projectRepository.listPlanAffectedOwners(currentPlanId, tenantId),
                 projectRepository.listAttachments(projectId, tenantId),
                 currentPlanId == null ? List.of() : projectRepository.listPlanAttachments(currentPlanId, tenantId));

@@ -31,6 +31,9 @@ public interface RepairProjectRepository {
     Optional<AllocationBasis> findAllocationBasis(
             Long tenantId, RepairProject.ScopeType scopeType, Long buildingId, String unitName);
 
+    /** 从已固化的方案费用承担房屋生成只读范围名称和统计，不读取项目端手工文本。 */
+    Optional<AllocationBasis> findAllocationSnapshotBasis(Long planId, Long tenantId);
+
     void linkPlanAttachment(Long planId, PlanAttachment attachment);
 
     Optional<RepairProject> findProject(Long projectId, Long tenantId);

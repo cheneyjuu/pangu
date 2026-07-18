@@ -41,12 +41,19 @@ public class RepairProjectGovernanceController extends BaseController {
     }
 
     @PostMapping("/building-governance/decision/complete")
-    @PreAuthorize("hasAnyAuthority('repair:workorder:manage','repair:workorder:field','repair:workorder:local-decision')")
+    @PreAuthorize("hasAuthority('repair:decision:verify')")
     public Result<BuildingProcessDetails> completeBuildingDecision(
             @PathVariable("projectId") Long projectId,
             @Valid @RequestBody CompleteBuildingRepairDecisionRequest request) {
         return success("楼栋维修征询已核验",
                 buildingWorkflowService.completeDecision(projectId, request.toCommand()));
+    }
+
+    @PostMapping("/building-governance/decision-audit")
+    @PreAuthorize("hasAuthority('repair:decision:audit')")
+    public Result<BuildingProcessDetails> auditBuildingDecision(
+            @PathVariable("projectId") Long projectId) {
+        return success(buildingWorkflowService.auditDecision(projectId));
     }
 
     @PostMapping("/building-governance/official-document")
@@ -102,7 +109,7 @@ public class RepairProjectGovernanceController extends BaseController {
     }
 
     @PostMapping("/community-assembly/settle")
-    @PreAuthorize("hasAuthority('repair:workorder:governance')")
+    @PreAuthorize("hasAuthority('repair:decision:verify')")
     public Result<AssemblySubjectLink> settleCommunityAssemblySubject(
             @PathVariable("projectId") Long projectId,
             @Valid @RequestBody SettleCommunityRepairAssemblySubjectRequest request) {

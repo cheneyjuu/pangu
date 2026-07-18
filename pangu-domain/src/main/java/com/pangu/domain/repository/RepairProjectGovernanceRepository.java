@@ -6,6 +6,7 @@ import com.pangu.domain.model.repair.RepairProjectGovernance.BuildingDecision;
 import com.pangu.domain.model.repair.RepairProjectGovernance.BuildingProcess;
 import com.pangu.domain.model.repair.RepairProjectGovernance.DecisionEntry;
 import com.pangu.domain.model.repair.RepairProjectGovernance.DecisionPolicySnapshot;
+import com.pangu.domain.model.repair.RepairProjectGovernance.OwnerDecisionTask;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -34,7 +35,24 @@ public interface RepairProjectGovernanceRepository {
                                  int invalidOwnerCount, BigDecimal invalidArea,
                                  String evidenceAttachmentHash, String result);
 
+    int completeBuildingDecisionByConfirmation(Long decisionId, Long tenantId,
+                                               String evidenceAttachmentHash, String result);
+
     List<DecisionEntry> listDecisionEntries(Long decisionId, Long tenantId);
+
+    /** 按锁定房屋展开参与状态；choice 只供受控审计接口使用。 */
+    List<DecisionEntry> listDecisionRoomParticipations(Long decisionId, Long tenantId);
+
+    List<OwnerDecisionTask> listOwnerDecisionTasks(Long ownerUid, Long tenantId);
+
+    Optional<OwnerDecisionTask> findOwnerDecisionTask(
+            Long decisionId, Long roomId, Long ownerUid, Long tenantId);
+
+    Optional<OwnerDecisionTask> findOwnerDecisionTask(
+            Long decisionId, Long ownerUid, Long tenantId);
+
+    void submitOwnerDecisionVote(Long decisionId, Long tenantId, Long roomId,
+                                 Long ownerUid, Long accountId, String choice, BigDecimal buildArea);
 
     BuildingProcess insertBuildingProcess(BuildingProcess process);
 

@@ -1,6 +1,8 @@
 // 关联业务：校验业主对关联报修的可见权，并投影当前已锁定维修实施方案。
 package com.pangu.application.repair;
 
+import com.pangu.domain.context.UserContext;
+import com.pangu.domain.context.UserContextHolder;
 import com.pangu.domain.model.repair.RepairProject;
 import com.pangu.domain.model.repair.RepairProject.AllocationRoom;
 import com.pangu.domain.model.repair.RepairProject.Attachment;
@@ -13,6 +15,7 @@ import com.pangu.domain.model.repair.RepairProjectSourcing.QuoteLine;
 import com.pangu.domain.model.repair.RepairProjectSourcing.Selection;
 import com.pangu.domain.repository.RepairProjectRepository;
 import com.pangu.domain.repository.RepairProjectSourcingRepository;
+import com.pangu.domain.repository.RepairProjectGovernanceRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -34,7 +37,9 @@ public class OwnerRepairProjectQueryService {
     private final RepairWorkOrderService workOrderService;
     private final RepairProjectRepository projectRepository;
     private final RepairProjectSourcingRepository sourcingRepository;
+    private final RepairProjectGovernanceRepository governanceRepository;
     private final RepairNarrativeImageService narrativeImageService;
+    private final UserContextHolder userContextHolder;
 
     @Transactional(readOnly = true)
     public Optional<OwnerRepairProjectDisclosure> findPublishedByWorkOrder(Long workOrderId) {
@@ -42,6 +47,17 @@ public class OwnerRepairProjectQueryService {
         var workOrder = workOrderService.findMine(workOrderId);
         return projectRepository.findProjectByActivePlanWorkOrder(workOrderId, workOrder.tenantId())
                 .flatMap(project -> disclosure(workOrderId, project));
+    }
+
+    @Transactional(readOnly = true)
+    public Optional<OwnerRepairProjectDisclosure> findPublishedByDecision(Long decisionId) {
+        UserContext owner = userContextHolder.current();
+        if (owner == null || !owner.isCUser() || owner.uid() == null || owner.tenantId() == null) {
+            return Optional.empty();
+        }
+        return governanceRepository.findOwnerDecisionTask(decisionId, owner.uid(), owner.tenantId())
+                .flatMap(task -> projectRepository.findProject(task.projectId(), owner.tenantId()))
+                .flatMap(project -> disclosure(null, project));
     }
 
     private Optional<OwnerRepairProjectDisclosure> disclosure(Long workOrderId, RepairProject project) {

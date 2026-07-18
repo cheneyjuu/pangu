@@ -9,6 +9,7 @@ import com.pangu.domain.model.repair.RepairProjectGovernance.BuildingDecision;
 import com.pangu.domain.model.repair.RepairProjectGovernance.BuildingProcess;
 import com.pangu.domain.model.repair.RepairProjectGovernance.DecisionEntry;
 import com.pangu.domain.model.repair.RepairProjectGovernance.DecisionPolicySnapshot;
+import com.pangu.domain.model.repair.RepairProjectGovernance.OwnerDecisionTask;
 import com.pangu.domain.model.repair.RepairVoteChoice;
 import com.pangu.domain.repository.RepairProjectGovernanceRepository;
 import com.pangu.infrastructure.persistence.entity.RepairProjectGovernanceRows.AssemblySubjectLinkRow;
@@ -17,6 +18,7 @@ import com.pangu.infrastructure.persistence.entity.RepairProjectGovernanceRows.B
 import com.pangu.infrastructure.persistence.entity.RepairProjectGovernanceRows.DecisionEntryRow;
 import com.pangu.infrastructure.persistence.entity.RepairProjectGovernanceRows.PolicySnapshotRow;
 import com.pangu.infrastructure.persistence.entity.RepairProjectGovernanceRows.ProjectSealUsageRow;
+import com.pangu.infrastructure.persistence.entity.RepairProjectGovernanceRows.OwnerDecisionTaskRow;
 import com.pangu.infrastructure.persistence.mapper.RepairProjectGovernanceMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Repository;
@@ -91,8 +93,50 @@ public class RepairProjectGovernanceRepositoryImpl implements RepairProjectGover
     }
 
     @Override
+    public int completeBuildingDecisionByConfirmation(
+            Long decisionId, Long tenantId, String evidenceAttachmentHash, String result) {
+        return mapper.completeBuildingDecisionByConfirmation(
+                decisionId, tenantId, evidenceAttachmentHash, result);
+    }
+
+    @Override
     public List<DecisionEntry> listDecisionEntries(Long decisionId, Long tenantId) {
         return mapper.listDecisionEntries(decisionId, tenantId).stream().map(this::toDomain).toList();
+    }
+
+    @Override
+    public List<DecisionEntry> listDecisionRoomParticipations(Long decisionId, Long tenantId) {
+        return mapper.listDecisionRoomParticipations(decisionId, tenantId).stream()
+                .map(this::toDomain)
+                .toList();
+    }
+
+    @Override
+    public List<OwnerDecisionTask> listOwnerDecisionTasks(Long ownerUid, Long tenantId) {
+        return mapper.listOwnerDecisionTasks(null, ownerUid, tenantId).stream()
+                .map(this::toDomain)
+                .toList();
+    }
+
+    @Override
+    public Optional<OwnerDecisionTask> findOwnerDecisionTask(
+            Long decisionId, Long roomId, Long ownerUid, Long tenantId) {
+        return Optional.ofNullable(mapper.findOwnerDecisionTask(decisionId, roomId, ownerUid, tenantId))
+                .map(this::toDomain);
+    }
+
+    @Override
+    public Optional<OwnerDecisionTask> findOwnerDecisionTask(
+            Long decisionId, Long ownerUid, Long tenantId) {
+        return findOwnerDecisionTask(decisionId, null, ownerUid, tenantId);
+    }
+
+    @Override
+    public void submitOwnerDecisionVote(
+            Long decisionId, Long tenantId, Long roomId, Long ownerUid,
+            Long accountId, String choice, BigDecimal buildArea) {
+        mapper.submitOwnerDecisionVote(
+                decisionId, tenantId, roomId, ownerUid, accountId, choice, buildArea);
     }
 
     @Override
@@ -203,7 +247,8 @@ public class RepairProjectGovernanceRepositoryImpl implements RepairProjectGover
     private DecisionPolicySnapshot toDomain(PolicySnapshotRow row) {
         return new DecisionPolicySnapshot(
                 row.getPolicySnapshotId(), row.getProjectId(), row.getPlanId(), row.getTenantId(),
-                row.getRuleDocumentAttachmentId(), row.getRuleVersion(), row.getRuleHash(),
+                row.getRuleId(), row.getRuleName(), row.getRuleDocumentAttachmentId(),
+                row.getRuleVersion(), row.getRuleHash(), row.getRuleEffectiveAt(),
                 RepairLocalDecisionChannel.valueOf(row.getDecisionChannel()), row.getDeliveryRule(),
                 RepairProjectGovernance.NonResponseRule.valueOf(row.getNonResponseRule()),
                 row.getStatus(), row.getCreatedByUserId(), row.getCreateTime());
@@ -215,9 +260,12 @@ public class RepairProjectGovernanceRepositoryImpl implements RepairProjectGover
         row.setProjectId(snapshot.projectId());
         row.setPlanId(snapshot.planId());
         row.setTenantId(snapshot.tenantId());
+        row.setRuleId(snapshot.ruleId());
+        row.setRuleName(snapshot.ruleName());
         row.setRuleDocumentAttachmentId(snapshot.ruleDocumentAttachmentId());
         row.setRuleVersion(snapshot.ruleVersion());
         row.setRuleHash(snapshot.ruleHash());
+        row.setRuleEffectiveAt(snapshot.ruleEffectiveAt());
         row.setDecisionChannel(snapshot.decisionChannel().name());
         row.setDeliveryRule(snapshot.deliveryRule());
         row.setNonResponseRule(snapshot.nonResponseRule().name());
@@ -284,8 +332,17 @@ public class RepairProjectGovernanceRepositoryImpl implements RepairProjectGover
 
     private DecisionEntry toDomain(DecisionEntryRow row) {
         return new DecisionEntry(
-                row.getRoomId(), row.getOwnerUid(), RepairVoteChoice.valueOf(row.getChoice()),
+                row.getRoomId(), row.getOwnerUid(), row.getChoice() == null
+                        ? null : RepairVoteChoice.valueOf(row.getChoice()),
                 row.getBuildArea(), row.getOriginalText());
+    }
+
+    private OwnerDecisionTask toDomain(OwnerDecisionTaskRow row) {
+        return new OwnerDecisionTask(
+                row.getDecisionId(), row.getProjectId(), row.getPlanId(), row.getProjectNo(),
+                row.getProjectName(), row.getScopeLabel(), row.getRoomId(), row.getRoomName(),
+                row.getBuildArea(), row.getMyChoice() == null
+                        ? null : RepairVoteChoice.valueOf(row.getMyChoice()));
     }
 
     private DecisionEntryRow toRow(DecisionEntry entry) {

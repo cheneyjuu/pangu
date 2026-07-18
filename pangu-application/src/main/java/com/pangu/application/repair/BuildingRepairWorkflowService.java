@@ -11,11 +11,13 @@ import com.pangu.application.repair.command.StartBuildingRepairDecisionCommand;
 import com.pangu.application.repair.command.SubmitBuildingRepairOfficialDocumentCommand;
 import com.pangu.domain.context.UserContext;
 import com.pangu.domain.context.UserContextHolder;
+import com.pangu.domain.model.community.TenantCommunity;
 import com.pangu.domain.model.repair.RepairLocalDecision;
 import com.pangu.domain.model.repair.RepairLocalDecisionChannel;
 import com.pangu.domain.model.repair.RepairLocalDecisionScopeType;
 import com.pangu.domain.model.repair.RepairProject;
 import com.pangu.domain.model.repair.RepairProject.AllocationRoom;
+import com.pangu.domain.model.repair.RepairProject.AllocationBasis;
 import com.pangu.domain.model.repair.RepairProject.Attachment;
 import com.pangu.domain.model.repair.RepairProject.PlanStatus;
 import com.pangu.domain.model.repair.RepairProject.PlanVersion;
@@ -27,12 +29,17 @@ import com.pangu.domain.model.repair.RepairProjectGovernance.BuildingProcessDeta
 import com.pangu.domain.model.repair.RepairProjectGovernance.BuildingProcessStatus;
 import com.pangu.domain.model.repair.RepairProjectGovernance.DecisionEntry;
 import com.pangu.domain.model.repair.RepairProjectGovernance.DecisionPolicySnapshot;
+import com.pangu.domain.model.repair.RepairProjectGovernance.DecisionRoomParticipation;
+import com.pangu.domain.model.repair.RepairProjectGovernance.GovernanceResult;
 import com.pangu.domain.model.repair.RepairProjectGovernance.NonResponseRule;
+import com.pangu.domain.model.repair.RepairDecisionRule;
+import com.pangu.domain.repository.RepairDecisionRuleRepository;
 import com.pangu.domain.model.repair.RepairVoteChoice;
 import com.pangu.domain.model.repair.RepairWorkflowType;
 import com.pangu.domain.repository.RepairProjectGovernanceRepository;
 import com.pangu.domain.repository.RepairProjectRepository;
 import com.pangu.domain.repository.RepairWorkOrderRepository;
+import com.pangu.domain.repository.CommunitySettingsRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -44,8 +51,6 @@ import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.HexFormat;
-import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -66,12 +71,10 @@ public class BuildingRepairWorkflowService {
     private static final Set<String> REVIEW_MODES = Set.of(
             "INTERNAL_PRICE_REVIEW", "THIRD_PARTY_AUDIT", "NOT_REQUIRED");
     private static final Set<String> REVIEW_CONCLUSIONS = Set.of("APPROVED", "REJECTED");
-    private static final Set<RepairVoteChoice> EXPLICIT_CHOICES = Set.of(
-            RepairVoteChoice.AGREE, RepairVoteChoice.DISAGREE,
-            RepairVoteChoice.ABSTAIN, RepairVoteChoice.INVALID);
-
     private final RepairProjectRepository projectRepository;
     private final RepairProjectGovernanceRepository governanceRepository;
+    private final RepairDecisionRuleRepository decisionRuleRepository;
+    private final CommunitySettingsRepository communitySettingsRepository;
     private final RepairWorkOrderRepository workOrderRepository;
     private final UserContextHolder userContextHolder;
     private final ObjectMapper objectMapper;
@@ -79,12 +82,8 @@ public class BuildingRepairWorkflowService {
     @Transactional
     public BuildingProcessDetails startDecision(Long projectId, StartBuildingRepairDecisionCommand command) {
         UserContext actor = requireRole(PROPERTY_ROLES, "仅物业可发起楼栋维修征询");
-        if (command == null || command.expectedProjectVersion() == null
-                || command.ruleDocumentAttachmentId() == null || command.nonResponseRule() == null) {
-            throw invalid("expectedProjectVersion、ruleDocumentAttachmentId 和 nonResponseRule 均为必填项");
-        }
-        if (command.nonResponseRule() != NonResponseRule.NOT_PARTICIPATED) {
-            throw invalid("尚未接入备案规则推导票能力，未表态房屋只能保持未参与");
+        if (command == null || command.expectedProjectVersion() == null) {
+            throw invalid("expectedProjectVersion 必填");
         }
         RepairProject project = loadProjectForUpdate(projectId, actor.tenantId());
         requireBuildingProject(project, Status.PLAN_LOCKED);
@@ -92,17 +91,24 @@ public class BuildingRepairWorkflowService {
             throw conflict("项目版本已变化，请刷新后再发起楼栋维修征询");
         }
         PlanVersion plan = activeLockedPlan(project);
-        Attachment ruleDocument = attachment(
-                project, command.ruleDocumentAttachmentId(), this::isDocument, "备案议事规则附件");
+        RepairDecisionRule rule = decisionRuleRepository.findActive(project.tenantId())
+                .orElseThrow(() -> conflict("当前小区尚未备案有效的维修征询规则，禁止发起征询"));
+        if (rule.nonResponseRule() != NonResponseRule.NOT_PARTICIPATED) {
+            throw invalid("当前备案规则包含未表态推导票，但系统尚未支持该计票方式，禁止发起征询");
+        }
         List<AllocationRoom> allocation = projectRepository.listAllocationRooms(plan.planId(), project.tenantId());
         if (allocation.isEmpty()) {
             throw conflict("实施方案没有费用承担房屋快照");
         }
+        AllocationBasis allocationBasis = projectRepository.findAllocationSnapshotBasis(
+                        plan.planId(), project.tenantId())
+                .orElseThrow(() -> conflict("实施方案没有可读取的费用承担范围快照"));
+        String scopeLabel = allocationBasis.scopeLabel() + " · 费用承担范围内业主";
+        RepairLocalDecisionChannel decisionChannel = decisionChannel(project.tenantId());
         DecisionPolicySnapshot policy = governanceRepository.insertPolicySnapshot(new DecisionPolicySnapshot(
-                null, project.projectId(), plan.planId(), project.tenantId(), ruleDocument.attachmentId(),
-                requireText(command.ruleVersion(), "ruleVersion"), ruleDocument.sha256(),
-                RepairLocalDecisionChannel.WECHAT, requireText(command.deliveryRule(), "deliveryRule"),
-                command.nonResponseRule(), "LOCKED", actor.userId(), null));
+                null, project.projectId(), plan.planId(), project.tenantId(), rule.ruleId(), rule.ruleName(), null,
+                rule.ruleVersion(), rule.sha256(), rule.effectiveAt(), decisionChannel,
+                rule.deliveryRule(), rule.nonResponseRule(), "LOCKED", actor.userId(), null));
         BigDecimal totalArea = allocation.stream()
                 .map(AllocationRoom::buildArea)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
@@ -111,8 +117,8 @@ public class BuildingRepairWorkflowService {
                 project.scopeType() == RepairProject.ScopeType.BUILDING_UNIT
                         ? RepairLocalDecisionScopeType.BUILDING_UNIT
                         : RepairLocalDecisionScopeType.BUILDING,
-                RepairLocalDecisionChannel.WECHAT, project.unitName(),
-                requireText(command.scopeLabel(), "scopeLabel"), allocation.size(), totalArea,
+                decisionChannel, project.unitName(),
+                scopeLabel, Math.toIntExact(allocation.stream().map(AllocationRoom::ownerUid).distinct().count()), totalArea,
                 null, null, null, null, null, null, null, null, null, null,
                 null, false, "COLLECTING", null, null));
         BuildingProcess process = governanceRepository.insertBuildingProcess(new BuildingProcess(
@@ -127,7 +133,8 @@ public class BuildingRepairWorkflowService {
         }
         event(project, actor, "BUILDING_DECISION_STARTED", Map.of(
                 "processId", process.processId(), "decisionId", decision.decisionId(),
-                "policySnapshotId", policy.policySnapshotId()));
+                "policySnapshotId", policy.policySnapshotId(), "ruleId", rule.ruleId(),
+                "scopeLabel", scopeLabel, "decisionChannel", decisionChannel.name()));
         return details(project, process);
     }
 
@@ -135,42 +142,22 @@ public class BuildingRepairWorkflowService {
     public BuildingProcessDetails completeDecision(
             Long projectId, CompleteBuildingRepairDecisionCommand command) {
         UserContext actor = requireRole(PROPERTY_ROLES, "仅物业可核验楼栋维修接龙");
-        if (command == null || command.expectedProcessVersion() == null
-                || command.evidenceAttachmentId() == null) {
-            throw invalid("expectedProcessVersion 和 evidenceAttachmentId 均为必填项");
+        if (command == null || command.expectedProcessVersion() == null) {
+            throw invalid("expectedProcessVersion 必填");
         }
         RepairProject project = loadProjectForUpdate(projectId, actor.tenantId());
         requireBuildingProject(project, Status.GOVERNANCE_IN_PROGRESS);
         PlanVersion plan = activeLockedPlan(project);
         BuildingProcess process = activeProcessForUpdate(project, plan);
         requireProcess(process, BuildingProcessStatus.DECISION_COLLECTING, command.expectedProcessVersion());
-        Attachment evidence = attachment(project, command.evidenceAttachmentId(), this::isImageOrPdf, "接龙截图");
-        List<AllocationRoom> allocation = projectRepository.listAllocationRooms(plan.planId(), project.tenantId());
-        List<DecisionEntry> entries = verifiedEntries(allocation, command.entries());
-        Tally tally = tally(entries);
         BuildingDecision decision = governanceRepository.findBuildingDecision(
                         process.decisionId(), project.tenantId())
                 .orElseThrow(() -> notFound("楼栋维修决定不存在"));
-        boolean passed = RepairLocalDecision.passesThreshold(
-                tally.participatedOwnerCount(), tally.participatedArea(),
-                tally.agreeOwnerCount(), tally.agreeArea(),
-                decision.totalOwnerCount(), decision.totalArea());
-        for (DecisionEntry entry : entries) {
-            governanceRepository.insertDecisionEntry(
-                    decision.decisionId(), project.tenantId(), entry, actor.userId());
-        }
-        governanceRepository.insertDecisionEvidence(
-                decision.decisionId(), project.tenantId(), evidence.sha256(), actor.accountId(), actor.userId());
-        String result = passed ? "PASSED" : "FAILED";
-        if (governanceRepository.completeBuildingDecision(
-                decision.decisionId(), project.tenantId(),
-                tally.participatedOwnerCount(), tally.participatedArea(),
-                tally.agreeOwnerCount(), tally.agreeArea(),
-                tally.disagreeOwnerCount(), tally.disagreeArea(),
-                tally.abstainOwnerCount(), tally.abstainArea(),
-                tally.invalidOwnerCount(), tally.invalidArea(), evidence.sha256(), result) != 1) {
-            throw conflict("楼栋维修决定已结算，请刷新后重试");
-        }
+        DecisionCompletion completion = decision.decisionChannel() == RepairLocalDecisionChannel.WECHAT
+                ? completeWechatDecision(project, decision, command, actor)
+                : completeOnlineDecision(project, decision, command);
+        boolean passed = completion.passed();
+        String result = completion.result();
         BuildingProcessStatus next = passed
                 ? BuildingProcessStatus.DECISION_PASSED
                 : BuildingProcessStatus.DECISION_FAILED;
@@ -184,11 +171,7 @@ public class BuildingRepairWorkflowService {
                 Status.PLAN_LOCKED, project.version()) != 1) {
             throw conflict("项目状态已变化，请刷新后重试");
         }
-        event(project, actor, "BUILDING_DECISION_COMPLETED", Map.of(
-                "processId", process.processId(), "result", result,
-                "participatedOwnerCount", tally.participatedOwnerCount(),
-                "agreeOwnerCount", tally.agreeOwnerCount(),
-                "participatedArea", tally.participatedArea(), "agreeArea", tally.agreeArea()));
+        event(project, actor, "BUILDING_DECISION_COMPLETED", completion.eventPayload(process.processId()));
         return details(project, reloadProcess(project, plan));
     }
 
@@ -343,37 +326,71 @@ public class BuildingRepairWorkflowService {
         return details(project, process);
     }
 
-    private List<DecisionEntry> verifiedEntries(
-            List<AllocationRoom> allocation,
-            List<CompleteBuildingRepairDecisionCommand.Entry> submitted) {
-        Map<Long, AllocationRoom> byRoom = new LinkedHashMap<>();
-        for (AllocationRoom room : allocation) {
-            byRoom.put(room.roomId(), room);
+    /** 审计接口单独留痕，并且只向拥有维修表决审计能力的角色返回逐房屋选择。 */
+    @Transactional
+    public BuildingProcessDetails auditDecision(Long projectId) {
+        UserContext actor = requireActor();
+        if (!actor.hasPermission("repair:decision:audit")) {
+            throw new RepairWorkOrderApplicationException(FORBIDDEN, "当前角色无权查看逐房屋表决选择");
         }
-        Map<Long, CompleteBuildingRepairDecisionCommand.Entry> submittedByRoom = new LinkedHashMap<>();
-        for (CompleteBuildingRepairDecisionCommand.Entry entry : submitted) {
-            if (entry == null || entry.roomId() == null || entry.choice() == null) {
-                throw invalid("接龙明细必须包含 roomId 和 choice");
-            }
-            if (!EXPLICIT_CHOICES.contains(entry.choice())) {
-                throw invalid("物业只能核验同意、不同意、弃权或无效原始接龙项");
-            }
-            if (!byRoom.containsKey(entry.roomId())) {
-                throw invalid("接龙房屋不在锁定分摊范围 roomId=" + entry.roomId());
-            }
-            if (submittedByRoom.put(entry.roomId(), entry) != null) {
-                throw invalid("同一房屋不能重复提交接龙意见 roomId=" + entry.roomId());
-            }
-            requireText(entry.originalText(), "entries.originalText");
+        RepairProject project = projectRepository.findProject(projectId, actor.tenantId())
+                .orElseThrow(() -> notFound("维修工程项目不存在"));
+        if (project.workflowType() != RepairWorkflowType.BUILDING_REPAIR || project.activePlanId() == null) {
+            throw notFound("楼栋维修治理流程不存在");
         }
-        List<DecisionEntry> verified = new ArrayList<>();
-        for (AllocationRoom room : allocation) {
-            CompleteBuildingRepairDecisionCommand.Entry source = submittedByRoom.get(room.roomId());
-            verified.add(new DecisionEntry(
-                    room.roomId(), room.ownerUid(), source == null ? RepairVoteChoice.NOT_VOTED : source.choice(),
-                    room.buildArea(), source == null ? null : trim(source.originalText())));
+        BuildingProcess process = governanceRepository.findBuildingProcess(
+                        project.projectId(), project.activePlanId(), project.tenantId())
+                .orElseThrow(() -> notFound("楼栋维修治理流程不存在"));
+        event(project, actor, "BUILDING_DECISION_CHOICES_ACCESSED", Map.of(
+                "processId", process.processId(), "decisionId", process.decisionId()));
+        return details(project, process, true);
+    }
+
+    private DecisionCompletion completeWechatDecision(
+            RepairProject project,
+            BuildingDecision decision,
+            CompleteBuildingRepairDecisionCommand command,
+            UserContext actor) {
+        if (command.evidenceAttachmentId() == null || command.confirmedResult() == null) {
+            throw invalid("微信接龙必须上传原始截图并由物业确认通过或未通过");
         }
-        return verified;
+        Attachment evidence = attachment(
+                project, command.evidenceAttachmentId(), this::isImageOrPdf, "微信接龙原始截图");
+        governanceRepository.insertDecisionEvidence(
+                decision.decisionId(), project.tenantId(), evidence.sha256(), actor.accountId(), actor.userId());
+        String result = command.confirmedResult().name();
+        if (governanceRepository.completeBuildingDecisionByConfirmation(
+                decision.decisionId(), project.tenantId(), evidence.sha256(), result) != 1) {
+            throw conflict("楼栋维修决定已结算，请刷新后重试");
+        }
+        return DecisionCompletion.wechat(command.confirmedResult() == GovernanceResult.PASSED, result);
+    }
+
+    private DecisionCompletion completeOnlineDecision(
+            RepairProject project,
+            BuildingDecision decision,
+            CompleteBuildingRepairDecisionCommand command) {
+        if (command.evidenceAttachmentId() != null || command.confirmedResult() != null) {
+            throw invalid("C端在线表决由系统票仓自动结算，不接收微信截图或人工结果");
+        }
+        List<DecisionEntry> entries = governanceRepository.listDecisionEntries(
+                decision.decisionId(), project.tenantId());
+        Tally tally = tally(entries);
+        boolean passed = RepairLocalDecision.passesThreshold(
+                tally.participatedOwnerCount(), tally.participatedArea(),
+                tally.agreeOwnerCount(), tally.agreeArea(),
+                decision.totalOwnerCount(), decision.totalArea());
+        String result = passed ? GovernanceResult.PASSED.name() : GovernanceResult.FAILED.name();
+        if (governanceRepository.completeBuildingDecision(
+                decision.decisionId(), project.tenantId(),
+                tally.participatedOwnerCount(), tally.participatedArea(),
+                tally.agreeOwnerCount(), tally.agreeArea(),
+                tally.disagreeOwnerCount(), tally.disagreeArea(),
+                tally.abstainOwnerCount(), tally.abstainArea(),
+                tally.invalidOwnerCount(), tally.invalidArea(), null, result) != 1) {
+            throw conflict("楼栋维修决定已结算，请刷新后重试");
+        }
+        return DecisionCompletion.online(passed, result, tally);
     }
 
     private Tally tally(List<DecisionEntry> entries) {
@@ -407,15 +424,36 @@ public class BuildingRepairWorkflowService {
     }
 
     private BuildingProcessDetails details(RepairProject project, BuildingProcess process) {
+        return details(project, process, false);
+    }
+
+    private BuildingProcessDetails details(
+            RepairProject project, BuildingProcess process, boolean includeChoices) {
         DecisionPolicySnapshot policy = governanceRepository.findPolicySnapshot(
                         process.policySnapshotId(), project.tenantId())
                 .orElseThrow(() -> notFound("楼栋维修规则快照不存在"));
         BuildingDecision decision = governanceRepository.findBuildingDecision(
                         process.decisionId(), project.tenantId())
                 .orElseThrow(() -> notFound("楼栋维修决定不存在"));
-        return new BuildingProcessDetails(
-                process, policy, decision,
-                governanceRepository.listDecisionEntries(decision.decisionId(), project.tenantId()));
+        List<DecisionRoomParticipation> participation = governanceRepository
+                .listDecisionRoomParticipations(decision.decisionId(), project.tenantId())
+                .stream()
+                .map(entry -> new DecisionRoomParticipation(
+                        entry.roomId(), entry.buildArea(), entry.choice() != null,
+                        includeChoices ? entry.choice() : null))
+                .toList();
+        return new BuildingProcessDetails(process, policy, decision, participation);
+    }
+
+    private RepairLocalDecisionChannel decisionChannel(Long tenantId) {
+        String configured = communitySettingsRepository.findCommunity(tenantId)
+                .map(TenantCommunity::buildingRepairDefaultDecisionChannel)
+                .orElse(RepairLocalDecisionChannel.WECHAT.name());
+        try {
+            return RepairLocalDecisionChannel.valueOf(configured);
+        } catch (IllegalArgumentException ex) {
+            throw invalid("小区楼栋维修默认表决方式配置不合法：" + configured);
+        }
     }
 
     private BuildingProcess activeProcessForUpdate(RepairProject project, PlanVersion plan) {
@@ -553,6 +591,39 @@ public class BuildingRepairWorkflowService {
 
     private RepairWorkOrderApplicationException notFound(String message) {
         return new RepairWorkOrderApplicationException(NOT_FOUND, message);
+    }
+
+    private record DecisionCompletion(
+            boolean passed,
+            String result,
+            Tally tally,
+            RepairLocalDecisionChannel channel
+    ) {
+        private static DecisionCompletion wechat(boolean passed, String result) {
+            return new DecisionCompletion(passed, result, null, RepairLocalDecisionChannel.WECHAT);
+        }
+
+        private static DecisionCompletion online(boolean passed, String result, Tally tally) {
+            return new DecisionCompletion(passed, result, tally, RepairLocalDecisionChannel.ONLINE);
+        }
+
+        private Map<String, Object> eventPayload(Long processId) {
+            if (tally == null) {
+                return Map.of(
+                        "processId", processId,
+                        "result", result,
+                        "decisionChannel", channel.name(),
+                        "confirmedByProperty", true);
+            }
+            return Map.of(
+                    "processId", processId,
+                    "result", result,
+                    "decisionChannel", channel.name(),
+                    "participatedOwnerCount", tally.participatedOwnerCount(),
+                    "agreeOwnerCount", tally.agreeOwnerCount(),
+                    "participatedArea", tally.participatedArea(),
+                    "agreeArea", tally.agreeArea());
+        }
     }
 
     private record Tally(

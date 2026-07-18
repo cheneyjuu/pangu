@@ -7,6 +7,7 @@ import com.pangu.infrastructure.persistence.entity.RepairProjectGovernanceRows.B
 import com.pangu.infrastructure.persistence.entity.RepairProjectGovernanceRows.DecisionEntryRow;
 import com.pangu.infrastructure.persistence.entity.RepairProjectGovernanceRows.PolicySnapshotRow;
 import com.pangu.infrastructure.persistence.entity.RepairProjectGovernanceRows.ProjectSealUsageRow;
+import com.pangu.infrastructure.persistence.entity.RepairProjectGovernanceRows.OwnerDecisionTaskRow;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
@@ -52,8 +53,33 @@ public interface RepairProjectGovernanceMapper {
                                  @Param("evidenceAttachmentHash") String evidenceAttachmentHash,
                                  @Param("result") String result);
 
+    int completeBuildingDecisionByConfirmation(@Param("decisionId") Long decisionId,
+                                               @Param("tenantId") Long tenantId,
+                                               @Param("evidenceAttachmentHash") String evidenceAttachmentHash,
+                                               @Param("result") String result);
+
     List<DecisionEntryRow> listDecisionEntries(@Param("decisionId") Long decisionId,
                                                 @Param("tenantId") Long tenantId);
+
+    List<DecisionEntryRow> listDecisionRoomParticipations(@Param("decisionId") Long decisionId,
+                                                           @Param("tenantId") Long tenantId);
+
+    List<OwnerDecisionTaskRow> listOwnerDecisionTasks(@Param("decisionId") Long decisionId,
+                                                       @Param("ownerUid") Long ownerUid,
+                                                       @Param("tenantId") Long tenantId);
+
+    OwnerDecisionTaskRow findOwnerDecisionTask(@Param("decisionId") Long decisionId,
+                                                @Param("roomId") Long roomId,
+                                                @Param("ownerUid") Long ownerUid,
+                                                @Param("tenantId") Long tenantId);
+
+    int submitOwnerDecisionVote(@Param("decisionId") Long decisionId,
+                                @Param("tenantId") Long tenantId,
+                                @Param("roomId") Long roomId,
+                                @Param("ownerUid") Long ownerUid,
+                                @Param("accountId") Long accountId,
+                                @Param("choice") String choice,
+                                @Param("buildArea") BigDecimal buildArea);
 
     int insertBuildingProcess(BuildingProcessRow row);
 

@@ -46,6 +46,8 @@ import static com.pangu.application.repair.RepairWorkOrderApplicationException.R
 public class CommunityAssemblyRepairWorkflowService {
 
     private static final Set<String> ORGANIZER_ROLES = Set.of("COMMITTEE_DIRECTOR", "COMMITTEE_MEMBER");
+    private static final Set<String> RESULT_VERIFIER_ROLES = Set.of(
+            "PROPERTY_MANAGER", "PROPERTY_STAFF", "COMMITTEE_DIRECTOR", "COMMITTEE_MEMBER");
     private static final Set<String> LINKABLE_PACKAGE_STATUSES = Set.of(
             "PACKAGE_DRAFT", "PUBLIC_NOTICE", "VOTING", "SETTLED");
 
@@ -104,7 +106,7 @@ public class CommunityAssemblyRepairWorkflowService {
     @Transactional
     public AssemblySubjectLink settleSubject(
             Long projectId, SettleCommunityRepairAssemblySubjectCommand command) {
-        UserContext actor = requireOrganizer();
+        UserContext actor = requireResultVerifier();
         if (command == null || command.expectedProjectVersion() == null) {
             throw invalid("expectedProjectVersion 必填");
         }
@@ -202,6 +204,14 @@ public class CommunityAssemblyRepairWorkflowService {
         UserContext actor = requireActor();
         if (!ORGANIZER_ROLES.contains(actor.roleKey())) {
             throw new RepairWorkOrderApplicationException(FORBIDDEN, "仅业委会可关联和确认业主大会维修事项");
+        }
+        return actor;
+    }
+
+    private UserContext requireResultVerifier() {
+        UserContext actor = requireActor();
+        if (!RESULT_VERIFIER_ROLES.contains(actor.roleKey())) {
+            throw new RepairWorkOrderApplicationException(FORBIDDEN, "仅物业或业委会可核验业主大会维修事项结果");
         }
         return actor;
     }

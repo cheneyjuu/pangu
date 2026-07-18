@@ -324,6 +324,7 @@ public record RepairProject(
             List<PlanVersion> plans,
             List<Item> currentPlanItems,
             List<AllocationRoom> currentPlanAllocationRooms,
+            AllocationBasis currentPlanAllocationBasis,
             List<PlanAffectedOwner> currentPlanAffectedOwners,
             List<Attachment> attachments,
             List<PlanAttachment> currentPlanAttachments

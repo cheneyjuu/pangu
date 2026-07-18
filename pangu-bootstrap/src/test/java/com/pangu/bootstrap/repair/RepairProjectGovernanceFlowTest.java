@@ -27,6 +27,7 @@ import java.util.Map;
 
 import static org.hamcrest.Matchers.is;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
@@ -49,6 +50,7 @@ class RepairProjectGovernanceFlowTest {
     private static final String CASE_PREFIX = "IT-治理维修报修-";
     private static final String ASSEMBLY_PREFIX = "IT-治理维修业主大会-";
     private static final String SUPPLIER_PREFIX = "IT-治理维修供应商-";
+    private static final String RULE_PREFIX = "IT-治理维修征询规则-";
 
     @Autowired private MockMvc mockMvc;
     @Autowired private ObjectMapper objectMapper;
@@ -59,11 +61,24 @@ class RepairProjectGovernanceFlowTest {
     private String propertyToken;
     private String directorToken;
     private long buildingId;
+    private Long previousActiveRuleId;
+    private String previousDecisionChannel;
 
     @BeforeEach
     void setUp() throws Exception {
         propertyToken = token(ACCOUNT_PROPERTY_MANAGER, USER_PROPERTY_MANAGER);
         directorToken = token(ACCOUNT_DIRECTOR, USER_DIRECTOR);
+        previousActiveRuleId = jdbcTemplate.query(
+                "SELECT rule_id FROM t_repair_decision_rule WHERE tenant_id = ? AND status = 'ACTIVE'",
+                resultSet -> resultSet.next() ? resultSet.getLong(1) : null, TENANT);
+        previousDecisionChannel = jdbcTemplate.queryForObject(
+                "SELECT building_repair_default_decision_channel FROM t_tenant_community WHERE tenant_id = ?",
+                String.class, TENANT);
+        jdbcTemplate.update("""
+                UPDATE t_tenant_community
+                SET building_repair_default_decision_channel = 'WECHAT'
+                WHERE tenant_id = ?
+                """, TENANT);
         buildingId = jdbcTemplate.queryForObject("""
                 SELECT op.building_id
                 FROM c_owner_property op
@@ -100,6 +115,19 @@ class RepairProjectGovernanceFlowTest {
                   )
                 """, PROJECT_PREFIX + "%");
         jdbcTemplate.update("DELETE FROM t_repair_project WHERE project_name LIKE ?", PROJECT_PREFIX + "%");
+        jdbcTemplate.update("DELETE FROM t_repair_decision_rule WHERE rule_name LIKE ?", RULE_PREFIX + "%");
+        if (previousActiveRuleId != null) {
+            jdbcTemplate.update("""
+                    UPDATE t_repair_decision_rule
+                    SET status = 'ACTIVE', update_time = CURRENT_TIMESTAMP
+                    WHERE rule_id = ?
+                    """, previousActiveRuleId);
+        }
+        jdbcTemplate.update("""
+                UPDATE t_tenant_community
+                SET building_repair_default_decision_channel = ?
+                WHERE tenant_id = ?
+                """, previousDecisionChannel, TENANT);
         RepairProjectSourcingTestSupport.cleanSuppliers(jdbcTemplate, SUPPLIER_PREFIX);
         jdbcTemplate.update("DELETE FROM t_repair_work_order WHERE title LIKE ?", CASE_PREFIX + "%");
         jdbcTemplate.update("""
@@ -117,40 +145,48 @@ class RepairProjectGovernanceFlowTest {
     @Test
     void buildingGovernanceRequiresRawDecisionPropertyDocumentDirectorApprovalAndCommitteeSeal() throws Exception {
         LockedProject locked = createAndLockBuildingProject();
-        long ruleAttachmentId = upload(locked.projectId(), "备案议事规则.pdf", "rule");
         long evidenceAttachmentId = upload(locked.projectId(), "微信接龙截图.jpg", "evidence");
         long officialAttachmentId = upload(locked.projectId(), "物业正式报审文件.pdf", "official");
         long reviewAttachmentId = upload(locked.projectId(), "第三方审价报告.pdf", "review");
         long sealedAttachmentId = upload(locked.projectId(), "业委会盖章报审文件.pdf", "sealed");
 
-        Map<String, Object> invalidRule = startDecisionRequest(ruleAttachmentId, "FOLLOW_MAJORITY");
+        registerDecisionRule("FOLLOW_MAJORITY");
         mockMvc.perform(post(projectPath(locked.projectId(), "/building-governance/start"))
                         .header("Authorization", bearer(propertyToken))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(json(invalidRule)))
+                        .content(json(startDecisionRequest())))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.msg", is("尚未接入备案规则推导票能力，未表态房屋只能保持未参与")));
+                .andExpect(jsonPath("$.msg", is("当前备案规则包含未表态推导票，但系统尚未支持该计票方式，禁止发起征询")));
 
-        JsonNode started = responseData(postJson(
+        registerDecisionRule("NOT_PARTICIPATED");
+        JsonNode startedDetails = responseData(postJson(
                 projectPath(locked.projectId(), "/building-governance/start"),
-                propertyToken, startDecisionRequest(ruleAttachmentId, "NOT_PARTICIPATED")))
-                .path("process");
+                propertyToken, startDecisionRequest()));
+        JsonNode started = startedDetails.path("process");
         assertEquals("DECISION_COLLECTING", started.path("status").asText());
         assertEquals(0, started.path("processVersion").asInt());
+        assertEquals("NOT_PARTICIPATED", startedDetails.path("policySnapshot").path("nonResponseRule").asText());
+        assertEquals("2026备案版-NOT_PARTICIPATED", startedDetails.path("policySnapshot").path("ruleVersion").asText());
+        assertEquals(
+                locked.allocationBasis().path("scopeLabel").asText() + " · 费用承担范围内业主",
+                startedDetails.path("decision").path("scopeLabel").asText());
 
-        List<Map<String, Object>> entries = new ArrayList<>();
-        for (JsonNode room : locked.allocationRooms()) {
-            entries.add(Map.of(
-                    "roomId", room.path("roomId").asLong(),
-                    "choice", "AGREE",
-                    "originalText", "同意按锁定方案维修并承担本户分摊费用"));
-        }
+        mockMvc.perform(post(projectPath(locked.projectId(), "/building-governance/decision/complete"))
+                        .header("Authorization", bearer(directorToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "expectedProcessVersion", 0,
+                                "evidenceAttachmentId", evidenceAttachmentId,
+                                "confirmedResult", "PASSED"))))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.msg", is("仅物业可核验楼栋维修接龙")));
+
         JsonNode decided = responseData(postJson(
                 projectPath(locked.projectId(), "/building-governance/decision/complete"),
                 propertyToken, Map.of(
                         "expectedProcessVersion", 0,
                         "evidenceAttachmentId", evidenceAttachmentId,
-                        "entries", entries)));
+                        "confirmedResult", "PASSED")));
         assertEquals("DECISION_PASSED", decided.path("process").path("status").asText());
         assertEquals("PASSED", decided.path("decision").path("result").asText());
 
@@ -204,28 +240,89 @@ class RepairProjectGovernanceFlowTest {
     }
 
     @Test
-    void omittedBuildingRoomsRemainNotVotedAndCannotBeTreatedAsConsent() throws Exception {
+    void wechatDecisionOnlyArchivesScreenshotAndPropertyConfirmedResult() throws Exception {
         LockedProject locked = createAndLockBuildingProject();
-        long ruleAttachmentId = upload(locked.projectId(), "备案议事规则.pdf", "rule");
+        registerDecisionRule("NOT_PARTICIPATED");
         long evidenceAttachmentId = upload(locked.projectId(), "无人表态截图.jpg", "empty");
         postJson(projectPath(locked.projectId(), "/building-governance/start"),
-                propertyToken, startDecisionRequest(ruleAttachmentId, "NOT_PARTICIPATED"));
+                propertyToken, startDecisionRequest());
 
         JsonNode result = responseData(postJson(
                 projectPath(locked.projectId(), "/building-governance/decision/complete"),
                 propertyToken, Map.of(
                         "expectedProcessVersion", 0,
                         "evidenceAttachmentId", evidenceAttachmentId,
-                        "entries", List.of())));
+                        "confirmedResult", "FAILED")));
         assertEquals("DECISION_FAILED", result.path("process").path("status").asText());
         assertEquals("FAILED", result.path("decision").path("result").asText());
-        assertEquals(locked.allocationRooms().size(), result.path("entries").size());
-        for (JsonNode entry : result.path("entries")) {
-            assertEquals("NOT_VOTED", entry.path("choice").asText());
-        }
+        assertEquals(0, result.path("entries").size());
         assertEquals("PLAN_LOCKED", jdbcTemplate.queryForObject(
                 "SELECT status FROM t_repair_project WHERE project_id = ?",
                 String.class, locked.projectId()));
+    }
+
+    @Test
+    void onlineDecisionCreatesOwnerTasksShowsOnlyParticipationAndUsesSystemTally() throws Exception {
+        jdbcTemplate.update("""
+                UPDATE t_tenant_community
+                SET building_repair_default_decision_channel = 'ONLINE'
+                WHERE tenant_id = ?
+                """, TENANT);
+        LockedProject locked = createAndLockBuildingProject();
+        registerDecisionRule("NOT_PARTICIPATED");
+
+        JsonNode started = responseData(postJson(
+                projectPath(locked.projectId(), "/building-governance/start"),
+                propertyToken, startDecisionRequest()));
+        assertEquals("ONLINE", started.path("policySnapshot").path("decisionChannel").asText());
+        long decisionId = started.path("decision").path("decisionId").asLong();
+
+        List<Map<String, Object>> owners = jdbcTemplate.queryForList("""
+                SELECT allocation.owner_uid, owner.account_id
+                FROM t_repair_plan_allocation_room allocation
+                JOIN c_user owner ON owner.uid = allocation.owner_uid
+                WHERE allocation.plan_id = ?
+                GROUP BY allocation.owner_uid, owner.account_id
+                ORDER BY allocation.owner_uid
+                """, locked.planId());
+        assertTrue(!owners.isEmpty());
+
+        for (int index = 0; index < owners.size(); index++) {
+            Map<String, Object> owner = owners.get(index);
+            long ownerUid = ((Number) owner.get("owner_uid")).longValue();
+            long accountId = ((Number) owner.get("account_id")).longValue();
+            String ownerToken = jwtTokenProvider.generateToken(accountId, "C_USER", ownerUid, TENANT);
+            JsonNode tasks = responseData(getJson(
+                    "/api/v1/me/repair-projects/decisions", ownerToken));
+            assertEquals(1, tasks.size());
+            JsonNode task = tasks.get(0);
+            assertEquals(decisionId, task.path("decisionId").asLong());
+            assertTrue(task.path("buildArea").decimalValue().signum() > 0);
+            postJson("/api/v1/me/repair-projects/decisions/" + decisionId + "/votes",
+                    ownerToken, Map.of("roomId", task.path("roomId").asLong(), "choice", "AGREE"));
+
+            if (index == 0) {
+                JsonNode regular = responseData(getJson(
+                        projectPath(locked.projectId(), "/building-governance"), propertyToken));
+                assertTrue(regular.path("decision").path("participatedOwnerCount").asInt() >= 1);
+                assertTrue(regular.path("entries").findValues("participated").stream()
+                        .anyMatch(JsonNode::asBoolean));
+                regular.path("entries").forEach(entry -> assertTrue(entry.path("choice").isNull()));
+
+                JsonNode audited = responseData(postJson(
+                        projectPath(locked.projectId(), "/building-governance/decision-audit"),
+                        directorToken, Map.of()));
+                assertTrue(audited.path("entries").findValues("choice").stream()
+                        .anyMatch(choice -> "AGREE".equals(choice.asText())));
+            }
+        }
+
+        JsonNode result = responseData(postJson(
+                projectPath(locked.projectId(), "/building-governance/decision/complete"),
+                propertyToken, Map.of("expectedProcessVersion", 0)));
+        assertEquals("DECISION_PASSED", result.path("process").path("status").asText());
+        assertEquals("PASSED", result.path("decision").path("result").asText());
+        assertEquals(owners.size(), result.path("decision").path("agreeOwnerCount").asInt());
     }
 
     @Test
@@ -244,7 +341,7 @@ class RepairProjectGovernanceFlowTest {
 
         JsonNode settled = responseData(postJson(
                 projectPath(locked.projectId(), "/community-assembly/settle"),
-                directorToken, Map.of("expectedProjectVersion", 2)));
+                propertyToken, Map.of("expectedProjectVersion", 2)));
         assertEquals("SETTLED", settled.path("status").asText());
         assertEquals("PASSED", settled.path("result").asText());
         assertEquals("AUTHORIZED", jdbcTemplate.queryForObject(
@@ -259,6 +356,20 @@ class RepairProjectGovernanceFlowTest {
                 SELECT COUNT(*) FROM t_repair_governance_basis
                 WHERE project_id = ? AND reference_id = ?
                 """, locked.projectId(), fixture.failedSubjectId()));
+
+        LockedProject committeeVerifiedProject = createAndLockCommunityProject();
+        AssemblyFixture committeeFixture = createSettledAssemblyFixture();
+        postJson(
+                projectPath(committeeVerifiedProject.projectId(), "/community-assembly/link"),
+                directorToken, Map.of(
+                        "expectedProjectVersion", 1,
+                        "packageId", committeeFixture.packageId(),
+                        "subjectId", committeeFixture.passedSubjectId()));
+        JsonNode committeeSettled = responseData(postJson(
+                projectPath(committeeVerifiedProject.projectId(), "/community-assembly/settle"),
+                directorToken, Map.of("expectedProjectVersion", 2)));
+        assertEquals("SETTLED", committeeSettled.path("status").asText());
+        assertEquals("PASSED", committeeSettled.path("result").asText());
     }
 
     private LockedProject createAndLockBuildingProject() throws Exception {
@@ -284,7 +395,7 @@ class RepairProjectGovernanceFlowTest {
                 propertyToken, Map.of("expectedProjectVersion", 0)));
         List<JsonNode> allocation = new ArrayList<>();
         locked.path("currentPlanAllocationRooms").forEach(allocation::add);
-        return new LockedProject(projectId, planId, allocation);
+        return new LockedProject(projectId, planId, allocation, locked.path("currentPlanAllocationBasis"));
     }
 
     private long createBuildingRepairCase() throws Exception {
@@ -403,14 +514,25 @@ class RepairProjectGovernanceFlowTest {
                         "requiredEvidenceCodes", List.of("WARRANTY_EXPIRED_CERTIFICATE")));
     }
 
-    private Map<String, Object> startDecisionRequest(long ruleAttachmentId, String nonResponseRule) {
-        return Map.of(
-                "expectedProjectVersion", 1,
-                "ruleDocumentAttachmentId", ruleAttachmentId,
-                "ruleVersion", "2026备案版",
-                "deliveryRule", "物业在本楼栋微信接龙群送达并保留完整截图",
-                "nonResponseRule", nonResponseRule,
-                "scopeLabel", "本楼栋专有维修资金承担范围");
+    private Map<String, Object> startDecisionRequest() {
+        return Map.of("expectedProjectVersion", 1);
+    }
+
+    private void registerDecisionRule(String nonResponseRule) throws Exception {
+        String content = "小区楼栋维修征询规则 " + nonResponseRule;
+        MockMultipartFile file = new MockMultipartFile(
+                "file", "维修征询规则.pdf", "application/pdf",
+                content.getBytes(StandardCharsets.UTF_8));
+        mockMvc.perform(multipart("/api/v1/admin/repair-decision-rules")
+                        .file(file)
+                        .param("ruleName", RULE_PREFIX + nonResponseRule + "-" + System.nanoTime())
+                        .param("ruleVersion", "2026备案版-" + nonResponseRule)
+                        .param("effectiveDate", LocalDate.now().toString())
+                        .param("deliveryRule", "物业向费用承担范围房屋送达纸质征询并保留送达记录")
+                        .param("nonResponseRule", nonResponseRule)
+                        .header("Authorization", bearer(directorToken)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.status", is("ACTIVE")));
     }
 
     private AssemblyFixture createSettledAssemblyFixture() {
@@ -491,6 +613,13 @@ class RepairProjectGovernanceFlowTest {
                 .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
     }
 
+    private String getJson(String path, String token) throws Exception {
+        return mockMvc.perform(get(path)
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+    }
+
     private JsonNode responseData(String response) throws Exception {
         return objectMapper.readTree(response).path("data");
     }
@@ -515,7 +644,8 @@ class RepairProjectGovernanceFlowTest {
         return objectMapper.writeValueAsString(value);
     }
 
-    private record LockedProject(long projectId, long planId, List<JsonNode> allocationRooms) {
+    private record LockedProject(
+            long projectId, long planId, List<JsonNode> allocationRooms, JsonNode allocationBasis) {
     }
 
     private record AssemblyFixture(

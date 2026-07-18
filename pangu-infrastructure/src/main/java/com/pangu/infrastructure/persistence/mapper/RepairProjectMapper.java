@@ -66,6 +66,9 @@ public interface RepairProjectMapper {
                                                   @Param("buildingId") Long buildingId,
                                                   @Param("unitName") String unitName);
 
+    RepairAllocationBasisRow findAllocationSnapshotBasis(@Param("planId") Long planId,
+                                                          @Param("tenantId") Long tenantId);
+
     List<RepairPlanAllocationRoomRow> listAllocationRooms(@Param("planId") Long planId,
                                                           @Param("tenantId") Long tenantId);
 
