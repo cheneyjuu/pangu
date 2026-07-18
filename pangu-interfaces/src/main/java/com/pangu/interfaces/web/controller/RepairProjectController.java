@@ -2,6 +2,8 @@
 package com.pangu.interfaces.web.controller;
 
 import com.pangu.application.repair.RepairProjectAttachmentService;
+import com.pangu.application.repair.RepairProjectProcessHistoryEntry;
+import com.pangu.application.repair.RepairProjectProcessHistoryService;
 import com.pangu.application.repair.RepairNarrativeImageService;
 import com.pangu.application.repair.RepairProjectService;
 import com.pangu.application.repair.RepairWorkOrderApplicationException;
@@ -34,6 +36,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/v1/admin/repair-projects")
@@ -41,6 +44,7 @@ import java.io.IOException;
 public class RepairProjectController extends BaseController {
 
     private final RepairProjectService projectService;
+    private final RepairProjectProcessHistoryService processHistoryService;
     private final RepairProjectAttachmentService attachmentService;
     private final RepairNarrativeImageService narrativeImageService;
 
@@ -108,6 +112,16 @@ public class RepairProjectController extends BaseController {
     @PreAuthorize("hasAuthority('repair:workorder:read')")
     public Result<RepairProject.Details> detail(@PathVariable("projectId") Long projectId) {
         return success(projectService.findProject(projectId));
+    }
+
+    /**
+     * 返回管理端可见的办理节点，应用层会过滤个人业主表决和原始审计载荷。
+     */
+    @GetMapping("/{projectId}/process-history")
+    @PreAuthorize("hasAuthority('repair:workorder:read')")
+    public Result<List<RepairProjectProcessHistoryEntry>> processHistory(
+            @PathVariable("projectId") Long projectId) {
+        return success(processHistoryService.list(projectId));
     }
 
     @PostMapping("/{projectId}/plan-versions")

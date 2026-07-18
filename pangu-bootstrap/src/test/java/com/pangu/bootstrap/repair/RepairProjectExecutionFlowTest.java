@@ -30,6 +30,8 @@ import java.util.Map;
 
 import static org.hamcrest.Matchers.is;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
@@ -456,6 +458,32 @@ class RepairProjectExecutionFlowTest {
                 locked.projectId()));
         assertEquals(2, count("SELECT COUNT(*) FROM t_repair_payment_request WHERE project_id = ?",
                 locked.projectId()));
+    }
+
+    @Test
+    void processHistoryReturnsBusinessNodesWithoutOwnerAcceptanceDetails() throws Exception {
+        LockedProject locked = createAndAuthorizeProject();
+        jdbcTemplate.update("""
+                INSERT INTO t_repair_project_event (
+                    project_id, tenant_id, action, actor_account_id, actor_owner_uid, payload_json
+                ) VALUES (?, ?, 'PROJECT_AFFECTED_OWNER_ACCEPTANCE', ?, ?, CAST(? AS JSONB))
+                """, locked.projectId(), TENANT, ACCOUNT_AFFECTED_OWNER, UID_AFFECTED_OWNER,
+                "{\"roomId\":20000001001,\"conclusion\":\"PASSED\"}");
+
+        mockMvc.perform(get(projectPath(locked.projectId(), "/process-history"))
+                        .header("Authorization", bearer(ownerToken)))
+                .andExpect(status().isForbidden());
+
+        JsonNode history = data(getOk(projectPath(locked.projectId(), "/process-history"), propertyToken));
+
+        assertTrue(history.isArray());
+        assertTrue(history.size() >= 4);
+        assertTrue(history.findValuesAsText("title").contains("创建维修工程项目"));
+        assertFalse(history.toString().contains("PROJECT_AFFECTED_OWNER_ACCEPTANCE"));
+        assertFalse(history.toString().contains("roomId"));
+        assertFalse(history.toString().contains("payloadJson"));
+        assertFalse(history.toString().contains("actorAccountId"));
+        assertFalse(history.toString().contains("actorUserId"));
     }
 
     private LockedProject createAndAuthorizeProject() throws Exception {

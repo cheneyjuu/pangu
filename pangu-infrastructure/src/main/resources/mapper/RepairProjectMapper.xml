@@ -3,6 +3,15 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.pangu.infrastructure.persistence.mapper.RepairProjectMapper">
 
+    <resultMap id="RepairProjectProcessEventResultMap"
+               type="com.pangu.infrastructure.persistence.entity.RepairProjectProcessEventRow">
+        <id property="eventId" column="event_id"/>
+        <result property="projectId" column="project_id"/>
+        <result property="tenantId" column="tenant_id"/>
+        <result property="action" column="action"/>
+        <result property="occurredAt" column="occurred_at"/>
+    </resultMap>
+
     <sql id="projectColumns">
         project_id, project_no, tenant_id, project_name, workflow_type, scope_type,
         building_id, unit_name, fund_source, governance_path, status, active_plan_id,
@@ -409,4 +418,16 @@
             #{actorOwnerUid}, CAST(#{payloadJson} AS JSONB)
         )
     </insert>
+
+    <select id="listProcessEvents" resultMap="RepairProjectProcessEventResultMap">
+        SELECT project_event.event_id,
+               project_event.project_id,
+               project_event.tenant_id,
+               project_event.action,
+               project_event.create_time AS occurred_at
+        FROM t_repair_project_event project_event
+        WHERE project_event.project_id = #{projectId}
+          AND project_event.tenant_id = #{tenantId}
+        ORDER BY project_event.create_time ASC, project_event.event_id ASC
+    </select>
 </mapper>

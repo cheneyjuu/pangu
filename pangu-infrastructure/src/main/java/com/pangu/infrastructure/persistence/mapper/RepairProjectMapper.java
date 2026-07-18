@@ -8,6 +8,7 @@ import com.pangu.infrastructure.persistence.entity.RepairAllocationBasisRow;
 import com.pangu.infrastructure.persistence.entity.RepairPlanAttachmentRow;
 import com.pangu.infrastructure.persistence.entity.RepairPlanVersionRow;
 import com.pangu.infrastructure.persistence.entity.RepairProjectAttachmentRow;
+import com.pangu.infrastructure.persistence.entity.RepairProjectProcessEventRow;
 import com.pangu.infrastructure.persistence.entity.RepairProjectItemRow;
 import com.pangu.infrastructure.persistence.entity.RepairProjectRow;
 import org.apache.ibatis.annotations.Mapper;
@@ -134,4 +135,7 @@ public interface RepairProjectMapper {
                          @Param("actorAccountId") Long actorAccountId,
                          @Param("actorOwnerUid") Long actorOwnerUid,
                          @Param("payloadJson") String payloadJson);
+
+    List<RepairProjectProcessEventRow> listProcessEvents(@Param("projectId") Long projectId,
+                                                         @Param("tenantId") Long tenantId);
 }

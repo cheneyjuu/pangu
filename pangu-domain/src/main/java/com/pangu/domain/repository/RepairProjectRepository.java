@@ -2,6 +2,7 @@
 package com.pangu.domain.repository;
 
 import com.pangu.domain.model.repair.RepairProject;
+import com.pangu.domain.model.repair.RepairProjectProcessEvent;
 import com.pangu.domain.model.repair.RepairProject.AllocationRoom;
 import com.pangu.domain.model.repair.RepairProject.AllocationBasis;
 import com.pangu.domain.model.repair.RepairProject.Attachment;
@@ -84,4 +85,7 @@ public interface RepairProjectRepository {
 
     void insertOwnerEvent(Long projectId, Long tenantId, String action,
                           Long actorAccountId, Long actorOwnerUid, String payloadJson);
+
+    /** 查询管理端办理记录所需的最小化事件字段，不读取个人身份和原始审计载荷。 */
+    List<RepairProjectProcessEvent> listProcessEvents(Long projectId, Long tenantId);
 }

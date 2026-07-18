@@ -5,6 +5,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pangu.domain.model.repair.RepairProject;
+import com.pangu.domain.model.repair.RepairProjectProcessEvent;
 import com.pangu.domain.model.repair.RepairProject.AllocationRoom;
 import com.pangu.domain.model.repair.RepairProject.AllocationBasis;
 import com.pangu.domain.model.repair.RepairProject.Attachment;
@@ -26,6 +27,7 @@ import com.pangu.infrastructure.persistence.entity.RepairPlanAffectedOwnerRow;
 import com.pangu.infrastructure.persistence.entity.RepairPlanAttachmentRow;
 import com.pangu.infrastructure.persistence.entity.RepairPlanVersionRow;
 import com.pangu.infrastructure.persistence.entity.RepairProjectAttachmentRow;
+import com.pangu.infrastructure.persistence.entity.RepairProjectProcessEventRow;
 import com.pangu.infrastructure.persistence.entity.RepairProjectItemRow;
 import com.pangu.infrastructure.persistence.entity.RepairProjectRow;
 import com.pangu.infrastructure.persistence.mapper.RepairProjectMapper;
@@ -238,6 +240,11 @@ public class RepairProjectRepositoryImpl implements RepairProjectRepository {
                 projectId, tenantId, action, actorAccountId, actorOwnerUid, payloadJson);
     }
 
+    @Override
+    public List<RepairProjectProcessEvent> listProcessEvents(Long projectId, Long tenantId) {
+        return mapper.listProcessEvents(projectId, tenantId).stream().map(this::toDomain).toList();
+    }
+
     private RepairProject toDomain(RepairProjectRow row) {
         return new RepairProject(
                 row.getProjectId(), row.getProjectNo(), row.getTenantId(), row.getProjectName(),
@@ -246,6 +253,11 @@ public class RepairProjectRepositoryImpl implements RepairProjectRepository {
                 RepairProject.GovernancePath.valueOf(row.getGovernancePath()),
                 RepairProject.Status.valueOf(row.getStatus()), row.getActivePlanId(), row.getVersion(),
                 row.getCreatedByAccountId(), row.getCreatedByUserId(), row.getCreateTime(), row.getUpdateTime());
+    }
+
+    private RepairProjectProcessEvent toDomain(RepairProjectProcessEventRow row) {
+        return new RepairProjectProcessEvent(
+                row.getEventId(), row.getProjectId(), row.getTenantId(), row.getAction(), row.getOccurredAt());
     }
 
     private RepairProjectRow toRow(RepairProject project) {
