@@ -10,8 +10,10 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Repository;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * {@link VoteItemRepository} 默认实现。
@@ -28,6 +30,14 @@ public class VoteItemRepositoryImpl implements VoteItemRepository {
     @Override
     public List<VoteItem> findValidVotes(Long subjectId) {
         return mapper.selectBySubjectId(subjectId).stream().map(this::toDomain).toList();
+    }
+
+    @Override
+    public Set<Long> findVotedSubjectIds(Collection<Long> subjectIds, Long uid) {
+        if (subjectIds == null || subjectIds.isEmpty()) {
+            return Set.of();
+        }
+        return Set.copyOf(mapper.selectVotedSubjectIds(subjectIds, uid));
     }
 
     @Override

@@ -13,7 +13,7 @@ import java.time.Instant;
  *
  * <p>故意不暴露 {@code partyRatioFloor / version / cancelled_*}：
  * 投票期间业主端只关心标题、类型、状态、起止时间；撤回审计仅在 B/G 端可见。
- * 也不返回当前票数，防止从众心理（结算后才暴露 SettleResult 中的票数）。
+ * 返回当前登录业主是否已投，但不返回选择结果和当前票数，避免泄露个人选择或诱发从众心理。
  */
 public record OwnerSubjectResponse(
         Long subjectId,
@@ -27,13 +27,17 @@ public record OwnerSubjectResponse(
         Instant voteEndAt,
         Instant clockSuspendedAt,
         Long clockSuspendedBySubjectId,
+        boolean voted,
         OwnersAssemblyPackageInfo assemblyPackage
 ) {
     public static OwnerSubjectResponse from(VotingSubject s) {
-        return from(s, null);
+        return from(s, null, false);
     }
 
-    public static OwnerSubjectResponse from(VotingSubject s, OwnersAssemblyPackage assemblyPackage) {
+    public static OwnerSubjectResponse from(
+            VotingSubject s,
+            OwnersAssemblyPackage assemblyPackage,
+            boolean voted) {
         return new OwnerSubjectResponse(
                 s.getSubjectId(),
                 s.getTitle(),
@@ -46,6 +50,7 @@ public record OwnerSubjectResponse(
                 s.getVoteEndAt(),
                 s.getClockSuspendedAt(),
                 s.getClockSuspendedBySubjectId(),
+                voted,
                 OwnersAssemblyPackageInfo.from(assemblyPackage));
     }
 

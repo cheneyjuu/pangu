@@ -3,8 +3,10 @@ package com.pangu.domain.repository;
 import com.pangu.domain.model.voting.VoteItem;
 import com.pangu.domain.model.voting.VoteChannel;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * 投票明细仓储端口（领域定义；实现在 infrastructure）。
@@ -23,6 +25,12 @@ public interface VoteItemRepository {
      * 因此本方法返回原始多行无需在持久层提前去重。
      */
     List<VoteItem> findValidVotes(Long subjectId);
+
+    /**
+     * 批量返回当前业主已经提交过有效票的议题，供 C 端列表展示本人完成状态。
+     * 只返回议题 ID，不暴露选择结果或其他业主的投票明细。
+     */
+    Set<Long> findVotedSubjectIds(Collection<Long> subjectIds, Long uid);
 
     /**
      * 写入一票。{@code subjectId} 单独入参（避免污染领域 {@link VoteItem}）；

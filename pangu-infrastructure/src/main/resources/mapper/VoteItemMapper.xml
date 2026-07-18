@@ -29,6 +29,17 @@
           AND valid_flag = 1
     </select>
 
+    <select id="selectVotedSubjectIds" resultType="long">
+        SELECT DISTINCT subject_id
+        FROM t_vote_item
+        WHERE uid = #{uid}
+          AND valid_flag = 1
+          AND subject_id IN
+          <foreach collection="subjectIds" item="subjectId" open="(" separator="," close=")">
+              #{subjectId}
+          </foreach>
+    </select>
+
     <!-- M3-2: 投票提交。voted_at 由 DB DEFAULT CURRENT_TIMESTAMP 兜底。 -->
     <insert id="insert" useGeneratedKeys="true" keyProperty="voteId" keyColumn="vote_id">
         INSERT INTO t_vote_item (

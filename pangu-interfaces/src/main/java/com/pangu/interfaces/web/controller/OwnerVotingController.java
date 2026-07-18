@@ -38,6 +38,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * C 端业主投票端点（M3-2 引入）。
@@ -71,7 +72,12 @@ public class OwnerVotingController extends BaseController {
         Long uid = requireUid();
         Long tenantId = requireTenantId();
         List<VotingSubject> subjects = proposalLifecycleService.findVisibleForOwner(uid, tenantId, page, size);
-        return success(subjects.stream().map(this::toOwnerSubjectResponse).toList());
+        Set<Long> votedSubjectIds = voteItemRepository.findVotedSubjectIds(
+                subjects.stream().map(VotingSubject::getSubjectId).toList(),
+                uid);
+        return success(subjects.stream()
+                .map(subject -> toOwnerSubjectResponse(subject, votedSubjectIds.contains(subject.getSubjectId())))
+                .toList());
     }
 
     /**
@@ -91,7 +97,7 @@ public class OwnerVotingController extends BaseController {
                 .map(VoteItem::getUid)
                 .anyMatch(uid::equals);
         return success(Map.of(
-                "subject", toOwnerSubjectResponse(subject),
+                "subject", toOwnerSubjectResponse(subject, voted),
                 "voted", voted));
     }
 
@@ -181,10 +187,10 @@ public class OwnerVotingController extends BaseController {
         return subject;
     }
 
-    private OwnerSubjectResponse toOwnerSubjectResponse(VotingSubject subject) {
+    private OwnerSubjectResponse toOwnerSubjectResponse(VotingSubject subject, boolean voted) {
         return OwnerSubjectResponse.from(subject, ownersAssemblyRepository.findPackageBySubjectId(subject.getSubjectId())
                 .filter(p -> p.tenantId().equals(subject.getTenantId()))
-                .orElse(null));
+                .orElse(null), voted);
     }
 
     private Long requireUid() {

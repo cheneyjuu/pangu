@@ -7,11 +7,13 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.HashMap;
 import java.util.Map;
 
+import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.is;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -47,6 +49,9 @@ public class VotingEndpointMatrixTest {
 
     @Autowired
     private JwtTokenProvider jwtTokenProvider;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     private static final long TENANT_RUSHI = 10001L;
 
@@ -413,6 +418,52 @@ public class VotingEndpointMatrixTest {
                         .header("Authorization", "Bearer " + cToken(ACC_LISI, UID_LISI)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code", is(200)));
+    }
+
+    @Test
+    public void cUserListMine_returnsCurrentUsersVotedState() throws Exception {
+        long marker = System.nanoTime();
+        Long votedSubjectId = insertVisibleVotingSubject("业主已投议题-" + marker);
+        Long unvotedSubjectId = insertVisibleVotingSubject("业主未投议题-" + marker);
+        Long opid = jdbcTemplate.queryForObject(
+                "SELECT opid FROM c_owner_property WHERE uid = ? AND tenant_id = ? ORDER BY opid LIMIT 1",
+                Long.class,
+                UID_LISI,
+                TENANT_RUSHI);
+        jdbcTemplate.update("""
+                INSERT INTO t_vote_item(subject_id, opid, uid, property_area, choice, vote_channel)
+                SELECT ?, opid, uid, build_area, 1, 1
+                FROM c_owner_property
+                WHERE opid = ?
+                """, votedSubjectId, opid);
+
+        try {
+            mockMvc.perform(get("/api/v1/me/voting-subjects")
+                            .param("size", "100")
+                            .header("Authorization", "Bearer " + cToken(ACC_LISI, UID_LISI)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath(
+                            "$.data[?(@.subjectId == " + votedSubjectId + ")].voted",
+                            hasItem(true)))
+                    .andExpect(jsonPath(
+                            "$.data[?(@.subjectId == " + unvotedSubjectId + ")].voted",
+                            hasItem(false)));
+        } finally {
+            jdbcTemplate.update("DELETE FROM t_vote_item WHERE subject_id IN (?, ?)", votedSubjectId, unvotedSubjectId);
+            jdbcTemplate.update("DELETE FROM t_voting_subject WHERE subject_id IN (?, ?)", votedSubjectId, unvotedSubjectId);
+        }
+    }
+
+    private Long insertVisibleVotingSubject(String title) {
+        return jdbcTemplate.queryForObject("""
+                INSERT INTO t_voting_subject(
+                    tenant_id, title, content_html, subject_type, scope, status,
+                    vote_start_at, vote_end_at, proposed_by_user_id
+                ) VALUES (?, ?, '<p>业主列表投票状态测试</p>', 3, 1, 3,
+                          CURRENT_TIMESTAMP - INTERVAL '1 day',
+                          CURRENT_TIMESTAMP + INTERVAL '7 days', ?)
+                RETURNING subject_id
+                """, Long.class, TENANT_RUSHI, title, USR_COMM);
     }
 
     @Test
