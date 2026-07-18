@@ -282,6 +282,30 @@
         ORDER BY material_id
     </select>
 
+    <select id="listPackageMaterials" resultMap="MaterialMap">
+        SELECT m.*
+        FROM t_owners_assembly_package_material link
+        JOIN t_owners_assembly_material m ON m.material_id = link.material_id
+        WHERE link.package_id = #{packageId}
+          AND link.tenant_id = #{tenantId}
+          AND m.tenant_id = #{tenantId}
+        ORDER BY m.material_type ASC, m.material_id ASC
+    </select>
+
+    <insert id="insertPackageMaterial">
+        INSERT INTO t_owners_assembly_package_material (package_id, tenant_id, material_id)
+        SELECT #{packageId}, #{tenantId}, material_id
+        FROM t_owners_assembly_material
+        WHERE material_id = #{materialId}
+          AND tenant_id = #{tenantId}
+          AND session_id = (
+              SELECT session_id
+              FROM t_owners_assembly_package
+              WHERE package_id = #{packageId}
+                AND tenant_id = #{tenantId}
+          )
+    </insert>
+
     <update id="lockPackage">
         UPDATE t_owners_assembly_package
         SET status = 'PUBLIC_NOTICE',
@@ -354,6 +378,15 @@
           AND valid_flag = 1
         ORDER BY create_time DESC, assembly_vote_id DESC
         LIMIT 1
+    </select>
+
+    <select id="findOwnerParticipationAt" resultType="java.time.LocalDateTime">
+        SELECT MIN(create_time)
+        FROM t_owners_assembly_vote_record
+        WHERE package_id = #{packageId}
+          AND tenant_id = #{tenantId}
+          AND uid = #{uid}
+          AND valid_flag = 1
     </select>
 
     <update id="invalidateVoteRecordByVoteId">

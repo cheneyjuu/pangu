@@ -50,6 +50,9 @@ public interface OwnerPropertyMapper {
      */
     List<Long> selectBuildingIdsByUid(@Param("uid") Long uid, @Param("tenantId") Long tenantId);
 
+    List<OwnerPropertyVotingViewRow> selectVotingViewsByUid(@Param("uid") Long uid,
+                                                            @Param("tenantId") Long tenantId);
+
     /**
      * 按手机号片段（前缀 / 中段 / 尾号）模糊检索本租户业主。
      * phone {@code LIKE '%xxx%'} 不走索引前缀但租户内业主规模有限，可接受；上限 20 条。

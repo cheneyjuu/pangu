@@ -18,4 +18,12 @@ public interface OwnerPropertyVotingRepository {
 
     /** 列出某业主在某租户下涉及的全部楼栋 ID（"我的议题" ABAC 用）。 */
     List<Long> findBuildingIdsByUid(Long uid, Long tenantId);
+
+    /**
+     * 列出当前业主在本小区的房产投票视图。
+     *
+     * <p>业主大会 C 端用它区分“可查看已发布材料”和“当前是否具备有效投票资格”，
+     * 不以任意一处房产存在就推定该业主可投票。
+     */
+    List<OwnerPropertyVotingView> listByUid(Long uid, Long tenantId);
 }

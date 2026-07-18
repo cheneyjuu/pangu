@@ -81,6 +81,15 @@
         WHERE uid = #{uid} AND tenant_id = #{tenantId}
     </select>
 
+    <select id="selectVotingViewsByUid" resultMap="VotingViewResultMap">
+        SELECT opid, uid, tenant_id, building_id, build_area,
+               is_voting_delegate, account_status
+        FROM c_owner_property
+        WHERE uid = #{uid}
+          AND tenant_id = #{tenantId}
+        ORDER BY opid
+    </select>
+
     <!-- ===================== 提名候选人:按手机号检索业主 ===================== -->
     <!-- phone 作普通明文列映射,realName 走 SM4 raw 密文(application 解密) -->
     <resultMap id="OwnerLookupResultMap"

@@ -35,6 +35,7 @@ import com.pangu.domain.model.voting.VotingSettlementPolicy;
 import com.pangu.domain.model.voting.VotingSubject;
 import com.pangu.domain.model.voting.VotingSubjectActions;
 import com.pangu.domain.repository.OwnerPropertyVotingRepository;
+import com.pangu.domain.repository.CommitteePositionRepository;
 import com.pangu.domain.repository.OwnersAssemblyMaterialStorage;
 import com.pangu.domain.repository.OwnersAssemblyRepository;
 import com.pangu.domain.repository.OwnersAssemblyRuleRepository;
@@ -92,10 +93,13 @@ public class OwnersAssemblyApplicationService {
     private static final String STATUS_VOTING = "VOTING";
     private static final String STATUS_SETTLED = "SETTLED";
     private static final String CHANNEL_PAPER = "PAPER";
+    private static final String FORMAL_MANAGE_PERMISSION = "owners-assembly:formal:manage";
+    private static final Set<String> EXECUTIVE_POSITIONS = Set.of("DIRECTOR", "VICE_DIRECTOR");
 
     private final OwnersAssemblyRepository ownersAssemblyRepository;
     private final OwnersAssemblyRuleRepository ownersAssemblyRuleRepository;
     private final OwnersAssemblyMaterialStorage ownersAssemblyMaterialStorage;
+    private final CommitteePositionRepository committeePositionRepository;
     private final VotingSubjectRepository votingSubjectRepository;
     private final VoteItemRepository voteItemRepository;
     private final OwnerPropertyVotingRepository ownerPropertyVotingRepository;
@@ -222,7 +226,7 @@ public class OwnersAssemblyApplicationService {
 
     @Transactional
     public OwnersAssemblyPackage confirmArrangement(ConfirmAssemblyArrangementCommand command) {
-        UserContext actor = requireSysContext(command.tenantId(), null);
+        UserContext actor = requireFormalAssemblyExecutive(command.tenantId());
         // 同一小区的规则启用与本次会议的规则快照必须串行，避免确认过程读到被替换中的 ACTIVE 版本。
         ownersAssemblyRuleRepository.lockTenantRules(command.tenantId());
         OwnersAssemblySession session = ownersAssemblyRepository.findSessionForUpdate(command.sessionId(), command.tenantId())
@@ -270,6 +274,15 @@ public class OwnersAssemblyApplicationService {
                 ballotTemplate.contentSha256(),
                 command.voteStartAt(),
                 command.voteEndAt());
+        // 正式表决包只披露此处锁定的原始材料，绝不以会前草稿材料全集替代。
+        ownersAssemblyRepository.linkPackageMaterial(
+                arrangement.packageId(), arrangement.tenantId(), publicNotice.materialId());
+        for (OwnersAssemblyMaterial attachment : attachments) {
+            ownersAssemblyRepository.linkPackageMaterial(
+                    arrangement.packageId(), arrangement.tenantId(), attachment.materialId());
+        }
+        ownersAssemblyRepository.linkPackageMaterial(
+                arrangement.packageId(), arrangement.tenantId(), ballotTemplate.materialId());
         for (OwnersAssemblySubjectDraft draft : drafts) {
             addDraftSubjectToArrangement(arrangement, draft, actor.userId());
         }
@@ -367,7 +380,7 @@ public class OwnersAssemblyApplicationService {
 
     @Transactional
     public OwnersAssemblyPackage lockPackage(Long packageId, Long tenantId) {
-        UserContext ctx = requireSysContext(tenantId, null);
+        UserContext ctx = requireFormalAssemblyExecutive(tenantId);
         OwnersAssemblyPackage ballotPackage = ownersAssemblyRepository.findPackageForUpdate(packageId, tenantId)
                 .orElseThrow(() -> new OwnersAssemblyApplicationException(NOT_FOUND, "表决包不存在"));
         requirePackageStatus(ballotPackage, STATUS_PACKAGE_DRAFT);
@@ -394,7 +407,7 @@ public class OwnersAssemblyApplicationService {
 
     @Transactional
     public OwnersAssemblyPackage openVoting(Long packageId, Long tenantId) {
-        requireSysContext(tenantId, null);
+        requireFormalAssemblyExecutive(tenantId);
         OwnersAssemblyPackage ballotPackage = ownersAssemblyRepository.findPackageForUpdate(packageId, tenantId)
                 .orElseThrow(() -> new OwnersAssemblyApplicationException(NOT_FOUND, "表决包不存在"));
         requirePackageStatus(ballotPackage, STATUS_PUBLIC_NOTICE);
@@ -420,14 +433,14 @@ public class OwnersAssemblyApplicationService {
 
     @Transactional
     public OwnersAssemblyPackage publishCurrentArrangement(Long sessionId, Long tenantId) {
-        requireSysContext(tenantId, null);
+        requireFormalAssemblyExecutive(tenantId);
         OwnersAssemblyPackage arrangement = requireLatestArrangement(sessionId, tenantId);
         return lockPackage(arrangement.packageId(), tenantId);
     }
 
     @Transactional
     public OwnersAssemblyPackage startVoting(Long sessionId, Long tenantId) {
-        requireSysContext(tenantId, null);
+        requireFormalAssemblyExecutive(tenantId);
         OwnersAssemblyPackage arrangement = requireLatestArrangement(sessionId, tenantId);
         return openVoting(arrangement.packageId(), tenantId);
     }
@@ -529,7 +542,7 @@ public class OwnersAssemblyApplicationService {
 
     @Transactional
     public OwnersAssemblyPackage settlePackage(Long packageId, Long tenantId) {
-        requireSysContext(tenantId, null);
+        requireFormalAssemblyExecutive(tenantId);
         OwnersAssemblyPackage ballotPackage = ownersAssemblyRepository.findPackageForUpdate(packageId, tenantId)
                 .orElseThrow(() -> new OwnersAssemblyApplicationException(NOT_FOUND, "表决包不存在"));
         requirePackageStatus(ballotPackage, STATUS_VOTING);
@@ -554,7 +567,7 @@ public class OwnersAssemblyApplicationService {
 
     @Transactional
     public OwnersAssemblyPackage settleCurrentArrangement(Long sessionId, Long tenantId) {
-        requireSysContext(tenantId, null);
+        requireFormalAssemblyExecutive(tenantId);
         OwnersAssemblyPackage arrangement = requireLatestArrangement(sessionId, tenantId);
         return settlePackage(arrangement.packageId(), tenantId);
     }
@@ -975,6 +988,23 @@ public class OwnersAssemblyApplicationService {
             throw new OwnersAssemblyApplicationException(FORBIDDEN, "操作人身份不匹配");
         }
         return ctx;
+    }
+
+    /**
+     * 正式业主大会的安排、发布、开票和结算由当前届主任或副主任办理。
+     * 物业可以协助录入会前材料，但不能以协办权限替代业主自治方的正式决定。
+     */
+    private UserContext requireFormalAssemblyExecutive(Long tenantId) {
+        UserContext actor = requireSysContext(tenantId, null);
+        if (!actor.hasPermission(FORMAL_MANAGE_PERMISSION)) {
+            throw new OwnersAssemblyApplicationException(FORBIDDEN, "当前角色无权办理业主大会正式环节");
+        }
+        String position = committeePositionRepository.findActivePosition(tenantId, actor.userId()).orElse(null);
+        if (!EXECUTIVE_POSITIONS.contains(position)) {
+            throw new OwnersAssemblyApplicationException(
+                    FORBIDDEN, "业主大会正式环节仅限当前届主任或副主任办理");
+        }
+        return actor;
     }
 
     private void requirePackageStatus(OwnersAssemblyPackage ballotPackage, String status) {

@@ -55,6 +55,12 @@ public interface OwnersAssemblyRepository {
 
     List<OwnersAssemblyMaterial> listMaterials(Long sessionId, Long tenantId);
 
+    /** 返回正式表决包确认时锁定的可公开材料，不能以会次全部草稿材料替代。 */
+    List<OwnersAssemblyMaterial> listPackageMaterials(Long packageId, Long tenantId);
+
+    /** 将本会次已核验材料关联至正式表决包，作为后续公示与 C 端披露的唯一材料清单。 */
+    void linkPackageMaterial(Long packageId, Long tenantId, Long materialId);
+
     int lockPackage(Long packageId,
                     Long tenantId,
                     String packageHash,
@@ -73,6 +79,9 @@ public interface OwnersAssemblyRepository {
     OwnersAssemblyVoteRecord insertVoteRecord(OwnersAssemblyVoteRecord voteRecord);
 
     Optional<OwnersAssemblyVoteRecord> findActiveVoteRecord(Long subjectId, Long opid);
+
+    /** 仅返回当前业主是否已参与纸质表决及首次参与时间，不返回任何选择内容。 */
+    Optional<Instant> findOwnerParticipationAt(Long packageId, Long tenantId, Long uid);
 
     int invalidateVoteRecordByVoteId(Long voteId, Long invalidatedByVoteId, String invalidReason);
 

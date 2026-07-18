@@ -1,4 +1,4 @@
-// 关联业务：验证业主大会只能依据已确认议事规则进入纸质书面征询，并冻结本次会次的规则快照。
+// 关联业务：验证业主大会依据已确认议事规则进入纸质书面征询，正式动作受主任/副主任控制，并向当前业主披露锁定材料。
 package com.pangu.bootstrap.assembly;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -47,6 +47,8 @@ class OwnersAssemblyFlowTest {
     private static final long USER_PROPERTY_MANAGER = 800201L;
     private static final long ACCOUNT_DIRECTOR = 999811L;
     private static final long USER_DIRECTOR = 800101L;
+    private static final long ACCOUNT_OWNER = 999913L;
+    private static final long USER_OWNER = 70002L;
     private static final String ASSEMBLY_TITLE_PREFIX = "IT-业主大会-";
     private static final String RULE_NAME_PREFIX = "IT-业主大会办理规则-";
 
@@ -186,6 +188,62 @@ class OwnersAssemblyFlowTest {
                 .andExpect(jsonPath("$.data.ruleSnapshot.planPublicityDays", is(7)));
 
         verify(objectStorage, times(5)).put(anyString(), any(byte[].class), anyString(), anyString());
+    }
+
+    @Test
+    void propertyMayPrepareMaterialsButOnlyDirectorOrViceDirectorCanConfirmFormalArrangement() throws Exception {
+        String propertyToken = token(ACCOUNT_PROPERTY_MANAGER, USER_PROPERTY_MANAGER);
+        String directorToken = token(ACCOUNT_DIRECTOR, USER_DIRECTOR);
+        activateRule(propertyToken, directorToken, "2026-IT-formal-role-" + System.nanoTime(), 0, 0, 0);
+        long sessionId = prepareFormalArrangement(directorToken);
+        String request = arrangementRequest(sessionId, directorToken);
+
+        mockMvc.perform(post("/api/v1/owners-assemblies/" + sessionId + "/arrangement")
+                        .header("Authorization", "Bearer " + propertyToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request))
+                .andExpect(status().isForbidden());
+
+        mockMvc.perform(post("/api/v1/owners-assemblies/" + sessionId + "/arrangement")
+                        .header("Authorization", "Bearer " + directorToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status", is("PACKAGE_DRAFT")));
+    }
+
+    @Test
+    void publishedAssemblyDisclosesOnlyLockedMaterialsAndCurrentOwnersParticipationState() throws Exception {
+        String propertyToken = token(ACCOUNT_PROPERTY_MANAGER, USER_PROPERTY_MANAGER);
+        String directorToken = token(ACCOUNT_DIRECTOR, USER_DIRECTOR);
+        activateRule(propertyToken, directorToken, "2026-IT-owner-disclosure-" + System.nanoTime(), 0, 0, 0);
+        long sessionId = prepareFormalArrangement(directorToken);
+
+        mockMvc.perform(post("/api/v1/owners-assemblies/" + sessionId + "/arrangement")
+                        .header("Authorization", "Bearer " + directorToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(arrangementRequest(sessionId, directorToken)))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/owners-assemblies/" + sessionId + "/publish")
+                        .header("Authorization", "Bearer " + directorToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status", is("PUBLIC_NOTICE")));
+        Long packageId = jdbcTemplate.queryForObject(
+                "SELECT package_id FROM t_owners_assembly_package WHERE session_id = ?", Long.class, sessionId);
+
+        mockMvc.perform(get("/api/v1/me/owners-assembly-disclosures/" + packageId)
+                        .header("Authorization", "Bearer " + ownerToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.stage", is("PUBLIC_NOTICE")))
+                .andExpect(jsonPath("$.data.publicNotice.fileName", is("公示公告.pdf")))
+                .andExpect(jsonPath("$.data.planAttachments.length()", is(1)))
+                .andExpect(jsonPath("$.data.planAttachments[0].fileName", is("改造方案.pdf")))
+                .andExpect(jsonPath("$.data.paperBallotTemplate.fileName", is("盖章选票模板.pdf")))
+                .andExpect(jsonPath("$.data.participation.eligible", is(true)))
+                .andExpect(jsonPath("$.data.participation.participated", is(false)))
+                .andExpect(jsonPath("$.data.subjects[0].status", is("PUBLISHED")))
+                .andExpect(jsonPath("$.data.subjects[0].choice").doesNotExist())
+                .andExpect(jsonPath("$.data.publicNotice.objectKey").doesNotExist());
     }
 
     @Test
@@ -353,6 +411,10 @@ class OwnersAssemblyFlowTest {
 
     private String token(long accountId, long userId) {
         return jwtTokenProvider.generateToken(accountId, "SYS_USER", userId, TENANT);
+    }
+
+    private String ownerToken() {
+        return jwtTokenProvider.generateToken(ACCOUNT_OWNER, "C_USER", USER_OWNER, TENANT);
     }
 
     private String json(Object value) throws Exception {

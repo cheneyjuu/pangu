@@ -73,6 +73,13 @@ public interface OwnersAssemblyMapper {
     List<OwnersAssemblyMaterialRow> listMaterials(@Param("sessionId") Long sessionId,
                                                    @Param("tenantId") Long tenantId);
 
+    List<OwnersAssemblyMaterialRow> listPackageMaterials(@Param("packageId") Long packageId,
+                                                          @Param("tenantId") Long tenantId);
+
+    int insertPackageMaterial(@Param("packageId") Long packageId,
+                              @Param("tenantId") Long tenantId,
+                              @Param("materialId") Long materialId);
+
     int lockPackage(@Param("packageId") Long packageId,
                     @Param("tenantId") Long tenantId,
                     @Param("packageHash") String packageHash,
@@ -98,6 +105,10 @@ public interface OwnersAssemblyMapper {
 
     OwnersAssemblyVoteRecordRow findActiveVoteRecord(@Param("subjectId") Long subjectId,
                                                      @Param("opid") Long opid);
+
+    LocalDateTime findOwnerParticipationAt(@Param("packageId") Long packageId,
+                                            @Param("tenantId") Long tenantId,
+                                            @Param("uid") Long uid);
 
     int invalidateVoteRecordByVoteId(@Param("voteId") Long voteId,
                                      @Param("invalidatedByVoteId") Long invalidatedByVoteId,

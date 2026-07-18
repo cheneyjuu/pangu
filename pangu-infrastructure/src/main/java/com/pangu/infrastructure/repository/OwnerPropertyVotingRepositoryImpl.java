@@ -35,6 +35,14 @@ public class OwnerPropertyVotingRepositoryImpl implements OwnerPropertyVotingRep
         return mapper.selectBuildingIdsByUid(uid, tenantId);
     }
 
+    @Override
+    public List<OwnerPropertyVotingView> listByUid(Long uid, Long tenantId) {
+        if (uid == null || tenantId == null) {
+            return List.of();
+        }
+        return mapper.selectVotingViewsByUid(uid, tenantId).stream().map(this::toView).toList();
+    }
+
     private OwnerPropertyVotingView toView(OwnerPropertyVotingViewRow r) {
         return new OwnerPropertyVotingView(
                 r.getOpid(),

@@ -158,6 +158,18 @@ public class OwnersAssemblyRepositoryImpl implements OwnersAssemblyRepository {
     }
 
     @Override
+    public List<OwnersAssemblyMaterial> listPackageMaterials(Long packageId, Long tenantId) {
+        return mapper.listPackageMaterials(packageId, tenantId).stream().map(this::toDomain).toList();
+    }
+
+    @Override
+    public void linkPackageMaterial(Long packageId, Long tenantId, Long materialId) {
+        if (mapper.insertPackageMaterial(packageId, tenantId, materialId) != 1) {
+            throw new IllegalStateException("业主大会表决包材料不属于该会次或租户");
+        }
+    }
+
+    @Override
     public int lockPackage(Long packageId,
                            Long tenantId,
                            String packageHash,
@@ -225,6 +237,12 @@ public class OwnersAssemblyRepositoryImpl implements OwnersAssemblyRepository {
     @Override
     public Optional<OwnersAssemblyVoteRecord> findActiveVoteRecord(Long subjectId, Long opid) {
         return Optional.ofNullable(mapper.findActiveVoteRecord(subjectId, opid)).map(this::toDomain);
+    }
+
+    @Override
+    public Optional<Instant> findOwnerParticipationAt(Long packageId, Long tenantId, Long uid) {
+        return Optional.ofNullable(mapper.findOwnerParticipationAt(packageId, tenantId, uid))
+                .map(this::toInstant);
     }
 
     @Override

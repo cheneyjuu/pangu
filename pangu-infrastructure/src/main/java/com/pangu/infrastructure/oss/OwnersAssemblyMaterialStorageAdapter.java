@@ -6,6 +6,9 @@ import com.pangu.domain.repository.RepairEvidenceObjectStorage;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
+import java.net.URL;
+import java.time.Duration;
+
 @Component
 @RequiredArgsConstructor
 public class OwnersAssemblyMaterialStorageAdapter implements OwnersAssemblyMaterialStorage {
@@ -17,6 +20,11 @@ public class OwnersAssemblyMaterialStorageAdapter implements OwnersAssemblyMater
         RepairEvidenceObjectStorage.StoredObjectMetadata stored = delegate.put(
                 objectKey, content, contentType, contentMd5Base64);
         return new StoredObjectMetadata(stored.size(), stored.contentType(), stored.etag());
+    }
+
+    @Override
+    public URL createDownloadUrl(String objectKey, Duration validity) {
+        return delegate.createDownloadUrl(objectKey, validity);
     }
 
     @Override

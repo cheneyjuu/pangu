@@ -59,20 +59,20 @@ public class OwnersAssemblyController extends BaseController {
     private final OwnersAssemblyApplicationService service;
 
     @GetMapping("/owners-assemblies")
-    @PreAuthorize("hasAnyAuthority('voting:subject:create','voting:subject:publish','voting:subject:audit')")
+    @PreAuthorize("hasAnyAuthority('voting:subject:create','voting:subject:publish','voting:subject:audit','owners-assembly:formal:manage')")
     public Result<List<OwnersAssemblySessionResponse>> listSessions() {
         return success(service.listSessions(requireTenantId()).stream()
                 .map(OwnersAssemblySessionResponse::from).toList());
     }
 
     @GetMapping("/owners-assemblies/{sessionId}/workspace")
-    @PreAuthorize("hasAnyAuthority('voting:subject:create','voting:subject:publish','voting:subject:audit')")
+    @PreAuthorize("hasAnyAuthority('voting:subject:create','voting:subject:publish','voting:subject:audit','owners-assembly:formal:manage')")
     public Result<OwnersAssemblyWorkspaceResponse> workspace(@PathVariable("sessionId") Long sessionId) {
         return success(toWorkspaceResponse(service.loadWorkspace(sessionId, requireTenantId())));
     }
 
     @PostMapping("/owners-assemblies")
-    @PreAuthorize("hasAuthority('voting:subject:create')")
+    @PreAuthorize("hasAnyAuthority('voting:subject:create','owners-assembly:formal:manage')")
     public ResponseEntity<Result<OwnersAssemblySessionResponse>> createSession(
             @Valid @RequestBody CreateOwnersAssemblySessionRequest request) {
         OwnersAssemblySession session = service.createSession(new CreateOwnersAssemblySessionCommand(
@@ -82,7 +82,7 @@ public class OwnersAssemblyController extends BaseController {
     }
 
     @PostMapping("/owners-assemblies/{sessionId}/subjects")
-    @PreAuthorize("hasAuthority('voting:subject:create')")
+    @PreAuthorize("hasAnyAuthority('voting:subject:create','owners-assembly:formal:manage')")
     public ResponseEntity<Result<OwnersAssemblySubjectDraftResponse>> createSubjectDraft(
             @PathVariable("sessionId") Long sessionId,
             @Valid @RequestBody CreateAssemblySubjectDraftRequest request) {
@@ -98,7 +98,7 @@ public class OwnersAssemblyController extends BaseController {
     }
 
     @PostMapping(path = "/owners-assemblies/{sessionId}/materials", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @PreAuthorize("hasAnyAuthority('voting:subject:create','voting:subject:audit')")
+    @PreAuthorize("hasAnyAuthority('voting:subject:create','voting:subject:audit','owners-assembly:formal:manage')")
     public ResponseEntity<Result<OwnersAssemblyMaterialResponse>> uploadMaterial(
             @PathVariable("sessionId") Long sessionId,
             @RequestParam("materialType") String materialType,
@@ -120,7 +120,7 @@ public class OwnersAssemblyController extends BaseController {
     }
 
     @PostMapping("/owners-assemblies/{sessionId}/arrangement")
-    @PreAuthorize("hasAuthority('voting:subject:create')")
+    @PreAuthorize("hasAuthority('owners-assembly:formal:manage')")
     public Result<OwnersAssemblyArrangementResponse> confirmArrangement(
             @PathVariable("sessionId") Long sessionId,
             @Valid @RequestBody ConfirmAssemblyArrangementRequest request) {
@@ -136,21 +136,21 @@ public class OwnersAssemblyController extends BaseController {
     }
 
     @PostMapping("/owners-assemblies/{sessionId}/publish")
-    @PreAuthorize("hasAuthority('voting:subject:publish')")
+    @PreAuthorize("hasAuthority('owners-assembly:formal:manage')")
     public Result<OwnersAssemblyArrangementResponse> publishArrangement(@PathVariable("sessionId") Long sessionId) {
         return success("公示已发布", OwnersAssemblyArrangementResponse.from(
                 service.publishCurrentArrangement(sessionId, requireTenantId())));
     }
 
     @PostMapping("/owners-assemblies/{sessionId}/start-voting")
-    @PreAuthorize("hasAuthority('voting:subject:publish')")
+    @PreAuthorize("hasAuthority('owners-assembly:formal:manage')")
     public Result<OwnersAssemblyArrangementResponse> startVoting(@PathVariable("sessionId") Long sessionId) {
         return success("投票已开始", OwnersAssemblyArrangementResponse.from(
                 service.startVoting(sessionId, requireTenantId())));
     }
 
     @PostMapping("/owners-assemblies/{sessionId}/settle")
-    @PreAuthorize("hasAuthority('voting:subject:audit')")
+    @PreAuthorize("hasAuthority('owners-assembly:formal:manage')")
     public Result<OwnersAssemblyArrangementResponse> settleCurrentArrangement(@PathVariable("sessionId") Long sessionId) {
         return success("已完成计票并形成结果", OwnersAssemblyArrangementResponse.from(
                 service.settleCurrentArrangement(sessionId, requireTenantId())));
