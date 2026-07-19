@@ -143,6 +143,11 @@ public interface RepairProjectMapper {
                                    @Param("projectId") Long projectId,
                                    @Param("tenantId") Long tenantId,
                                    @Param("authorizationSnapshotHash") String authorizationSnapshotHash,
+                                   @Param("supplierSelectionMethod") String supplierSelectionMethod,
+                                   @Param("supplierSelectionEvaluationRule") String supplierSelectionEvaluationRule,
+                                   @Param("minimumInvitedSupplierCount") Integer minimumInvitedSupplierCount,
+                                   @Param("minimumValidQuoteCount") Integer minimumValidQuoteCount,
+                                   @Param("nonCompetitiveSelectionBasis") String nonCompetitiveSelectionBasis,
                                    @Param("frozenByUserId") Long frozenByUserId);
 
     int activateAuthorizationProposal(@Param("projectId") Long projectId,

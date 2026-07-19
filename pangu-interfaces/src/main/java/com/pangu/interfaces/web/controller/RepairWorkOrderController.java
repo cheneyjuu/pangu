@@ -4,6 +4,7 @@ package com.pangu.interfaces.web.controller;
 import com.pangu.application.repair.RepairWorkOrderApplicationException;
 import com.pangu.application.repair.RepairAttachmentService;
 import com.pangu.application.repair.RepairWorkOrderService;
+import com.pangu.application.repair.LegacyRepairVotingMigrationPolicy;
 import com.pangu.application.repair.command.AssignRepairCommand;
 import com.pangu.application.repair.command.UploadRepairAttachmentCommand;
 import com.pangu.application.repair.command.CompleteRepairContractCommand;
@@ -105,6 +106,7 @@ public class RepairWorkOrderController extends BaseController {
 
     private final RepairWorkOrderService service;
     private final RepairAttachmentService attachmentService;
+    private final LegacyRepairVotingMigrationPolicy migrationPolicy;
 
     @PostMapping(
             value = "/admin/repair-work-orders/{workOrderId}/attachments",
@@ -572,6 +574,7 @@ public class RepairWorkOrderController extends BaseController {
     public Result<RepairWorkOrderResponse> startLocalDecision(
             @PathVariable("workOrderId") Long workOrderId,
             @Valid @RequestBody(required = false) StartRepairLocalDecisionRequest request) {
+        migrationPolicy.rejectNewLegacyFlow();
         StartRepairLocalDecisionRequest safeRequest = request == null
                 ? new StartRepairLocalDecisionRequest(null, null, null, null, null)
                 : request;
@@ -659,6 +662,7 @@ public class RepairWorkOrderController extends BaseController {
     public Result<RepairWorkOrderResponse> startAssemblyDecision(
             @PathVariable("workOrderId") Long workOrderId,
             @Valid @RequestBody StartRepairAssemblyDecisionRequest request) {
+        migrationPolicy.rejectNewLegacyFlow();
         RepairWorkOrder order = service.startAssemblyDecision(workOrderId,
                 new StartRepairAssemblyDecisionCommand(request.packageId(), request.remark()));
         return success(RepairWorkOrderResponse.from(order));

@@ -15,6 +15,7 @@ import com.pangu.domain.model.repair.RepairProject.ResponsibilityDeterminationSt
 import com.pangu.domain.model.repair.RepairProject.ResponsibilityPath;
 import com.pangu.domain.model.repair.RepairProject.Status;
 import com.pangu.domain.model.repair.RepairProject.WorkPoint;
+import com.pangu.domain.model.repair.RepairProjectVoting;
 import com.pangu.domain.model.repair.RepairProjectSourcing;
 import com.pangu.domain.model.repair.RepairProjectSourcing.Details;
 import com.pangu.domain.model.repair.RepairProjectSourcing.Invitation;
@@ -43,6 +44,7 @@ import com.pangu.domain.policy.RepairSupplierSelectionPolicy;
 import com.pangu.domain.repository.RepairProjectGovernanceRepository;
 import com.pangu.domain.repository.RepairProjectRepository;
 import com.pangu.domain.repository.RepairProjectSourcingRepository;
+import com.pangu.domain.repository.RepairProjectVotingRepository;
 import com.pangu.domain.repository.RepairWorkOrderRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -55,6 +57,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 @Service
@@ -71,6 +74,7 @@ public class RepairProjectSourcingService {
     private final RepairProjectApplicationSupport support;
     private final RepairProjectRepository projectRepository;
     private final RepairProjectSourcingRepository sourcingRepository;
+    private final RepairProjectVotingRepository repairVotingRepository;
     private final RepairProjectGovernanceRepository governanceRepository;
     private final RepairWorkOrderRepository workOrderRepository;
     private final RepairProjectQuotePricingPolicy quotePricingPolicy;
@@ -411,9 +415,7 @@ public class RepairProjectSourcingService {
                         project.projectId(), plan.planId(), project.tenantId()).orElse(null));
     }
 
-    /**
-     * 只认楼栋维修流程实际落库的决定、审价、审批事实和用印依据；草稿字段与旧物业推荐均不能形成授权。
-     */
+    /** 只认统一表决结果或历史已封存决定；草稿字段与参考询价都不能形成施工单位选择授权。 */
     private SelectionAuthorization resolveSelectionAuthorization(
             RepairProject project, PlanVersion plan, UserContext actor) {
         ResponsibilityDetermination determination = projectRepository.findCurrentResponsibilityDetermination(
@@ -434,6 +436,12 @@ public class RepairProjectSourcingService {
         }
         if (!authorizationStageReached(project.status())) {
             return pending("相关业主表决和业委会确认尚未完成，请完成后再确定施工单位");
+        }
+        GovernanceBasis basis = governanceRepository.findActiveGovernanceBasis(
+                        project.projectId(), plan.planId(), project.tenantId())
+                .orElse(null);
+        if (basis != null && "OWNER_VOTING_DECISION".equals(basis.basisType())) {
+            return resolveUnifiedVotingAuthorization(project, plan, actor, basis);
         }
         BuildingProcess process = governanceRepository.findBuildingProcess(
                         project.projectId(), plan.planId(), project.tenantId())
@@ -463,9 +471,6 @@ public class RepairProjectSourcingService {
                 || !GovernanceResult.PASSED.name().equals(decision.result())) {
             return pending("相关业主表决尚未通过，不能确定施工单位");
         }
-        GovernanceBasis basis = governanceRepository.findActiveGovernanceBasis(
-                        project.projectId(), plan.planId(), project.tenantId())
-                .orElse(null);
         if (basis == null || !"BUILDING_REPAIR_DECISION".equals(basis.basisType())
                 || !"BUILDING_PROCESS".equals(basis.referenceType())
                 || !process.processId().equals(basis.referenceId()) || blank(basis.snapshotHash())) {
@@ -476,12 +481,56 @@ public class RepairProjectSourcingService {
             return pending(snapshotIssue);
         }
         boolean mayConfirm = project.status() == Status.AUTHORIZED && mayConfirmSelection(actor, process);
+        BigDecimal approvedBudget = basis.approvedBudgetAmount() == null
+                ? process.reviewedAmount()
+                : basis.approvedBudgetAmount();
         return new SelectionAuthorization(
                 SelectionAuthorizationStatus.AUTHORIZED, null,
                 basis.approvedSupplierSelectionMethod(), basis.approvedSupplierEvaluationRule(),
                 basis.minimumInvitedSupplierCount(), basis.minimumValidQuoteCount(),
-                basis.nonCompetitiveSelectionBasis(), process.reviewedAmount(), basis.basisId(),
+                basis.nonCompetitiveSelectionBasis(), approvedBudget, basis.basisId(),
                 basis.snapshotHash(), process.processId(), decision.decisionId(), mayConfirm);
+    }
+
+    /** 新流程直接核对统一表决关联和已冻结提案，不再要求旧楼栋接龙、审价或用印流程表。 */
+    private SelectionAuthorization resolveUnifiedVotingAuthorization(
+            RepairProject project, PlanVersion plan, UserContext actor, GovernanceBasis basis) {
+        if (!"VOTING_SUBJECT".equals(basis.referenceType())
+                || basis.referenceId() == null || blank(basis.snapshotHash())) {
+            return pending("相关业主表决结果与当前实施方案尚未完成对应核对");
+        }
+        RepairProjectVoting voting = repairVotingRepository.find(
+                        project.projectId(), plan.planId(), project.tenantId())
+                .orElse(null);
+        if (voting == null || voting.status() != RepairProjectVoting.Status.SETTLED
+                || voting.result() != RepairProjectVoting.Result.PASSED
+                || !basis.referenceId().equals(voting.subjectId())) {
+            return pending("相关业主表决尚未通过，不能确定施工单位");
+        }
+        String snapshotIssue = selectionAuthorizationSnapshotIssue(basis);
+        if (snapshotIssue != null) {
+            return pending(snapshotIssue);
+        }
+        if (basis.approvedBudgetAmount() == null
+                || basis.approvedBudgetAmount().compareTo(BigDecimal.ZERO) <= 0
+                || plan.budgetTotal() == null
+                || basis.approvedBudgetAmount().compareTo(plan.budgetTotal()) != 0) {
+            return pending("表决通过的预算金额与当前实施方案不一致，请核对后再办理");
+        }
+        if (!Objects.equals(plan.supplierSelectionMethod(), basis.approvedSupplierSelectionMethod())
+                || !Objects.equals(plan.supplierSelectionEvaluationRule(), basis.approvedSupplierEvaluationRule())
+                || !Objects.equals(plan.minimumInvitedSupplierCount(), basis.minimumInvitedSupplierCount())
+                || !Objects.equals(plan.minimumValidQuoteCount(), basis.minimumValidQuoteCount())
+                || !Objects.equals(plan.nonCompetitiveSelectionBasis(), basis.nonCompetitiveSelectionBasis())) {
+            return pending("表决通过的施工单位选择条件与当前实施方案不一致，请核对后再办理");
+        }
+        return new SelectionAuthorization(
+                SelectionAuthorizationStatus.AUTHORIZED, null,
+                basis.approvedSupplierSelectionMethod(), basis.approvedSupplierEvaluationRule(),
+                basis.minimumInvitedSupplierCount(), basis.minimumValidQuoteCount(),
+                basis.nonCompetitiveSelectionBasis(), basis.approvedBudgetAmount(), basis.basisId(),
+                basis.snapshotHash(), null, null,
+                project.status() == Status.AUTHORIZED && mayConfirmSelection(actor));
     }
 
     /** 直接责任路径不产生业主侧施工单位选择权，文案必须反映真实责任主体而非笼统报“未授权”。 */
@@ -501,46 +550,24 @@ public class RepairProjectSourcingService {
     }
 
     private String selectionAuthorizationSnapshotIssue(GovernanceBasis basis) {
-        RepairSupplierSelectionMethod method = basis.approvedSupplierSelectionMethod();
-        SupplierSelectionEvaluationRule rule = basis.approvedSupplierEvaluationRule();
-        if (method == null || rule == null) {
-            return "盖章文件未明确施工单位选择方式和报价选择规则，请补充后再办理";
-        }
-        Integer invited = basis.minimumInvitedSupplierCount();
-        Integer quotes = basis.minimumValidQuoteCount();
-        if ((invited != null && invited <= 0) || (quotes != null && quotes <= 0)
-                || (invited != null && quotes != null && quotes > invited)) {
-            return "盖章文件中的邀请单位数或报价数量填写有误，请核对后再办理";
-        }
-        if (method == RepairSupplierSelectionMethod.COMPETITIVE_QUOTATION) {
-            if (rule != SupplierSelectionEvaluationRule.LOWEST_COMPLIANT_QUOTE
-                    && rule != SupplierSelectionEvaluationRule.COMPREHENSIVE_EVALUATION) {
-                return "询价项目的报价选择规则不完整，请核对盖章文件";
-            }
-            if (!blank(basis.nonCompetitiveSelectionBasis())) {
-                return "本项目采用询价方式，不应同时填写直接委托依据，请核对盖章文件";
-            }
-            return null;
-        }
-        if (rule != SupplierSelectionEvaluationRule.AUTHORIZED_DIRECT_SELECTION) {
-            return "直接委托项目的施工单位选择规则填写有误，请核对盖章文件";
-        }
-        if (blank(basis.nonCompetitiveSelectionBasis())) {
-            return "直接委托项目缺少书面依据，请补充后再办理";
-        }
-        if (invited != null || quotes != null) {
-            return "直接委托项目不应填写询价数量要求，请核对盖章文件";
-        }
-        return null;
+        RepairSupplierSelectionPolicy.Decision decision = selectionPolicy.validateTerms(
+                new RepairSupplierSelectionPolicy.Terms(
+                        basis.approvedSupplierSelectionMethod(), basis.approvedSupplierEvaluationRule(),
+                        basis.minimumInvitedSupplierCount(), basis.minimumValidQuoteCount(),
+                        basis.nonCompetitiveSelectionBasis()));
+        return decision.allowed() ? null : decision.rejectionReason();
     }
 
     private boolean mayConfirmSelection(UserContext actor, BuildingProcess process) {
+        return FINAL_SELECTION_POSITIONS.contains(process.approverPosition()) && mayConfirmSelection(actor);
+    }
+
+    private boolean mayConfirmSelection(UserContext actor) {
         if (actor == null || !actor.isSysUser() || actor.userId() == null
-                || !actor.hasPermission("repair:workorder:governance")
-                || !FINAL_SELECTION_POSITIONS.contains(process.approverPosition())) {
+                || !actor.hasPermission("repair:workorder:governance")) {
             return false;
         }
-        return workOrderRepository.findActiveCommitteePosition(process.tenantId(), actor.userId())
+        return workOrderRepository.findActiveCommitteePosition(actor.tenantId(), actor.userId())
                 .filter(FINAL_SELECTION_POSITIONS::contains)
                 .isPresent();
     }

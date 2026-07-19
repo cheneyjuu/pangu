@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pangu.application.repair.RepairProjectVotingService;
 import com.pangu.application.repair.RepairWorkOrderApplicationException;
 import com.pangu.application.voting.FormalVotingRulePolicy;
+import com.pangu.application.voting.VotingDecisionResultProjector;
 import com.pangu.application.voting.VotingExecutionService;
 import com.pangu.domain.context.UserContext;
 import com.pangu.domain.context.UserContextHolder;
@@ -67,10 +68,11 @@ class RepairProjectVotingServiceTest {
 
     @BeforeEach
     void setUp() {
+        ObjectMapper objectMapper = new ObjectMapper();
         service = new RepairProjectVotingService(
                 projectRepository, votingRepository, governanceRepository, ruleRepository,
-                subjectRepository, resultRepository, votingExecutionService, rulePolicy,
-                userContextHolder, new ObjectMapper());
+                subjectRepository, resultRepository, new VotingDecisionResultProjector(objectMapper),
+                votingExecutionService, rulePolicy, userContextHolder, objectMapper);
         UserContext actor = new UserContext(
                 9001L, UserContext.IdentityType.SYS_USER, 800101L, 10001L,
                 10L, UserContext.DeptCategory.B, 1, DataScopeType.ALL_COMMUNITY,
@@ -100,6 +102,14 @@ class RepairProjectVotingServiceTest {
         when(projectRepository.listPlans(101L, 10001L)).thenReturn(List.of(plan));
         when(votingRepository.find(101L, 201L, 10001L)).thenReturn(Optional.empty());
         when(ruleRepository.findActive(10001L)).thenReturn(Optional.of(rule));
+        RepairProject.Attachment template = org.mockito.Mockito.mock(RepairProject.Attachment.class);
+        when(template.attachmentId()).thenReturn(401L);
+        when(template.projectId()).thenReturn(101L);
+        when(template.tenantId()).thenReturn(10001L);
+        when(template.originalFileName()).thenReturn("已用印表决票模板.pdf");
+        when(template.contentType()).thenReturn("application/pdf");
+        when(template.sha256()).thenReturn("c".repeat(64));
+        when(projectRepository.findAttachment(401L, 101L, 10001L)).thenReturn(Optional.of(template));
     }
 
     @Test
@@ -123,6 +133,7 @@ class RepairProjectVotingServiceTest {
                 anyLong(), anyLong(), any(), anyLong(), any())).thenReturn(executionPackage);
         RepairProjectVoting link = new RepairProjectVoting(
                 1101L, 101L, 201L, 10001L, 901L, 1001L, 301L, "b".repeat(64),
+                401L, "c".repeat(64),
                 VotingExecutionPackage.CollectionMode.PAPER,
                 RepairProjectVoting.Status.PREPARED, null, 800101L, Instant.now(),
                 null, null, null, null, 0L);
@@ -131,7 +142,7 @@ class RepairProjectVotingServiceTest {
 
         RepairProjectVotingService.Details result = service.prepare(
                 101L, new RepairProjectVotingService.PrepareCommand(
-                        3, VotingExecutionPackage.CollectionMode.PAPER, startAt, endAt));
+                        3, VotingExecutionPackage.CollectionMode.PAPER, 401L, startAt, endAt));
 
         assertEquals(1101L, result.voting().linkId());
         assertEquals(1001L, result.executionPackage().getPackageId());
@@ -154,7 +165,7 @@ class RepairProjectVotingServiceTest {
         RepairWorkOrderApplicationException failure = assertThrows(
                 RepairWorkOrderApplicationException.class,
                 () -> service.prepare(101L, new RepairProjectVotingService.PrepareCommand(
-                        3, VotingExecutionPackage.CollectionMode.PAPER, startAt, endAt)));
+                        3, VotingExecutionPackage.CollectionMode.PAPER, 401L, startAt, endAt)));
 
         assertEquals("房屋楼栋或法定面积已变化，请重新核验并形成新方案版本 roomId=501", failure.getMessage());
         verify(subjectRepository, never()).insert(any());

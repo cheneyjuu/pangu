@@ -2,6 +2,7 @@
 package com.pangu.interfaces.web.controller;
 
 import com.pangu.application.repair.RepairDecisionRuleService;
+import com.pangu.application.repair.LegacyRepairVotingMigrationPolicy;
 import com.pangu.application.repair.RepairWorkOrderApplicationException;
 import com.pangu.application.repair.command.RegisterRepairDecisionRuleCommand;
 import com.pangu.domain.model.repair.RepairProjectGovernance.NonResponseRule;
@@ -32,6 +33,7 @@ import java.util.List;
 public class RepairDecisionRuleController extends BaseController {
 
     private final RepairDecisionRuleService service;
+    private final LegacyRepairVotingMigrationPolicy migrationPolicy;
 
     @GetMapping
     @PreAuthorize("hasAnyAuthority('community:settings:read','repair:workorder:read')")
@@ -58,6 +60,7 @@ public class RepairDecisionRuleController extends BaseController {
             @RequestParam("deliveryRule") String deliveryRule,
             @RequestParam("nonResponseRule") String nonResponseRule,
             @RequestPart("file") MultipartFile file) {
+        migrationPolicy.rejectLegacyRuleRegistration();
         try {
             var rule = service.register(tenantId, new RegisterRepairDecisionRuleCommand(
                     ruleName, ruleVersion, effectiveDate, deliveryRule,

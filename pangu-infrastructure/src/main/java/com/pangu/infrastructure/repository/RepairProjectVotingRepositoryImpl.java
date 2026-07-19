@@ -57,6 +57,7 @@ public class RepairProjectVotingRepositoryImpl implements RepairProjectVotingRep
         return new RepairProjectVoting(
                 row.getLinkId(), row.getProjectId(), row.getPlanId(), row.getTenantId(), row.getSubjectId(),
                 row.getExecutionPackageId(), row.getRuleId(), row.getRuleConfigurationHash(),
+                row.getPaperBallotTemplateAttachmentId(), row.getPaperBallotTemplateHash(),
                 VotingExecutionPackage.CollectionMode.valueOf(row.getCollectionMode()),
                 RepairProjectVoting.Status.valueOf(row.getStatus()),
                 row.getResult() == null ? null : RepairProjectVoting.Result.valueOf(row.getResult()),
@@ -68,6 +69,7 @@ public class RepairProjectVotingRepositoryImpl implements RepairProjectVotingRep
         return new RepairProjectVoting.OwnerTask(
                 row.getProjectId(), row.getPlanId(), row.getProjectNo(), row.getProjectName(), row.getSubjectId(),
                 row.getExecutionPackageId(), row.getOpid(), row.getRoomId(),
+                row.getBuildingName(), row.getUnitName(), row.getRoomName(),
                 VotingExecutionPackage.CollectionMode.valueOf(row.getCollectionMode()),
                 RepairProjectVoting.Status.valueOf(row.getStatus()),
                 row.getResult() == null ? null : RepairProjectVoting.Result.valueOf(row.getResult()),
@@ -84,6 +86,8 @@ public class RepairProjectVotingRepositoryImpl implements RepairProjectVotingRep
         row.setExecutionPackageId(link.executionPackageId());
         row.setRuleId(link.ruleId());
         row.setRuleConfigurationHash(link.ruleConfigurationHash());
+        row.setPaperBallotTemplateAttachmentId(link.paperBallotTemplateAttachmentId());
+        row.setPaperBallotTemplateHash(link.paperBallotTemplateHash());
         row.setCollectionMode(link.collectionMode().name());
         row.setStatus(link.status().name());
         row.setResult(link.result() == null ? null : link.result().name());

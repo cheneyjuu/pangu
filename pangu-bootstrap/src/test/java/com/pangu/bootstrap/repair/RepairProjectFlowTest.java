@@ -232,7 +232,12 @@ class RepairProjectFlowTest {
                         + "/plans/" + planId + "/freeze-for-authorization")
                         .header("Authorization", bearer(propertyToken))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(json(Map.of("expectedProjectVersion", freezeVersion))))
+                        .content(json(Map.of(
+                                "expectedProjectVersion", freezeVersion,
+                                "supplierSelectionMethod", "COMPETITIVE_QUOTATION",
+                                "supplierEvaluationRule", "LOWEST_COMPLIANT_QUOTE",
+                                "minimumInvitedSupplierCount", 3,
+                                "minimumValidQuoteCount", 2))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.project.status", is("AUTHORIZATION_IN_PROGRESS")))
                 .andExpect(jsonPath("$.data.plans[0].status", is("AUTHORIZATION_FROZEN")))

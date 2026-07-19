@@ -277,11 +277,63 @@ public class OnlineVotingService {
                 ballotPackage.getPackageId(), item.snapshotItemId(), ballotPackage.getTenantId()).orElse(null);
         OnlinePaperAssistanceRequest assistance = onlineVotingRepository.findPaperAssistanceRequest(
                 ballotPackage.getPackageId(), item.snapshotItemId(), ballotPackage.getTenantId()).orElse(null);
+        List<VotingBallotRecord> activeBallots = votingExecutionRepository
+                .listSubjectIds(ballotPackage.getPackageId(), ballotPackage.getTenantId()).stream()
+                .map(subjectId -> votingExecutionRepository.findActiveBallot(
+                        subjectId, item.snapshotItemId(), ballotPackage.getTenantId()).orElse(null))
+                .filter(Objects::nonNull)
+                .toList();
+        VoteChannel firstChannel = activeBallots.isEmpty() ? null : activeBallots.getFirst().voteChannel();
+        VoteChannel participationChannel = firstChannel != null
+                && activeBallots.stream().allMatch(ballot -> ballot.voteChannel() == firstChannel)
+                ? firstChannel : null;
         return new PropertyProgress(
                 item.representativeOpid(), acknowledgement != null,
                 submission == null ? null : new Receipt(
                         submission.submissionId(), submission.confirmationHash(), submission.submittedAt()),
-                assistance);
+                assistance,
+                !activeBallots.isEmpty(),
+                participationChannel,
+                paperDeliveryStatus(ballotPackage, item),
+                paperBallotStatus(ballotPackage, item));
+    }
+
+    private String paperDeliveryStatus(
+            VotingExecutionPackage ballotPackage, VotingElectorateSnapshot.Item item) {
+        var deliveries = paperVotingRepository.listDeliveries(
+                        ballotPackage.getPackageId(), ballotPackage.getTenantId()).stream()
+                .filter(delivery -> delivery.electorateItemId().equals(item.snapshotItemId()))
+                .toList();
+        if (deliveries.stream().anyMatch(delivery -> delivery.status()
+                == com.pangu.domain.model.voting.PaperVotingDelivery.Status.CONFIRMED)) {
+            return "CONFIRMED";
+        }
+        if (deliveries.stream().anyMatch(delivery -> delivery.status()
+                == com.pangu.domain.model.voting.PaperVotingDelivery.Status.PENDING_REVIEW)) {
+            return "PENDING_REVIEW";
+        }
+        return deliveries.isEmpty() ? "NOT_REGISTERED" : "REJECTED";
+    }
+
+    private String paperBallotStatus(
+            VotingExecutionPackage ballotPackage, VotingElectorateSnapshot.Item item) {
+        var ballots = paperVotingRepository.listBallots(
+                        ballotPackage.getPackageId(), ballotPackage.getTenantId()).stream()
+                .filter(ballot -> ballot.electorateItemId().equals(item.snapshotItemId()))
+                .toList();
+        if (ballots.stream().anyMatch(ballot -> ballot.status()
+                == com.pangu.domain.model.voting.PaperBallot.Status.COMPLETED)) {
+            return "COMPLETED";
+        }
+        if (ballots.stream().anyMatch(ballot -> ballot.status()
+                == com.pangu.domain.model.voting.PaperBallot.Status.IN_ENTRY)) {
+            return "IN_ENTRY";
+        }
+        if (ballots.stream().anyMatch(ballot -> ballot.status()
+                == com.pangu.domain.model.voting.PaperBallot.Status.RECEIVED)) {
+            return "RECEIVED";
+        }
+        return ballots.isEmpty() ? "NOT_RECEIVED" : "VOIDED";
     }
 
     private UserContext requireL3Owner(Long tenantId) {
@@ -478,7 +530,11 @@ public class OnlineVotingService {
             Long opid,
             boolean acknowledged,
             Receipt receipt,
-            OnlinePaperAssistanceRequest paperAssistance
+            OnlinePaperAssistanceRequest paperAssistance,
+            boolean participated,
+            VoteChannel participationChannel,
+            String paperDeliveryStatus,
+            String paperBallotStatus
     ) {
     }
 

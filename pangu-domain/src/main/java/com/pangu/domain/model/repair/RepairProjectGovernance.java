@@ -83,6 +83,7 @@ public final class RepairProjectGovernance {
             Integer minimumInvitedSupplierCount,
             Integer minimumValidQuoteCount,
             String nonCompetitiveSelectionBasis,
+            BigDecimal approvedBudgetAmount,
             String status,
             Long createdByUserId,
             LocalDateTime createTime

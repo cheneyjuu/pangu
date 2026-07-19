@@ -1,6 +1,8 @@
 // 关联业务：维修工程项目、责任认定、单一决定范围、资金切片、不可变实施方案及项目附件。
 package com.pangu.domain.model.repair;
 
+import com.pangu.domain.model.repair.RepairProjectGovernance.SupplierSelectionEvaluationRule;
+
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -173,6 +175,7 @@ public record RepairProject(
         ORIGINAL_QUOTE,
         SITE_PHOTO,
         OFFICIAL_DOCUMENT,
+        PAPER_BALLOT_TEMPLATE,
         OTHER
     }
 
@@ -216,6 +219,10 @@ public record RepairProject(
             AllocationRuleType allocationRuleType,
             String allocationRuleDescription,
             RepairSupplierSelectionMethod supplierSelectionMethod,
+            SupplierSelectionEvaluationRule supplierSelectionEvaluationRule,
+            Integer minimumInvitedSupplierCount,
+            Integer minimumValidQuoteCount,
+            String nonCompetitiveSelectionBasis,
             String supplierSelectionReason,
             String constructionManagementRequirements,
             List<EvidenceRequirement> evidenceRequirements,
@@ -256,7 +263,31 @@ public record RepairProject(
             return new PlanVersion(
                     planId, projectId, tenantId, versionNo, resolvedPlanDescription,
                     budgetTotal, fundSource, allocationRuleType, allocationRuleDescription,
-                    supplierSelectionMethod, supplierSelectionReason, constructionManagementRequirements,
+                    supplierSelectionMethod, supplierSelectionEvaluationRule,
+                    minimumInvitedSupplierCount, minimumValidQuoteCount, nonCompetitiveSelectionBasis,
+                    supplierSelectionReason, constructionManagementRequirements,
+                    evidenceRequirements, safetyRequirements, acceptanceMethod, requiredAcceptanceRoles,
+                    affectedOwnerScopeDescription, minimumAffectedOwnerAcceptors, affectedOwnerPassRule,
+                    affectedOwnerApprovalRatio, settlementMethod, plannedStartDate, plannedCompletionDate,
+                    warrantyDays, governancePath, priceReviewRequired, paymentMilestones, status,
+                    authorizationSnapshotHash, authorizationFrozenByUserId, authorizationFrozenAt, snapshotHash,
+                    createdByAccountId, createdByUserId, lockedByUserId, createTime, lockedAt);
+        }
+
+        /** 授权提案冻结时补齐施工单位选择条件；初始问题草稿阶段仍可为空。 */
+        public PlanVersion withSupplierSelectionTerms(
+                RepairSupplierSelectionMethod resolvedMethod,
+                SupplierSelectionEvaluationRule resolvedEvaluationRule,
+                Integer resolvedMinimumInvitedSupplierCount,
+                Integer resolvedMinimumValidQuoteCount,
+                String resolvedNonCompetitiveSelectionBasis) {
+            return new PlanVersion(
+                    planId, projectId, tenantId, versionNo, planDescription,
+                    budgetTotal, fundSource, allocationRuleType, allocationRuleDescription,
+                    resolvedMethod, resolvedEvaluationRule,
+                    resolvedMinimumInvitedSupplierCount, resolvedMinimumValidQuoteCount,
+                    resolvedNonCompetitiveSelectionBasis,
+                    supplierSelectionReason, constructionManagementRequirements,
                     evidenceRequirements, safetyRequirements, acceptanceMethod, requiredAcceptanceRoles,
                     affectedOwnerScopeDescription, minimumAffectedOwnerAcceptors, affectedOwnerPassRule,
                     affectedOwnerApprovalRatio, settlementMethod, plannedStartDate, plannedCompletionDate,

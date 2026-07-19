@@ -222,6 +222,10 @@ public class VotingApplicationService {
         appendJson(sb, "passed", result.isPassed()); sb.append(',');
         appendJson(sb, "supportArea", result.getSupportArea() == null ? null : result.getSupportArea().toPlainString()); sb.append(',');
         appendJson(sb, "supportOwnerCount", result.getSupportOwnerCount()); sb.append(',');
+        appendJson(sb, "againstArea", result.getAgainstArea() == null ? null : result.getAgainstArea().toPlainString()); sb.append(',');
+        appendJson(sb, "againstOwnerCount", result.getAgainstOwnerCount()); sb.append(',');
+        appendJson(sb, "abstainArea", result.getAbstainArea() == null ? null : result.getAbstainArea().toPlainString()); sb.append(',');
+        appendJson(sb, "abstainOwnerCount", result.getAbstainOwnerCount()); sb.append(',');
         appendJson(sb, "effectivePartyRatioFloor", effectiveRatio.toPlainString()); sb.append(',');
         appendJson(sb, "denominatorSnapshotId", denom.snapshotId()); sb.append(',');
         appendJson(sb, "denominatorAggregateHash", denom.snapshotHash());
@@ -255,6 +259,18 @@ public class VotingApplicationService {
         payload.put("statisticsVersion", statisticsVersion);
         payload.put("passed", result.isPassed());
         payload.put("quorumSatisfied", result.isQuorumSatisfied());
+        payload.put("totalArea", valueOf(result.getTotalArea()));
+        payload.put("totalOwnerCount", result.getTotalOwnerCount());
+        payload.put("participatingArea", valueOf(result.getParticipatingArea()));
+        payload.put("participatingOwnerCount", result.getParticipatingOwnerCount());
+        // 选举等非三选项事项没有同意/反对/弃权汇总。存证 Map 不接受 null，
+        // 因此只在该事项确实产生对应统计时写入，避免伪造为 0，也保持既有事项可结算。
+        putIfPresent(payload, "supportArea", valueOf(result.getSupportArea()));
+        putIfPresent(payload, "supportOwnerCount", result.getSupportOwnerCount());
+        putIfPresent(payload, "againstArea", valueOf(result.getAgainstArea()));
+        putIfPresent(payload, "againstOwnerCount", result.getAgainstOwnerCount());
+        putIfPresent(payload, "abstainArea", valueOf(result.getAbstainArea()));
+        putIfPresent(payload, "abstainOwnerCount", result.getAbstainOwnerCount());
         payload.put("effectivePartyRatioFloor", effectiveRatio.toPlainString());
         payload.put("denominatorSnapshotId", denom.snapshotId());
         payload.put("denominatorAggregateHash", denom.snapshotHash());
@@ -270,6 +286,16 @@ public class VotingApplicationService {
             payload.put("executionPackageHash", executionTrace.executionPackageHash());
         }
         return payload;
+    }
+
+    private void putIfPresent(Map<String, Object> payload, String key, Object value) {
+        if (value != null) {
+            payload.put(key, value);
+        }
+    }
+
+    private String valueOf(BigDecimal value) {
+        return value == null ? null : value.toPlainString();
     }
 
     private void appendJson(StringBuilder sb, String key, Object value) {

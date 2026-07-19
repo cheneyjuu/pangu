@@ -100,5 +100,6 @@ public interface RepairProjectGovernanceRepository {
                                Integer minimumInvitedSupplierCount,
                                Integer minimumValidQuoteCount,
                                String nonCompetitiveSelectionBasis,
+                               BigDecimal approvedBudgetAmount,
                                Long createdByUserId);
 }

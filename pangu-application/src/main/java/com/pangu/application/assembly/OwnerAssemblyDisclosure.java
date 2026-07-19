@@ -66,7 +66,25 @@ public record OwnerAssemblyDisclosure(
             SubjectType subjectType,
             String title,
             String content,
-            String status
+            String status,
+            Result result
+    ) {
+    }
+
+    /** 结算后向有权业主公开的结构化结果，不包含任何逐户票面。 */
+    public record Result(
+            boolean quorumSatisfied,
+            boolean passed,
+            java.math.BigDecimal totalArea,
+            long totalOwnerCount,
+            java.math.BigDecimal participatingArea,
+            long participatingOwnerCount,
+            java.math.BigDecimal supportArea,
+            Long supportOwnerCount,
+            java.math.BigDecimal againstArea,
+            Long againstOwnerCount,
+            java.math.BigDecimal abstainArea,
+            Long abstainOwnerCount
     ) {
     }
 
@@ -75,6 +93,8 @@ public record OwnerAssemblyDisclosure(
             String meetingForm,
             String votingChannel,
             Integer planPublicityDays,
+            Integer meetingNoticeDays,
+            Integer resultAnnouncementDays,
             Set<OwnersAssemblyRuleConfiguration.DeliveryMethod> validDeliveryMethods,
             OwnersAssemblyRuleConfiguration.NonResponsePolicy nonResponsePolicy,
             Boolean paperBallotSealRequired,
@@ -110,12 +130,22 @@ public record OwnerAssemblyDisclosure(
     /** 本人每个符合资格专有部分的办理状态；回执不包含具体选择。 */
     public record PropertyProgress(
             Long opid,
+            Long buildingId,
+            Long roomId,
+            String buildingName,
+            String unitName,
+            String roomName,
             boolean onlineAcknowledged,
             boolean submitted,
             Long receiptId,
             String confirmationHash,
             Instant submittedAt,
-            String paperAssistanceStatus
+            Long paperAssistanceRequestId,
+            String paperAssistanceStatus,
+            boolean participated,
+            String participationChannel,
+            String paperDeliveryStatus,
+            String paperBallotStatus
     ) {
     }
 }

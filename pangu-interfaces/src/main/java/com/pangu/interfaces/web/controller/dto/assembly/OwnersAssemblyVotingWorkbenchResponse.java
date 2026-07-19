@@ -9,21 +9,42 @@ import java.util.List;
 
 /** 管理端办理投影不包含任何线上票面选择。 */
 public record OwnersAssemblyVotingWorkbenchResponse(
+        List<ElectorateItem> electorate,
         List<PaperVotingDeliveryResponse> deliveries,
         List<BallotItem> ballots,
         List<PaperAssistanceItem> paperAssistance,
         OnlineProgress online,
-        long duplicatePaperDecisionCount
+        long duplicatePaperDecisionCount,
+        Long currentActorUserId
 ) {
     public static OwnersAssemblyVotingWorkbenchResponse from(
             OwnersAssemblyApplicationService.VotingWorkbench workbench) {
         return new OwnersAssemblyVotingWorkbenchResponse(
+                workbench.electorate().stream().map(ElectorateItem::from).toList(),
                 workbench.paper().deliveries().stream().map(PaperVotingDeliveryResponse::from).toList(),
                 workbench.paper().ballots().stream().map(BallotItem::from).toList(),
                 workbench.paperAssistance().stream().map(PaperAssistanceItem::from).toList(),
                 new OnlineProgress(
                         workbench.online().completedPropertyCount(), workbench.online().conflictCount()),
-                workbench.duplicatePaperDecisionCount());
+                workbench.duplicatePaperDecisionCount(), workbench.currentActorUserId());
+    }
+
+    public record ElectorateItem(
+            Long snapshotItemId,
+            Long roomId,
+            Long buildingId,
+            java.math.BigDecimal certifiedArea,
+            Long representativeOpid,
+            String buildingName,
+            String unitName,
+            String roomName
+    ) {
+        private static ElectorateItem from(
+                OwnersAssemblyApplicationService.ElectorateWorkbenchItem item) {
+            return new ElectorateItem(
+                    item.snapshotItemId(), item.roomId(), item.buildingId(), item.certifiedArea(),
+                    item.representativeOpid(), item.buildingName(), item.unitName(), item.roomName());
+        }
     }
 
     public record BallotItem(

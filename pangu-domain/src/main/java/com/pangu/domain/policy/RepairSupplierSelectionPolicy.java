@@ -4,10 +4,21 @@ package com.pangu.domain.policy;
 import com.pangu.domain.model.repair.RepairProjectGovernance.SupplierSelectionEvaluationRule;
 import com.pangu.domain.model.repair.RepairSupplierSelectionMethod;
 
-@FunctionalInterface
 public interface RepairSupplierSelectionPolicy {
 
+    Decision validateTerms(Terms terms);
+
     Decision evaluate(Input input);
+
+    /** 授权提案中必须冻结的施工单位选择条件，不包含尚未发生的具体中选结果。 */
+    record Terms(
+            RepairSupplierSelectionMethod method,
+            SupplierSelectionEvaluationRule evaluationRule,
+            Integer minimumInvitedSupplierCount,
+            Integer minimumValidQuoteCount,
+            String nonCompetitiveSelectionBasis
+    ) {
+    }
 
     record Input(
             RepairSupplierSelectionMethod method,

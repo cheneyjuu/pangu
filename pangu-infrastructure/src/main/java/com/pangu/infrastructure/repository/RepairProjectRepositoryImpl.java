@@ -20,6 +20,7 @@ import com.pangu.domain.model.repair.RepairProject.PlanAffectedOwner;
 import com.pangu.domain.model.repair.RepairProject.PlanVersion;
 import com.pangu.domain.model.repair.RepairProject.Status;
 import com.pangu.domain.model.repair.RepairProject.WorkPoint;
+import com.pangu.domain.model.repair.RepairProjectGovernance.SupplierSelectionEvaluationRule;
 import com.pangu.domain.model.repair.RepairSupplierSelectionMethod;
 import com.pangu.domain.model.repair.RepairWorkflowType;
 import com.pangu.domain.repository.RepairProjectRepository;
@@ -295,9 +296,16 @@ public class RepairProjectRepositoryImpl implements RepairProjectRepository {
 
     @Override
     public int freezePlanForAuthorization(
-            Long planId, Long projectId, Long tenantId, String authorizationSnapshotHash, Long frozenByUserId) {
+            Long planId, Long projectId, Long tenantId, String authorizationSnapshotHash,
+            RepairSupplierSelectionMethod supplierSelectionMethod,
+            SupplierSelectionEvaluationRule supplierEvaluationRule,
+            Integer minimumInvitedSupplierCount, Integer minimumValidQuoteCount,
+            String nonCompetitiveSelectionBasis, Long frozenByUserId) {
         return mapper.freezePlanForAuthorization(
-                planId, projectId, tenantId, authorizationSnapshotHash, frozenByUserId);
+                planId, projectId, tenantId, authorizationSnapshotHash,
+                nameOrNull(supplierSelectionMethod), nameOrNull(supplierEvaluationRule),
+                minimumInvitedSupplierCount, minimumValidQuoteCount,
+                nonCompetitiveSelectionBasis, frozenByUserId);
     }
 
     @Override
@@ -400,6 +408,9 @@ public class RepairProjectRepositoryImpl implements RepairProjectRepository {
                 enumOrNull(RepairProject.AllocationRuleType.class, row.getAllocationRuleType()),
                 row.getAllocationRuleDescription(),
                 enumOrNull(RepairSupplierSelectionMethod.class, row.getSupplierSelectionMethod()),
+                enumOrNull(SupplierSelectionEvaluationRule.class, row.getSupplierSelectionEvaluationRule()),
+                row.getMinimumInvitedSupplierCount(), row.getMinimumValidQuoteCount(),
+                row.getNonCompetitiveSelectionBasis(),
                 row.getSupplierSelectionReason(), row.getConstructionManagementRequirements(),
                 readJson(row.getEvidenceRequirementsJson(), EVIDENCE_REQUIREMENTS_TYPE),
                 row.getSafetyRequirements(), row.getAcceptanceMethod(),
@@ -431,6 +442,10 @@ public class RepairProjectRepositoryImpl implements RepairProjectRepository {
         row.setAllocationRuleType(nameOrNull(plan.allocationRuleType()));
         row.setAllocationRuleDescription(plan.allocationRuleDescription());
         row.setSupplierSelectionMethod(nameOrNull(plan.supplierSelectionMethod()));
+        row.setSupplierSelectionEvaluationRule(nameOrNull(plan.supplierSelectionEvaluationRule()));
+        row.setMinimumInvitedSupplierCount(plan.minimumInvitedSupplierCount());
+        row.setMinimumValidQuoteCount(plan.minimumValidQuoteCount());
+        row.setNonCompetitiveSelectionBasis(plan.nonCompetitiveSelectionBasis());
         row.setSupplierSelectionReason(plan.supplierSelectionReason());
         row.setConstructionManagementRequirements(plan.constructionManagementRequirements());
         row.setEvidenceRequirementsJson(writeJson(plan.evidenceRequirements()));

@@ -3,6 +3,7 @@ package com.pangu.interfaces.web.controller;
 
 import com.pangu.application.repair.BuildingRepairWorkflowService;
 import com.pangu.application.repair.CommunityAssemblyRepairWorkflowService;
+import com.pangu.application.repair.LegacyRepairVotingMigrationPolicy;
 import com.pangu.domain.model.repair.RepairProjectGovernance.AssemblySubjectLink;
 import com.pangu.domain.model.repair.RepairProjectGovernance.BuildingProcessDetails;
 import com.pangu.interfaces.web.controller.dto.repair.ApproveBuildingRepairRequest;
@@ -30,12 +31,14 @@ public class RepairProjectGovernanceController extends BaseController {
 
     private final BuildingRepairWorkflowService buildingWorkflowService;
     private final CommunityAssemblyRepairWorkflowService communityWorkflowService;
+    private final LegacyRepairVotingMigrationPolicy migrationPolicy;
 
     @PostMapping("/building-governance/start")
     @PreAuthorize("hasAnyAuthority('repair:workorder:manage','repair:workorder:field','repair:workorder:local-decision')")
     public Result<BuildingProcessDetails> startBuildingDecision(
             @PathVariable("projectId") Long projectId,
             @Valid @RequestBody StartBuildingRepairDecisionRequest request) {
+        migrationPolicy.rejectNewLegacyFlow();
         return success("楼栋维修征询已发起",
                 buildingWorkflowService.startDecision(projectId, request.toCommand()));
     }
@@ -104,6 +107,7 @@ public class RepairProjectGovernanceController extends BaseController {
     public Result<AssemblySubjectLink> linkCommunityAssemblySubject(
             @PathVariable("projectId") Long projectId,
             @Valid @RequestBody LinkCommunityRepairAssemblySubjectRequest request) {
+        migrationPolicy.rejectNewLegacyFlow();
         return success("全小区维修已关联业主大会表决事项",
                 communityWorkflowService.linkSubject(projectId, request.toCommand()));
     }

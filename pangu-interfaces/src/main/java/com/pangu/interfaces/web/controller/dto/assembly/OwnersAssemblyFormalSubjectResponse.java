@@ -1,16 +1,45 @@
 // 关联业务：向办理页面返回已进入正式表决安排的事项摘要。
 package com.pangu.interfaces.web.controller.dto.assembly;
 
-import com.pangu.domain.model.voting.VotingSubject;
+import com.pangu.application.assembly.OwnersAssemblyWorkspace;
+
+import java.math.BigDecimal;
 
 public record OwnersAssemblyFormalSubjectResponse(
         Long subjectId,
         String subjectType,
         String title,
-        String status
+        String content,
+        String status,
+        Result result
 ) {
-    public static OwnersAssemblyFormalSubjectResponse from(VotingSubject subject) {
+    public static OwnersAssemblyFormalSubjectResponse from(OwnersAssemblyWorkspace.FormalSubject subject) {
         return new OwnersAssemblyFormalSubjectResponse(
-                subject.getSubjectId(), subject.getSubjectType().name(), subject.getTitle(), subject.getStatus().name());
+                subject.subjectId(), subject.subjectType().name(), subject.title(), subject.content(), subject.status(),
+                Result.from(subject.result()));
+    }
+
+    public record Result(
+            boolean quorumSatisfied,
+            boolean passed,
+            BigDecimal totalArea,
+            long totalOwnerCount,
+            BigDecimal participatingArea,
+            long participatingOwnerCount,
+            BigDecimal supportArea,
+            Long supportOwnerCount,
+            BigDecimal againstArea,
+            Long againstOwnerCount,
+            BigDecimal abstainArea,
+            Long abstainOwnerCount
+    ) {
+        private static Result from(OwnersAssemblyWorkspace.Result result) {
+            return result == null ? null : new Result(
+                    result.quorumSatisfied(), result.passed(), result.totalArea(), result.totalOwnerCount(),
+                    result.participatingArea(), result.participatingOwnerCount(),
+                    result.supportArea(), result.supportOwnerCount(),
+                    result.againstArea(), result.againstOwnerCount(),
+                    result.abstainArea(), result.abstainOwnerCount());
+        }
     }
 }

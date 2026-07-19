@@ -3,6 +3,7 @@ package com.pangu.application.assembly;
 
 import com.pangu.application.support.PayloadHasher;
 import com.pangu.application.voting.OnlineVotingService;
+import com.pangu.application.voting.VotingDecisionResultProjector;
 import com.pangu.domain.context.UserContext;
 import com.pangu.domain.context.UserContextHolder;
 import com.pangu.domain.model.assembly.OwnersAssemblyMaterial;
@@ -20,8 +21,10 @@ import com.pangu.domain.repository.OwnerPropertyVotingRepository;
 import com.pangu.domain.repository.OwnersAssemblyMaterialStorage;
 import com.pangu.domain.repository.OwnersAssemblyRepository;
 import com.pangu.domain.repository.PaperVotingRepository;
+import com.pangu.domain.repository.PropertyBindingRepository;
 import com.pangu.domain.repository.VotingExecutionRepository;
 import com.pangu.domain.repository.VotingSubjectRepository;
+import com.pangu.domain.repository.VotingResultRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -54,9 +57,12 @@ public class OwnerAssemblyDisclosureService {
 
     private final OwnersAssemblyRepository ownersAssemblyRepository;
     private final VotingSubjectRepository votingSubjectRepository;
+    private final VotingResultRepository votingResultRepository;
+    private final VotingDecisionResultProjector votingDecisionResultProjector;
     private final OwnerPropertyVotingRepository ownerPropertyVotingRepository;
     private final VotingExecutionRepository votingExecutionRepository;
     private final PaperVotingRepository paperVotingRepository;
+    private final PropertyBindingRepository propertyBindingRepository;
     private final OnlineVotingService onlineVotingService;
     private final OwnersAssemblyMaterialStorage materialStorage;
     private final UserContextHolder userContextHolder;
@@ -155,12 +161,16 @@ public class OwnerAssemblyDisclosureService {
                 visible.subjects().stream()
                         .map(subject -> new OwnerAssemblyDisclosure.Subject(
                                 subject.getSubjectId(), subject.getSubjectType(),
-                                subject.getTitle(), subject.getContent(), subject.getStatus().name()))
+                                subject.getTitle(), subject.getContent(), subject.getStatus().name(),
+                                votingResultRepository.findBySubjectId(subject.getSubjectId())
+                                        .map(this::toResult).orElse(null)))
                         .toList(),
                 new OwnerAssemblyDisclosure.Rule(
                         meetingFormOf(visible.session()),
                         configuration.votingChannelPolicy().name(),
                         configuration.planPublicityDays(),
+                        configuration.meetingNoticeDays(),
+                        configuration.resultAnnouncementDays(),
                         configuration.validDeliveryMethods(),
                         configuration.nonResponsePolicy(),
                         configuration.paperBallotSealRequired(),
@@ -221,7 +231,8 @@ public class OwnerAssemblyDisclosureService {
                 countedDecisionCount,
                 ownerProgress.packageHash(),
                 new OwnerAssemblyDisclosure.PaperProgress(deliveryStatus, ballotStatus),
-                ownerProgress.properties().stream().map(this::toPropertyProgress).toList());
+                ownerProgress.properties().stream()
+                        .map(progress -> toPropertyProgress(executionPackage, progress)).toList());
     }
 
     private String aggregateDeliveryStatus(List<PaperVotingDelivery> deliveries) {
@@ -329,13 +340,41 @@ public class OwnerAssemblyDisclosureService {
     }
 
     private OwnerAssemblyDisclosure.PropertyProgress toPropertyProgress(
+            VotingExecutionPackage executionPackage,
             OnlineVotingService.PropertyProgress progress) {
+        var electorate = votingExecutionRepository.findElectorateItem(
+                        executionPackage.getPackageId(), executionPackage.getTenantId(), progress.opid())
+                .orElseThrow(this::notVisible);
+        PropertyBindingRepository.Roster roster = propertyBindingRepository.findRosterById(electorate.rosterId());
+        if (roster == null
+                || !executionPackage.getTenantId().equals(roster.tenantId())
+                || !electorate.buildingId().equals(roster.buildingId())
+                || !electorate.roomId().equals(roster.roomId())) {
+            throw notVisible();
+        }
         return new OwnerAssemblyDisclosure.PropertyProgress(
-                progress.opid(), progress.acknowledged(), progress.receipt() != null,
+                progress.opid(), electorate.buildingId(), electorate.roomId(),
+                roster.buildingName(), roster.unitName(), roster.roomName(),
+                progress.acknowledged(), progress.receipt() != null,
                 progress.receipt() == null ? null : progress.receipt().submissionId(),
                 progress.receipt() == null ? null : progress.receipt().confirmationHash(),
                 progress.receipt() == null ? null : progress.receipt().submittedAt(),
-                progress.paperAssistance() == null ? "NOT_REQUESTED" : progress.paperAssistance().status().name());
+                progress.paperAssistance() == null ? null : progress.paperAssistance().requestId(),
+                progress.paperAssistance() == null ? "NOT_REQUESTED" : progress.paperAssistance().status().name(),
+                progress.participated(),
+                progress.participationChannel() == null ? null : progress.participationChannel().name(),
+                progress.paperDeliveryStatus(),
+                progress.paperBallotStatus());
+    }
+
+    private OwnerAssemblyDisclosure.Result toResult(VotingResultRepository.Snapshot snapshot) {
+        VotingDecisionResultProjector.View view = votingDecisionResultProjector.project(snapshot);
+        return new OwnerAssemblyDisclosure.Result(
+                view.quorumSatisfied(), view.passed(), view.totalArea(), view.totalOwnerCount(),
+                view.participatingArea(), view.participatingOwnerCount(),
+                view.supportArea(), view.supportOwnerCount(),
+                view.againstArea(), view.againstOwnerCount(),
+                view.abstainArea(), view.abstainOwnerCount());
     }
 
     private String nonResponseLabel(OwnersAssemblyRuleConfiguration.NonResponsePolicy policy) {

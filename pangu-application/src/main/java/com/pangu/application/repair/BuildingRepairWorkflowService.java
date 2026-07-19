@@ -342,7 +342,7 @@ public class BuildingRepairWorkflowService {
                 "BUILDING_REPAIR_DECISION", "BUILDING_PROCESS", process.processId(),
                 basisHash, authorization.selectionMethod(), authorization.evaluationRule(),
                 authorization.minimumInvitedSupplierCount(), authorization.minimumValidQuoteCount(),
-                authorization.nonCompetitiveSelectionBasis(), actor.userId());
+                authorization.nonCompetitiveSelectionBasis(), process.reviewedAmount(), actor.userId());
         Status expectedStatus = authorizationProposal ? Status.AUTHORIZATION_IN_PROGRESS : Status.GOVERNANCE_IN_PROGRESS;
         if (projectRepository.advanceStatus(
                 project.projectId(), project.tenantId(), expectedStatus,

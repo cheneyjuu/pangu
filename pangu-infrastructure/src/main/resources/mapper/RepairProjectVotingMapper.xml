@@ -5,7 +5,8 @@
 
     <sql id="columns">
         link_id, project_id, plan_id, tenant_id, subject_id, execution_package_id,
-        rule_id, rule_configuration_hash, collection_mode, status, result,
+        rule_id, rule_configuration_hash, paper_ballot_template_attachment_id,
+        paper_ballot_template_hash, collection_mode, status, result,
         prepared_by_user_id, prepared_at, opened_by_user_id, opened_at,
         settled_by_user_id, settled_at, version
     </sql>
@@ -13,11 +14,13 @@
     <insert id="insert" useGeneratedKeys="true" keyProperty="linkId" keyColumn="link_id">
         INSERT INTO t_repair_project_voting (
             project_id, plan_id, tenant_id, subject_id, execution_package_id,
-            rule_id, rule_configuration_hash, collection_mode, status,
+            rule_id, rule_configuration_hash, paper_ballot_template_attachment_id,
+            paper_ballot_template_hash, collection_mode, status,
             prepared_by_user_id, prepared_at, version
         ) VALUES (
             #{projectId}, #{planId}, #{tenantId}, #{subjectId}, #{executionPackageId},
-            #{ruleId}, #{ruleConfigurationHash}, #{collectionMode}, #{status},
+            #{ruleId}, #{ruleConfigurationHash}, #{paperBallotTemplateAttachmentId},
+            #{paperBallotTemplateHash}, #{collectionMode}, #{status},
             #{preparedByUserId}, #{preparedAt}, #{version}
         )
     </insert>
@@ -56,6 +59,7 @@
         SELECT link.project_id, link.plan_id, project.project_no, project.project_name,
                link.subject_id, link.execution_package_id,
                electorate.representative_opid AS opid, electorate.room_id,
+               roster.building_name, roster.unit_name, roster.room_name,
                link.collection_mode, link.status, link.result,
                package.package_hash, package.vote_start_at, package.vote_end_at
         FROM t_repair_project_voting link
@@ -66,6 +70,8 @@
         JOIN t_voting_electorate_item_snapshot electorate
           ON electorate.snapshot_id = package.electorate_snapshot_id
          AND electorate.representative_uid = #{ownerUid}
+        JOIN c_property_roster roster
+          ON roster.roster_id = electorate.roster_id
         WHERE link.tenant_id = #{tenantId}
           AND link.status &lt;&gt; 'VOIDED'
         ORDER BY package.vote_start_at DESC, link.link_id DESC, electorate.room_id

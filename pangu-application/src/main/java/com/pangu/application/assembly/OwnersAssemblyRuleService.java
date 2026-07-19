@@ -382,7 +382,24 @@ public class OwnersAssemblyRuleService {
 
     private void validateVotingChannel(OwnersAssemblyRuleConfiguration configuration) {
         OwnersAssemblyRuleConfiguration.VotingChannelPolicy channelPolicy = configuration.votingChannelPolicy();
-        if (channelPolicy == OwnersAssemblyRuleConfiguration.VotingChannelPolicy.ONLINE_ONLY
+        boolean written = configuration.allowedMeetingForms()
+                .contains(OwnersAssemblyRuleConfiguration.MeetingForm.WRITTEN_CONSULTATION);
+        boolean internet = configuration.allowedMeetingForms()
+                .contains(OwnersAssemblyRuleConfiguration.MeetingForm.INTERNET);
+        boolean parallel = configuration.allowedMeetingForms()
+                .contains(OwnersAssemblyRuleConfiguration.MeetingForm.ONLINE_AND_OFFLINE);
+        if ((written && channelPolicy == OwnersAssemblyRuleConfiguration.VotingChannelPolicy.ONLINE_ONLY)
+                || (internet && channelPolicy == OwnersAssemblyRuleConfiguration.VotingChannelPolicy.PAPER_ONLY)) {
+            throw new OwnersAssemblyApplicationException(
+                    PARAM_INVALID, "规则允许的会议形式与表决渠道条款相互矛盾");
+        }
+        if ((parallel || written && internet)
+                && channelPolicy != OwnersAssemblyRuleConfiguration.VotingChannelPolicy.PAPER_AND_ONLINE) {
+            throw new OwnersAssemblyApplicationException(
+                    PARAM_INVALID, "规则同时包含纸质与互联网办理时，渠道条款必须完整记录两类渠道");
+        }
+        if (internet || parallel
+                || channelPolicy == OwnersAssemblyRuleConfiguration.VotingChannelPolicy.ONLINE_ONLY
                 || channelPolicy == OwnersAssemblyRuleConfiguration.VotingChannelPolicy.PAPER_AND_ONLINE) {
             if (!Boolean.TRUE.equals(configuration.onlineIdentityVerificationRequired())) {
                 throw new OwnersAssemblyApplicationException(

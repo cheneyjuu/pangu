@@ -21,7 +21,9 @@
     <sql id="planColumns">
         plan_id, project_id, tenant_id, version_no, plan_description,
         budget_total, fund_source, allocation_rule_type, allocation_rule_description,
-        supplier_selection_method, supplier_selection_reason,
+        supplier_selection_method, supplier_selection_evaluation_rule,
+        minimum_invited_supplier_count, minimum_valid_quote_count,
+        non_competitive_selection_basis, supplier_selection_reason,
         construction_management_requirements, evidence_requirements_json::TEXT AS evidence_requirements_json,
         safety_requirements, acceptance_method,
         required_acceptance_roles_json::TEXT AS required_acceptance_roles_json,
@@ -138,7 +140,9 @@
         INSERT INTO t_repair_plan_version (
             project_id, tenant_id, version_no, plan_description,
             budget_total, fund_source, allocation_rule_type, allocation_rule_description,
-            supplier_selection_method, supplier_selection_reason,
+            supplier_selection_method, supplier_selection_evaluation_rule,
+            minimum_invited_supplier_count, minimum_valid_quote_count,
+            non_competitive_selection_basis, supplier_selection_reason,
             construction_management_requirements, evidence_requirements_json,
             safety_requirements, acceptance_method, required_acceptance_roles_json,
             affected_owner_scope_description, minimum_affected_owner_acceptors,
@@ -149,7 +153,9 @@
         ) VALUES (
             #{projectId}, #{tenantId}, #{versionNo}, #{planDescription},
             #{budgetTotal}, #{fundSource}, #{allocationRuleType}, #{allocationRuleDescription},
-            #{supplierSelectionMethod}, #{supplierSelectionReason},
+            #{supplierSelectionMethod}, #{supplierSelectionEvaluationRule},
+            #{minimumInvitedSupplierCount}, #{minimumValidQuoteCount},
+            #{nonCompetitiveSelectionBasis}, #{supplierSelectionReason},
             #{constructionManagementRequirements}, CAST(#{evidenceRequirementsJson} AS JSONB),
             #{safetyRequirements}, #{acceptanceMethod}, CAST(#{requiredAcceptanceRolesJson} AS JSONB),
             #{affectedOwnerScopeDescription}, #{minimumAffectedOwnerAcceptors},
@@ -490,6 +496,11 @@
     <update id="freezePlanForAuthorization">
         UPDATE t_repair_plan_version
         SET status = 'AUTHORIZATION_FROZEN', authorization_snapshot_hash = #{authorizationSnapshotHash},
+            supplier_selection_method = #{supplierSelectionMethod},
+            supplier_selection_evaluation_rule = #{supplierSelectionEvaluationRule},
+            minimum_invited_supplier_count = #{minimumInvitedSupplierCount},
+            minimum_valid_quote_count = #{minimumValidQuoteCount},
+            non_competitive_selection_basis = #{nonCompetitiveSelectionBasis},
             authorization_frozen_by_user_id = #{frozenByUserId}, authorization_frozen_at = CURRENT_TIMESTAMP
         WHERE plan_id = #{planId}
           AND project_id = #{projectId}

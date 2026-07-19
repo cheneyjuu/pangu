@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pangu.application.repair.command.CreateRepairPlanVersionCommand;
 import com.pangu.application.repair.command.CreateRepairProjectCommand;
 import com.pangu.application.repair.command.ConfirmRepairResponsibilityDeterminationCommand;
+import com.pangu.application.repair.command.FreezeRepairAuthorizationProposalCommand;
 import com.pangu.application.repair.command.ProposeRepairResponsibilityDeterminationCommand;
 import com.pangu.application.repair.command.RepairPlanDraftCommand;
 import com.pangu.domain.common.Page;
@@ -40,6 +41,7 @@ import com.pangu.domain.model.repair.RepairWorkOrderEvent;
 import com.pangu.domain.model.repair.RepairWorkOrderStatus;
 import com.pangu.domain.model.repair.RepairWorkflowType;
 import com.pangu.domain.policy.RepairCaseLifecyclePolicy;
+import com.pangu.domain.policy.RepairSupplierSelectionPolicy;
 import com.pangu.domain.repository.MaintenanceFundAccountRepository;
 import com.pangu.domain.repository.MaintenanceFundAccountRepository.Account;
 import com.pangu.domain.repository.MaintenanceFundAccountRepository.AccountScope;
@@ -82,6 +84,7 @@ public class RepairProjectService {
     private final MaintenanceFundAccountRepository maintenanceFundAccountRepository;
     private final RepairWorkOrderRepository workOrderRepository;
     private final RepairCaseLifecyclePolicy caseLifecyclePolicy;
+    private final RepairSupplierSelectionPolicy supplierSelectionPolicy;
     private final UserContextHolder userContextHolder;
     private final ObjectMapper objectMapper;
     private final RichTextSanitizer richTextSanitizer;
@@ -330,13 +333,21 @@ public class RepairProjectService {
      */
     @Transactional
     public RepairProject.Details freezePlanForAuthorization(
-            Long projectId, Long planId, Integer expectedProjectVersion) {
+            Long projectId, Long planId, FreezeRepairAuthorizationProposalCommand command) {
         UserContext actor = requireActor();
-        if (expectedProjectVersion == null) {
+        if (command == null || command.expectedProjectVersion() == null) {
             throw invalid("项目版本信息缺失，请刷新后重试");
         }
+        RepairSupplierSelectionPolicy.Decision selectionTerms = supplierSelectionPolicy.validateTerms(
+                new RepairSupplierSelectionPolicy.Terms(
+                        command.supplierSelectionMethod(), command.supplierEvaluationRule(),
+                        command.minimumInvitedSupplierCount(), command.minimumValidQuoteCount(),
+                        trim(command.nonCompetitiveSelectionBasis())));
+        if (!selectionTerms.allowed()) {
+            throw invalid(selectionTerms.rejectionReason());
+        }
         RepairProject project = loadProjectForUpdate(projectId, actor.tenantId());
-        requireDraftProjectVersion(project, expectedProjectVersion, "提交实施方案");
+        requireDraftProjectVersion(project, command.expectedProjectVersion(), "提交实施方案");
         PlanVersion plan = projectRepository.findPlanForUpdate(planId, projectId, actor.tenantId())
                 .orElseThrow(() -> notFound("实施方案不存在"));
         if (plan.status() != PlanStatus.DRAFT) {
@@ -350,22 +361,29 @@ public class RepairProjectService {
             throw new RepairWorkOrderApplicationException(
                     INVALID_STATUS, "只有属于共有部位维修且需相关业主表决的项目，才能提交本实施方案");
         }
+        PlanVersion proposal = plan.withSupplierSelectionTerms(
+                command.supplierSelectionMethod(), command.supplierEvaluationRule(),
+                command.minimumInvitedSupplierCount(), command.minimumValidQuoteCount(),
+                trim(command.nonCompetitiveSelectionBasis()));
         List<WorkPoint> workPoints = requireWorkPoints(plan.planId(), actor.tenantId(), "提交实施方案");
         List<AllocationRoom> allocationRooms = projectRepository.snapshotAllocationRooms(
                 plan.planId(), actor.tenantId(), decisionScope.scopeType(),
                 decisionScope.buildingId(), decisionScope.unitName());
         AllocationBasis allocationBasis = requireAllocationSnapshot(plan, actor.tenantId(), allocationRooms);
         String allocationSnapshotHash = allocationSnapshotHash(
-                decisionScope, determination, plan, allocationRooms, allocationBasis);
+                decisionScope, determination, proposal, allocationRooms, allocationBasis);
         String authorizationSnapshotHash = authorizationProposalSnapshotHash(
-                project, decisionScope, determination, plan, workPoints, allocationRooms, allocationBasis,
+                project, decisionScope, determination, proposal, workPoints, allocationRooms, allocationBasis,
                 allocationSnapshotHash);
         if (projectRepository.freezePlanForAuthorization(
-                planId, projectId, actor.tenantId(), authorizationSnapshotHash, actor.userId()) != 1) {
+                planId, projectId, actor.tenantId(), authorizationSnapshotHash,
+                proposal.supplierSelectionMethod(), proposal.supplierSelectionEvaluationRule(),
+                proposal.minimumInvitedSupplierCount(), proposal.minimumValidQuoteCount(),
+                proposal.nonCompetitiveSelectionBasis(), actor.userId()) != 1) {
             throw new RepairWorkOrderApplicationException(INVALID_STATUS, "实施方案提交失败，请刷新后重试");
         }
         if (projectRepository.activateAuthorizationProposal(
-                projectId, actor.tenantId(), planId, expectedProjectVersion) != 1) {
+                projectId, actor.tenantId(), planId, command.expectedProjectVersion()) != 1) {
             throw new RepairWorkOrderApplicationException(INVALID_STATUS, "项目状态已变化，请刷新后重试");
         }
         event(project, actor, "AUTHORIZATION_PROPOSAL_FROZEN", Map.of(
@@ -373,6 +391,8 @@ public class RepairProjectService {
                 "planVersion", plan.versionNo(),
                 "authorizationSnapshotHash", authorizationSnapshotHash,
                 "allocationSnapshotHash", allocationSnapshotHash,
+                "supplierSelectionMethod", proposal.supplierSelectionMethod().name(),
+                "supplierEvaluationRule", proposal.supplierSelectionEvaluationRule().name(),
                 "decisionScopeId", decisionScope.decisionScopeId(),
                 "responsibilityDeterminationId", determination.determinationId(),
                 "allocationRoomCount", allocationRooms.size()));
@@ -515,7 +535,7 @@ public class RepairProjectService {
         PlanVersion plan = projectRepository.insertPlan(new PlanVersion(
                 null, project.projectId(), project.tenantId(), versionNo,
                 narratives.planDescription(),
-                draft.budgetTotal(), null, null, null, null, null,
+                draft.budgetTotal(), null, null, null, null, null, null, null, null, null,
                 null, List.of(), null, null, List.of(), null, null,
                 null, null, null, null, null, null, null, false, List.of(),
                 PlanStatus.DRAFT, null, null, null, null,
@@ -1284,6 +1304,10 @@ public class RepairProjectService {
         snapshot.put("allocationRuleType", plan.allocationRuleType());
         snapshot.put("allocationRuleDescription", plan.allocationRuleDescription());
         snapshot.put("supplierSelectionMethod", plan.supplierSelectionMethod());
+        snapshot.put("supplierSelectionEvaluationRule", plan.supplierSelectionEvaluationRule());
+        snapshot.put("minimumInvitedSupplierCount", plan.minimumInvitedSupplierCount());
+        snapshot.put("minimumValidQuoteCount", plan.minimumValidQuoteCount());
+        snapshot.put("nonCompetitiveSelectionBasis", plan.nonCompetitiveSelectionBasis());
         snapshot.put("supplierSelectionReason", plan.supplierSelectionReason());
         snapshot.put("constructionManagementRequirements", plan.constructionManagementRequirements());
         snapshot.put("evidenceRequirements", plan.evidenceRequirements());

@@ -1,3 +1,4 @@
+// 关联业务：统一计算业主共同决定的参与人数、面积、选项汇总和法定通过条件。
 package com.pangu.domain.model.voting;
 
 import java.math.BigDecimal;
@@ -105,4 +106,29 @@ public abstract class AbstractVotingEngine<S extends VotingSubject, R extends Vo
                                          BigDecimal participatingArea, long participatingOwnerCount,
                                          boolean quorumSatisfied,
                                          VotingDecisionRule decisionRule);
+
+    /**
+     * 按与参与口径相同的双重去重规则汇总一个表决选项。
+     *
+     * <p>同一自然人拥有多个专有部分时，面积分别计入、人数只计一人；同一专有部分的异常重复行
+     * 只计一次，避免选项汇总和参与汇总采用不同口径。
+     */
+    protected final ChoiceTally tallyChoice(List<VoteItem> votes, VoteChoice choice) {
+        Set<Long> ownerUids = new HashSet<>();
+        Set<String> ownerProperties = new HashSet<>();
+        BigDecimal area = BigDecimal.ZERO;
+        for (VoteItem vote : votes) {
+            if (vote.getChoice() != choice) {
+                continue;
+            }
+            if (ownerProperties.add(vote.getUid() + "-" + vote.getOpid())) {
+                area = area.add(vote.getPropertyArea());
+            }
+            ownerUids.add(vote.getUid());
+        }
+        return new ChoiceTally(area, ownerUids.size());
+    }
+
+    protected record ChoiceTally(BigDecimal area, long ownerCount) {
+    }
 }

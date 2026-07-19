@@ -6,8 +6,9 @@ import com.pangu.domain.model.assembly.OwnersAssemblyPackage;
 import com.pangu.domain.model.assembly.OwnersAssemblyRuleSnapshot;
 import com.pangu.domain.model.assembly.OwnersAssemblySession;
 import com.pangu.domain.model.assembly.OwnersAssemblySubjectDraft;
-import com.pangu.domain.model.voting.VotingSubject;
+import com.pangu.domain.model.voting.SubjectType;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 public record OwnersAssemblyWorkspace(
@@ -15,7 +16,34 @@ public record OwnersAssemblyWorkspace(
         OwnersAssemblyPackage arrangement,
         OwnersAssemblyRuleSnapshot ruleSnapshot,
         List<OwnersAssemblySubjectDraft> draftSubjects,
-        List<VotingSubject> formalSubjects,
+        List<FormalSubject> formalSubjects,
         List<OwnersAssemblyMaterial> materials
 ) {
+
+    /** 管理端正式事项投影只返回汇总结果，不泄露逐户票面。 */
+    public record FormalSubject(
+            Long subjectId,
+            SubjectType subjectType,
+            String title,
+            String content,
+            String status,
+            Result result
+    ) {
+    }
+
+    public record Result(
+            boolean quorumSatisfied,
+            boolean passed,
+            BigDecimal totalArea,
+            long totalOwnerCount,
+            BigDecimal participatingArea,
+            long participatingOwnerCount,
+            BigDecimal supportArea,
+            Long supportOwnerCount,
+            BigDecimal againstArea,
+            Long againstOwnerCount,
+            BigDecimal abstainArea,
+            Long abstainOwnerCount
+    ) {
+    }
 }

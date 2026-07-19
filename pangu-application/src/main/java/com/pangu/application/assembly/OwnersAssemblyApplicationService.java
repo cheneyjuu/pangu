@@ -13,9 +13,11 @@ import com.pangu.application.assembly.command.UploadOwnersAssemblyMaterialComman
 import com.pangu.application.assembly.command.VoidAssemblyPaperBallotCommand;
 import com.pangu.application.support.PayloadHasher;
 import com.pangu.application.voting.OnlineVotingService;
+import com.pangu.application.voting.FormalVotingRulePolicy;
 import com.pangu.application.voting.PaperVotingException;
 import com.pangu.application.voting.PaperVotingService;
 import com.pangu.application.voting.VotingExecutionService;
+import com.pangu.application.voting.VotingDecisionResultProjector;
 import com.pangu.domain.context.UserContext;
 import com.pangu.domain.context.UserContextHolder;
 import com.pangu.domain.model.assembly.OwnersAssemblyMaterial;
@@ -44,7 +46,9 @@ import com.pangu.domain.repository.CommitteePositionRepository;
 import com.pangu.domain.repository.OwnersAssemblyMaterialStorage;
 import com.pangu.domain.repository.OwnersAssemblyRepository;
 import com.pangu.domain.repository.OwnersAssemblyRuleRepository;
+import com.pangu.domain.repository.PropertyBindingRepository;
 import com.pangu.domain.repository.VotingSubjectRepository;
+import com.pangu.domain.repository.VotingResultRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -99,12 +103,16 @@ public class OwnersAssemblyApplicationService {
 
     private final OwnersAssemblyRepository ownersAssemblyRepository;
     private final OwnersAssemblyRuleRepository ownersAssemblyRuleRepository;
+    private final PropertyBindingRepository propertyBindingRepository;
     private final OwnersAssemblyMaterialStorage ownersAssemblyMaterialStorage;
     private final CommitteePositionRepository committeePositionRepository;
     private final VotingSubjectRepository votingSubjectRepository;
+    private final VotingResultRepository votingResultRepository;
+    private final VotingDecisionResultProjector votingDecisionResultProjector;
     private final VotingExecutionService votingExecutionService;
     private final PaperVotingService paperVotingService;
     private final OnlineVotingService onlineVotingService;
+    private final FormalVotingRulePolicy formalVotingRulePolicy;
     private final UserContextHolder userContextHolder;
 
     @Transactional
@@ -126,6 +134,36 @@ public class OwnersAssemblyApplicationService {
         return ownersAssemblyRepository.listSessions(tenantId);
     }
 
+    /**
+     * 由当前已启用议事规则计算可选办理方式和最早开始时间。管理端只能展示该结果，
+     * 不能根据规则字段自行拼装会议形式或默认日期。
+     */
+    @Transactional(readOnly = true)
+    public PreparationOptions preparationOptions(Long tenantId) {
+        requireSysContext(tenantId, null);
+        OwnersAssemblyRule activeRule = ownersAssemblyRuleRepository.findActive(tenantId)
+                .orElseThrow(() -> new OwnersAssemblyApplicationException(
+                        INVALID_STATUS, "当前小区尚无已确认生效的业主大会议事规则"));
+        try {
+            FormalVotingRulePolicy.PreparationOptions options =
+                    formalVotingRulePolicy.preparationOptions(activeRule, Instant.now());
+            OwnersAssemblyRuleConfiguration configuration = activeRule.configuration();
+            return new PreparationOptions(
+                    activeRule.ruleName(),
+                    activeRule.ruleVersion(),
+                    activeRule.effectiveDate(),
+                    options.allowedModes().stream().map(this::preparationModeOf).toList(),
+                    options.earliestVoteStartAt(),
+                    configuration.planPublicityDays(),
+                    configuration.meetingNoticeDays(),
+                    configuration.resultAnnouncementDays(),
+                    options.validDeliveryMethods(),
+                    options.paperBallotSealRequired());
+        } catch (FormalVotingRulePolicy.UnsupportedRuleException ex) {
+            throw new OwnersAssemblyApplicationException(INVALID_STATUS, ex.getMessage(), ex);
+        }
+    }
+
     @Transactional(readOnly = true)
     public OwnersAssemblyWorkspace loadWorkspace(Long sessionId, Long tenantId) {
         requireSysContext(tenantId, null);
@@ -136,10 +174,11 @@ public class OwnersAssemblyApplicationService {
         OwnersAssemblyRuleSnapshot ruleSnapshot = ownersAssemblyRepository
                 .findRuleSnapshotBySession(sessionId, tenantId)
                 .orElse(null);
-        List<VotingSubject> formalSubjects = arrangement == null ? List.of()
+        List<OwnersAssemblyWorkspace.FormalSubject> formalSubjects = arrangement == null ? List.of()
                 : ownersAssemblyRepository.listSubjectIds(arrangement.packageId(), tenantId).stream()
                 .map(subjectId -> votingSubjectRepository.findById(subjectId).orElseThrow(
                         () -> new OwnersAssemblyApplicationException(NOT_FOUND, "正式表决事项不存在")))
+                .map(this::toWorkspaceSubject)
                 .toList();
         return new OwnersAssemblyWorkspace(
                 session,
@@ -251,10 +290,23 @@ public class OwnersAssemblyApplicationService {
                 || !command.voteEndAt().isAfter(command.voteStartAt())) {
             throw new OwnersAssemblyApplicationException(PARAM_INVALID, "投票截止时间必须晚于投票开始时间");
         }
+        try {
+            formalVotingRulePolicy.requireExecutable(
+                    activeRule,
+                    collectionModeOf(session, activeRule.configuration()),
+                    Instant.now(),
+                    command.voteStartAt());
+        } catch (FormalVotingRulePolicy.UnsupportedRuleException ex) {
+            throw new OwnersAssemblyApplicationException(INVALID_STATUS, ex.getMessage(), ex);
+        }
         OwnersAssemblyMaterial publicNotice = requireMaterial(
                 command.publicNoticeMaterialId(), session, MaterialType.PUBLIC_NOTICE);
         OwnersAssemblyMaterial ballotTemplate = requireMaterial(
                 command.ballotTemplateMaterialId(), session, MaterialType.PAPER_BALLOT_TEMPLATE);
+        if (!"application/pdf".equals(ballotTemplate.contentType())) {
+            throw new OwnersAssemblyApplicationException(
+                    PARAM_INVALID, "正式纸质表决票样必须上传 PDF 原件");
+        }
         List<Long> attachmentIds = command.planAttachmentMaterialIds() == null ? List.of()
                 : command.planAttachmentMaterialIds().stream().filter(id -> id != null).distinct().toList();
         if (attachmentIds.isEmpty()) {
@@ -345,7 +397,7 @@ public class OwnersAssemblyApplicationService {
                 1,
                 STATUS_PACKAGE_DRAFT,
                 ruleSnapshot.configuration().votingChannelPolicy().name(),
-                ruleSnapshot.configuration().planPublicityDays(),
+                requiredPreparationDays(ruleSnapshot.configuration()),
                 requireText(announcementHash, "公告材料摘要"),
                 requireText(attachmentManifestHash, "方案附件摘要"),
                 requireText(ballotTemplateHash, "纸质选票模板摘要"),
@@ -432,6 +484,11 @@ public class OwnersAssemblyApplicationService {
         }
         Instant noticeStartAt = Instant.now();
         Instant noticeEndAt = noticeStartAt.plus(ballotPackage.publicNoticeDays(), ChronoUnit.DAYS);
+        if (ballotPackage.voteStartAt().isBefore(noticeEndAt)) {
+            throw new OwnersAssemblyApplicationException(
+                    NOTICE_NOT_COMPLETED,
+                    "计划投票开始时间早于本次规则要求的公示和通知期限，请重新确认安排");
+        }
         int updated = ownersAssemblyRepository.lockPackage(
                 packageId, tenantId, packageHash, noticeStartAt, noticeEndAt, ctx.userId());
         if (updated != 1) {
@@ -596,7 +653,7 @@ public class OwnersAssemblyApplicationService {
 
     @Transactional(readOnly = true)
     public VotingWorkbench getVotingWorkbench(Long sessionId, Long tenantId) {
-        requireSysContext(tenantId, null);
+        UserContext actor = requireSysContext(tenantId, null);
         OwnersAssemblySession session = ownersAssemblyRepository.findSession(sessionId, tenantId)
                 .orElseThrow(() -> new OwnersAssemblyApplicationException(NOT_FOUND, "业主大会不存在"));
         OwnersAssemblyPackage arrangement = requireLatestArrangement(session.sessionId(), session.tenantId());
@@ -611,14 +668,50 @@ public class OwnersAssemblyApplicationService {
                     .toList();
             OnlineVotingService.ManagementProgress online = onlineVotingService.managementProgress(
                     executionPackage.getPackageId(), tenantId);
+            List<ElectorateWorkbenchItem> electorate = votingExecutionService.findElectorateSnapshot(
+                            executionPackage.getPackageId(), tenantId)
+                    .orElseThrow(() -> new OwnersAssemblyApplicationException(
+                            INVALID_STATUS, "本次表决缺少冻结房屋名册"))
+                    .items().stream().map(item -> toElectorateWorkbenchItem(item, tenantId)).toList();
             long duplicatePaperDecisionCount = paper.ballots().stream()
                     .flatMap(item -> item.outcomes().stream())
                     .filter(outcome -> outcome.status() == PaperBallotOutcome.Status.DUPLICATE)
                     .count();
-            return new VotingWorkbench(paper, assistance, online, duplicatePaperDecisionCount);
+            return new VotingWorkbench(
+                    electorate, paper, assistance, online, duplicatePaperDecisionCount, actor.userId());
         } catch (PaperVotingException ex) {
             throw translatePaperVotingFailure(ex);
         }
+    }
+
+    private ElectorateWorkbenchItem toElectorateWorkbenchItem(
+            VotingElectorateSnapshot.Item item, Long tenantId) {
+        PropertyBindingRepository.Roster roster = propertyBindingRepository.findRosterById(item.rosterId());
+        if (roster == null
+                || !tenantId.equals(roster.tenantId())
+                || !item.roomId().equals(roster.roomId())
+                || !item.buildingId().equals(roster.buildingId())) {
+            throw new OwnersAssemblyApplicationException(
+                    INVALID_STATUS, "冻结房屋名册与建筑名册不一致，不能继续办理");
+        }
+        return new ElectorateWorkbenchItem(
+                item.snapshotItemId(), item.roomId(), item.buildingId(), item.certifiedArea(),
+                item.representativeOpid(), roster.buildingName(), roster.unitName(), roster.roomName());
+    }
+
+    private OwnersAssemblyWorkspace.FormalSubject toWorkspaceSubject(VotingSubject subject) {
+        OwnersAssemblyWorkspace.Result result = votingResultRepository.findBySubjectId(subject.getSubjectId())
+                .map(votingDecisionResultProjector::project)
+                .map(view -> new OwnersAssemblyWorkspace.Result(
+                        view.quorumSatisfied(), view.passed(), view.totalArea(), view.totalOwnerCount(),
+                        view.participatingArea(), view.participatingOwnerCount(),
+                        view.supportArea(), view.supportOwnerCount(),
+                        view.againstArea(), view.againstOwnerCount(),
+                        view.abstainArea(), view.abstainOwnerCount()))
+                .orElse(null);
+        return new OwnersAssemblyWorkspace.FormalSubject(
+                subject.getSubjectId(), subject.getSubjectType(), subject.getTitle(), subject.getContent(),
+                subject.getStatus().name(), result);
     }
 
     private PaperAssistanceWorkbenchItem toPaperAssistanceWorkbenchItem(
@@ -715,14 +808,6 @@ public class OwnersAssemblyApplicationService {
                                             OwnersAssemblyRuleConfiguration configuration) {
         collectionModeOf(session, configuration);
         requireSupportedFrozenRule(configuration);
-        if (configuration.meetingNoticeDays() == null || configuration.meetingNoticeDays() != 0) {
-            throw new OwnersAssemblyApplicationException(
-                    INVALID_STATUS, "当前系统尚未建模独立的会议通知阶段；规则要求会议通知期限时不能进入正式办理");
-        }
-        if (configuration.resultAnnouncementDays() == null || configuration.resultAnnouncementDays() != 0) {
-            throw new OwnersAssemblyApplicationException(
-                    INVALID_STATUS, "当前系统尚未建模独立的结果公告阶段；规则要求结果公告期限时不能进入正式办理");
-        }
     }
 
     /**
@@ -734,6 +819,12 @@ public class OwnersAssemblyApplicationService {
         }
         if (configuration.planPublicityDays() == null || configuration.planPublicityDays() < 0) {
             throw new OwnersAssemblyApplicationException(INVALID_STATUS, "冻结议事规则未明确有效的方案公示期限");
+        }
+        if (configuration.meetingNoticeDays() == null || configuration.meetingNoticeDays() < 0) {
+            throw new OwnersAssemblyApplicationException(INVALID_STATUS, "冻结议事规则未明确有效的会议通知期限");
+        }
+        if (configuration.resultAnnouncementDays() == null || configuration.resultAnnouncementDays() < 0) {
+            throw new OwnersAssemblyApplicationException(INVALID_STATUS, "冻结议事规则未明确有效的结果公示期限");
         }
         validateSupportedChannelRule(configuration);
         if (configuration.nonResponsePolicy()
@@ -798,6 +889,19 @@ public class OwnersAssemblyApplicationService {
         };
     }
 
+    private String preparationModeOf(VotingExecutionPackage.CollectionMode mode) {
+        return switch (mode) {
+            case PAPER -> "WRITTEN_DECISION";
+            case ONLINE_WITH_PAPER_ASSISTANCE -> "INTERNET_DECISION";
+            case PAPER_AND_ONLINE -> "ONLINE_AND_OFFLINE";
+        };
+    }
+
+    /** 方案公示与会议通知可以同期完成，但必须满足两者中较长的期限。 */
+    private int requiredPreparationDays(OwnersAssemblyRuleConfiguration configuration) {
+        return Math.max(configuration.planPublicityDays(), configuration.meetingNoticeDays());
+    }
+
     private VotingExecutionPackage.CollectionMode requireMode(
             OwnersAssemblyRuleConfiguration configuration,
             OwnersAssemblyRuleConfiguration.MeetingForm meetingForm,
@@ -805,10 +909,20 @@ public class OwnersAssemblyApplicationService {
             VotingExecutionPackage.CollectionMode collectionMode,
             String message) {
         if (!configuration.allowedMeetingForms().contains(meetingForm)
-                || configuration.votingChannelPolicy() != channelPolicy) {
+                || !allowsChannel(configuration.votingChannelPolicy(), channelPolicy)) {
             throw new OwnersAssemblyApplicationException(INVALID_STATUS, message);
         }
         return collectionMode;
+    }
+
+    /** 当前规则可覆盖多个办理形式，但每次会次只冻结一种实际收票方式。 */
+    private boolean allowsChannel(
+            OwnersAssemblyRuleConfiguration.VotingChannelPolicy configured,
+            OwnersAssemblyRuleConfiguration.VotingChannelPolicy requested) {
+        return configured == requested
+                || configured == OwnersAssemblyRuleConfiguration.VotingChannelPolicy.PAPER_AND_ONLINE
+                && (requested == OwnersAssemblyRuleConfiguration.VotingChannelPolicy.PAPER_ONLY
+                || requested == OwnersAssemblyRuleConfiguration.VotingChannelPolicy.ONLINE_ONLY);
     }
 
     private void validateSupportedChannelRule(OwnersAssemblyRuleConfiguration configuration) {
@@ -1152,7 +1266,7 @@ public class OwnersAssemblyApplicationService {
 
     private void requireChannelAllowed(OwnersAssemblyPackage ballotPackage, String channel) {
         if (!CHANNEL_PAPER.equals(channel)) {
-            throw new OwnersAssemblyApplicationException(PARAM_INVALID, "当前业主大会仅支持纸质选票通道");
+            throw new OwnersAssemblyApplicationException(PARAM_INVALID, "不支持的纸质办理动作");
         }
         if (CHANNEL_PAPER.equals(channel) && !ballotPackage.paperAllowed()) {
             throw new OwnersAssemblyApplicationException(FORBIDDEN, "该表决包未启用纸质投票");
@@ -1180,13 +1294,48 @@ public class OwnersAssemblyApplicationService {
 
     /** 管理端办理台只暴露纸票记录、协助进度和线上汇总，不返回线上票面选择。 */
     public record VotingWorkbench(
+            List<ElectorateWorkbenchItem> electorate,
             PaperVotingService.Workbench paper,
             List<PaperAssistanceWorkbenchItem> paperAssistance,
             OnlineVotingService.ManagementProgress online,
-            long duplicatePaperDecisionCount
+            long duplicatePaperDecisionCount,
+            Long currentActorUserId
     ) {
         public VotingWorkbench {
+            electorate = electorate == null ? List.of() : List.copyOf(electorate);
             paperAssistance = paperAssistance == null ? List.of() : List.copyOf(paperAssistance);
+        }
+    }
+
+    public record ElectorateWorkbenchItem(
+            Long snapshotItemId,
+            Long roomId,
+            Long buildingId,
+            BigDecimal certifiedArea,
+            Long representativeOpid,
+            String buildingName,
+            String unitName,
+            String roomName
+    ) {
+    }
+
+    public record PreparationOptions(
+            String ruleName,
+            String ruleVersion,
+            LocalDate effectiveDate,
+            List<String> allowedPreparationModes,
+            Instant earliestVoteStartAt,
+            Integer planPublicityDays,
+            Integer meetingNoticeDays,
+            Integer resultAnnouncementDays,
+            Set<OwnersAssemblyRuleConfiguration.DeliveryMethod> validDeliveryMethods,
+            Boolean paperBallotSealRequired
+    ) {
+        public PreparationOptions {
+            allowedPreparationModes = allowedPreparationModes == null
+                    ? List.of() : List.copyOf(allowedPreparationModes);
+            validDeliveryMethods = validDeliveryMethods == null
+                    ? Set.of() : Set.copyOf(validDeliveryMethods);
         }
     }
 

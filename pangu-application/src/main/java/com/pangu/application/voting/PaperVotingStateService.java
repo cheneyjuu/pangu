@@ -84,13 +84,17 @@ public class PaperVotingStateService {
         if (delivery.status() != PaperVotingDelivery.Status.PENDING_REVIEW) {
             throw new PaperVotingException(INVALID_STATUS, "该送达登记已经完成核对");
         }
+        Long reviewer = requirePositive(command.reviewedByUserId(), "核对人");
+        if (reviewer.equals(delivery.deliveredByUserId())) {
+            throw new PaperVotingException(INVALID_ARGUMENT, "送达登记人不能核对自己的送达记录");
+        }
         Instant reviewedAt = requireInstant(command.reviewedAt(), "核对时间");
         int updated;
         if (command.decision() == PaperVotingService.ReviewDecision.REJECT) {
             String note = requireText(command.reviewNote(), "不通过原因");
             updated = paperVotingRepository.rejectDelivery(
                     delivery.paperDeliveryId(), delivery.tenantId(),
-                    requirePositive(command.reviewedByUserId(), "核对人"), reviewedAt, note, delivery.version());
+                    reviewer, reviewedAt, note, delivery.version());
         } else if (command.decision() == PaperVotingService.ReviewDecision.CONFIRM) {
             VotingDeliveryRecord unified;
             try {
@@ -103,7 +107,7 @@ public class PaperVotingStateService {
             }
             updated = paperVotingRepository.confirmDelivery(
                     delivery.paperDeliveryId(), delivery.tenantId(),
-                    requirePositive(command.reviewedByUserId(), "核对人"), reviewedAt,
+                    reviewer, reviewedAt,
                     unified.deliveryId(), delivery.version());
         } else {
             throw new PaperVotingException(INVALID_ARGUMENT, "请选择送达核对结论");

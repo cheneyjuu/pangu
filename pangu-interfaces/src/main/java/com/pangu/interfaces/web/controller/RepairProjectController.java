@@ -15,6 +15,7 @@ import com.pangu.interfaces.web.controller.dto.PageResponse;
 import com.pangu.interfaces.web.controller.dto.repair.CreateRepairPlanVersionRequest;
 import com.pangu.interfaces.web.controller.dto.repair.CreateRepairProjectRequest;
 import com.pangu.interfaces.web.controller.dto.repair.ConfirmRepairResponsibilityDeterminationRequest;
+import com.pangu.interfaces.web.controller.dto.repair.FreezeRepairAuthorizationProposalRequest;
 import com.pangu.interfaces.web.controller.dto.repair.LockRepairPlanRequest;
 import com.pangu.interfaces.web.controller.dto.repair.ProposeRepairResponsibilityDeterminationRequest;
 import com.pangu.interfaces.web.controller.dto.repair.RepairAttachmentDownloadTicketResponse;
@@ -167,9 +168,9 @@ public class RepairProjectController extends BaseController {
     public Result<RepairProject.Details> freezePlanForAuthorization(
             @PathVariable("projectId") Long projectId,
             @PathVariable("planId") Long planId,
-            @Valid @RequestBody LockRepairPlanRequest request) {
+            @Valid @RequestBody FreezeRepairAuthorizationProposalRequest request) {
         return success("授权提案已冻结",
-                projectService.freezePlanForAuthorization(projectId, planId, request.expectedProjectVersion()));
+                projectService.freezePlanForAuthorization(projectId, planId, request.toCommand()));
     }
 
     @PostMapping("/{projectId}/plans/{planId}/lock")

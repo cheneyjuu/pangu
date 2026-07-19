@@ -15,6 +15,8 @@ public class RepairProjectVotingRow {
     private Long executionPackageId;
     private Long ruleId;
     private String ruleConfigurationHash;
+    private Long paperBallotTemplateAttachmentId;
+    private String paperBallotTemplateHash;
     private String collectionMode;
     private String status;
     private String result;

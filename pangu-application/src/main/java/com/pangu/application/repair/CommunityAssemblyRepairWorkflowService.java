@@ -149,7 +149,9 @@ public class CommunityAssemblyRepairWorkflowService {
             governanceRepository.insertGovernanceBasis(
                     project.projectId(), plan.planId(), project.tenantId(),
                     "COMMUNITY_ASSEMBLY_DECISION", "ASSEMBLY_SUBJECT", link.subjectId(),
-                    basisHash, null, null, null, null, null, actor.userId());
+                    basisHash, plan.supplierSelectionMethod(), plan.supplierSelectionEvaluationRule(),
+                    plan.minimumInvitedSupplierCount(), plan.minimumValidQuoteCount(),
+                    plan.nonCompetitiveSelectionBasis(), plan.budgetTotal(), actor.userId());
         }
         int updated;
         if (result.passed()) {

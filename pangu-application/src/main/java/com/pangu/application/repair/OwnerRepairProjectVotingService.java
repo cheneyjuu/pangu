@@ -3,6 +3,7 @@ package com.pangu.application.repair;
 
 import com.pangu.application.voting.OnlineVotingException;
 import com.pangu.application.voting.OnlineVotingService;
+import com.pangu.application.voting.VotingDecisionResultProjector;
 import com.pangu.domain.context.UserContext;
 import com.pangu.domain.context.UserContextHolder;
 import com.pangu.domain.model.repair.RepairProject;
@@ -15,12 +16,14 @@ import com.pangu.domain.model.voting.VotingSubject;
 import com.pangu.domain.repository.RepairProjectRepository;
 import com.pangu.domain.repository.RepairProjectVotingRepository;
 import com.pangu.domain.repository.VotingExecutionRepository;
+import com.pangu.domain.repository.VotingResultRepository;
 import com.pangu.domain.repository.VotingSubjectRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
@@ -43,6 +46,8 @@ public class OwnerRepairProjectVotingService {
     private final RepairProjectRepository projectRepository;
     private final VotingExecutionRepository votingExecutionRepository;
     private final VotingSubjectRepository subjectRepository;
+    private final VotingResultRepository resultRepository;
+    private final VotingDecisionResultProjector votingDecisionResultProjector;
     private final OnlineVotingService onlineVotingService;
     private final UserContextHolder userContextHolder;
 
@@ -62,7 +67,7 @@ public class OwnerRepairProjectVotingService {
                 resolved.voting().planId(), resolved.owner().tenantId());
         List<RepairProject.Attachment> projectAttachments = projectRepository.listAttachments(
                 resolved.project().projectId(), resolved.owner().tenantId());
-        List<PublishedAttachment> disclosedAttachments = planAttachments.stream()
+        List<PublishedAttachment> disclosedAttachments = new ArrayList<>(planAttachments.stream()
                 .map(reference -> projectAttachments.stream()
                         .filter(attachment -> attachment.attachmentId().equals(reference.attachmentId()))
                         .findFirst()
@@ -71,13 +76,28 @@ public class OwnerRepairProjectVotingService {
                                 attachment.contentType(), attachment.fileSize()))
                         .orElse(null))
                 .filter(Objects::nonNull)
-                .toList();
+                .toList());
+        if (resolved.voting().paperBallotTemplateAttachmentId() != null) {
+            projectAttachments.stream()
+                    .filter(attachment -> attachment.attachmentId()
+                            .equals(resolved.voting().paperBallotTemplateAttachmentId()))
+                    .filter(attachment -> Objects.equals(
+                            attachment.sha256(), resolved.voting().paperBallotTemplateHash()))
+                    .findFirst()
+                    .map(attachment -> new PublishedAttachment(
+                            attachment.attachmentId(), RepairProject.AttachmentPurpose.PAPER_BALLOT_TEMPLATE,
+                            attachment.originalFileName(), attachment.contentType(), attachment.fileSize()))
+                    .ifPresent(disclosedAttachments::add);
+        }
         return new Disclosure(
                 resolved.project().projectId(), resolved.project().projectNo(), resolved.project().projectName(),
                 new PlanSummary(resolved.plan().planId(), resolved.plan().versionNo(),
                         resolved.plan().planDescription(), resolved.plan().budgetTotal()),
                 new SubjectSummary(resolved.subject().getSubjectId(), resolved.subject().getTitle(),
                         resolved.subject().getContent()),
+                resultRepository.findBySubjectId(resolved.subject().getSubjectId())
+                        .map(this::toResultSummary)
+                        .orElse(null),
                 resolved.executionPackage().getCollectionMode(),
                 resolved.executionPackage().getStatus(), resolved.executionPackage().getPackageHash(),
                 resolved.executionPackage().getVoteStartAt(), resolved.executionPackage().getVoteEndAt(),
@@ -195,12 +215,23 @@ public class OwnerRepairProjectVotingService {
         return new RepairWorkOrderApplicationException(reason, failure.getMessage(), failure);
     }
 
+    private ResultSummary toResultSummary(VotingResultRepository.Snapshot snapshot) {
+        VotingDecisionResultProjector.View view = votingDecisionResultProjector.project(snapshot);
+        return new ResultSummary(
+                view.quorumSatisfied(), view.passed(), view.totalArea(), view.totalOwnerCount(),
+                view.participatingArea(), view.participatingOwnerCount(),
+                view.supportArea(), view.supportOwnerCount(),
+                view.againstArea(), view.againstOwnerCount(),
+                view.abstainArea(), view.abstainOwnerCount());
+    }
+
     public record Disclosure(
             Long projectId,
             String projectNo,
             String projectName,
             PlanSummary plan,
             SubjectSummary subject,
+            ResultSummary result,
             VotingExecutionPackage.CollectionMode collectionMode,
             VotingExecutionPackage.Status status,
             String packageHash,
@@ -233,6 +264,23 @@ public class OwnerRepairProjectVotingService {
     }
 
     public record SubjectSummary(Long subjectId, String title, String content) {
+    }
+
+    /** 表决结束后向相关业主公开的汇总结果，不包含逐户选择。 */
+    public record ResultSummary(
+            boolean quorumSatisfied,
+            boolean passed,
+            java.math.BigDecimal totalArea,
+            long totalOwnerCount,
+            java.math.BigDecimal participatingArea,
+            long participatingOwnerCount,
+            java.math.BigDecimal supportArea,
+            Long supportOwnerCount,
+            java.math.BigDecimal againstArea,
+            Long againstOwnerCount,
+            java.math.BigDecimal abstainArea,
+            Long abstainOwnerCount
+    ) {
     }
 
     public record PublishedAttachment(

@@ -12,6 +12,9 @@ import org.springframework.stereotype.Component;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
+import java.util.Collections;
+import java.util.EnumSet;
+import java.util.Set;
 
 /**
  * 正式表决规则闸门。
@@ -25,6 +28,45 @@ public class FormalVotingRulePolicy {
                                             VotingExecutionPackage.CollectionMode collectionMode,
                                             Instant preparedAt,
                                             Instant voteStartAt) {
+        BaseConstraints base = requireBaseConstraints(rule, preparedAt);
+        requireMode(base.configuration(), collectionMode);
+        if (voteStartAt == null) {
+            throw new UnsupportedRuleException("请填写表决开始时间");
+        }
+        if (voteStartAt.isBefore(base.earliestVoteStartAt())) {
+            throw new UnsupportedRuleException(
+                    "表决开始时间应在方案公示和会议通知期限届满后，最早为 "
+                            + base.earliestVoteStartAt());
+        }
+        return new ExecutableRule(rule, collectionMode, base.earliestVoteStartAt());
+    }
+
+    /**
+     * 返回当前有效规则真正可办理的单次方式，供管理端展示选择范围；客户端不能自行解释规则组合。
+     */
+    public PreparationOptions preparationOptions(OwnersAssemblyRule rule, Instant preparedAt) {
+        BaseConstraints base = requireBaseConstraints(rule, preparedAt);
+        EnumSet<VotingExecutionPackage.CollectionMode> supported =
+                EnumSet.noneOf(VotingExecutionPackage.CollectionMode.class);
+        for (VotingExecutionPackage.CollectionMode mode : VotingExecutionPackage.CollectionMode.values()) {
+            try {
+                requireMode(base.configuration(), mode);
+                supported.add(mode);
+            } catch (UnsupportedRuleException ignored) {
+                // 单个方式不受规则支持时只从选择列表移除；共享规则错误已在上方明确阻断。
+            }
+        }
+        if (supported.isEmpty()) {
+            throw new UnsupportedRuleException("当前表决依据没有系统可办理的表决方式");
+        }
+        return new PreparationOptions(
+                Collections.unmodifiableSet(supported),
+                base.earliestVoteStartAt(),
+                base.configuration().validDeliveryMethods(),
+                base.configuration().paperBallotSealRequired());
+    }
+
+    private BaseConstraints requireBaseConstraints(OwnersAssemblyRule rule, Instant preparedAt) {
         if (rule == null || rule.status() != OwnersAssemblyRule.Status.ACTIVE) {
             throw new UnsupportedRuleException("本小区尚无已启用的维修事项表决依据");
         }
@@ -39,20 +81,15 @@ public class FormalVotingRulePolicy {
             throw new UnsupportedRuleException("当前表决依据缺少已确认的办理规则");
         }
         requireSupportedSharedRules(configuration);
-        requireMode(configuration, collectionMode);
 
         int publicityDays = requireNonNegative(configuration.planPublicityDays(), "方案公示期限");
         int noticeDays = requireNonNegative(configuration.meetingNoticeDays(), "会议通知期限");
         int preparationDays = Math.max(publicityDays, noticeDays);
-        if (preparedAt == null || voteStartAt == null) {
-            throw new UnsupportedRuleException("请填写表决准备时间和开始时间");
+        if (preparedAt == null) {
+            throw new UnsupportedRuleException("缺少本次表决准备时间");
         }
         Instant earliestStartAt = preparedAt.plus(preparationDays, ChronoUnit.DAYS);
-        if (voteStartAt.isBefore(earliestStartAt)) {
-            throw new UnsupportedRuleException(
-                    "表决开始时间应在方案公示和会议通知期限届满后，最早为 " + earliestStartAt);
-        }
-        return new ExecutableRule(rule, collectionMode, earliestStartAt);
+        return new BaseConstraints(configuration, earliestStartAt);
     }
 
     public VotingSettlementPolicy settlementPolicy(OwnersAssemblyRule rule, SubjectType subjectType) {
@@ -88,10 +125,13 @@ public class FormalVotingRulePolicy {
                 != OwnersAssemblyRuleConfiguration.ProxyVotingPolicy.NOT_ALLOWED) {
             throw new UnsupportedRuleException("当前系统尚未接入书面委托代理的核验和存证，不能发起正式表决");
         }
-        if (configuration.countingRules().get(OwnersAssemblyRuleConfiguration.DecisionType.GENERAL) == null) {
-            throw new UnsupportedRuleException("当前表决依据缺少一般共同决定事项的计票口径");
+        for (OwnersAssemblyRuleConfiguration.DecisionType decisionType
+                : OwnersAssemblyRuleConfiguration.DecisionType.values()) {
+            if (configuration.countingRules().get(decisionType) == null) {
+                throw new UnsupportedRuleException("当前表决依据缺少 " + decisionType + " 事项的计票口径");
+            }
+            settlementPolicyFromConfiguration(configuration, decisionType);
         }
-        settlementPolicyFromConfiguration(configuration, OwnersAssemblyRuleConfiguration.DecisionType.GENERAL);
     }
 
     private void requireMode(OwnersAssemblyRuleConfiguration configuration,
@@ -104,20 +144,14 @@ public class FormalVotingRulePolicy {
                 requirePair(configuration, OwnersAssemblyRuleConfiguration.MeetingForm.WRITTEN_CONSULTATION,
                         OwnersAssemblyRuleConfiguration.VotingChannelPolicy.PAPER_ONLY,
                         "当前表决依据未确认纸质书面征询");
-                if (configuration.duplicateVotePolicy()
-                        != OwnersAssemblyRuleConfiguration.DuplicateVotePolicy.NOT_APPLICABLE) {
-                    throw new UnsupportedRuleException("纸质单渠道表决的重复投票规则应为不适用");
-                }
+                requireDuplicatePolicy(configuration, false);
             }
             case ONLINE_WITH_PAPER_ASSISTANCE -> {
                 requirePair(configuration, OwnersAssemblyRuleConfiguration.MeetingForm.INTERNET,
                         OwnersAssemblyRuleConfiguration.VotingChannelPolicy.ONLINE_ONLY,
                         "当前表决依据未确认互联网表决并为有困难业主提供纸质协助");
                 requireOnlineIdentity(configuration);
-                if (configuration.duplicateVotePolicy()
-                        != OwnersAssemblyRuleConfiguration.DuplicateVotePolicy.NOT_APPLICABLE) {
-                    throw new UnsupportedRuleException("互联网表决的重复投票规则应为不适用");
-                }
+                requireDuplicatePolicy(configuration, false);
             }
             case PAPER_AND_ONLINE -> {
                 requirePair(configuration, OwnersAssemblyRuleConfiguration.MeetingForm.ONLINE_AND_OFFLINE,
@@ -137,8 +171,36 @@ public class FormalVotingRulePolicy {
                              OwnersAssemblyRuleConfiguration.VotingChannelPolicy channelPolicy,
                              String message) {
         if (!configuration.allowedMeetingForms().contains(meetingForm)
-                || configuration.votingChannelPolicy() != channelPolicy) {
+                || !allowsChannel(configuration.votingChannelPolicy(), channelPolicy)) {
             throw new UnsupportedRuleException(message);
+        }
+    }
+
+    /**
+     * 规则可同时允许多种会议形式；PAPER_AND_ONLINE 表达规则已经覆盖两类渠道，
+     * 单次表决仍只能从 allowedMeetingForms 中选择一种实际办理方式。
+     */
+    private boolean allowsChannel(
+            OwnersAssemblyRuleConfiguration.VotingChannelPolicy configured,
+            OwnersAssemblyRuleConfiguration.VotingChannelPolicy requested) {
+        return configured == requested
+                || configured == OwnersAssemblyRuleConfiguration.VotingChannelPolicy.PAPER_AND_ONLINE
+                && (requested == OwnersAssemblyRuleConfiguration.VotingChannelPolicy.PAPER_ONLY
+                || requested == OwnersAssemblyRuleConfiguration.VotingChannelPolicy.ONLINE_ONLY);
+    }
+
+    private void requireDuplicatePolicy(
+            OwnersAssemblyRuleConfiguration configuration,
+            boolean parallelCollection) {
+        OwnersAssemblyRuleConfiguration.DuplicateVotePolicy expected =
+                configuration.votingChannelPolicy()
+                        == OwnersAssemblyRuleConfiguration.VotingChannelPolicy.PAPER_AND_ONLINE
+                        ? OwnersAssemblyRuleConfiguration.DuplicateVotePolicy.FIRST_VALID_WINS
+                        : OwnersAssemblyRuleConfiguration.DuplicateVotePolicy.NOT_APPLICABLE;
+        if (configuration.duplicateVotePolicy() != expected) {
+            throw new UnsupportedRuleException(parallelCollection
+                    ? "当前纸质与线上并行只支持首张有效票生效"
+                    : "当前规则的重复投票处理与所登记的渠道能力不一致");
         }
     }
 
@@ -154,7 +216,7 @@ public class FormalVotingRulePolicy {
         try {
             configuration.countingRules().get(decisionType).toVotingDecisionRule().requireExecutable();
         } catch (IllegalStateException ex) {
-            throw new UnsupportedRuleException("当前表决依据的一般事项计票口径不完整", ex);
+            throw new UnsupportedRuleException("当前表决依据的 " + decisionType + " 事项计票口径不完整", ex);
         }
     }
 
@@ -168,6 +230,20 @@ public class FormalVotingRulePolicy {
     public record ExecutableRule(
             OwnersAssemblyRule rule,
             VotingExecutionPackage.CollectionMode collectionMode,
+            Instant earliestVoteStartAt
+    ) {
+    }
+
+    public record PreparationOptions(
+            Set<VotingExecutionPackage.CollectionMode> allowedModes,
+            Instant earliestVoteStartAt,
+            Set<OwnersAssemblyRuleConfiguration.DeliveryMethod> validDeliveryMethods,
+            Boolean paperBallotSealRequired
+    ) {
+    }
+
+    private record BaseConstraints(
+            OwnersAssemblyRuleConfiguration configuration,
             Instant earliestVoteStartAt
     ) {
     }

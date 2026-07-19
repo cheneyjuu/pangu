@@ -1,3 +1,4 @@
+// 关联业务：承载业主共同决定结算后的双维度参与、选项汇总和通过结论。
 package com.pangu.domain.model.voting;
 
 import lombok.Getter;
@@ -45,6 +46,18 @@ public class VotingResult<S extends VotingSubject> {
 
     /** 赞成票对应的总人数 */
     private Long supportOwnerCount;
+
+    /** 反对票对应的总专有面积 */
+    private BigDecimal againstArea;
+
+    /** 反对票对应的总人数 */
+    private Long againstOwnerCount;
+
+    /** 弃权票对应的总专有面积 */
+    private BigDecimal abstainArea;
+
+    /** 弃权票对应的总人数 */
+    private Long abstainOwnerCount;
 
     /**
      * 获取参与投票的面积占比

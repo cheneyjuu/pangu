@@ -254,6 +254,7 @@ public class RepairProjectGovernanceRepositoryImpl implements RepairProjectGover
                                       Integer minimumInvitedSupplierCount,
                                       Integer minimumValidQuoteCount,
                                       String nonCompetitiveSelectionBasis,
+                                      BigDecimal approvedBudgetAmount,
                                       Long createdByUserId) {
         mapper.insertGovernanceBasis(
                 projectId, planId, tenantId, basisType, referenceType,
@@ -261,6 +262,7 @@ public class RepairProjectGovernanceRepositoryImpl implements RepairProjectGover
                 approvedSupplierSelectionMethod == null ? null : approvedSupplierSelectionMethod.name(),
                 approvedSupplierEvaluationRule == null ? null : approvedSupplierEvaluationRule.name(),
                 minimumInvitedSupplierCount, minimumValidQuoteCount, nonCompetitiveSelectionBasis,
+                approvedBudgetAmount,
                 createdByUserId);
     }
 
@@ -273,7 +275,8 @@ public class RepairProjectGovernanceRepositoryImpl implements RepairProjectGover
                 row.getApprovedSupplierEvaluationRule() == null ? null
                         : SupplierSelectionEvaluationRule.valueOf(row.getApprovedSupplierEvaluationRule()),
                 row.getMinimumInvitedSupplierCount(), row.getMinimumValidQuoteCount(),
-                row.getNonCompetitiveSelectionBasis(), row.getStatus(), row.getCreatedByUserId(),
+                row.getNonCompetitiveSelectionBasis(), row.getApprovedBudgetAmount(),
+                row.getStatus(), row.getCreatedByUserId(),
                 row.getCreateTime());
     }
 

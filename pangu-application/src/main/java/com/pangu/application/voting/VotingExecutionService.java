@@ -374,6 +374,14 @@ public class VotingExecutionService {
         return executionRepository.findElectorateItem(packageId, tenantId, opid);
     }
 
+    /** 管理办理台读取本次冻结名册，禁止回读当前可变房屋关系替代历史范围。 */
+    public java.util.Optional<VotingElectorateSnapshot> findElectorateSnapshot(
+            Long packageId, Long tenantId) {
+        return executionRepository.findPackage(packageId, tenantId)
+                .flatMap(ballotPackage -> executionRepository.findElectorateSnapshot(
+                        ballotPackage.getElectorateSnapshotId(), tenantId));
+    }
+
     private VotingElectorateSnapshot buildElectorateSnapshot(
             VotingExecutionPackage ballotPackage,
             List<VotingElectorateSnapshot.Candidate> candidates,

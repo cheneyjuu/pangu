@@ -15,6 +15,9 @@ public class RepairProjectVotingOwnerTaskRow {
     private Long executionPackageId;
     private Long opid;
     private Long roomId;
+    private String buildingName;
+    private String unitName;
+    private String roomName;
     private String collectionMode;
     private String status;
     private String result;

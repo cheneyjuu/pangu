@@ -158,6 +158,7 @@ public final class RepairProjectGovernanceRows {
         private Integer minimumInvitedSupplierCount;
         private Integer minimumValidQuoteCount;
         private String nonCompetitiveSelectionBasis;
+        private BigDecimal approvedBudgetAmount;
         private String status;
         private Long createdByUserId;
         private LocalDateTime createTime;

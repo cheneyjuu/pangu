@@ -5,6 +5,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pangu.application.support.PayloadHasher;
 import com.pangu.application.voting.FormalVotingRulePolicy;
+import com.pangu.application.voting.VotingDecisionResultProjector;
 import com.pangu.application.voting.VotingExecutionService;
 import com.pangu.domain.context.UserContext;
 import com.pangu.domain.context.UserContextHolder;
@@ -37,6 +38,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -65,6 +67,7 @@ public class RepairProjectVotingService {
     private final OwnersAssemblyRuleRepository ruleRepository;
     private final VotingSubjectRepository subjectRepository;
     private final VotingResultRepository resultRepository;
+    private final VotingDecisionResultProjector votingDecisionResultProjector;
     private final VotingExecutionService votingExecutionService;
     private final FormalVotingRulePolicy rulePolicy;
     private final UserContextHolder userContextHolder;
@@ -77,9 +80,10 @@ public class RepairProjectVotingService {
     public Details prepare(Long projectId, PrepareCommand command) {
         UserContext actor = requireGovernanceActor();
         if (command == null || command.expectedProjectVersion() == null
-                || command.collectionMode() == null || command.voteStartAt() == null
+                || command.collectionMode() == null || command.paperBallotTemplateAttachmentId() == null
+                || command.voteStartAt() == null
                 || command.voteEndAt() == null) {
-            throw invalid("项目版本、本次办理方式、开始时间和截止时间均为必填项");
+            throw invalid("项目版本、本次办理方式、纸质表决票模板、开始时间和截止时间均为必填项");
         }
         if (!command.voteEndAt().isAfter(command.voteStartAt())) {
             throw invalid("表决截止时间必须晚于开始时间");
@@ -101,6 +105,13 @@ public class RepairProjectVotingService {
         } catch (FormalVotingRulePolicy.UnsupportedRuleException ex) {
             throw conflict(ex.getMessage(), ex);
         }
+        RepairProject.Attachment paperBallotTemplate = requirePaperBallotTemplate(
+                project, command.paperBallotTemplateAttachmentId());
+        String votingSourceHash = PayloadHasher.sha256Hex(String.join("|",
+                plan.authorizationSnapshotHash(),
+                "PAPER_BALLOT_TEMPLATE",
+                paperBallotTemplate.attachmentId().toString(),
+                paperBallotTemplate.sha256()));
 
         List<AllocationRoom> allocationRooms = projectRepository.listAllocationRooms(
                 plan.planId(), project.tenantId());
@@ -121,7 +132,7 @@ public class RepairProjectVotingService {
         VotingExecutionPackage executionPackage = votingExecutionService.create(
                 new VotingExecutionService.CreatePackageCommand(
                         project.tenantId(), VotingExecutionPackage.BusinessType.REPAIR_PROJECT, plan.planId(),
-                        "REPAIR_AUTHORIZATION_PROPOSAL", plan.planId(), plan.authorizationSnapshotHash(),
+                        "REPAIR_AUTHORIZATION_PROPOSAL", plan.planId(), votingSourceHash,
                         "OWNERS_ASSEMBLY_RULE_VERSION", rule.ruleId(), rule.configurationSha256(),
                         VotingScope.REPAIR_ALLOCATION, plan.planId(), command.collectionMode(),
                         command.voteStartAt(), command.voteEndAt(), actor.userId()));
@@ -134,6 +145,7 @@ public class RepairProjectVotingService {
             link = votingRepository.insert(new RepairProjectVoting(
                     null, project.projectId(), plan.planId(), project.tenantId(), insertedSubject.getSubjectId(),
                     frozenPackage.getPackageId(), rule.ruleId(), rule.configurationSha256(),
+                    paperBallotTemplate.attachmentId(), paperBallotTemplate.sha256(),
                     command.collectionMode(), RepairProjectVoting.Status.PREPARED, null,
                     actor.userId(), preparedAt, null, null, null, null, 0L));
         } catch (DataIntegrityViolationException ex) {
@@ -149,9 +161,32 @@ public class RepairProjectVotingService {
                 "subjectId", insertedSubject.getSubjectId(),
                 "executionPackageId", frozenPackage.getPackageId(),
                 "ruleId", rule.ruleId(),
+                "paperBallotTemplateAttachmentId", paperBallotTemplate.attachmentId(),
+                "paperBallotTemplateHash", paperBallotTemplate.sha256(),
                 "collectionMode", command.collectionMode().name(),
                 "allocationRoomCount", allocationRooms.size()));
         return details(project, plan, link, insertedSubject, frozenPackage, rule);
+    }
+
+    /** 管理端只展示服务端按当前有效规则计算出的可选方式和最早开始时间。 */
+    @Transactional(readOnly = true)
+    public PreparationOptions preparationOptions(Long projectId) {
+        UserContext actor = requireGovernanceActor();
+        RepairProject project = projectRepository.findProject(projectId, actor.tenantId())
+                .orElseThrow(() -> notFound("维修工程项目不存在"));
+        requireAuthorizationInProgress(project);
+        requireFrozenPlan(project);
+        OwnersAssemblyRule rule = ruleRepository.findActive(project.tenantId())
+                .orElseThrow(() -> conflict("本小区尚未启用可用于维修事项的议事规则"));
+        FormalVotingRulePolicy.PreparationOptions options;
+        try {
+            options = rulePolicy.preparationOptions(rule, Instant.now());
+        } catch (FormalVotingRulePolicy.UnsupportedRuleException ex) {
+            throw conflict(ex.getMessage(), ex);
+        }
+        return new PreparationOptions(
+                rule.ruleName(), rule.ruleVersion(), options.allowedModes(), options.earliestVoteStartAt(),
+                options.validDeliveryMethods(), options.paperBallotSealRequired());
     }
 
     /** 到达开始时间后开启同一表决包，不能通过创建第二场表决绕过公示或通知期限。 */
@@ -222,7 +257,9 @@ public class RepairProjectVotingService {
             governanceRepository.insertGovernanceBasis(
                     project.projectId(), plan.planId(), project.tenantId(),
                     "OWNER_VOTING_DECISION", "VOTING_SUBJECT", subject.getSubjectId(), basisHash,
-                    null, null, null, null, null, actor.userId());
+                    plan.supplierSelectionMethod(), plan.supplierSelectionEvaluationRule(),
+                    plan.minimumInvitedSupplierCount(), plan.minimumValidQuoteCount(),
+                    plan.nonCompetitiveSelectionBasis(), plan.budgetTotal(), actor.userId());
             if (projectRepository.advanceStatus(
                     project.projectId(), project.tenantId(), Status.AUTHORIZATION_IN_PROGRESS,
                     Status.AUTHORIZED, project.version()) != 1) {
@@ -316,6 +353,25 @@ public class RepairProjectVotingService {
         }
     }
 
+    private RepairProject.Attachment requirePaperBallotTemplate(
+            RepairProject project, Long attachmentId) {
+        RepairProject.Attachment attachment = projectRepository.findAttachment(
+                        attachmentId, project.projectId(), project.tenantId())
+                .orElseThrow(() -> invalid("纸质表决票模板不属于当前维修项目"));
+        if (!"application/pdf".equalsIgnoreCase(attachment.contentType())) {
+            throw invalid("纸质表决票模板必须上传 PDF 原件");
+        }
+        String hash = attachment.sha256() == null
+                ? null : attachment.sha256().trim().toLowerCase(Locale.ROOT);
+        if (hash == null || !hash.matches("[0-9a-f]{64}")) {
+            throw invalid("纸质表决票模板缺少可核验的文件摘要");
+        }
+        return new RepairProject.Attachment(
+                attachment.attachmentId(), attachment.projectId(), attachment.tenantId(), attachment.objectKey(),
+                attachment.originalFileName(), attachment.contentType(), attachment.fileSize(), attachment.etag(),
+                hash, attachment.uploadedByAccountId(), attachment.uploadedByUserId(), attachment.createTime());
+    }
+
     private String buildSubjectContent(RepairProject project, PlanVersion plan, List<AllocationRoom> rooms) {
         BigDecimal totalArea = rooms.stream().map(AllocationRoom::buildArea)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
@@ -336,7 +392,9 @@ public class RepairProjectVotingService {
                             VotingSubject subject,
                             VotingExecutionPackage executionPackage,
                             OwnersAssemblyRule rule) {
-        VotingResultRepository.Snapshot result = resultRepository.findBySubjectId(subject.getSubjectId()).orElse(null);
+        VotingDecisionResultProjector.View result = resultRepository.findBySubjectId(subject.getSubjectId())
+                .map(votingDecisionResultProjector::project)
+                .orElse(null);
         return new Details(project, plan, link, subject, executionPackage, rule.ruleName(), rule.ruleVersion(), result);
     }
 
@@ -460,8 +518,19 @@ public class RepairProjectVotingService {
     public record PrepareCommand(
             Integer expectedProjectVersion,
             VotingExecutionPackage.CollectionMode collectionMode,
+            Long paperBallotTemplateAttachmentId,
             Instant voteStartAt,
             Instant voteEndAt
+    ) {
+    }
+
+    public record PreparationOptions(
+            String ruleName,
+            String ruleVersion,
+            Set<VotingExecutionPackage.CollectionMode> allowedModes,
+            Instant earliestVoteStartAt,
+            Set<com.pangu.domain.model.assembly.OwnersAssemblyRuleConfiguration.DeliveryMethod> validDeliveryMethods,
+            Boolean paperBallotSealRequired
     ) {
     }
 
@@ -476,7 +545,7 @@ public class RepairProjectVotingService {
             VotingExecutionPackage executionPackage,
             String ruleName,
             String ruleVersion,
-            VotingResultRepository.Snapshot result
+            VotingDecisionResultProjector.View result
     ) {
     }
 }

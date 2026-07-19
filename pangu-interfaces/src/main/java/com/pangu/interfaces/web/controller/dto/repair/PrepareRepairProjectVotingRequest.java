@@ -10,11 +10,12 @@ import java.time.Instant;
 public record PrepareRepairProjectVotingRequest(
         @NotNull Integer expectedProjectVersion,
         @NotNull VotingExecutionPackage.CollectionMode collectionMode,
+        @NotNull Long paperBallotTemplateAttachmentId,
         @NotNull Instant voteStartAt,
         @NotNull Instant voteEndAt
 ) {
     public RepairProjectVotingService.PrepareCommand toCommand() {
         return new RepairProjectVotingService.PrepareCommand(
-                expectedProjectVersion, collectionMode, voteStartAt, voteEndAt);
+                expectedProjectVersion, collectionMode, paperBallotTemplateAttachmentId, voteStartAt, voteEndAt);
     }
 }

@@ -164,6 +164,10 @@ public class AbstractVotingEngineSettleTest {
                 "三套房产总面积应累加 = 240");
         assertEquals(1L, result.getParticipatingOwnerCount(),
                 "同一自然人 uid 仅计 1 次人头");
+        assertEquals(0, new BigDecimal("240.00").compareTo(result.getSupportArea()),
+                "同一自然人的多个专有部分面积均应计入同意面积");
+        assertEquals(1L, result.getSupportOwnerCount(),
+                "同一自然人的多个专有部分均同意时，同意人数仍只计 1 人");
     }
 
     @Test

@@ -19,6 +19,10 @@ public class RepairPlanVersionRow {
     private String allocationRuleType;
     private String allocationRuleDescription;
     private String supplierSelectionMethod;
+    private String supplierSelectionEvaluationRule;
+    private Integer minimumInvitedSupplierCount;
+    private Integer minimumValidQuoteCount;
+    private String nonCompetitiveSelectionBasis;
     private String supplierSelectionReason;
     private String constructionManagementRequirements;
     private String evidenceRequirementsJson;

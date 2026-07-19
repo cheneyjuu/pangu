@@ -1,3 +1,4 @@
+// 关联业务：按重大共同决定门槛计算表决参与情况和同意、反对、弃权汇总。
 package com.pangu.domain.model.voting;
 
 import java.math.BigDecimal;
@@ -27,24 +28,17 @@ public class MajorDecisionEngine extends AbstractVotingEngine<VotingSubject, Vot
                                                           boolean quorumSatisfied,
                                                           VotingDecisionRule decisionRule) {
         
-        // 1. 基于 Stream 计算选择 SUPPORT 的专有面积总和
-        BigDecimal supportArea = validVotes.stream()
-                .filter(vote -> vote.getChoice() == VoteChoice.SUPPORT)
-                .map(VoteItem::getPropertyArea)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-
-        // 2. 计算赞成票人数
-        long supportOwnerCount = validVotes.stream()
-                .filter(vote -> vote.getChoice() == VoteChoice.SUPPORT)
-                .count();
+        ChoiceTally support = tallyChoice(validVotes, VoteChoice.SUPPORT);
+        ChoiceTally against = tallyChoice(validVotes, VoteChoice.AGAINST);
+        ChoiceTally abstain = tallyChoice(validVotes, VoteChoice.ABSTAIN);
 
         boolean passed = false;
 
         if (quorumSatisfied && participatingOwnerCount > 0 && participatingArea.compareTo(BigDecimal.ZERO) > 0) {
             boolean areaPassed = decisionRule.approvalAreaThreshold()
-                    .isSatisfied(supportArea, participatingArea);
+                    .isSatisfied(support.area(), participatingArea);
             boolean ownerPassed = decisionRule.approvalOwnerThreshold()
-                    .isSatisfied(supportOwnerCount, participatingOwnerCount);
+                    .isSatisfied(support.ownerCount(), participatingOwnerCount);
 
             passed = areaPassed && ownerPassed;
         }
@@ -57,8 +51,12 @@ public class MajorDecisionEngine extends AbstractVotingEngine<VotingSubject, Vot
                 .participatingOwnerCount(participatingOwnerCount)
                 .quorumSatisfied(quorumSatisfied)
                 .passed(passed)
-                .supportArea(supportArea)
-                .supportOwnerCount(supportOwnerCount)
+                .supportArea(support.area())
+                .supportOwnerCount(support.ownerCount())
+                .againstArea(against.area())
+                .againstOwnerCount(against.ownerCount())
+                .abstainArea(abstain.area())
+                .abstainOwnerCount(abstain.ownerCount())
                 .build();
     }
 }

@@ -75,6 +75,12 @@ public class OwnersAssemblyController extends BaseController {
                 .map(OwnersAssemblySessionResponse::from).toList());
     }
 
+    @GetMapping("/owners-assemblies/preparation-options")
+    @PreAuthorize("hasAnyAuthority('voting:subject:create','owners-assembly:formal:manage')")
+    public Result<OwnersAssemblyApplicationService.PreparationOptions> preparationOptions() {
+        return success(service.preparationOptions(requireTenantId()));
+    }
+
     @GetMapping("/owners-assemblies/{sessionId}/workspace")
     @PreAuthorize("hasAnyAuthority('voting:subject:create','voting:subject:publish','voting:subject:audit','owners-assembly:formal:manage')")
     public Result<OwnersAssemblyWorkspaceResponse> workspace(@PathVariable("sessionId") Long sessionId) {

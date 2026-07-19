@@ -158,5 +158,6 @@ public interface RepairProjectGovernanceMapper {
                               @Param("minimumInvitedSupplierCount") Integer minimumInvitedSupplierCount,
                               @Param("minimumValidQuoteCount") Integer minimumValidQuoteCount,
                               @Param("nonCompetitiveSelectionBasis") String nonCompetitiveSelectionBasis,
+                              @Param("approvedBudgetAmount") BigDecimal approvedBudgetAmount,
                               @Param("createdByUserId") Long createdByUserId);
 }

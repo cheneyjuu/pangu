@@ -16,6 +16,7 @@ import com.pangu.domain.model.voting.PaperVotingDelivery;
 import com.pangu.domain.model.voting.VotingExecutionPackage;
 import com.pangu.domain.model.voting.VotingElectorateSnapshot;
 import com.pangu.domain.repository.OwnersAssemblyRuleRepository;
+import com.pangu.domain.repository.PropertyBindingRepository;
 import com.pangu.domain.repository.RepairProjectRepository;
 import com.pangu.domain.repository.RepairProjectVotingRepository;
 import com.pangu.domain.repository.VotingExecutionRepository;
@@ -23,9 +24,11 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 
 import static com.pangu.application.repair.RepairWorkOrderApplicationException.Reason.FORBIDDEN;
 import static com.pangu.application.repair.RepairWorkOrderApplicationException.Reason.INVALID_STATUS;
@@ -45,6 +48,7 @@ public class RepairProjectVotingChannelService {
     private final RepairProjectRepository projectRepository;
     private final RepairProjectVotingRepository repairVotingRepository;
     private final OwnersAssemblyRuleRepository ruleRepository;
+    private final PropertyBindingRepository propertyBindingRepository;
     private final VotingExecutionRepository votingExecutionRepository;
     private final PaperVotingService paperVotingService;
     private final OnlineVotingService onlineVotingService;
@@ -97,7 +101,7 @@ public class RepairProjectVotingChannelService {
         try {
             return paperVotingService.registerBallot(new PaperVotingService.RegisterBallotCommand(
                     context.executionPackage().getPackageId(), context.project().tenantId(), command.opid(),
-                    requireText(command.ballotNumber(), "选票编号"), context.executionPackage().getPackageHash(),
+                    requireText(command.ballotNumber(), "选票编号"), requireTemplateHash(context),
                     "REPAIR_PROJECT_ATTACHMENT", ballot.attachmentId(), ballot.sha256(),
                     context.actor().userId(), command.receivedAt()));
         } catch (PaperVotingException ex) {
@@ -128,7 +132,7 @@ public class RepairProjectVotingChannelService {
         try {
             return paperVotingService.submitEntry(new PaperVotingService.SubmitEntryCommand(
                     context.executionPackage().getPackageId(), ballotId, context.project().tenantId(),
-                    context.executionPackage().getPackageHash(), items, context.actor().userId(), Instant.now()));
+                    requireTemplateHash(context), items, context.actor().userId(), Instant.now()));
         } catch (PaperVotingException ex) {
             throw translate(ex);
         }
@@ -152,16 +156,43 @@ public class RepairProjectVotingChannelService {
     @Transactional(readOnly = true)
     public Workbench workbench(Long projectId) {
         Context context = context(projectId);
+        RepairProject.Attachment template = projectRepository.findAttachment(
+                        context.voting().paperBallotTemplateAttachmentId(),
+                        context.project().projectId(), context.project().tenantId())
+                .filter(item -> Objects.equals(item.sha256(), context.voting().paperBallotTemplateHash()))
+                .orElseThrow(() -> conflict("本次表决锁定的纸质表决票模板无法核对"));
         return new Workbench(
                 votingExecutionRepository.findElectorateSnapshot(
                                 context.executionPackage().getElectorateSnapshotId(), context.project().tenantId())
-                        .map(VotingElectorateSnapshot::items).orElseGet(List::of),
+                        .map(snapshot -> snapshot.items().stream()
+                                .map(item -> toElectorateWorkbenchItem(item, context.project().tenantId()))
+                                .toList())
+                        .orElseGet(List::of),
                 paperVotingService.getWorkbench(
                         context.executionPackage().getPackageId(), context.project().tenantId()),
                 onlineVotingService.managementProgress(
                         context.executionPackage().getPackageId(), context.project().tenantId()),
                 onlineVotingService.listPaperAssistanceRequests(
-                        context.executionPackage().getPackageId(), context.project().tenantId()));
+                        context.executionPackage().getPackageId(), context.project().tenantId()),
+                context.rule().configuration().validDeliveryMethods(),
+                Boolean.TRUE.equals(context.rule().configuration().paperBallotSealRequired()),
+                new PaperBallotTemplate(
+                        template.attachmentId(), template.originalFileName(), template.contentType(),
+                        template.fileSize(), template.sha256()),
+                context.actor().userId());
+    }
+
+    private ElectorateWorkbenchItem toElectorateWorkbenchItem(
+            VotingElectorateSnapshot.Item item, Long tenantId) {
+        PropertyBindingRepository.Roster roster = propertyBindingRepository.findRosterById(item.rosterId());
+        if (roster == null || !tenantId.equals(roster.tenantId())
+                || !item.roomId().equals(roster.roomId())
+                || !item.buildingId().equals(roster.buildingId())) {
+            throw conflict("冻结房屋名册与当前建筑名册无法对应，请先核对名册");
+        }
+        return new ElectorateWorkbenchItem(
+                item.snapshotItemId(), item.roomId(), item.buildingId(), item.certifiedArea(),
+                item.representativeOpid(), roster.buildingName(), roster.unitName(), roster.roomName());
     }
 
     private Context context(Long projectId) {
@@ -192,6 +223,14 @@ public class RepairProjectVotingChannelService {
         if (!context.rule().configuration().validDeliveryMethods().contains(method)) {
             throw conflict("本次表决依据不认可所选送达方式");
         }
+    }
+
+    private String requireTemplateHash(Context context) {
+        String hash = context.voting().paperBallotTemplateHash();
+        if (hash == null || !hash.matches("[0-9a-f]{64}")) {
+            throw conflict("本次表决未锁定可核验的纸质表决票模板");
+        }
+        return hash;
     }
 
     private void requirePaperOpen(VotingExecutionPackage executionPackage) {
@@ -276,16 +315,42 @@ public class RepairProjectVotingChannelService {
     }
 
     public record Workbench(
-            List<VotingElectorateSnapshot.Item> electorate,
+            List<ElectorateWorkbenchItem> electorate,
             PaperVotingService.Workbench paper,
             OnlineVotingService.ManagementProgress online,
-            List<com.pangu.domain.model.voting.OnlinePaperAssistanceRequest> paperAssistanceRequests
+            List<com.pangu.domain.model.voting.OnlinePaperAssistanceRequest> paperAssistanceRequests,
+            Set<OwnersAssemblyRuleConfiguration.DeliveryMethod> validDeliveryMethods,
+            boolean paperBallotSealRequired,
+            PaperBallotTemplate paperBallotTemplate,
+            Long currentActorUserId
     ) {
         public Workbench {
             electorate = electorate == null ? List.of() : List.copyOf(electorate);
             paperAssistanceRequests = paperAssistanceRequests == null
                     ? List.of() : List.copyOf(paperAssistanceRequests);
+            validDeliveryMethods = validDeliveryMethods == null ? Set.of() : Set.copyOf(validDeliveryMethods);
         }
+    }
+
+    public record ElectorateWorkbenchItem(
+            Long snapshotItemId,
+            Long roomId,
+            Long buildingId,
+            BigDecimal certifiedArea,
+            Long representativeOpid,
+            String buildingName,
+            String unitName,
+            String roomName
+    ) {
+    }
+
+    public record PaperBallotTemplate(
+            Long attachmentId,
+            String originalFileName,
+            String contentType,
+            Long fileSize,
+            String sha256
+    ) {
     }
 
     private record Context(

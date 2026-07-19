@@ -53,6 +53,11 @@ public class VotingDecisionEngineTest {
         VotingResult<VotingSubject> result = generalDecisionEngine.settle(subject, votes, denom(totalArea, totalOwnerCount));
         assertTrue(result.isQuorumSatisfied(), "双参与开会率应该满足");
         assertTrue(result.isPassed(), "5票赞成/8票参与，应该判定表决通过");
+        assertEquals(5L, result.getSupportOwnerCount());
+        assertEquals(3L, result.getAgainstOwnerCount());
+        assertEquals(0L, result.getAbstainOwnerCount());
+        assertEquals(0, new BigDecimal("300.00").compareTo(result.getAgainstArea()));
+        assertEquals(0, BigDecimal.ZERO.compareTo(result.getAbstainArea()));
 
         // 2. 模拟 4 户赞成 (4 * 100 = 400 ㎡，正好是 400/800 = 50%，未过半数，应当不通过)
         List<VoteItem> votesHalf = new ArrayList<>();

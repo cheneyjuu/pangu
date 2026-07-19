@@ -217,7 +217,7 @@ class OwnersAssemblyFlowTest {
     }
 
     @Test
-    void formalArrangementBlocksRuleCapabilitiesWithoutACompleteEvidenceStateMachine() throws Exception {
+    void formalArrangementKeepsConfiguredResultAnnouncementPeriod() throws Exception {
         String propertyToken = token(ACCOUNT_PROPERTY_MANAGER, USER_PROPERTY_MANAGER);
         String directorToken = token(ACCOUNT_DIRECTOR, USER_DIRECTOR);
         activateRule(propertyToken, directorToken, "需要结果公告", 7, 0, 7);
@@ -227,8 +227,55 @@ class OwnersAssemblyFlowTest {
                         .header("Authorization", "Bearer " + directorToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(arrangementRequest(sessionId, directorToken)))
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.msg").value("当前系统尚未建模独立的结果公告阶段；规则要求结果公告期限时不能进入正式办理"));
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/v1/owners-assemblies/" + sessionId + "/workspace")
+                        .header("Authorization", "Bearer " + directorToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.ruleSnapshot.resultAnnouncementDays", is(7)));
+    }
+
+    @Test
+    void preparationOptionsComeFromActiveRuleInsteadOfClientDefaults() throws Exception {
+        String propertyToken = token(ACCOUNT_PROPERTY_MANAGER, USER_PROPERTY_MANAGER);
+        String directorToken = token(ACCOUNT_DIRECTOR, USER_DIRECTOR);
+        activateRule(propertyToken, directorToken, "2026-IT-preparation-options-" + System.nanoTime(), 7, 10, 5);
+
+        mockMvc.perform(get("/api/v1/owners-assemblies/preparation-options")
+                        .header("Authorization", "Bearer " + directorToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.allowedPreparationModes", contains("WRITTEN_DECISION")))
+                .andExpect(jsonPath("$.data.planPublicityDays", is(7)))
+                .andExpect(jsonPath("$.data.meetingNoticeDays", is(10)))
+                .andExpect(jsonPath("$.data.resultAnnouncementDays", is(5)))
+                .andExpect(jsonPath("$.data.paperBallotSealRequired", is(true)))
+                .andExpect(jsonPath("$.data.earliestVoteStartAt").isNotEmpty());
+    }
+
+    @Test
+    void formalArrangementRequiresPdfPaperBallotTemplate() throws Exception {
+        String propertyToken = token(ACCOUNT_PROPERTY_MANAGER, USER_PROPERTY_MANAGER);
+        String directorToken = token(ACCOUNT_DIRECTOR, USER_DIRECTOR);
+        activateRule(propertyToken, directorToken, "2026-IT-pdf-ballot-" + System.nanoTime(), 0, 0, 0);
+        long sessionId = prepareFormalArrangement(directorToken);
+        long noticeId = uploadMaterial(
+                directorToken, sessionId, "PUBLIC_NOTICE", "公告.pdf", "application/pdf", "notice");
+        long planId = uploadMaterial(
+                directorToken, sessionId, "PLAN_ATTACHMENT", "方案.pdf", "application/pdf", "plan");
+        long ballotId = uploadMaterial(
+                directorToken, sessionId, "PAPER_BALLOT_TEMPLATE", "票样.png", "image/png", "ballot-image");
+
+        mockMvc.perform(post("/api/v1/owners-assemblies/" + sessionId + "/arrangement")
+                        .header("Authorization", "Bearer " + directorToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "voteStartAt", Instant.now().plus(1, ChronoUnit.MINUTES).toString(),
+                                "voteEndAt", Instant.now().plus(1, ChronoUnit.HOURS).toString(),
+                                "publicNoticeMaterialId", noticeId,
+                                "planAttachmentMaterialIds", List.of(planId),
+                                "ballotTemplateMaterialId", ballotId))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.msg", is("正式纸质表决票样必须上传 PDF 原件")));
     }
 
     @Test
@@ -321,6 +368,8 @@ class OwnersAssemblyFlowTest {
                 .andExpect(jsonPath("$.data.paperBallotTemplate.fileName", is("盖章选票模板.pdf")))
                 .andExpect(jsonPath("$.data.participation.eligible", is(true)))
                 .andExpect(jsonPath("$.data.participation.participated", is(false)))
+                .andExpect(jsonPath("$.data.participation.properties[0].buildingName").isNotEmpty())
+                .andExpect(jsonPath("$.data.participation.properties[0].roomName").isNotEmpty())
                 .andExpect(jsonPath("$.data.subjects[0].status", is("PUBLISHED")))
                 .andExpect(jsonPath("$.data.subjects[0].choice").doesNotExist())
                 .andExpect(jsonPath("$.data.publicNotice.objectKey").doesNotExist());
@@ -333,7 +382,7 @@ class OwnersAssemblyFlowTest {
         String committeeToken = token(ACCOUNT_COMMITTEE_MEMBER, USER_COMMITTEE_MEMBER);
         activateRule(propertyToken, directorToken, "2026-IT-unified-ledger-" + System.nanoTime(), 0, 0, 0);
         long sessionId = prepareFormalArrangement(directorToken);
-        Instant voteStartAt = Instant.now().minus(1, ChronoUnit.MINUTES);
+        Instant voteStartAt = Instant.now().plus(1, ChronoUnit.MINUTES);
         Instant voteEndAt = Instant.now().plus(1, ChronoUnit.HOURS);
 
         mockMvc.perform(post("/api/v1/owners-assemblies/" + sessionId + "/arrangement")
@@ -344,6 +393,7 @@ class OwnersAssemblyFlowTest {
         mockMvc.perform(post("/api/v1/owners-assemblies/" + sessionId + "/publish")
                         .header("Authorization", "Bearer " + directorToken))
                 .andExpect(status().isOk());
+        openVotingWindowForTest(sessionId);
         mockMvc.perform(post("/api/v1/owners-assemblies/" + sessionId + "/start-voting")
                         .header("Authorization", "Bearer " + directorToken))
                 .andExpect(status().isOk())
@@ -385,7 +435,7 @@ class OwnersAssemblyFlowTest {
 
         mockMvc.perform(post("/api/v1/owners-assemblies/" + sessionId
                         + "/paper-deliveries/" + paperDeliveryId + "/review")
-                        .header("Authorization", "Bearer " + directorToken)
+                        .header("Authorization", "Bearer " + committeeToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(Map.of("decision", "CONFIRM"))))
                 .andExpect(status().isOk())
@@ -582,7 +632,7 @@ class OwnersAssemblyFlowTest {
         String directorToken = token(ACCOUNT_DIRECTOR, USER_DIRECTOR);
         activateOnlineRule(propertyToken, directorToken, "2026-IT-online-" + System.nanoTime());
         long sessionId = prepareInternetArrangement(directorToken, 2);
-        Instant voteStartAt = Instant.now().minus(1, ChronoUnit.MINUTES);
+        Instant voteStartAt = Instant.now().plus(1, ChronoUnit.MINUTES);
         Instant voteEndAt = Instant.now().plus(1, ChronoUnit.HOURS);
 
         mockMvc.perform(post("/api/v1/owners-assemblies/" + sessionId + "/arrangement")
@@ -594,6 +644,7 @@ class OwnersAssemblyFlowTest {
         mockMvc.perform(post("/api/v1/owners-assemblies/" + sessionId + "/publish")
                         .header("Authorization", "Bearer " + directorToken))
                 .andExpect(status().isOk());
+        openVotingWindowForTest(sessionId);
         mockMvc.perform(post("/api/v1/owners-assemblies/" + sessionId + "/start-voting")
                         .header("Authorization", "Bearer " + directorToken))
                 .andExpect(status().isOk());
@@ -766,7 +817,7 @@ class OwnersAssemblyFlowTest {
         String directorToken = token(ACCOUNT_DIRECTOR, USER_DIRECTOR);
         activateOnlineRule(propertyToken, directorToken, "2026-IT-paper-assist-" + System.nanoTime());
         long sessionId = prepareInternetArrangement(directorToken, 1);
-        Instant voteStartAt = Instant.now().minus(1, ChronoUnit.MINUTES);
+        Instant voteStartAt = Instant.now().plus(1, ChronoUnit.MINUTES);
         Instant voteEndAt = Instant.now().plus(1, ChronoUnit.HOURS);
         mockMvc.perform(post("/api/v1/owners-assemblies/" + sessionId + "/arrangement")
                         .header("Authorization", "Bearer " + directorToken)
@@ -776,6 +827,7 @@ class OwnersAssemblyFlowTest {
         mockMvc.perform(post("/api/v1/owners-assemblies/" + sessionId + "/publish")
                         .header("Authorization", "Bearer " + directorToken))
                 .andExpect(status().isOk());
+        openVotingWindowForTest(sessionId);
         mockMvc.perform(post("/api/v1/owners-assemblies/" + sessionId + "/start-voting")
                         .header("Authorization", "Bearer " + directorToken))
                 .andExpect(status().isOk());
@@ -811,6 +863,14 @@ class OwnersAssemblyFlowTest {
                 .andExpect(jsonPath("$.data.status", is("REQUESTED")))
                 .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
         long requestId = objectMapper.readTree(assistanceResponse).path("data").path("requestId").asLong();
+
+        mockMvc.perform(get("/api/v1/me/owners-assembly-disclosures/" + legacyPackageId)
+                        .header("Authorization", "Bearer " + ownerToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.participation.properties[?(@.opid == 9)].paperAssistanceRequestId",
+                        contains((int) requestId)))
+                .andExpect(jsonPath("$.data.participation.properties[?(@.opid == 9)].paperAssistanceStatus",
+                        contains("REQUESTED")));
 
         mockMvc.perform(get("/api/v1/owners-assemblies/" + sessionId + "/voting-workbench")
                         .header("Authorization", "Bearer " + directorToken))
@@ -853,7 +913,7 @@ class OwnersAssemblyFlowTest {
         String committeeToken = token(ACCOUNT_COMMITTEE_MEMBER, USER_COMMITTEE_MEMBER);
         activateMixedRule(propertyToken, directorToken, "2026-IT-mixed-" + System.nanoTime());
         long sessionId = prepareMixedArrangement(directorToken, 1);
-        Instant voteStartAt = Instant.now().minus(1, ChronoUnit.MINUTES);
+        Instant voteStartAt = Instant.now().plus(1, ChronoUnit.MINUTES);
         Instant voteEndAt = Instant.now().plus(1, ChronoUnit.HOURS);
 
         mockMvc.perform(post("/api/v1/owners-assemblies/" + sessionId + "/arrangement")
@@ -865,6 +925,7 @@ class OwnersAssemblyFlowTest {
         mockMvc.perform(post("/api/v1/owners-assemblies/" + sessionId + "/publish")
                         .header("Authorization", "Bearer " + directorToken))
                 .andExpect(status().isOk());
+        openVotingWindowForTest(sessionId);
         mockMvc.perform(post("/api/v1/owners-assemblies/" + sessionId + "/start-voting")
                         .header("Authorization", "Bearer " + directorToken))
                 .andExpect(status().isOk());
@@ -901,7 +962,7 @@ class OwnersAssemblyFlowTest {
         long deliveryEvidenceId = uploadMaterial(
                 directorToken, sessionId, "DELIVERY_EVIDENCE", "并行纸票送达凭证.pdf",
                 "application/pdf", "mixed-delivery");
-        confirmPaperDelivery(directorToken, sessionId, 10, deliveryEvidenceId);
+        confirmPaperDelivery(directorToken, committeeToken, sessionId, 10, deliveryEvidenceId);
         long paperMaterialId = uploadMaterial(
                 directorToken, sessionId, "PAPER_BALLOT", "并行纸票原件.pdf",
                 "application/pdf", "mixed-paper-opid-10");
@@ -923,7 +984,7 @@ class OwnersAssemblyFlowTest {
         long duplicateDeliveryEvidenceId = uploadMaterial(
                 directorToken, sessionId, "DELIVERY_EVIDENCE", "线上完成后纸票送达凭证.pdf",
                 "application/pdf", "mixed-duplicate-delivery");
-        confirmPaperDelivery(directorToken, sessionId, 9, duplicateDeliveryEvidenceId);
+        confirmPaperDelivery(directorToken, committeeToken, sessionId, 9, duplicateDeliveryEvidenceId);
         long duplicateMaterialId = uploadMaterial(
                 directorToken, sessionId, "PAPER_BALLOT", "线上完成后收到的纸票.pdf",
                 "application/pdf", "mixed-paper-opid-9");
@@ -1045,6 +1106,28 @@ class OwnersAssemblyFlowTest {
                 token,
                 Instant.now().plus(8, ChronoUnit.DAYS),
                 Instant.now().plus(15, ChronoUnit.DAYS));
+    }
+
+    /**
+     * 集成测试完成真实确认和发布后，仅把测试会次的时钟推进到收票期；生产代码仍禁止倒填开始时间。
+     */
+    private void openVotingWindowForTest(long sessionId) {
+        Long packageId = jdbcTemplate.queryForObject(
+                "SELECT package_id FROM t_owners_assembly_package WHERE session_id = ?", Long.class, sessionId);
+        jdbcTemplate.update(
+                "UPDATE t_owners_assembly_package SET vote_start_at = CURRENT_TIMESTAMP - INTERVAL '1 minute' WHERE package_id = ?",
+                packageId);
+        jdbcTemplate.update(
+                "UPDATE t_voting_execution_package SET vote_start_at = CURRENT_TIMESTAMP - INTERVAL '1 minute' "
+                        + "WHERE business_type = 'OWNERS_ASSEMBLY' AND business_reference_id = ?",
+                packageId);
+        jdbcTemplate.update("""
+                UPDATE t_voting_subject
+                SET vote_start_at = CURRENT_TIMESTAMP - INTERVAL '1 minute'
+                WHERE subject_id IN (
+                    SELECT subject_id FROM t_owners_assembly_subject WHERE package_id = ?
+                )
+                """, packageId);
     }
 
     private String arrangementRequest(long sessionId,
@@ -1292,9 +1375,13 @@ class OwnersAssemblyFlowTest {
     }
 
     private long confirmPaperDelivery(
-            String token, long sessionId, long opid, long evidenceMaterialId) throws Exception {
+            String recorderToken,
+            String reviewerToken,
+            long sessionId,
+            long opid,
+            long evidenceMaterialId) throws Exception {
         String response = mockMvc.perform(post("/api/v1/owners-assemblies/" + sessionId + "/paper-deliveries")
-                        .header("Authorization", "Bearer " + token)
+                        .header("Authorization", "Bearer " + recorderToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(Map.of(
                                 "opid", opid,
@@ -1307,7 +1394,7 @@ class OwnersAssemblyFlowTest {
         long deliveryId = objectMapper.readTree(response).path("data").path("paperDeliveryId").asLong();
         mockMvc.perform(post("/api/v1/owners-assemblies/" + sessionId
                         + "/paper-deliveries/" + deliveryId + "/review")
-                        .header("Authorization", "Bearer " + token)
+                        .header("Authorization", "Bearer " + reviewerToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(Map.of("decision", "CONFIRM"))))
                 .andExpect(status().isOk());
