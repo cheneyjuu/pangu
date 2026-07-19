@@ -270,6 +270,14 @@
           AND ballot.valid_flag = 1
     </select>
 
+    <select id="countAudits" resultType="long">
+        SELECT COUNT(*)
+        FROM t_voting_execution_audit
+        WHERE package_id = #{packageId}
+          AND tenant_id = #{tenantId}
+          AND event_type = #{eventType}
+    </select>
+
     <insert id="insertAudit">
         INSERT INTO t_voting_execution_audit (
             package_id, tenant_id, event_type, from_status, to_status,

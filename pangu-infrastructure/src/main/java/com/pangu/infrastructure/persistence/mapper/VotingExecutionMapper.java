@@ -67,6 +67,10 @@ public interface VotingExecutionMapper {
                                               @Param("electorateItemId") Long electorateItemId,
                                               @Param("tenantId") Long tenantId);
 
+    long countAudits(@Param("packageId") Long packageId,
+                     @Param("tenantId") Long tenantId,
+                     @Param("eventType") String eventType);
+
     int insertAudit(@Param("packageId") Long packageId,
                     @Param("tenantId") Long tenantId,
                     @Param("eventType") String eventType,

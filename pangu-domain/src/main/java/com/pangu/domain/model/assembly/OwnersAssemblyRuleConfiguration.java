@@ -49,6 +49,10 @@ public record OwnersAssemblyRuleConfiguration(
     /** 规则允许的业主大会形式。 */
     public enum MeetingForm {
         WRITTEN_CONSULTATION,
+        /** 以互联网为主要办理方式，并为确有困难且提出要求的业主提供纸质表决票。 */
+        INTERNET,
+        /** 仅在本小区有效规则明确允许时，向符合条件的业主同时开放纸质与线上渠道。 */
+        ONLINE_AND_OFFLINE,
         OFFLINE_MEETING
     }
 

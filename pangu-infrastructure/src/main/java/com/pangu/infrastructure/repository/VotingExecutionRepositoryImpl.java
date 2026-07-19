@@ -204,6 +204,11 @@ public class VotingExecutionRepositoryImpl implements VotingExecutionRepository 
     }
 
     @Override
+    public long countAudits(Long packageId, Long tenantId, String eventType) {
+        return mapper.countAudits(packageId, tenantId, eventType);
+    }
+
+    @Override
     public void insertAudit(Long packageId,
                             Long tenantId,
                             String eventType,

@@ -12,6 +12,7 @@ import com.pangu.application.assembly.command.SubmitAssemblyPaperBallotEntryComm
 import com.pangu.application.assembly.command.UploadOwnersAssemblyMaterialCommand;
 import com.pangu.application.assembly.command.VoidAssemblyPaperBallotCommand;
 import com.pangu.application.support.PayloadHasher;
+import com.pangu.application.voting.OnlineVotingService;
 import com.pangu.application.voting.PaperVotingException;
 import com.pangu.application.voting.PaperVotingService;
 import com.pangu.application.voting.VotingExecutionService;
@@ -29,7 +30,10 @@ import com.pangu.domain.model.voting.SubjectType;
 import com.pangu.domain.model.voting.VoteChannel;
 import com.pangu.domain.model.voting.PaperBallot;
 import com.pangu.domain.model.voting.PaperBallotEntry;
+import com.pangu.domain.model.voting.PaperBallotOutcome;
 import com.pangu.domain.model.voting.PaperVotingDelivery;
+import com.pangu.domain.model.voting.OnlinePaperAssistanceRequest;
+import com.pangu.domain.model.voting.VotingElectorateSnapshot;
 import com.pangu.domain.model.voting.VotingExecutionPackage;
 import com.pangu.domain.model.voting.VotingScope;
 import com.pangu.domain.model.voting.VotingDecisionRule;
@@ -74,11 +78,9 @@ import static com.pangu.application.assembly.OwnersAssemblyApplicationException.
 @RequiredArgsConstructor
 public class OwnersAssemblyApplicationService {
 
-    /**
-     * 当前正式办理只实现了经规则确认的书面征求意见和纸质选票闭环。
-     * 线下会议、线上及混合表决所需的签到、代理、身份和重复票证据链尚未建模，不能伪装为可用流程。
-     */
-    private static final Set<String> SESSION_MODES = Set.of("WRITTEN_DECISION");
+    /** 当前已经有统一证据链的单次办理方式；线下集中会议的签到和代理仍未建模。 */
+    private static final Set<String> SESSION_MODES = Set.of(
+            "WRITTEN_DECISION", "INTERNET_DECISION", "ONLINE_AND_OFFLINE");
     private static final Set<String> MATERIAL_CONTENT_TYPES = Set.of(
             "application/pdf",
             "image/jpeg",
@@ -102,6 +104,7 @@ public class OwnersAssemblyApplicationService {
     private final VotingSubjectRepository votingSubjectRepository;
     private final VotingExecutionService votingExecutionService;
     private final PaperVotingService paperVotingService;
+    private final OnlineVotingService onlineVotingService;
     private final UserContextHolder userContextHolder;
 
     @Transactional
@@ -111,8 +114,7 @@ public class OwnersAssemblyApplicationService {
         String mode = normalize(command.preparationMode(), "preparationMode");
         if (!SESSION_MODES.contains(mode)) {
             throw new OwnersAssemblyApplicationException(
-                    PARAM_INVALID, "当前系统仅支持经规则确认的书面征求意见；线下会议、线上或混合表决的"
-                    + "签到、身份、代理与证据链尚未实现");
+                    PARAM_INVALID, "请选择纸质书面征询、互联网表决或规则明确允许的纸质与线上并行方式");
         }
         return ownersAssemblyRepository.insertSession(new OwnersAssemblySession(
                 null, command.tenantId(), title, mode, "PREPARING", command.createdByUserId(), null));
@@ -311,7 +313,7 @@ public class OwnersAssemblyApplicationService {
                         requireText(ruleSnapshot.configurationSha256(), "议事规则配置摘要"),
                         executionScope,
                         executionScopeReferenceId,
-                        VotingExecutionPackage.CollectionMode.PAPER,
+                        collectionModeOf(session, ruleSnapshot.configuration()),
                         arrangement.voteStartAt(),
                         arrangement.voteEndAt(),
                         actor.userId()));
@@ -342,7 +344,7 @@ public class OwnersAssemblyApplicationService {
                 ruleSnapshot.ruleSnapshotId(),
                 1,
                 STATUS_PACKAGE_DRAFT,
-                OwnersAssemblyRuleConfiguration.VotingChannelPolicy.PAPER_ONLY.name(),
+                ruleSnapshot.configuration().votingChannelPolicy().name(),
                 ruleSnapshot.configuration().planPublicityDays(),
                 requireText(announcementHash, "公告材料摘要"),
                 requireText(attachmentManifestHash, "方案附件摘要"),
@@ -592,7 +594,8 @@ public class OwnersAssemblyApplicationService {
         }
     }
 
-    public PaperVotingService.Workbench getPaperVotingWorkbench(Long sessionId, Long tenantId) {
+    @Transactional(readOnly = true)
+    public VotingWorkbench getVotingWorkbench(Long sessionId, Long tenantId) {
         requireSysContext(tenantId, null);
         OwnersAssemblySession session = ownersAssemblyRepository.findSession(sessionId, tenantId)
                 .orElseThrow(() -> new OwnersAssemblyApplicationException(NOT_FOUND, "业主大会不存在"));
@@ -600,10 +603,47 @@ public class OwnersAssemblyApplicationService {
         VotingExecutionPackage executionPackage = requireExecutionPackage(
                 arrangement, ownersAssemblyRepository.listSubjectIds(arrangement.packageId(), arrangement.tenantId()));
         try {
-            return paperVotingService.getWorkbench(executionPackage.getPackageId(), tenantId);
+            PaperVotingService.Workbench paper = paperVotingService.getWorkbench(
+                    executionPackage.getPackageId(), tenantId);
+            List<PaperAssistanceWorkbenchItem> assistance = onlineVotingService
+                    .listPaperAssistanceRequests(executionPackage.getPackageId(), tenantId).stream()
+                    .map(request -> toPaperAssistanceWorkbenchItem(executionPackage, paper, request))
+                    .toList();
+            OnlineVotingService.ManagementProgress online = onlineVotingService.managementProgress(
+                    executionPackage.getPackageId(), tenantId);
+            long duplicatePaperDecisionCount = paper.ballots().stream()
+                    .flatMap(item -> item.outcomes().stream())
+                    .filter(outcome -> outcome.status() == PaperBallotOutcome.Status.DUPLICATE)
+                    .count();
+            return new VotingWorkbench(paper, assistance, online, duplicatePaperDecisionCount);
         } catch (PaperVotingException ex) {
             throw translatePaperVotingFailure(ex);
         }
+    }
+
+    private PaperAssistanceWorkbenchItem toPaperAssistanceWorkbenchItem(
+            VotingExecutionPackage executionPackage,
+            PaperVotingService.Workbench paper,
+            OnlinePaperAssistanceRequest request) {
+        VotingElectorateSnapshot.Item electorate = votingExecutionService
+                .findElectorateItem(executionPackage.getPackageId(), executionPackage.getTenantId(), request.opid())
+                .orElseThrow(() -> new OwnersAssemblyApplicationException(
+                        INVALID_STATUS, "纸质办理申请与冻结表决名册不一致"));
+        PaperAssistanceStage stage;
+        if (request.status() == OnlinePaperAssistanceRequest.Status.WITHDRAWN) {
+            stage = PaperAssistanceStage.WITHDRAWN;
+        } else if (paper.ballots().stream()
+                .anyMatch(item -> item.ballot().electorateItemId().equals(electorate.snapshotItemId())
+                        && item.ballot().status() == PaperBallot.Status.COMPLETED)) {
+            stage = PaperAssistanceStage.COMPLETED;
+        } else if (request.status() == OnlinePaperAssistanceRequest.Status.FULFILLED) {
+            stage = PaperAssistanceStage.PAPER_PROCESSING;
+        } else {
+            stage = PaperAssistanceStage.PENDING_PAPER_PROVISION;
+        }
+        return new PaperAssistanceWorkbenchItem(
+                request.requestId(), request.opid(), electorate.buildingId(), electorate.roomId(), stage,
+                request.requestedAt(), request.fulfilledAt(), request.withdrawnAt(), request.paperDeliveryId());
     }
 
     @Transactional
@@ -670,21 +710,10 @@ public class OwnersAssemblyApplicationService {
                 null);
     }
 
-    /**
-     * 本期只开放真实材料已覆盖的纸质书面征求意见。不能把尚无状态与证据模型的能力降级为默认行为。
-     */
+    /** 本次实际方式必须同时得到有效规则中的会议形式和渠道规则支持。 */
     private void requireSupportedFormalFlow(OwnersAssemblySession session,
                                             OwnersAssemblyRuleConfiguration configuration) {
-        if (!"WRITTEN_DECISION".equals(session.preparationMode())) {
-            throw new OwnersAssemblyApplicationException(
-                    INVALID_STATUS, "当前会议形式没有对应的正式办理状态机；仅支持书面征求意见");
-        }
-        if (configuration == null
-                || !configuration.allowedMeetingForms().contains(
-                OwnersAssemblyRuleConfiguration.MeetingForm.WRITTEN_CONSULTATION)) {
-            throw new OwnersAssemblyApplicationException(
-                    INVALID_STATUS, "当前有效议事规则未确认书面征求意见，不能进入正式办理");
-        }
+        collectionModeOf(session, configuration);
         requireSupportedFrozenRule(configuration);
         if (configuration.meetingNoticeDays() == null || configuration.meetingNoticeDays() != 0) {
             throw new OwnersAssemblyApplicationException(
@@ -706,11 +735,7 @@ public class OwnersAssemblyApplicationService {
         if (configuration.planPublicityDays() == null || configuration.planPublicityDays() < 0) {
             throw new OwnersAssemblyApplicationException(INVALID_STATUS, "冻结议事规则未明确有效的方案公示期限");
         }
-        if (configuration.votingChannelPolicy()
-                != OwnersAssemblyRuleConfiguration.VotingChannelPolicy.PAPER_ONLY) {
-            throw new OwnersAssemblyApplicationException(
-                    INVALID_STATUS, "当前系统只实现纸质选票闭环；线上或混合表决规则不能进入正式办理");
-        }
+        validateSupportedChannelRule(configuration);
         if (configuration.nonResponsePolicy()
                 != OwnersAssemblyRuleConfiguration.NonResponsePolicy.NOT_PARTICIPATED) {
             throw new OwnersAssemblyApplicationException(
@@ -720,11 +745,6 @@ public class OwnersAssemblyApplicationService {
                 != OwnersAssemblyRuleConfiguration.ProxyVotingPolicy.NOT_ALLOWED) {
             throw new OwnersAssemblyApplicationException(
                     INVALID_STATUS, "当前系统尚未建模代理授权、核验与存证，不能按允许委托的规则办理");
-        }
-        if (configuration.duplicateVotePolicy()
-                != OwnersAssemblyRuleConfiguration.DuplicateVotePolicy.NOT_APPLICABLE) {
-            throw new OwnersAssemblyApplicationException(
-                    INVALID_STATUS, "纸质单渠道表决的重复投票规则必须为不适用，不能使用平台默认替代");
         }
         if (configuration.validDeliveryMethods() == null || configuration.validDeliveryMethods().isEmpty()) {
             throw new OwnersAssemblyApplicationException(INVALID_STATUS, "冻结议事规则未明确有效送达方式");
@@ -740,6 +760,87 @@ public class OwnersAssemblyApplicationService {
             } catch (IllegalStateException ex) {
                 throw new OwnersAssemblyApplicationException(
                         INVALID_STATUS, "冻结议事规则的 " + type + " 事项计票口径不完整", ex);
+            }
+        }
+    }
+
+    /**
+     * 将会次选择映射为统一收票方式。互联网方式中的纸质票是按业主请求提供的协助渠道，
+     * 不能误映射成默认向所有人开放的纸电并行。
+     */
+    private VotingExecutionPackage.CollectionMode collectionModeOf(
+            OwnersAssemblySession session,
+            OwnersAssemblyRuleConfiguration configuration) {
+        if (configuration == null) {
+            throw new OwnersAssemblyApplicationException(INVALID_STATUS, "当前有效议事规则缺少结构化配置");
+        }
+        return switch (session.preparationMode()) {
+            case "WRITTEN_DECISION" -> requireMode(
+                    configuration,
+                    OwnersAssemblyRuleConfiguration.MeetingForm.WRITTEN_CONSULTATION,
+                    OwnersAssemblyRuleConfiguration.VotingChannelPolicy.PAPER_ONLY,
+                    VotingExecutionPackage.CollectionMode.PAPER,
+                    "当前有效议事规则未确认纸质书面征询");
+            case "INTERNET_DECISION" -> requireMode(
+                    configuration,
+                    OwnersAssemblyRuleConfiguration.MeetingForm.INTERNET,
+                    OwnersAssemblyRuleConfiguration.VotingChannelPolicy.ONLINE_ONLY,
+                    VotingExecutionPackage.CollectionMode.ONLINE_WITH_PAPER_ASSISTANCE,
+                    "当前有效议事规则未确认互联网表决及实名核验");
+            case "ONLINE_AND_OFFLINE" -> requireMode(
+                    configuration,
+                    OwnersAssemblyRuleConfiguration.MeetingForm.ONLINE_AND_OFFLINE,
+                    OwnersAssemblyRuleConfiguration.VotingChannelPolicy.PAPER_AND_ONLINE,
+                    VotingExecutionPackage.CollectionMode.PAPER_AND_ONLINE,
+                    "当前有效议事规则未明确允许纸质与线上并行");
+            default -> throw new OwnersAssemblyApplicationException(
+                    INVALID_STATUS, "本次会议形式尚无可执行的表决证据链");
+        };
+    }
+
+    private VotingExecutionPackage.CollectionMode requireMode(
+            OwnersAssemblyRuleConfiguration configuration,
+            OwnersAssemblyRuleConfiguration.MeetingForm meetingForm,
+            OwnersAssemblyRuleConfiguration.VotingChannelPolicy channelPolicy,
+            VotingExecutionPackage.CollectionMode collectionMode,
+            String message) {
+        if (!configuration.allowedMeetingForms().contains(meetingForm)
+                || configuration.votingChannelPolicy() != channelPolicy) {
+            throw new OwnersAssemblyApplicationException(INVALID_STATUS, message);
+        }
+        return collectionMode;
+    }
+
+    private void validateSupportedChannelRule(OwnersAssemblyRuleConfiguration configuration) {
+        switch (configuration.votingChannelPolicy()) {
+            case PAPER_ONLY -> {
+                if (configuration.duplicateVotePolicy()
+                        != OwnersAssemblyRuleConfiguration.DuplicateVotePolicy.NOT_APPLICABLE) {
+                    throw new OwnersAssemblyApplicationException(
+                            INVALID_STATUS, "纸质单渠道表决的重复投票规则应为不适用");
+                }
+            }
+            case ONLINE_ONLY -> {
+                if (!Boolean.TRUE.equals(configuration.onlineIdentityVerificationRequired())) {
+                    throw new OwnersAssemblyApplicationException(
+                            INVALID_STATUS, "互联网表决必须明确实名身份核验要求");
+                }
+                if (configuration.duplicateVotePolicy()
+                        != OwnersAssemblyRuleConfiguration.DuplicateVotePolicy.NOT_APPLICABLE) {
+                    throw new OwnersAssemblyApplicationException(
+                            INVALID_STATUS, "互联网表决的重复投票规则应为不适用");
+                }
+            }
+            case PAPER_AND_ONLINE -> {
+                if (!Boolean.TRUE.equals(configuration.onlineIdentityVerificationRequired())) {
+                    throw new OwnersAssemblyApplicationException(
+                            INVALID_STATUS, "纸质与线上并行必须明确实名身份核验要求");
+                }
+                if (configuration.duplicateVotePolicy()
+                        != OwnersAssemblyRuleConfiguration.DuplicateVotePolicy.FIRST_VALID_WINS) {
+                    throw new OwnersAssemblyApplicationException(
+                            INVALID_STATUS, "当前纸质与线上并行仅支持先形成的有效票计入，其他冲突规则尚无证据链");
+                }
             }
         }
     }
@@ -1075,6 +1176,38 @@ public class OwnersAssemblyApplicationService {
                 ballotPackage.voteStartAt().toString(),
                 ballotPackage.voteEndAt().toString(),
                 subjectIds.toString()));
+    }
+
+    /** 管理端办理台只暴露纸票记录、协助进度和线上汇总，不返回线上票面选择。 */
+    public record VotingWorkbench(
+            PaperVotingService.Workbench paper,
+            List<PaperAssistanceWorkbenchItem> paperAssistance,
+            OnlineVotingService.ManagementProgress online,
+            long duplicatePaperDecisionCount
+    ) {
+        public VotingWorkbench {
+            paperAssistance = paperAssistance == null ? List.of() : List.copyOf(paperAssistance);
+        }
+    }
+
+    public record PaperAssistanceWorkbenchItem(
+            Long requestId,
+            Long opid,
+            Long buildingId,
+            Long roomId,
+            PaperAssistanceStage stage,
+            Instant requestedAt,
+            Instant fulfilledAt,
+            Instant withdrawnAt,
+            Long paperDeliveryId
+    ) {
+    }
+
+    public enum PaperAssistanceStage {
+        PENDING_PAPER_PROVISION,
+        PAPER_PROCESSING,
+        COMPLETED,
+        WITHDRAWN
     }
 
     private String normalize(String value, String field) {

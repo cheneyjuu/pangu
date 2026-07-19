@@ -29,7 +29,7 @@ import com.pangu.interfaces.web.controller.dto.assembly.PaperBallotEntryResponse
 import com.pangu.interfaces.web.controller.dto.assembly.PaperBallotResponse;
 import com.pangu.interfaces.web.controller.dto.assembly.PaperBallotReviewResponse;
 import com.pangu.interfaces.web.controller.dto.assembly.PaperVotingDeliveryResponse;
-import com.pangu.interfaces.web.controller.dto.assembly.PaperVotingWorkbenchResponse;
+import com.pangu.interfaces.web.controller.dto.assembly.OwnersAssemblyVotingWorkbenchResponse;
 import com.pangu.interfaces.web.controller.dto.assembly.RegisterAssemblyPaperBallotRequest;
 import com.pangu.interfaces.web.controller.dto.assembly.ReviewPaperVotingRecordRequest;
 import com.pangu.interfaces.web.controller.dto.assembly.SubmitAssemblyPaperBallotEntryRequest;
@@ -275,12 +275,12 @@ public class OwnersAssemblyController extends BaseController {
                 PaperBallotReviewResponse.from(result));
     }
 
-    @GetMapping("/owners-assemblies/{sessionId}/paper-workbench")
+    @GetMapping("/owners-assemblies/{sessionId}/voting-workbench")
     @PreAuthorize("hasAuthority('voting:subject:audit')")
-    public Result<PaperVotingWorkbenchResponse> paperVotingWorkbench(
+    public Result<OwnersAssemblyVotingWorkbenchResponse> votingWorkbench(
             @PathVariable("sessionId") Long sessionId) {
-        return success(PaperVotingWorkbenchResponse.from(
-                service.getPaperVotingWorkbench(sessionId, requireTenantId())));
+        return success(OwnersAssemblyVotingWorkbenchResponse.from(
+                service.getVotingWorkbench(sessionId, requireTenantId())));
     }
 
     private Long requireTenantId() {

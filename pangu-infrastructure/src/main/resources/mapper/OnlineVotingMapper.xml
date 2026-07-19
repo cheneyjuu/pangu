@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 关联业务：持久化线上实名表决的阅读确认、整包回执和纸质协助请求。 -->
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pangu.infrastructure.persistence.mapper.OnlineVotingMapper">
+
+    <insert id="insertAcknowledgement" useGeneratedKeys="true" keyProperty="acknowledgementId">
+        INSERT INTO t_online_voting_acknowledgement (
+            package_id, electorate_item_id, tenant_id, account_id, uid, opid,
+            package_hash, acknowledgement_hash, unified_delivery_id, acknowledged_at
+        ) VALUES (
+            #{packageId}, #{electorateItemId}, #{tenantId}, #{accountId}, #{uid}, #{opid},
+            #{packageHash}, #{acknowledgementHash}, #{unifiedDeliveryId}, #{acknowledgedAt}
+        )
+    </insert>
+
+    <select id="selectAcknowledgement" resultType="com.pangu.infrastructure.persistence.entity.OnlineVotingAcknowledgementRow">
+        SELECT acknowledgement_id, package_id, electorate_item_id, tenant_id, account_id, uid, opid,
+               package_hash, acknowledgement_hash, unified_delivery_id, acknowledged_at
+        FROM t_online_voting_acknowledgement
+        WHERE package_id = #{packageId}
+          AND electorate_item_id = #{electorateItemId}
+          AND tenant_id = #{tenantId}
+    </select>
+
+    <insert id="insertSubmission" useGeneratedKeys="true" keyProperty="submissionId">
+        INSERT INTO t_online_ballot_submission (
+            package_id, electorate_item_id, tenant_id, account_id, uid, opid,
+            idempotency_key, package_hash, choice_manifest_hash, confirmation_hash, status, submitted_at
+        ) VALUES (
+            #{packageId}, #{electorateItemId}, #{tenantId}, #{accountId}, #{uid}, #{opid},
+            #{idempotencyKey}, #{packageHash}, #{choiceManifestHash}, #{confirmationHash}, #{status}, #{submittedAt}
+        )
+    </insert>
+
+    <insert id="insertSubmissionItem" useGeneratedKeys="true" keyProperty="submissionItemId">
+        INSERT INTO t_online_ballot_submission_item (
+            submission_id, subject_id, choice, unified_ballot_id, item_confirmation_hash
+        ) VALUES (
+            #{submissionId}, #{subjectId}, #{choice}, #{unifiedBallotId}, #{itemConfirmationHash}
+        )
+    </insert>
+
+    <sql id="submissionColumns">
+        submission_id, package_id, electorate_item_id, tenant_id, account_id, uid, opid,
+        idempotency_key, package_hash, choice_manifest_hash, confirmation_hash, status, submitted_at
+    </sql>
+
+    <select id="selectSubmission" resultType="com.pangu.infrastructure.persistence.entity.OnlineBallotSubmissionRow">
+        SELECT <include refid="submissionColumns"/>
+        FROM t_online_ballot_submission
+        WHERE package_id = #{packageId}
+          AND electorate_item_id = #{electorateItemId}
+          AND tenant_id = #{tenantId}
+    </select>
+
+    <select id="selectSubmissionByIdempotencyKey" resultType="com.pangu.infrastructure.persistence.entity.OnlineBallotSubmissionRow">
+        SELECT <include refid="submissionColumns"/>
+        FROM t_online_ballot_submission
+        WHERE package_id = #{packageId}
+          AND tenant_id = #{tenantId}
+          AND idempotency_key = #{idempotencyKey}
+    </select>
+
+    <select id="countAcceptedSubmissions" resultType="long">
+        SELECT COUNT(*)
+        FROM t_online_ballot_submission
+        WHERE package_id = #{packageId}
+          AND tenant_id = #{tenantId}
+          AND status = 'ACCEPTED'
+    </select>
+
+    <select id="selectSubmissionItems" resultType="com.pangu.infrastructure.persistence.entity.OnlineBallotSubmissionItemRow">
+        SELECT submission_item_id, submission_id, subject_id, choice, unified_ballot_id, item_confirmation_hash
+        FROM t_online_ballot_submission_item
+        WHERE submission_id = #{submissionId}
+        ORDER BY subject_id
+    </select>
+
+    <insert id="insertPaperAssistanceRequest" useGeneratedKeys="true" keyProperty="requestId">
+        INSERT INTO t_online_paper_assistance_request (
+            package_id, electorate_item_id, tenant_id, account_id, uid, opid, status, requested_at
+        ) VALUES (
+            #{packageId}, #{electorateItemId}, #{tenantId}, #{accountId}, #{uid}, #{opid}, #{status}, #{requestedAt}
+        )
+    </insert>
+
+    <sql id="paperAssistanceColumns">
+        request_id, package_id, electorate_item_id, tenant_id, account_id, uid, opid,
+        status, requested_at, fulfilled_at, withdrawn_at, paper_delivery_id
+    </sql>
+
+    <select id="selectPaperAssistanceRequest" resultType="com.pangu.infrastructure.persistence.entity.OnlinePaperAssistanceRequestRow">
+        SELECT <include refid="paperAssistanceColumns"/>
+        FROM t_online_paper_assistance_request
+        WHERE package_id = #{packageId}
+          AND electorate_item_id = #{electorateItemId}
+          AND tenant_id = #{tenantId}
+    </select>
+
+    <select id="selectPaperAssistanceRequests" resultType="com.pangu.infrastructure.persistence.entity.OnlinePaperAssistanceRequestRow">
+        SELECT <include refid="paperAssistanceColumns"/>
+        FROM t_online_paper_assistance_request
+        WHERE package_id = #{packageId} AND tenant_id = #{tenantId}
+        ORDER BY requested_at, request_id
+    </select>
+
+    <update id="reactivatePaperAssistanceRequest">
+        UPDATE t_online_paper_assistance_request
+        SET status = 'REQUESTED', requested_at = #{requestedAt}, fulfilled_at = NULL,
+            withdrawn_at = NULL, paper_delivery_id = NULL, update_time = CURRENT_TIMESTAMP
+        WHERE request_id = #{requestId} AND tenant_id = #{tenantId} AND status = 'WITHDRAWN'
+    </update>
+
+    <update id="withdrawPaperAssistanceRequest">
+        UPDATE t_online_paper_assistance_request
+        SET status = 'WITHDRAWN', withdrawn_at = #{withdrawnAt}, update_time = CURRENT_TIMESTAMP
+        WHERE request_id = #{requestId} AND tenant_id = #{tenantId} AND status = 'REQUESTED'
+    </update>
+
+    <update id="fulfillPaperAssistanceRequest">
+        UPDATE t_online_paper_assistance_request
+        SET status = 'FULFILLED', fulfilled_at = #{fulfilledAt}, paper_delivery_id = #{paperDeliveryId},
+            update_time = CURRENT_TIMESTAMP
+        WHERE request_id = #{requestId} AND tenant_id = #{tenantId} AND status = 'REQUESTED'
+    </update>
+</mapper>

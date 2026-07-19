@@ -1,4 +1,4 @@
-// 关联业务：定义 C 端业主可查看的业主大会公示、纸质投票规则和本人参与状态，不含任何表决选择。
+// 关联业务：定义 C 端业主可查看的业主大会公示、办理方式和本人参与状态，不含任何表决选择。
 package com.pangu.application.assembly;
 
 import com.pangu.domain.model.assembly.OwnersAssemblyRuleConfiguration;
@@ -28,13 +28,15 @@ public record OwnerAssemblyDisclosure(
         Instant publicNoticeEndAt,
         Instant voteStartAt,
         Instant voteEndAt,
-        String paperVotingInstruction,
+        String votingInstruction,
         Participation participation
 ) {
 
     public enum Stage {
         PUBLIC_NOTICE,
         PAPER_VOTING,
+        ONLINE_VOTING,
+        PAPER_AND_ONLINE_VOTING,
         RESULT_FORMED
     }
 
@@ -68,7 +70,7 @@ public record OwnerAssemblyDisclosure(
     ) {
     }
 
-    /** 冻结规则中与当前纸质书面征询有关的可读口径。 */
+    /** 冻结规则中与本次实际办理方式有关的可读口径。 */
     public record Rule(
             String meetingForm,
             String votingChannel,
@@ -89,14 +91,31 @@ public record OwnerAssemblyDisclosure(
             int eligiblePropertyCount,
             int expectedDecisionCount,
             int countedDecisionCount,
-            PaperProgress paper
+            String packageHash,
+            PaperProgress paper,
+            List<PropertyProgress> properties
     ) {
+        public Participation {
+            properties = properties == null ? List.of() : List.copyOf(properties);
+        }
     }
 
     /** 纸质办理只返回本人汇总进度，不返回票面选择、原件或其他业主信息。 */
     public record PaperProgress(
             String deliveryStatus,
             String ballotStatus
+    ) {
+    }
+
+    /** 本人每个符合资格专有部分的办理状态；回执不包含具体选择。 */
+    public record PropertyProgress(
+            Long opid,
+            boolean onlineAcknowledged,
+            boolean submitted,
+            Long receiptId,
+            String confirmationHash,
+            Instant submittedAt,
+            String paperAssistanceStatus
     ) {
     }
 }

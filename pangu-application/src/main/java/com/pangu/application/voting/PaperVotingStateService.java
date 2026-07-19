@@ -5,11 +5,13 @@ import com.pangu.domain.model.voting.PaperBallot;
 import com.pangu.domain.model.voting.PaperBallotEntry;
 import com.pangu.domain.model.voting.PaperBallotOutcome;
 import com.pangu.domain.model.voting.PaperVotingDelivery;
+import com.pangu.domain.model.voting.OnlinePaperAssistanceRequest;
 import com.pangu.domain.model.voting.VoteChannel;
 import com.pangu.domain.model.voting.VotingDeliveryRecord;
 import com.pangu.domain.model.voting.VotingElectorateSnapshot;
 import com.pangu.domain.model.voting.VotingExecutionPackage;
 import com.pangu.domain.repository.PaperVotingRepository;
+import com.pangu.domain.repository.OnlineVotingRepository;
 import com.pangu.domain.repository.VotingExecutionRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -34,6 +36,7 @@ import static com.pangu.application.voting.PaperVotingException.Reason.NOT_FOUND
 public class PaperVotingStateService {
 
     private final PaperVotingRepository paperVotingRepository;
+    private final OnlineVotingRepository onlineVotingRepository;
     private final VotingExecutionRepository votingExecutionRepository;
     private final VotingExecutionService votingExecutionService;
 
@@ -43,6 +46,7 @@ public class PaperVotingStateService {
         VotingExecutionPackage ballotPackage = requirePaperPackage(command.packageId(), command.tenantId(), false);
         VotingElectorateSnapshot.Item electorate = requireElectorateItem(
                 command.packageId(), command.tenantId(), command.opid());
+        OnlinePaperAssistanceRequest assistance = requirePaperRoute(ballotPackage, electorate);
         Instant deliveredAt = requireInstant(command.deliveredAt(), "送达时间");
         if (!deliveredAt.isBefore(ballotPackage.getVoteEndAt())) {
             throw new PaperVotingException(INVALID_ARGUMENT, "送达时间必须早于本次表决截止时间");
@@ -58,7 +62,13 @@ public class PaperVotingStateService {
                 PaperVotingDelivery.Status.PENDING_REVIEW,
                 null, null, null, null, null, null, 0L);
         try {
-            return paperVotingRepository.insertDelivery(delivery);
+            PaperVotingDelivery inserted = paperVotingRepository.insertDelivery(delivery);
+            if (assistance != null && onlineVotingRepository.fulfillPaperAssistanceRequest(
+                    assistance.requestId(), assistance.tenantId(), inserted.paperDeliveryId(), deliveredAt) != 1) {
+                throw new PaperVotingException(
+                        CONCURRENT_MODIFICATION, "纸质办理申请状态已变化，请刷新后重试");
+            }
+            return inserted;
         } catch (DataIntegrityViolationException ex) {
             throw new PaperVotingException(DUPLICATE, "该送达证据已经登记，不能重复提交", ex);
         }
@@ -112,6 +122,7 @@ public class PaperVotingStateService {
         VotingExecutionPackage ballotPackage = requirePaperPackage(command.packageId(), command.tenantId(), true);
         VotingElectorateSnapshot.Item electorate = requireElectorateItem(
                 command.packageId(), command.tenantId(), command.opid());
+        requirePaperBallotRoute(ballotPackage, electorate);
         Instant receivedAt = requireInstant(command.receivedAt(), "回收时间");
         if (receivedAt.isBefore(ballotPackage.getVoteStartAt()) || !receivedAt.isBefore(ballotPackage.getVoteEndAt())) {
             throw new PaperVotingException(INVALID_ARGUMENT, "纸票回收时间必须在本次表决时间内");
@@ -295,6 +306,38 @@ public class PaperVotingStateService {
     private VotingElectorateSnapshot.Item requireElectorateItem(Long packageId, Long tenantId, Long opid) {
         return votingExecutionRepository.findElectorateItem(packageId, tenantId, opid)
                 .orElseThrow(() -> new PaperVotingException(NOT_FOUND, "该专有部分不在本次冻结表决人名册中"));
+    }
+
+    /** 互联网为主的表决只为已经提出请求的专有部分办理纸质送达。 */
+    private OnlinePaperAssistanceRequest requirePaperRoute(
+            VotingExecutionPackage ballotPackage, VotingElectorateSnapshot.Item electorate) {
+        if (ballotPackage.getCollectionMode()
+                != VotingExecutionPackage.CollectionMode.ONLINE_WITH_PAPER_ASSISTANCE) {
+            return null;
+        }
+        OnlinePaperAssistanceRequest assistance = onlineVotingRepository.findPaperAssistanceRequest(
+                        ballotPackage.getPackageId(), electorate.snapshotItemId(), ballotPackage.getTenantId())
+                .orElseThrow(() -> new PaperVotingException(
+                        INVALID_STATUS, "该业主尚未申请纸质办理，不能登记纸质送达"));
+        if (assistance.status() != OnlinePaperAssistanceRequest.Status.REQUESTED) {
+            throw new PaperVotingException(INVALID_STATUS, "该纸质办理申请已经处理或撤回");
+        }
+        return assistance;
+    }
+
+    private void requirePaperBallotRoute(
+            VotingExecutionPackage ballotPackage, VotingElectorateSnapshot.Item electorate) {
+        if (ballotPackage.getCollectionMode()
+                != VotingExecutionPackage.CollectionMode.ONLINE_WITH_PAPER_ASSISTANCE) {
+            return;
+        }
+        OnlinePaperAssistanceRequest assistance = onlineVotingRepository.findPaperAssistanceRequest(
+                        ballotPackage.getPackageId(), electorate.snapshotItemId(), ballotPackage.getTenantId())
+                .orElseThrow(() -> new PaperVotingException(
+                        INVALID_STATUS, "该业主尚未申请纸质办理，不能登记纸质表决票"));
+        if (assistance.status() != OnlinePaperAssistanceRequest.Status.FULFILLED) {
+            throw new PaperVotingException(INVALID_STATUS, "请先完成该业主的纸质材料送达登记");
+        }
     }
 
     private List<PaperBallotEntry.Item> requireCompleteItems(List<PaperBallotEntry.Item> items,

@@ -124,24 +124,12 @@ public class VoteSubmissionService {
             }
         }
 
-        // 正式共同决定已绑定通用表决包时，只能使用锁定名册、渠道和送达事实收票。
+        // 正式共同决定必须通过整包确认入口提交，禁止单事项接口产生部分票或接受客户端签名摘要。
         var formalPackage = votingExecutionService.findPackageBySubjectId(cmd.subjectId());
         if (formalPackage.isPresent()) {
-            long voteId;
-            try {
-                var executionPackage = formalPackage.orElseThrow();
-                voteId = votingExecutionService.cast(new VotingExecutionService.CastBallotCommand(
-                        executionPackage.getPackageId(), cmd.subjectId(), cmd.tenantId(), cmd.opid(), cmd.uid(),
-                        cmd.choice(), voteChannel, null, cmd.signatureHash(), null, Instant.now()));
-            } catch (VotingExecutionService.VotingExecutionException ex) {
-                throw translateExecutionFailure(ex);
-            }
-            log.info("Formal vote cast subjectId={} uid={} opid={} choice={} channel={} voteId={}",
-                    cmd.subjectId(), cmd.uid(), cmd.opid(), cmd.choice(), voteChannel, voteId);
-            recordMonitorAfterCommit(new VoteCastMonitorGateway.VoteCastEvent(
-                    cmd.subjectId(), cmd.tenantId(), cmd.uid(), cmd.opid(), cmd.targetId(),
-                    subject.getSubjectType(), cmd.choice(), cmd.signatureHash(), voteChannel, Instant.now()));
-            return voteId;
+            throw new VotingApplicationException(
+                    VotingApplicationException.Reason.SUBJECT_NOT_VOTING_CASTABLE,
+                    "该事项属于正式共同决定，请从本次业主大会表决页面核对全部事项后统一提交");
         }
 
         // 3. opid 归属 + scope 范围校验
@@ -215,19 +203,6 @@ public class VoteSubmissionService {
                 voteChannel,
                 Instant.now()));
         return voteId;
-    }
-
-    private VotingApplicationException translateExecutionFailure(
-            VotingExecutionService.VotingExecutionException exception) {
-        VotingApplicationException.Reason reason = switch (exception.getReason()) {
-            case DUPLICATE_BALLOT -> VotingApplicationException.Reason.VOTE_ALREADY_CAST;
-            case ELECTORATE_NOT_FOUND, INVALID_COMMAND -> VotingApplicationException.Reason.OPID_OUT_OF_SCOPE;
-            case NOT_FOUND -> VotingApplicationException.Reason.SUBJECT_NOT_FOUND;
-            case CONCURRENT_MODIFICATION -> VotingApplicationException.Reason.CONCURRENT_LIFECYCLE_MODIFICATION;
-            case INVALID_STATUS, CHANNEL_NOT_ALLOWED, DELIVERY_REQUIRED ->
-                    VotingApplicationException.Reason.SUBJECT_NOT_VOTING_CASTABLE;
-        };
-        return new VotingApplicationException(reason, exception.getMessage(), exception);
     }
 
     private void recordMonitorAfterCommit(VoteCastMonitorGateway.VoteCastEvent event) {

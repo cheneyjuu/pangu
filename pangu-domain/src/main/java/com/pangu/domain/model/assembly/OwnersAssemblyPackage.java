@@ -1,4 +1,4 @@
-// 关联业务：保存业主大会正式公示、纸质表决和结算所依赖的已冻结规则快照与材料版本。
+// 关联业务：保存业主大会正式公示、纸质或线上表决和结算所依赖的已冻结规则快照与材料版本。
 package com.pangu.domain.model.assembly;
 
 import java.time.Instant;
@@ -26,6 +26,13 @@ public record OwnersAssemblyPackage(
         Instant lockedAt
 ) {
     public boolean paperAllowed() {
+        // 互联网表决也必须为确有困难并提出要求的业主提供本次锁定的正式纸质表决票。
+        return "PAPER_ONLY".equals(votingChannelPolicy)
+                || "ONLINE_ONLY".equals(votingChannelPolicy)
+                || "PAPER_AND_ONLINE".equals(votingChannelPolicy);
+    }
+
+    public boolean paperOpenToAll() {
         return "PAPER_ONLY".equals(votingChannelPolicy) || "PAPER_AND_ONLINE".equals(votingChannelPolicy);
     }
 

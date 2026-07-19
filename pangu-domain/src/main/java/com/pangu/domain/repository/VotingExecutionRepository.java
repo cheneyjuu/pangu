@@ -50,6 +50,8 @@ public interface VotingExecutionRepository {
 
     Optional<VotingBallotRecord> findActiveBallot(Long subjectId, Long electorateItemId, Long tenantId);
 
+    long countAudits(Long packageId, Long tenantId, String eventType);
+
     void insertAudit(Long packageId,
                      Long tenantId,
                      String eventType,

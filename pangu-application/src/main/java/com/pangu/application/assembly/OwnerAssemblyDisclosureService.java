@@ -1,7 +1,8 @@
-// 关联业务：向当前业主披露已发布业主大会的公告、方案、纸质选票规则和本人参与状态。
+// 关联业务：向当前业主披露已发布业主大会材料，以及线上、纸质或混合表决的本人办理状态。
 package com.pangu.application.assembly;
 
 import com.pangu.application.support.PayloadHasher;
+import com.pangu.application.voting.OnlineVotingService;
 import com.pangu.domain.context.UserContext;
 import com.pangu.domain.context.UserContextHolder;
 import com.pangu.domain.model.assembly.OwnersAssemblyMaterial;
@@ -39,8 +40,8 @@ import static com.pangu.application.assembly.OwnersAssemblyApplicationException.
 /**
  * C 端业主大会只读服务。
  *
- * <p>正式表决仍由纸质选票闭环办理；本服务不提供线上投票写入口，也不以“未回复”等状态推定
- * 业主选择。所有材料均以正式表决包锁定的清单为准，不能回退到会前草稿材料全集。
+ * <p>本服务不以“未回复”等状态推定业主选择，也不向业主回显已经提交的具体选择。
+ * 所有材料和办理渠道均以正式表决包锁定的清单与规则快照为准，不能回退到会前草稿材料全集。
  */
 @Service
 @RequiredArgsConstructor
@@ -56,6 +57,7 @@ public class OwnerAssemblyDisclosureService {
     private final OwnerPropertyVotingRepository ownerPropertyVotingRepository;
     private final VotingExecutionRepository votingExecutionRepository;
     private final PaperVotingRepository paperVotingRepository;
+    private final OnlineVotingService onlineVotingService;
     private final OwnersAssemblyMaterialStorage materialStorage;
     private final UserContextHolder userContextHolder;
 
@@ -140,7 +142,7 @@ public class OwnerAssemblyDisclosureService {
         return new OwnerAssemblyDisclosure(
                 ballotPackage.packageId(),
                 visible.session().title(),
-                stageOf(ballotPackage.status()),
+                stageOf(ballotPackage),
                 new OwnerAssemblyDisclosure.PublicNotice(
                         publicNotice.materialId(),
                         publicNotice.originalFileName(),
@@ -156,7 +158,7 @@ public class OwnerAssemblyDisclosureService {
                                 subject.getTitle(), subject.getContent(), subject.getStatus().name()))
                         .toList(),
                 new OwnerAssemblyDisclosure.Rule(
-                        OwnersAssemblyRuleConfiguration.MeetingForm.WRITTEN_CONSULTATION.name(),
+                        meetingFormOf(visible.session()),
                         configuration.votingChannelPolicy().name(),
                         configuration.planPublicityDays(),
                         configuration.validDeliveryMethods(),
@@ -167,7 +169,7 @@ public class OwnerAssemblyDisclosureService {
                 ballotPackage.publicNoticeEndAt(),
                 ballotPackage.voteStartAt(),
                 ballotPackage.voteEndAt(),
-                paperVotingInstruction(configuration),
+                votingInstruction(ballotPackage, configuration),
                 participation);
     }
 
@@ -176,8 +178,8 @@ public class OwnerAssemblyDisclosureService {
         int expectedDecisionCount = eligiblePropertyCount * visible.subjects().size();
         if (eligiblePropertyCount == 0) {
             return new OwnerAssemblyDisclosure.Participation(
-                    false, false, null, 0, 0, 0,
-                    new OwnerAssemblyDisclosure.PaperProgress("NOT_APPLICABLE", "NOT_APPLICABLE"));
+                    false, false, null, 0, 0, 0, null,
+                    new OwnerAssemblyDisclosure.PaperProgress("NOT_APPLICABLE", "NOT_APPLICABLE"), List.of());
         }
         VotingExecutionPackage executionPackage = votingExecutionRepository
                 .findPackageBySubjectId(visible.subjects().getFirst().getSubjectId())
@@ -208,6 +210,8 @@ public class OwnerAssemblyDisclosureService {
                         .stream()
                         .filter(ballot -> eligibleOpids.contains(ballot.opid()))
                         .toList());
+        OnlineVotingService.OwnerProgress ownerProgress = onlineVotingService.ownerProgress(
+                executionPackage.getPackageId(), visible.owner().tenantId(), eligibleOpids.stream().toList());
         return new OwnerAssemblyDisclosure.Participation(
                 true,
                 countedDecisionCount > 0,
@@ -215,7 +219,9 @@ public class OwnerAssemblyDisclosureService {
                 eligiblePropertyCount,
                 expectedDecisionCount,
                 countedDecisionCount,
-                new OwnerAssemblyDisclosure.PaperProgress(deliveryStatus, ballotStatus));
+                ownerProgress.packageHash(),
+                new OwnerAssemblyDisclosure.PaperProgress(deliveryStatus, ballotStatus),
+                ownerProgress.properties().stream().map(this::toPropertyProgress).toList());
     }
 
     private String aggregateDeliveryStatus(List<PaperVotingDelivery> deliveries) {
@@ -288,18 +294,48 @@ public class OwnerAssemblyDisclosureService {
                 material.contentSha256());
     }
 
-    private OwnerAssemblyDisclosure.Stage stageOf(String packageStatus) {
-        return switch (packageStatus) {
+    private OwnerAssemblyDisclosure.Stage stageOf(OwnersAssemblyPackage ballotPackage) {
+        return switch (ballotPackage.status()) {
             case "PUBLIC_NOTICE" -> OwnerAssemblyDisclosure.Stage.PUBLIC_NOTICE;
-            case "VOTING" -> OwnerAssemblyDisclosure.Stage.PAPER_VOTING;
+            case "VOTING" -> switch (ballotPackage.votingChannelPolicy()) {
+                case "PAPER_ONLY" -> OwnerAssemblyDisclosure.Stage.PAPER_VOTING;
+                case "ONLINE_ONLY" -> OwnerAssemblyDisclosure.Stage.ONLINE_VOTING;
+                case "PAPER_AND_ONLINE" -> OwnerAssemblyDisclosure.Stage.PAPER_AND_ONLINE_VOTING;
+                default -> throw notVisible();
+            };
             case "SETTLED" -> OwnerAssemblyDisclosure.Stage.RESULT_FORMED;
             default -> throw notVisible();
         };
     }
 
-    private String paperVotingInstruction(OwnersAssemblyRuleConfiguration configuration) {
-        return "本次仅接受纸质选票，请使用本次公告附带的盖章选票模板；未表态按冻结规则“"
-                + nonResponseLabel(configuration.nonResponsePolicy()) + "”处理。";
+    private String meetingFormOf(OwnersAssemblySession session) {
+        return switch (session.preparationMode()) {
+            case "WRITTEN_DECISION" -> OwnersAssemblyRuleConfiguration.MeetingForm.WRITTEN_CONSULTATION.name();
+            case "INTERNET_DECISION" -> OwnersAssemblyRuleConfiguration.MeetingForm.INTERNET.name();
+            case "ONLINE_AND_OFFLINE" -> OwnersAssemblyRuleConfiguration.MeetingForm.ONLINE_AND_OFFLINE.name();
+            default -> throw notVisible();
+        };
+    }
+
+    private String votingInstruction(
+            OwnersAssemblyPackage ballotPackage, OwnersAssemblyRuleConfiguration configuration) {
+        String route = switch (ballotPackage.votingChannelPolicy()) {
+            case "PAPER_ONLY" -> "本次采用纸质书面征询，请使用本次公告附带的正式表决票。";
+            case "ONLINE_ONLY" -> "本次采用互联网表决；确有困难的业主可为本人专有部分申请纸质表决票。";
+            case "PAPER_AND_ONLINE" -> "本次按小区有效规则同时开放线上实名和纸质办理，每个专有部分只能形成一份有效票。";
+            default -> throw notVisible();
+        };
+        return route + "未表态按冻结规则“" + nonResponseLabel(configuration.nonResponsePolicy()) + "”处理。";
+    }
+
+    private OwnerAssemblyDisclosure.PropertyProgress toPropertyProgress(
+            OnlineVotingService.PropertyProgress progress) {
+        return new OwnerAssemblyDisclosure.PropertyProgress(
+                progress.opid(), progress.acknowledged(), progress.receipt() != null,
+                progress.receipt() == null ? null : progress.receipt().submissionId(),
+                progress.receipt() == null ? null : progress.receipt().confirmationHash(),
+                progress.receipt() == null ? null : progress.receipt().submittedAt(),
+                progress.paperAssistance() == null ? "NOT_REQUESTED" : progress.paperAssistance().status().name());
     }
 
     private String nonResponseLabel(OwnersAssemblyRuleConfiguration.NonResponsePolicy policy) {

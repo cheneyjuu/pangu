@@ -26,7 +26,13 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -163,7 +169,7 @@ class VotingExecutionFlowTest {
     }
 
     @Test
-    void onlineSubmissionUsesFrozenRosterAndRequiresMatchingDelivery() {
+    void formalPackageRejectsLegacySingleSubjectOnlineSubmission() {
         VotingSubject subject = createSubject();
         VotingExecutionPackage ballotPackage = createPackage(subject, 990000004L);
         votingExecutionService.freeze(ballotPackage.getPackageId(), TENANT_ID, ACTOR_USER_ID, Instant.now());
@@ -174,16 +180,74 @@ class VotingExecutionFlowTest {
                 null, VoteChoice.SUPPORT, SHA_A, VoteChannel.ONLINE);
         assertThatThrownBy(() -> voteSubmissionService.cast(command))
                 .isInstanceOf(VotingApplicationException.class)
-                .hasMessageContaining("送达记录");
+                .hasMessageContaining("业主大会表决页面")
+                .hasMessageContaining("统一提交");
+    }
 
+    @Test
+    void concurrentPaperAndOnlineSubmissionsKeepOnlyTheFirstValidBallot() throws Exception {
+        VotingSubject subject = createSubject();
+        VotingExecutionPackage ballotPackage = createPackage(subject, 990000005L);
+        votingExecutionService.freeze(ballotPackage.getPackageId(), TENANT_ID, ACTOR_USER_ID, Instant.now());
+        votingExecutionService.open(ballotPackage.getPackageId(), TENANT_ID, ACTOR_USER_ID, Instant.now());
+        votingExecutionService.recordDelivery(new RecordDeliveryCommand(
+                ballotPackage.getPackageId(), TENANT_ID, FIRST_OPID, VoteChannel.PAPER,
+                "DOOR_TO_DOOR", SHA_A, ACTOR_USER_ID, Instant.now()));
         votingExecutionService.recordDelivery(new RecordDeliveryCommand(
                 ballotPackage.getPackageId(), TENANT_ID, FIRST_OPID, VoteChannel.ONLINE,
-                "SYSTEM_NOTICE", SHA_B, ACTOR_USER_ID, Instant.now()));
-        long voteId = voteSubmissionService.cast(command);
+                "OWNER_ONLINE_ACKNOWLEDGEMENT", SHA_B, ACTOR_USER_ID, Instant.now()));
+
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<String> paper = executor.submit(() -> concurrentCast(
+                    ready, start, ballotPackage, subject, VoteChannel.PAPER, VoteChoice.SUPPORT));
+            Future<String> online = executor.submit(() -> concurrentCast(
+                    ready, start, ballotPackage, subject, VoteChannel.ONLINE, VoteChoice.AGAINST));
+            assertThat(ready.await(5, TimeUnit.SECONDS)).isTrue();
+            start.countDown();
+
+            List<String> outcomes = List.of(
+                    paper.get(10, TimeUnit.SECONDS), online.get(10, TimeUnit.SECONDS));
+            assertThat(outcomes).contains("DUPLICATE");
+            assertThat(outcomes).containsAnyOf("PAPER", "ONLINE");
+        } finally {
+            executor.shutdownNow();
+        }
 
         assertThat(jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM t_voting_ballot_record WHERE vote_id = ? AND vote_channel = 1",
-                Long.class, voteId)).isEqualTo(1L);
+                "SELECT COUNT(*) FROM t_voting_ballot_record WHERE package_id = ? AND valid_flag = 1",
+                Long.class, ballotPackage.getPackageId())).isEqualTo(1L);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_vote_item WHERE subject_id = ? AND opid = ?",
+                Long.class, subject.getSubjectId(), FIRST_OPID)).isEqualTo(1L);
+    }
+
+    private String concurrentCast(
+            CountDownLatch ready,
+            CountDownLatch start,
+            VotingExecutionPackage ballotPackage,
+            VotingSubject subject,
+            VoteChannel channel,
+            VoteChoice choice) throws InterruptedException {
+        ready.countDown();
+        if (!start.await(5, TimeUnit.SECONDS)) {
+            throw new IllegalStateException("并发收票测试未能同步启动");
+        }
+        try {
+            votingExecutionService.castRecord(new CastBallotCommand(
+                    ballotPackage.getPackageId(), subject.getSubjectId(), TENANT_ID,
+                    FIRST_OPID, FIRST_UID, choice, channel,
+                    channel == VoteChannel.PAPER ? SHA_A : null,
+                    channel == VoteChannel.ONLINE ? SHA_B : null,
+                    channel == VoteChannel.PAPER ? ACTOR_USER_ID : null,
+                    Instant.now()));
+            return channel.name();
+        } catch (VotingExecutionService.VotingExecutionException failure) {
+            assertThat(failure.getMessage()).contains("已有有效票");
+            return "DUPLICATE";
+        }
     }
 
     private VotingSubject createSubject() {

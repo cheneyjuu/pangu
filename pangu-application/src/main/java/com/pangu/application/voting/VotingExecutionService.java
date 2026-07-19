@@ -323,6 +323,12 @@ public class VotingExecutionService {
         return executionRepository.findPackageBySubjectId(subjectId);
     }
 
+    /** 供业务适配器把本人申请或纸票记录还原到冻结时的专有部分，不读取当前可变名册。 */
+    public java.util.Optional<VotingElectorateSnapshot.Item> findElectorateItem(
+            Long packageId, Long tenantId, Long opid) {
+        return executionRepository.findElectorateItem(packageId, tenantId, opid);
+    }
+
     private VotingElectorateSnapshot buildElectorateSnapshot(
             VotingExecutionPackage ballotPackage,
             List<VotingElectorateSnapshot.Candidate> candidates,
