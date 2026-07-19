@@ -2,6 +2,8 @@
 package com.pangu.interfaces.web.controller;
 
 import com.pangu.application.repair.OwnerRepairProjectVotingService;
+import com.pangu.application.repair.RepairAttachmentDownloadTicket;
+import com.pangu.application.repair.RepairProjectAttachmentService;
 import com.pangu.domain.model.repair.RepairProjectVoting;
 import com.pangu.interfaces.web.controller.dto.assembly.OnlineBallotReceiptResponse;
 import com.pangu.interfaces.web.controller.dto.assembly.OnlineBallotSubmissionRequest;
@@ -31,6 +33,7 @@ import java.util.List;
 public class OwnerRepairProjectVotingController extends BaseController {
 
     private final OwnerRepairProjectVotingService service;
+    private final RepairProjectAttachmentService attachmentService;
 
     @GetMapping("/voting-tasks")
     @PreAuthorize("isAuthenticated()")
@@ -42,6 +45,14 @@ public class OwnerRepairProjectVotingController extends BaseController {
     @PreAuthorize("isAuthenticated()")
     public Result<OwnerRepairProjectVotingService.Disclosure> disclosure(@PathVariable Long projectId) {
         return success(service.disclosure(projectId));
+    }
+
+    @GetMapping("/{projectId}/voting/attachments/{attachmentId}/download-ticket")
+    @PreAuthorize("isAuthenticated()")
+    public Result<RepairAttachmentDownloadTicket> attachmentTicket(
+            @PathVariable Long projectId,
+            @PathVariable Long attachmentId) {
+        return success(attachmentService.createOwnerVotingDownloadTicket(projectId, attachmentId));
     }
 
     @PostMapping("/{projectId}/voting/acknowledgements")

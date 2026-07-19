@@ -57,6 +57,7 @@ public class RepairProjectAttachmentService {
     private final UserContextHolder userContextHolder;
     private final ObjectMapper objectMapper;
     private final OwnerRepairProjectQueryService ownerProjectQueryService;
+    private final OwnerRepairProjectVotingService ownerVotingService;
 
     @Transactional
     public Attachment upload(Long projectId, UploadRepairProjectAttachmentCommand command) {
@@ -135,6 +136,24 @@ public class RepairProjectAttachmentService {
                 .anyMatch(attachment -> attachment.attachmentId().equals(attachmentId));
         if (!published) {
             throw new RepairWorkOrderApplicationException(NOT_FOUND, "维修工程附件不在当前披露方案中");
+        }
+        UserContext owner = userContextHolder.current();
+        Attachment attachment = projectRepository.findAttachment(
+                        attachmentId, disclosure.projectId(), owner.tenantId())
+                .orElseThrow(() -> new RepairWorkOrderApplicationException(
+                        NOT_FOUND, "维修工程附件不存在"));
+        return createTicket(attachment);
+    }
+
+    /** 表决期间只允许下载本次冻结方案已经列出的附件。 */
+    @Transactional(readOnly = true)
+    public RepairAttachmentDownloadTicket createOwnerVotingDownloadTicket(
+            Long projectId, Long attachmentId) {
+        OwnerRepairProjectVotingService.Disclosure disclosure = ownerVotingService.disclosure(projectId);
+        boolean published = disclosure.attachments().stream()
+                .anyMatch(attachment -> attachment.attachmentId().equals(attachmentId));
+        if (!published) {
+            throw new RepairWorkOrderApplicationException(NOT_FOUND, "维修工程附件不在本次表决方案中");
         }
         UserContext owner = userContextHolder.current();
         Attachment attachment = projectRepository.findAttachment(

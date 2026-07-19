@@ -14,6 +14,7 @@ import com.pangu.domain.model.voting.PaperBallot;
 import com.pangu.domain.model.voting.PaperBallotEntry;
 import com.pangu.domain.model.voting.PaperVotingDelivery;
 import com.pangu.domain.model.voting.VotingExecutionPackage;
+import com.pangu.domain.model.voting.VotingElectorateSnapshot;
 import com.pangu.domain.repository.OwnersAssemblyRuleRepository;
 import com.pangu.domain.repository.RepairProjectRepository;
 import com.pangu.domain.repository.RepairProjectVotingRepository;
@@ -152,6 +153,9 @@ public class RepairProjectVotingChannelService {
     public Workbench workbench(Long projectId) {
         Context context = context(projectId);
         return new Workbench(
+                votingExecutionRepository.findElectorateSnapshot(
+                                context.executionPackage().getElectorateSnapshotId(), context.project().tenantId())
+                        .map(VotingElectorateSnapshot::items).orElseGet(List::of),
                 paperVotingService.getWorkbench(
                         context.executionPackage().getPackageId(), context.project().tenantId()),
                 onlineVotingService.managementProgress(
@@ -272,11 +276,13 @@ public class RepairProjectVotingChannelService {
     }
 
     public record Workbench(
+            List<VotingElectorateSnapshot.Item> electorate,
             PaperVotingService.Workbench paper,
             OnlineVotingService.ManagementProgress online,
             List<com.pangu.domain.model.voting.OnlinePaperAssistanceRequest> paperAssistanceRequests
     ) {
         public Workbench {
+            electorate = electorate == null ? List.of() : List.copyOf(electorate);
             paperAssistanceRequests = paperAssistanceRequests == null
                     ? List.of() : List.copyOf(paperAssistanceRequests);
         }
