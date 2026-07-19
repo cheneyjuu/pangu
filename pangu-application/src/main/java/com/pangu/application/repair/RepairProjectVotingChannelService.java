@@ -138,7 +138,10 @@ public class RepairProjectVotingChannelService {
         }
     }
 
-    @Transactional
+    /**
+     * 纸票复核先提交原始复核状态，再由统一表决内核分事务写入有效票和逐事项结果。
+     * 此处不能包裹外层事务，否则内核的独立事务会等待本请求自己持有的纸票行锁。
+     */
     public PaperVotingService.BallotReviewResult reviewEntry(
             Long projectId, Long ballotId, Long entryId, ReviewCommand command) {
         Context context = context(projectId);

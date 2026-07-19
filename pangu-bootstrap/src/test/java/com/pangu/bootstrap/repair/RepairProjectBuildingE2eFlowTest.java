@@ -51,6 +51,8 @@ class RepairProjectBuildingE2eFlowTest {
     private static final long USER_PROPERTY_STAFF = 800202L;
     private static final long ACCOUNT_COMMITTEE_DIRECTOR = 999811L;
     private static final long USER_COMMITTEE_DIRECTOR = 800101L;
+    private static final long ACCOUNT_COMMITTEE_MEMBER = 999813L;
+    private static final long USER_COMMITTEE_MEMBER = 800103L;
     private static final String PROJECT_PREFIX = "IT-楼栋维修端到端-";
     private static final String WORK_ORDER_PREFIX = "IT-楼栋维修来源-";
     private static final String SUPPLIER_PREFIX = "IT-楼栋维修端到端供应商-";
@@ -66,6 +68,7 @@ class RepairProjectBuildingE2eFlowTest {
     private String propertyManagerToken;
     private String propertyStaffToken;
     private String committeeDirectorToken;
+    private String committeeMemberToken;
     private long buildingId;
     private Long createdFundingAccountId;
     private Long createdOwnersAssemblyRuleId;
@@ -81,6 +84,8 @@ class RepairProjectBuildingE2eFlowTest {
                 ACCOUNT_PROPERTY_STAFF, "SYS_USER", USER_PROPERTY_STAFF, TENANT);
         committeeDirectorToken = jwtTokenProvider.generateToken(
                 ACCOUNT_COMMITTEE_DIRECTOR, "SYS_USER", USER_COMMITTEE_DIRECTOR, TENANT);
+        committeeMemberToken = jwtTokenProvider.generateToken(
+                ACCOUNT_COMMITTEE_MEMBER, "SYS_USER", USER_COMMITTEE_MEMBER, TENANT);
         buildingId = jdbcTemplate.queryForObject("""
                 SELECT building_id
                 FROM c_owner_property
@@ -166,7 +171,7 @@ class RepairProjectBuildingE2eFlowTest {
 
     @Test
     void surveyedBuildingRepairRunsFromReferenceQuoteToAuthorizedSupplierSelection() throws Exception {
-        activateOnlineOwnersAssemblyRule();
+        activateMixedOwnersAssemblyRule();
         long sourceWorkOrderId = createSurveyedBuildingWorkOrder();
         createdFundingAccountId = seedBuildingMaintenanceAccount(PLAN_BUDGET);
 
@@ -237,7 +242,7 @@ class RepairProjectBuildingE2eFlowTest {
                 "/api/v1/admin/repair-projects/" + projectId + "/voting/prepare",
                 committeeDirectorToken, Map.of(
                         "expectedProjectVersion", frozen.path("project").path("version").asInt(),
-                        "collectionMode", "ONLINE_WITH_PAPER_ASSISTANCE",
+                        "collectionMode", "PAPER_AND_ONLINE",
                         "paperBallotTemplateAttachmentId", ballotTemplateAttachmentId,
                         "voteStartAt", voteStartAt.toString(),
                         "voteEndAt", voteStartAt.plus(30, ChronoUnit.MINUTES).toString()));
@@ -263,13 +268,18 @@ class RepairProjectBuildingE2eFlowTest {
                 WHERE snapshot.package_id = ?
                 ORDER BY electorate.snapshot_item_id
                 """, executionPackageId);
-        assertTrue(!voters.isEmpty());
-        for (Map<String, Object> voter : voters) {
+        assertTrue(voters.size() >= 2);
+        for (int index = 0; index < voters.size(); index++) {
+            Map<String, Object> voter = voters.get(index);
             long ownerUid = ((Number) voter.get("owner_uid")).longValue();
             long ownerAccountId = ((Number) voter.get("account_id")).longValue();
             long opid = ((Number) voter.get("opid")).longValue();
             originalOwnerAuthLevels.putIfAbsent(ownerUid, ((Number) voter.get("auth_level")).intValue());
             jdbcTemplate.update("UPDATE c_user SET auth_level = 3 WHERE uid = ?", ownerUid);
+            if (index == 0) {
+                recordPaperBallot(projectId, opid, subjectId);
+                continue;
+            }
             String ownerToken = jwtTokenProvider.generateToken(ownerAccountId, "C_USER", ownerUid, TENANT);
             JsonNode disclosure = getData(
                     "/api/v1/me/repair-projects/" + projectId + "/voting", ownerToken);
@@ -384,34 +394,35 @@ class RepairProjectBuildingE2eFlowTest {
     }
 
     /**
-     * 本用例登记并逐字段确认一份只允许实名线上收集、可申请纸质协助的有效议事规则。
-     * 规则内容来自测试原件，不复用或篡改环境中已有生效规则。
+     * 本用例登记并逐字段确认一份允许纸质、实名线上和两者并行的有效议事规则。
+     * 单个项目选择并行办理，用真实纸票复核覆盖维修适配层的事务边界。
      */
-    private void activateOnlineOwnersAssemblyRule() throws Exception {
+    private void activateMixedOwnersAssemblyRule() throws Exception {
         Map<String, Object> configuration = new LinkedHashMap<>();
-        configuration.put("allowedMeetingForms", List.of("INTERNET"));
+        configuration.put("allowedMeetingForms", List.of(
+                "WRITTEN_CONSULTATION", "INTERNET", "ONLINE_AND_OFFLINE"));
         configuration.put("planPublicityDays", 0);
         configuration.put("meetingNoticeDays", 0);
         configuration.put("validDeliveryMethods", List.of("ELECTRONIC", "DOOR_TO_DOOR"));
         configuration.put("nonResponsePolicy", "NOT_PARTICIPATED");
         configuration.put("proxyVotingPolicy", "NOT_ALLOWED");
-        configuration.put("votingChannelPolicy", "ONLINE_ONLY");
+        configuration.put("votingChannelPolicy", "PAPER_AND_ONLINE");
         configuration.put("onlineIdentityVerificationRequired", true);
         configuration.put("paperBallotSealRequired", true);
-        configuration.put("duplicateVotePolicy", "NOT_APPLICABLE");
+        configuration.put("duplicateVotePolicy", "FIRST_VALID_WINS");
         configuration.put("countingRules", Map.of(
                 "GENERAL", countingRule(),
                 "MAJOR", countingRule()));
         configuration.put("resultAnnouncementDays", 0);
         configuration.put("sourceClauseReferences", allSourceReferences());
 
-        String version = "2026-IT-repair-online-" + System.nanoTime();
+        String version = "2026-IT-repair-mixed-" + System.nanoTime();
         MockMultipartFile configurationPart = new MockMultipartFile(
                 "configuration", "configuration.json", MediaType.APPLICATION_JSON_VALUE,
                 objectMapper.writeValueAsBytes(configuration));
         MockMultipartFile sourceFile = new MockMultipartFile(
-                "file", "维修相关业主线上表决规则.pdf", MediaType.APPLICATION_PDF_VALUE,
-                "repair-online-rule".getBytes(StandardCharsets.UTF_8));
+                "file", "维修相关业主纸质与线上并行表决规则.pdf", MediaType.APPLICATION_PDF_VALUE,
+                "repair-mixed-rule".getBytes(StandardCharsets.UTF_8));
         String response = mockMvc.perform(multipart("/api/v1/admin/owners-assembly-rules/drafts")
                         .file(configurationPart)
                         .file(sourceFile)
@@ -519,6 +530,52 @@ class RepairProjectBuildingE2eFlowTest {
                                         "subjectId", subjectId,
                                         "choice", "SUPPORT"))))))
                 .andExpect(status().isCreated());
+    }
+
+    /** 纸票录入与复核使用不同管理人员，复核完成后必须立即进入统一有效票台账。 */
+    private void recordPaperBallot(long projectId, long opid, long subjectId) throws Exception {
+        long deliveryAttachmentId = uploadProjectAttachment(
+                projectId, committeeDirectorToken, "纸质材料送达凭证.pdf", "paper-delivery");
+        JsonNode delivery = postData(
+                "/api/v1/admin/repair-projects/" + projectId + "/voting/paper-deliveries",
+                committeeDirectorToken, Map.of(
+                        "opid", opid,
+                        "recipientName", "测试业主",
+                        "deliveryMethod", "DOOR_TO_DOOR",
+                        "evidenceAttachmentId", deliveryAttachmentId,
+                        "deliveredAt", Instant.now().toString()));
+        postData(
+                "/api/v1/admin/repair-projects/" + projectId + "/voting/paper-deliveries/"
+                        + delivery.path("paperDeliveryId").asLong() + "/review",
+                committeeMemberToken, Map.of(
+                        "decision", "CONFIRM",
+                        "reviewNote", "第二名工作人员已核对纸质材料送达凭证。"));
+
+        long ballotAttachmentId = uploadProjectAttachment(
+                projectId, committeeDirectorToken, "纸质表决票原件.pdf", "paper-ballot");
+        JsonNode ballot = postData(
+                "/api/v1/admin/repair-projects/" + projectId + "/voting/paper-ballots",
+                committeeDirectorToken, Map.of(
+                        "opid", opid,
+                        "ballotNumber", "REPAIR-E2E-PAPER-" + projectId + "-" + opid,
+                        "attachmentId", ballotAttachmentId,
+                        "receivedAt", Instant.now().toString()));
+        long ballotId = ballot.path("paperBallotId").asLong();
+        JsonNode entry = postData(
+                "/api/v1/admin/repair-projects/" + projectId + "/voting/paper-ballots/"
+                        + ballotId + "/entries",
+                committeeDirectorToken, Map.of(
+                        "items", List.of(Map.of(
+                                "subjectId", subjectId,
+                                "determination", "VALID",
+                                "choice", "SUPPORT"))));
+        JsonNode reviewed = postData(
+                "/api/v1/admin/repair-projects/" + projectId + "/voting/paper-ballots/"
+                        + ballotId + "/entries/" + entry.path("entryId").asLong() + "/review",
+                committeeMemberToken, Map.of(
+                        "decision", "CONFIRM",
+                        "reviewNote", "第二名工作人员已核对纸质表决票录入。"));
+        assertEquals("COUNTED", reviewed.path("outcomes").get(0).path("status").asText());
     }
 
     /** 删除本用例产生的统一表决证据；真实生产记录不存在此类回收路径。 */
