@@ -169,15 +169,15 @@ class RepairProjectBuildingE2eFlowTest {
                         "responsibilityPath", "SHARED_COMMON_REPAIR",
                         "fundingSourceType", "SPECIAL_MAINTENANCE_LEDGER",
                         "basisAttachmentId", responsibilityAttachmentId,
-                        "basisReference", "本工程经勘验属于楼栋共有维修，需由相关业主决定后使用专项维修资金。",
-                        "approvedAmount", PLAN_BUDGET));
+                        "basisReference", "本工程经勘验属于楼栋共有维修，需由相关业主决定后使用专项维修资金。"));
         assertEquals("PENDING_CONFIRMATION", responsibility.path("responsibilityDetermination").path("status").asText());
+        assertTrue(responsibility.path("responsibilityDetermination").path("approvedAmount").isMissingNode());
         JsonNode responsibilityConfirmed = postData(
                 "/api/v1/admin/repair-projects/" + projectId + "/responsibility-determinations/"
                         + responsibility.path("responsibilityDetermination").path("determinationId").asLong() + "/confirm",
                 committeeDirectorToken, Map.of(
                         "expectedProjectVersion", responsibility.path("project").path("version").asInt(),
-                        "confirmationNote", "已核验共有责任、专项维修资金路径和需要相关业主决定的执行依据。"));
+                        "confirmationNote", "已核验共有责任、专项维修资金路径和后续相关业主决定程序。"));
         assertEquals("CONFIRMED", responsibilityConfirmed.path("responsibilityDetermination").path("status").asText());
 
         JsonNode frozen = postData(

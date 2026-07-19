@@ -51,7 +51,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -213,7 +212,7 @@ public class RepairProjectService {
         DecisionScope decisionScope = projectRepository.findDecisionScope(projectId, actor.tenantId())
                 .orElseThrow(() -> new RepairWorkOrderApplicationException(
                         INVALID_STATUS, "项目缺少唯一决定范围快照"));
-        PlanVersion draftPlan = currentDraftPlan(projectId, actor.tenantId());
+        currentDraftPlan(projectId, actor.tenantId());
         projectRepository.findAttachment(command.basisAttachmentId(), projectId, actor.tenantId())
                 .orElseThrow(() -> notFound("工程责任初判依据附件不存在"));
         ResponsibilityDetermination determination = new ResponsibilityDetermination(
@@ -223,9 +222,9 @@ public class RepairProjectService {
                 deriveExecutionAuthority(command.responsibilityPath()),
                 command.basisAttachmentId(), requireText(command.basisReference(), "basisReference"),
                 trim(command.responsiblePartyName()), trim(command.responsiblePartyReference()),
-                requirePositiveAmount(command.approvedAmount(), "approvedAmount"), actor.accountId(), actor.userId(),
+                actor.accountId(), actor.userId(),
                 LocalDateTime.now(), null, null, null, null, null);
-        validateResponsibilityDetermination(determination, decisionScope, draftPlan);
+        validateResponsibilityDetermination(determination, decisionScope);
         if (!projectRepository.listFundingSlices(decisionScope.decisionScopeId(), actor.tenantId()).isEmpty()) {
             throw new RepairWorkOrderApplicationException(
                     INVALID_STATUS, "项目已有可信资金切片，不能直接替换工程责任初判");
@@ -241,7 +240,6 @@ public class RepairProjectService {
                 "responsibilityPath", proposed.responsibilityPath().name(),
                 "fundingSourceType", proposed.fundingSourceType().name(),
                 "executionAuthorityType", proposed.executionAuthorityType().name(),
-                "approvedAmount", proposed.approvedAmount(),
                 "basisAttachmentId", proposed.basisAttachmentId()));
         return details(projectId, actor.tenantId());
     }
@@ -271,10 +269,10 @@ public class RepairProjectService {
         DecisionScope decisionScope = projectRepository.findDecisionScope(projectId, actor.tenantId())
                 .orElseThrow(() -> new RepairWorkOrderApplicationException(
                         INVALID_STATUS, "项目缺少唯一决定范围快照"));
-        PlanVersion draftPlan = currentDraftPlan(projectId, actor.tenantId());
+        currentDraftPlan(projectId, actor.tenantId());
         projectRepository.findAttachment(current.basisAttachmentId(), projectId, actor.tenantId())
                 .orElseThrow(() -> notFound("工程责任初判依据附件不存在"));
-        validateResponsibilityDetermination(current, decisionScope, draftPlan);
+        validateResponsibilityDetermination(current, decisionScope);
         if (current.responsibilityPath() == ResponsibilityPath.SHARED_COMMON_REPAIR
                 && decisionScope.verificationStatus() != DecisionScopeVerificationStatus.CONFIRMED) {
             throw new RepairWorkOrderApplicationException(
@@ -294,7 +292,6 @@ public class RepairProjectService {
                 "responsibilityPath", current.responsibilityPath().name(),
                 "fundingSourceType", current.fundingSourceType().name(),
                 "executionAuthorityType", current.executionAuthorityType().name(),
-                "approvedAmount", current.approvedAmount(),
                 "basisAttachmentId", current.basisAttachmentId()));
         return details(projectId, actor.tenantId());
     }
@@ -353,7 +350,6 @@ public class RepairProjectService {
             throw new RepairWorkOrderApplicationException(
                     INVALID_STATUS, "只有已确认需相关业主决定的共有维修可以冻结相关业主决定提案");
         }
-        requireApprovedAmount(determination, plan, "冻结相关业主决定提案");
         List<WorkPoint> workPoints = requireWorkPoints(plan.planId(), actor.tenantId(), "冻结相关业主决定提案");
         List<AllocationRoom> allocationRooms = projectRepository.snapshotAllocationRooms(
                 plan.planId(), actor.tenantId(), decisionScope.scopeType(),
@@ -402,7 +398,6 @@ public class RepairProjectService {
         DecisionScope decisionScope = requireConfirmedDecisionScope(projectId, actor.tenantId(), "锁定实施方案");
         ResponsibilityDetermination determination = requireConfirmedResponsibilityDetermination(
                 projectId, actor.tenantId(), "锁定实施方案");
-        requireApprovedAmount(determination, plan, "锁定实施方案");
         List<WorkPoint> workPoints = requireWorkPoints(plan.planId(), actor.tenantId(), "锁定实施方案");
 
         boolean ownerDecisionRoute = determination.responsibilityPath() == ResponsibilityPath.SHARED_COMMON_REPAIR;
@@ -883,14 +878,6 @@ public class RepairProjectService {
                         INVALID_STATUS, "工程责任或资金承担初判尚待确认，不能" + actionLabel));
     }
 
-    private void requireApprovedAmount(
-            ResponsibilityDetermination determination, PlanVersion plan, String actionLabel) {
-        if (determination.approvedAmount().compareTo(plan.budgetTotal()) < 0) {
-            throw new RepairWorkOrderApplicationException(
-                    INVALID_STATUS, "已确认责任承担上限低于实施方案预算，不能" + actionLabel);
-        }
-    }
-
     private List<WorkPoint> requireWorkPoints(Long planId, Long tenantId, String actionLabel) {
         List<WorkPoint> workPoints = projectRepository.listWorkPoints(planId, tenantId);
         if (workPoints.isEmpty()) {
@@ -915,14 +902,10 @@ public class RepairProjectService {
      */
     private void validateResponsibilityDetermination(
             ResponsibilityDetermination determination,
-            DecisionScope decisionScope,
-            PlanVersion draftPlan) {
+            DecisionScope decisionScope) {
         if (determination.responsibilityPath() == null || determination.fundingSourceType() == null
                 || determination.executionAuthorityType() == null) {
             throw invalid("责任路径、资金承担和服务端派生执行状态均为必填项");
-        }
-        if (determination.approvedAmount().compareTo(draftPlan.budgetTotal()) < 0) {
-            throw invalid("责任承担上限不得低于当前草案预算");
         }
         switch (determination.responsibilityPath()) {
             case PROPERTY_SERVICE_CONTRACT -> {
@@ -1025,8 +1008,8 @@ public class RepairProjectService {
     }
 
     /**
-     * 资金切片只从已确认的责任与资金初判产生。专项维修资金仍需服务端核验对应账簿；其他责任路径由确认依据
-     * 作为承担上限快照，绝不因为项目所在楼栋而回退到专项维修资金账户。
+     * 资金切片只从已确认的责任与资金初判产生。专项维修资金仍需服务端核验对应账簿；其他责任路径以确认依据
+     * 与最终锁定的方案预算共同形成履行范围，绝不因为项目所在楼栋而回退到专项维修资金账户。
      */
     private List<FundingSlice> resolveFundingSlices(
             RepairProject project,
@@ -1065,7 +1048,7 @@ public class RepairProjectService {
                 determination.fundingSourceType(), "RESPONSIBILITY_DETERMINATION",
                 determination.determinationId().toString(), directResponsibilityReference(determination),
                 allocationSnapshotHash,
-                // 记录的是经确认的责任承担上限内、本方案可使用的预算，不是合同、结算或付款金额。
+                // 记录的是锁定方案预算对应的直接责任履行范围，不是合同、结算或付款金额。
                 plan.budgetTotal(), FundingSliceVerificationStatus.CONFIRMED, false,
                 LocalDateTime.now(), null));
         return List.of(fundingSlice);
@@ -1401,15 +1384,6 @@ public class RepairProjectService {
     private void requirePositive(BigDecimal value, String field) {
         if (value == null || value.compareTo(BigDecimal.ZERO) <= 0) {
             throw invalid(field + " 必须大于 0");
-        }
-    }
-
-    private BigDecimal requirePositiveAmount(BigDecimal value, String field) {
-        requirePositive(value, field);
-        try {
-            return value.setScale(2, RoundingMode.UNNECESSARY);
-        } catch (ArithmeticException ex) {
-            throw invalid(field + " 最多保留 2 位小数");
         }
     }
 

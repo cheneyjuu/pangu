@@ -205,12 +205,12 @@
         INSERT INTO t_repair_project_responsibility_determination (
             project_id, tenant_id, version_no, status, responsibility_path,
             funding_source_type, execution_authority_type, basis_attachment_id, basis_reference,
-            responsible_party_name, responsible_party_reference, approved_amount,
+            responsible_party_name, responsible_party_reference,
             proposed_by_account_id, proposed_by_user_id, proposed_at
         ) VALUES (
             #{projectId}, #{tenantId}, #{versionNo}, #{status}, #{responsibilityPath},
             #{fundingSourceType}, #{executionAuthorityType}, #{basisAttachmentId}, #{basisReference},
-            #{responsiblePartyName}, #{responsiblePartyReference}, #{approvedAmount},
+            #{responsiblePartyName}, #{responsiblePartyReference},
             #{proposedByAccountId}, #{proposedByUserId}, #{proposedAt}
         )
     </insert>
@@ -219,7 +219,7 @@
             resultType="com.pangu.infrastructure.persistence.entity.RepairResponsibilityDeterminationRow">
         SELECT determination_id, project_id, tenant_id, version_no, status, responsibility_path,
                funding_source_type, execution_authority_type, basis_attachment_id, basis_reference,
-               responsible_party_name, responsible_party_reference, approved_amount,
+               responsible_party_name, responsible_party_reference,
                proposed_by_account_id, proposed_by_user_id, proposed_at,
                confirmed_by_account_id, confirmed_by_user_id, confirmed_at, confirmation_note, create_time
         FROM t_repair_project_responsibility_determination
@@ -232,7 +232,7 @@
             resultType="com.pangu.infrastructure.persistence.entity.RepairResponsibilityDeterminationRow">
         SELECT determination_id, project_id, tenant_id, version_no, status, responsibility_path,
                funding_source_type, execution_authority_type, basis_attachment_id, basis_reference,
-               responsible_party_name, responsible_party_reference, approved_amount,
+               responsible_party_name, responsible_party_reference,
                proposed_by_account_id, proposed_by_user_id, proposed_at,
                confirmed_by_account_id, confirmed_by_user_id, confirmed_at, confirmation_note, create_time
         FROM t_repair_project_responsibility_determination

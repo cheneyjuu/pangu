@@ -282,7 +282,8 @@ public record RepairProject(
     }
 
     /**
-     * 工程责任、资金承担和派生执行状态的版本化事实。物业只能提出，具有治理权限的主体确认后才可参与锁定。
+     * 工程责任、资金承担和派生执行状态的版本化事实。物业只能提出，具有治理权限的主体确认后才可参与锁定；
+     * 金额不属于初判，相关业主决定提案的预算只来自后续冻结的实施方案快照。
      */
     public record ResponsibilityDetermination(
             Long determinationId,
@@ -297,7 +298,6 @@ public record RepairProject(
             String basisReference,
             String responsiblePartyName,
             String responsiblePartyReference,
-            BigDecimal approvedAmount,
             Long proposedByAccountId,
             Long proposedByUserId,
             LocalDateTime proposedAt,

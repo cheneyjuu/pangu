@@ -4,8 +4,6 @@ package com.pangu.application.repair.command;
 import com.pangu.domain.model.repair.RepairProject.FundingSourceType;
 import com.pangu.domain.model.repair.RepairProject.ResponsibilityPath;
 
-import java.math.BigDecimal;
-
 public record ProposeRepairResponsibilityDeterminationCommand(
         Integer expectedProjectVersion,
         ResponsibilityPath responsibilityPath,
@@ -13,7 +11,6 @@ public record ProposeRepairResponsibilityDeterminationCommand(
         Long basisAttachmentId,
         String basisReference,
         String responsiblePartyName,
-        String responsiblePartyReference,
-        BigDecimal approvedAmount
+        String responsiblePartyReference
 ) {
 }

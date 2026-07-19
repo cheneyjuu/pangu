@@ -277,12 +277,12 @@ class RepairProjectFlowTest {
                                 "basisAttachmentId", basisAttachmentId,
                                 "basisReference", "物业服务合同第六条约定本类日常维修由物业承担。",
                                 "responsiblePartyName", "江湾国际公寓物业服务中心",
-                                "responsiblePartyReference", "物业服务合同第六条",
-                                "approvedAmount", 2207))))
+                                "responsiblePartyReference", "物业服务合同第六条"))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.responsibilityDetermination.status", is("PENDING_CONFIRMATION")))
                 .andExpect(jsonPath("$.data.responsibilityDetermination.executionAuthorityType",
                         is("CONTRACTUAL_EXECUTION")))
+                .andExpect(jsonPath("$.data.responsibilityDetermination.approvedAmount").doesNotExist())
                 .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
         JsonNode proposed = objectMapper.readTree(proposedResponse).path("data");
         long determinationId = proposed.path("responsibilityDetermination").path("determinationId").asLong();
@@ -371,7 +371,8 @@ class RepairProjectFlowTest {
     }
 
     /**
-     * 旧客户端携带的执行依据字段必须被忽略：共有维修只能由服务端派生为待取得相关业主决定。
+     * 旧客户端携带的执行依据和初判金额必须被忽略：共有维修只能由服务端派生为待取得相关业主决定，
+     * 决定提案预算只会在冻结实施方案时写入快照。
      */
     private int confirmSharedSpecialFundResponsibility(
             long projectId, int expectedProjectVersion, String legacyExecutionAuthorityType,
@@ -389,11 +390,12 @@ class RepairProjectFlowTest {
                                 "executionAuthorityType", legacyExecutionAuthorityType,
                                 "basisAttachmentId", basisAttachmentId,
                                 "basisReference", "已完成共有部位与专项维修资金使用条件的初步勘验，尚需取得相关业主决定。",
-                                "approvedAmount", 2207))))
+                                "approvedAmount", 1))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.responsibilityDetermination.status", is("PENDING_CONFIRMATION")))
                 .andExpect(jsonPath("$.data.responsibilityDetermination.executionAuthorityType",
                         is("OWNER_DECISION")))
+                .andExpect(jsonPath("$.data.responsibilityDetermination.approvedAmount").doesNotExist())
                 .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
         JsonNode proposed = objectMapper.readTree(proposedResponse).path("data");
         long determinationId = proposed.path("responsibilityDetermination").path("determinationId").asLong();

@@ -501,7 +501,7 @@ public class RepairProjectRepositoryImpl implements RepairProjectRepository {
                 RepairProject.FundingSourceType.valueOf(row.getFundingSourceType()),
                 RepairProject.ExecutionAuthorityType.valueOf(row.getExecutionAuthorityType()),
                 row.getBasisAttachmentId(), row.getBasisReference(), row.getResponsiblePartyName(),
-                row.getResponsiblePartyReference(), row.getApprovedAmount(), row.getProposedByAccountId(),
+                row.getResponsiblePartyReference(), row.getProposedByAccountId(),
                 row.getProposedByUserId(), row.getProposedAt(), row.getConfirmedByAccountId(),
                 row.getConfirmedByUserId(), row.getConfirmedAt(), row.getConfirmationNote(), row.getCreateTime());
     }
@@ -520,7 +520,6 @@ public class RepairProjectRepositoryImpl implements RepairProjectRepository {
         row.setBasisReference(determination.basisReference());
         row.setResponsiblePartyName(determination.responsiblePartyName());
         row.setResponsiblePartyReference(determination.responsiblePartyReference());
-        row.setApprovedAmount(determination.approvedAmount());
         row.setProposedByAccountId(determination.proposedByAccountId());
         row.setProposedByUserId(determination.proposedByUserId());
         row.setProposedAt(determination.proposedAt());
