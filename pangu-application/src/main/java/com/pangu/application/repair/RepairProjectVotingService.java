@@ -60,6 +60,8 @@ import static com.pangu.application.repair.RepairWorkOrderApplicationException.R
 public class RepairProjectVotingService {
 
     private static final Set<String> GOVERNANCE_ROLES = Set.of("COMMITTEE_DIRECTOR", "COMMITTEE_MEMBER");
+    private static final Set<String> PREPARATION_VIEW_ROLES = Set.of(
+            "PROPERTY_MANAGER", "PROPERTY_STAFF", "COMMITTEE_DIRECTOR", "COMMITTEE_MEMBER");
 
     private final RepairProjectRepository projectRepository;
     private final RepairProjectVotingRepository votingRepository;
@@ -171,7 +173,7 @@ public class RepairProjectVotingService {
     /** 管理端只展示服务端按当前有效规则计算出的可选方式和最早开始时间。 */
     @Transactional(readOnly = true)
     public PreparationOptions preparationOptions(Long projectId) {
-        UserContext actor = requireGovernanceActor();
+        UserContext actor = requirePreparationViewer();
         RepairProject project = projectRepository.findProject(projectId, actor.tenantId())
                 .orElseThrow(() -> notFound("维修工程项目不存在"));
         requireAuthorizationInProgress(project);
@@ -466,6 +468,15 @@ public class RepairProjectVotingService {
         UserContext actor = requireActor();
         if (!actor.isSysUser() || actor.userId() == null || !GOVERNANCE_ROLES.contains(actor.roleKey())) {
             throw new RepairWorkOrderApplicationException(FORBIDDEN, "仅业委会可确认并办理相关业主正式表决");
+        }
+        return actor;
+    }
+
+    /** 物业需要提前查看生效规则和材料要求，但确认、开始及结算仍只属于业委会。 */
+    private UserContext requirePreparationViewer() {
+        UserContext actor = requireActor();
+        if (!actor.isSysUser() || actor.userId() == null || !PREPARATION_VIEW_ROLES.contains(actor.roleKey())) {
+            throw new RepairWorkOrderApplicationException(FORBIDDEN, "仅物业和业委会可查看相关业主表决准备要求");
         }
         return actor;
     }

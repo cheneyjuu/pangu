@@ -119,7 +119,10 @@ public class FormalVotingRulePolicy {
         }
         if (configuration.nonResponsePolicy()
                 != OwnersAssemblyRuleConfiguration.NonResponsePolicy.NOT_PARTICIPATED) {
-            throw new UnsupportedRuleException("当前系统尚不能按本小区的未反馈表决票认定方式完成可审计计票");
+            throw new UnsupportedRuleException("本小区当前表决依据约定“"
+                    + nonResponsePolicyLabel(configuration.nonResponsePolicy())
+                    + "”，该认定方式暂不能在系统内办理。请业委会根据议事规则原件核对已登记内容；"
+                    + "确认无误后需等待该方式开通，不能为继续办理改写规则");
         }
         if (configuration.proxyVotingPolicy()
                 != OwnersAssemblyRuleConfiguration.ProxyVotingPolicy.NOT_ALLOWED) {
@@ -132,6 +135,14 @@ public class FormalVotingRulePolicy {
             }
             settlementPolicyFromConfiguration(configuration, decisionType);
         }
+    }
+
+    private String nonResponsePolicyLabel(OwnersAssemblyRuleConfiguration.NonResponsePolicy policy) {
+        return switch (policy) {
+            case NOT_PARTICIPATED -> "未反馈不计入参与";
+            case FOLLOW_MAJORITY -> "未反馈按多数意见认定";
+            case ABSTAIN -> "未反馈认定为弃权";
+        };
     }
 
     private void requireMode(OwnersAssemblyRuleConfiguration configuration,

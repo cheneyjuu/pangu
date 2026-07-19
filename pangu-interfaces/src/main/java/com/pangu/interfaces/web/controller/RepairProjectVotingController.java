@@ -34,7 +34,7 @@ public class RepairProjectVotingController extends BaseController {
     private final RepairProjectVotingChannelService channelService;
 
     @GetMapping("/preparation-options")
-    @PreAuthorize("hasAuthority('repair:workorder:governance')")
+    @PreAuthorize("hasAnyAuthority('repair:workorder:manage','repair:workorder:field','repair:workorder:governance')")
     public Result<RepairProjectVotingService.PreparationOptions> preparationOptions(
             @PathVariable("projectId") Long projectId) {
         return success(service.preparationOptions(projectId));

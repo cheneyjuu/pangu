@@ -235,6 +235,12 @@ class RepairProjectBuildingE2eFlowTest {
                 WHERE plan_id = ?
                 """, Boolean.class, planId));
 
+        // 物业需要查看生效规则和材料要求；确认、开始和结算仍由业委会办理。
+        mockMvc.perform(get("/api/v1/admin/repair-projects/" + projectId + "/voting/preparation-options")
+                        .header("Authorization", bearer(propertyManagerToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.paperBallotSealRequired", is(true)));
+
         long ballotTemplateAttachmentId = uploadProjectAttachment(
                 projectId, committeeDirectorToken, "相关业主表决票模板.pdf", "ballot-template");
         Instant voteStartAt = Instant.now().plus(2, ChronoUnit.MINUTES);
