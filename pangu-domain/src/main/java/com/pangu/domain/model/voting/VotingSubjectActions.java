@@ -87,8 +87,9 @@ public final class VotingSubjectActions {
         if (!voteEndAt.isAfter(voteStartAt)) {
             throw new IllegalArgumentException("voteEndAt 必须晚于 voteStartAt");
         }
-        if (scope == VotingScope.BUILDING && scopeReferenceId == null) {
-            throw new IllegalArgumentException("scope=BUILDING 时 scopeReferenceId 不能为空");
+        if ((scope == VotingScope.BUILDING || scope == VotingScope.REPAIR_ALLOCATION)
+                && scopeReferenceId == null) {
+            throw new IllegalArgumentException("scope=" + scope + " 时 scopeReferenceId 不能为空");
         }
         if (scope == VotingScope.UNIT) {
             throw new IllegalArgumentException("scope=UNIT 暂未实现，本期仅支持 COMMUNITY/BUILDING");

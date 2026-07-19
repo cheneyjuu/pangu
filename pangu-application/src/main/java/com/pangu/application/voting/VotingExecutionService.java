@@ -108,6 +108,51 @@ public class VotingExecutionService {
         }
         List<VotingElectorateSnapshot.Candidate> candidates = executionRepository.listElectorateCandidates(
                 tenantId, ballotPackage.getScope(), ballotPackage.getScopeReferenceId());
+        return freezeWithCandidates(ballotPackage, subjectIds, candidates, actorUserId, now);
+    }
+
+    /**
+     * 以业务适配器已经核对的精确房屋候选名册冻结表决包。
+     *
+     * <p>该入口只接受 {@link VotingScope#REPAIR_ALLOCATION}，避免普通业务绕过社区/楼栋范围解析；
+     * 候选行仍由本服务统一校验唯一代表、生成摘要、落分母并发布事项。
+     */
+    @Transactional
+    public VotingExecutionPackage freezeExactElectorate(
+            Long packageId,
+            Long tenantId,
+            List<VotingElectorateSnapshot.Candidate> candidates,
+            Long actorUserId,
+            Instant now) {
+        VotingExecutionPackage ballotPackage = requirePackageForUpdate(packageId, tenantId);
+        requireStatus(ballotPackage, VotingExecutionPackage.Status.DRAFT);
+        if (ballotPackage.getBusinessType() != VotingExecutionPackage.BusinessType.REPAIR_PROJECT
+                || ballotPackage.getScope() != VotingScope.REPAIR_ALLOCATION) {
+            throw new VotingExecutionException("精确房屋名册只适用于维修授权提案");
+        }
+        requirePositive(actorUserId, "actorUserId");
+        Objects.requireNonNull(now, "now 不能为空");
+        List<Long> subjectIds = executionRepository.listSubjectIds(packageId, tenantId);
+        if (subjectIds.isEmpty()) {
+            throw new VotingExecutionException("正式表决包至少需要一个表决事项");
+        }
+        return freezeWithCandidates(ballotPackage, subjectIds, candidates, actorUserId, now);
+    }
+
+    /** 读取精确房屋的有效产权候选行，供维修适配器与冻结分摊快照逐房屋核对。 */
+    public List<VotingElectorateSnapshot.Candidate> listElectorateCandidatesByRoomIds(
+            Long tenantId, List<Long> roomIds) {
+        return executionRepository.listElectorateCandidatesByRoomIds(tenantId, roomIds);
+    }
+
+    private VotingExecutionPackage freezeWithCandidates(
+            VotingExecutionPackage ballotPackage,
+            List<Long> subjectIds,
+            List<VotingElectorateSnapshot.Candidate> candidates,
+            Long actorUserId,
+            Instant now) {
+        Long packageId = ballotPackage.getPackageId();
+        Long tenantId = ballotPackage.getTenantId();
         VotingElectorateSnapshot snapshot = buildElectorateSnapshot(ballotPackage, candidates, now);
         VotingElectorateSnapshot insertedSnapshot = executionRepository.insertElectorateSnapshot(snapshot);
         for (Long subjectId : subjectIds) {

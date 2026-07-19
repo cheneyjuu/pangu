@@ -73,7 +73,21 @@ public class VotingExecutionRepositoryImpl implements VotingExecutionRepository 
     @Override
     public List<VotingElectorateSnapshot.Candidate> listElectorateCandidates(
             Long tenantId, VotingScope scope, Long scopeReferenceId) {
+        if (scope == VotingScope.REPAIR_ALLOCATION) {
+            throw new IllegalArgumentException("维修方案范围必须提供精确房屋集合，不能按 planId 查询实时名册");
+        }
         return mapper.selectElectorateCandidates(tenantId, scope.getDbValue(), scopeReferenceId).stream()
+                .map(this::toCandidate)
+                .toList();
+    }
+
+    @Override
+    public List<VotingElectorateSnapshot.Candidate> listElectorateCandidatesByRoomIds(
+            Long tenantId, List<Long> roomIds) {
+        if (roomIds == null || roomIds.isEmpty()) {
+            return List.of();
+        }
+        return mapper.selectElectorateCandidatesByRoomIds(tenantId, roomIds.stream().distinct().toList()).stream()
                 .map(this::toCandidate)
                 .toList();
     }

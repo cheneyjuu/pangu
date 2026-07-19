@@ -150,6 +150,30 @@
         ORDER BY r.building_id, r.room_id, op.opid
     </select>
 
+    <!-- 维修提案只能按已冻结的费用承担房屋读取名册，不能把整栋或全小区业主带入决定范围。 -->
+    <select id="selectElectorateCandidatesByRoomIds" resultMap="CandidateMap">
+        SELECT r.roster_id,
+               r.room_id,
+               r.building_id,
+               r.build_area AS certified_area,
+               op.opid,
+               op.uid,
+               op.is_voting_delegate
+        FROM c_property_roster r
+        LEFT JOIN c_owner_property op
+          ON op.tenant_id = r.tenant_id
+         AND op.room_id = r.room_id
+         AND op.verify_status = 'VERIFIED'
+         AND op.superseded_at IS NULL
+        WHERE r.tenant_id = #{tenantId}
+          AND r.status = 'ACTIVE'
+          AND r.room_id IN
+          <foreach collection="roomIds" item="roomId" open="(" separator="," close=")">
+              #{roomId}
+          </foreach>
+        ORDER BY r.building_id, r.room_id, op.opid
+    </select>
+
     <insert id="insertElectorateSnapshot" useGeneratedKeys="true" keyProperty="snapshotId" keyColumn="snapshot_id">
         INSERT INTO t_voting_electorate_snapshot (
             package_id, tenant_id, scope, scope_reference_id,

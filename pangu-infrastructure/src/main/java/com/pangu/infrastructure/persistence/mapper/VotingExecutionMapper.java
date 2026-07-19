@@ -38,6 +38,10 @@ public interface VotingExecutionMapper {
             @Param("scope") int scope,
             @Param("scopeReferenceId") Long scopeReferenceId);
 
+    List<VotingElectorateCandidateRow> selectElectorateCandidatesByRoomIds(
+            @Param("tenantId") Long tenantId,
+            @Param("roomIds") List<Long> roomIds);
+
     int insertElectorateSnapshot(VotingElectorateSnapshotRow row);
 
     int insertElectorateItems(@Param("snapshotId") Long snapshotId,

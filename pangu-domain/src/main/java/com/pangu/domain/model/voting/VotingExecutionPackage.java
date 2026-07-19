@@ -128,8 +128,9 @@ public final class VotingExecutionPackage {
         requirePositive(ruleSnapshotId, "ruleSnapshotId");
         String normalizedRuleHash = requireSha256(ruleSnapshotHash, "ruleSnapshotHash");
         Objects.requireNonNull(scope, "scope 不能为空");
-        if (scope == VotingScope.BUILDING && scopeReferenceId == null) {
-            throw new IllegalArgumentException("BUILDING 范围必须提供 scopeReferenceId");
+        if ((scope == VotingScope.BUILDING || scope == VotingScope.REPAIR_ALLOCATION)
+                && scopeReferenceId == null) {
+            throw new IllegalArgumentException(scope + " 范围必须提供 scopeReferenceId");
         }
         if (scope == VotingScope.UNIT) {
             throw new IllegalArgumentException("UNIT 决定范围尚未建模");

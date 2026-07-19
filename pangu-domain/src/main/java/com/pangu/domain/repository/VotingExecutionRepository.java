@@ -29,6 +29,13 @@ public interface VotingExecutionRepository {
     List<VotingElectorateSnapshot.Candidate> listElectorateCandidates(
             Long tenantId, VotingScope scope, Long scopeReferenceId);
 
+    /**
+     * 按业务已经冻结的精确房屋集合读取当前有效名册；只供上层在冻结前核对业务快照，
+     * 不允许以楼栋或小区实时查询替代该集合。
+     */
+    List<VotingElectorateSnapshot.Candidate> listElectorateCandidatesByRoomIds(
+            Long tenantId, List<Long> roomIds);
+
     VotingElectorateSnapshot insertElectorateSnapshot(VotingElectorateSnapshot snapshot);
 
     Optional<VotingElectorateSnapshot> findElectorateSnapshot(Long snapshotId, Long tenantId);

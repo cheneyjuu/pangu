@@ -117,6 +117,11 @@ public class DefaultVotingDenominatorResolver implements VotingDenominatorResolv
                     "UNIT 范围分母解析未实现：需先在 c_owner_property 增加 unit_id 字段后再开放 subjectId="
                             + subject.getSubjectId());
         }
+        if (scope == VotingScope.REPAIR_ALLOCATION) {
+            throw new IllegalStateException(
+                    "维修方案分母必须由统一表决包的精确房屋名册冻结，不能从实时产权关系重新计算 subjectId="
+                            + subject.getSubjectId());
+        }
         if (scope == VotingScope.BUILDING && subject.getScopeReferenceId() == null) {
             throw new IllegalArgumentException(
                     "BUILDING 范围必须提供 scopeReferenceId(=building_id) subjectId=" + subject.getSubjectId());

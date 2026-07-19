@@ -72,11 +72,11 @@ class VotingExecutionFlowTest {
                 "UPDATE c_owner_property SET account_status = ?, build_area = ? WHERE opid = ?",
                 originalAccountStatus, originalOwnerArea, FIRST_OPID);
         jdbcTemplate.update("DELETE FROM t_voting_result WHERE subject_id IN (SELECT subject_id FROM t_voting_subject WHERE title LIKE ?)", TITLE_PREFIX + "%");
-        jdbcTemplate.update("DELETE FROM t_voting_ballot_record WHERE package_id IN (SELECT package_id FROM t_voting_execution_package WHERE business_type = 'OWNERS_ASSEMBLY' AND business_reference_id >= 990000000)");
-        jdbcTemplate.update("DELETE FROM t_voting_delivery_record WHERE package_id IN (SELECT package_id FROM t_voting_execution_package WHERE business_type = 'OWNERS_ASSEMBLY' AND business_reference_id >= 990000000)");
-        jdbcTemplate.update("UPDATE t_voting_execution_package SET status = 'DRAFT', package_hash = NULL, electorate_snapshot_id = NULL, frozen_at = NULL WHERE business_type = 'OWNERS_ASSEMBLY' AND business_reference_id >= 990000000");
-        jdbcTemplate.update("DELETE FROM t_voting_electorate_snapshot WHERE package_id IN (SELECT package_id FROM t_voting_execution_package WHERE business_type = 'OWNERS_ASSEMBLY' AND business_reference_id >= 990000000)");
-        jdbcTemplate.update("DELETE FROM t_voting_execution_package WHERE business_type = 'OWNERS_ASSEMBLY' AND business_reference_id >= 990000000");
+        jdbcTemplate.update("DELETE FROM t_voting_ballot_record WHERE package_id IN (SELECT package_id FROM t_voting_execution_package WHERE business_reference_id >= 990000000)");
+        jdbcTemplate.update("DELETE FROM t_voting_delivery_record WHERE package_id IN (SELECT package_id FROM t_voting_execution_package WHERE business_reference_id >= 990000000)");
+        jdbcTemplate.update("UPDATE t_voting_execution_package SET status = 'DRAFT', package_hash = NULL, electorate_snapshot_id = NULL, frozen_at = NULL WHERE business_reference_id >= 990000000");
+        jdbcTemplate.update("DELETE FROM t_voting_electorate_snapshot WHERE package_id IN (SELECT package_id FROM t_voting_execution_package WHERE business_reference_id >= 990000000)");
+        jdbcTemplate.update("DELETE FROM t_voting_execution_package WHERE business_reference_id >= 990000000");
         jdbcTemplate.update("DELETE FROM t_vote_item WHERE subject_id IN (SELECT subject_id FROM t_voting_subject WHERE title LIKE ?)", TITLE_PREFIX + "%");
         jdbcTemplate.update("DELETE FROM t_voting_denominator_item_snapshot WHERE snapshot_id IN (SELECT snapshot_id FROM t_voting_denominator_snapshot WHERE subject_id IN (SELECT subject_id FROM t_voting_subject WHERE title LIKE ?))", TITLE_PREFIX + "%");
         jdbcTemplate.update("DELETE FROM t_voting_denominator_snapshot WHERE subject_id IN (SELECT subject_id FROM t_voting_subject WHERE title LIKE ?)", TITLE_PREFIX + "%");
@@ -222,6 +222,40 @@ class VotingExecutionFlowTest {
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM t_vote_item WHERE subject_id = ? AND opid = ?",
                 Long.class, subject.getSubjectId(), FIRST_OPID)).isEqualTo(1L);
+    }
+
+    @Test
+    void repairPackageFreezesOnlyExplicitAllocationRooms() {
+        Long roomId = jdbcTemplate.queryForObject(
+                "SELECT room_id FROM c_owner_property WHERE opid = ?", Long.class, FIRST_OPID);
+        Instant now = Instant.now();
+        long planId = 990000006L;
+        VotingSubject subject = votingSubjectRepository.insert(VotingSubjectActions.open(
+                TENANT_ID, SubjectType.GENERAL, VotingScope.REPAIR_ALLOCATION, planId,
+                TITLE_PREFIX + System.nanoTime(), now.minus(1, ChronoUnit.MINUTES),
+                now.plus(1, ChronoUnit.HOURS), ACTOR_USER_ID, null));
+        VotingExecutionPackage ballotPackage = votingExecutionService.create(new CreatePackageCommand(
+                TENANT_ID, VotingExecutionPackage.BusinessType.REPAIR_PROJECT, planId,
+                "REPAIR_AUTHORIZATION_PROPOSAL", planId, SHA_A,
+                "OWNERS_ASSEMBLY_RULE", planId, SHA_B,
+                VotingScope.REPAIR_ALLOCATION, planId,
+                VotingExecutionPackage.CollectionMode.PAPER,
+                subject.getVoteStartAt(), subject.getVoteEndAt(), ACTOR_USER_ID));
+        votingExecutionService.attachSubject(
+                ballotPackage.getPackageId(), TENANT_ID, subject.getSubjectId(), ACTOR_USER_ID);
+
+        var candidates = votingExecutionService.listElectorateCandidatesByRoomIds(
+                TENANT_ID, List.of(roomId));
+        VotingExecutionPackage frozen = votingExecutionService.freezeExactElectorate(
+                ballotPackage.getPackageId(), TENANT_ID, candidates, ACTOR_USER_ID, now);
+
+        assertThat(frozen.getScope()).isEqualTo(VotingScope.REPAIR_ALLOCATION);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_voting_electorate_item_snapshot WHERE snapshot_id = ?",
+                Long.class, frozen.getElectorateSnapshotId())).isEqualTo(1L);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT room_id FROM t_voting_electorate_item_snapshot WHERE snapshot_id = ?",
+                Long.class, frozen.getElectorateSnapshotId())).isEqualTo(roomId);
     }
 
     private String concurrentCast(
