@@ -1,4 +1,4 @@
-// 关联业务：暴露维修工程筹备草稿、责任认定、决定范围复核、实施方案版本、项目附件和方案冻结后台接口。
+// 关联业务：暴露维修工程筹备草稿、责任与资金初判、决定范围复核、实施方案版本、项目附件和方案冻结后台接口。
 package com.pangu.interfaces.web.controller;
 
 import com.pangu.application.repair.RepairProjectAttachmentService;
@@ -127,25 +127,25 @@ public class RepairProjectController extends BaseController {
     }
 
     /**
-     * 物业可提出本工程的责任、资金承担和执行依据；该动作只形成待确认版本，不产生锁定或付款资格。
+     * 物业可提出本工程的责任和资金承担初判；服务端派生执行状态，该动作不产生锁定或付款资格。
      */
     @PostMapping("/{projectId}/responsibility-determinations")
     @PreAuthorize("hasAuthority('repair:workorder:manage')")
     public Result<RepairProject.Details> proposeResponsibilityDetermination(
             @PathVariable("projectId") Long projectId,
             @Valid @RequestBody ProposeRepairResponsibilityDeterminationRequest request) {
-        return success("工程责任认定已提交确认",
+        return success("工程责任初判已提交确认",
                 projectService.proposeResponsibilityDetermination(projectId, request.toCommand()));
     }
 
-    /** 有治理权限的主体确认责任、资金承担和执行依据；附件上传本身不会越过该确认。 */
+    /** 有治理权限的主体确认责任和资金承担初判；附件上传本身不会越过该确认。 */
     @PostMapping("/{projectId}/responsibility-determinations/{determinationId}/confirm")
     @PreAuthorize("hasAuthority('repair:workorder:governance')")
     public Result<RepairProject.Details> confirmResponsibilityDetermination(
             @PathVariable("projectId") Long projectId,
             @PathVariable("determinationId") Long determinationId,
             @Valid @RequestBody ConfirmRepairResponsibilityDeterminationRequest request) {
-        return success("工程责任认定已确认", projectService.confirmResponsibilityDetermination(
+        return success("工程责任初判已确认", projectService.confirmResponsibilityDetermination(
                 projectId, determinationId, request.toCommand()));
     }
 

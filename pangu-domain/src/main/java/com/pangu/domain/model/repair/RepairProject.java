@@ -65,15 +65,14 @@ public record RepairProject(
     }
 
     /**
-     * 允许形成执行快照的依据类型。相关业主决定与既有授权必须以独立证据确认，不能由物业勾选替代。
+     * 由已确认责任路径派生的执行状态。共有维修只表示尚需取得相关业主决定，
+     * 既有授权和紧急维修必须先接入各自的可信事实链路，不能由本工程初判创建。
      */
     public enum ExecutionAuthorityType {
         CONTRACTUAL_EXECUTION,
         WARRANTY_EXECUTION,
         LIABILITY_EXECUTION,
-        OWNER_DECISION,
-        EXISTING_AUTHORIZATION,
-        EMERGENCY_REPAIR
+        OWNER_DECISION
     }
 
     /** 项目责任认定的确认生命周期；新认定不能覆盖已确认历史。 */
@@ -99,7 +98,7 @@ public record RepairProject(
     public enum Status {
         DRAFT,
         /**
-         * 已冻结供相关业主决定或授权审查的方案，但尚未形成可施工、可定商或可付款的执行快照。
+         * 已冻结供相关业主决定审查的方案，但尚未形成可施工、可定商或可付款的执行快照。
          */
         AUTHORIZATION_IN_PROGRESS,
         PLAN_LOCKED,
@@ -117,7 +116,7 @@ public record RepairProject(
     public enum PlanStatus {
         DRAFT,
         /**
-         * 为决定/授权固定的提案版本；它不是实施锁定，不能据此签约、定商或付款。
+         * 为相关业主决定固定的提案版本；它不是实施锁定，不能据此签约、定商或付款。
          */
         AUTHORIZATION_FROZEN,
         LOCKED,
@@ -283,7 +282,7 @@ public record RepairProject(
     }
 
     /**
-     * 工程责任、资金承担和执行依据的版本化事实。物业只能提出，具有治理权限的主体确认后才可参与锁定。
+     * 工程责任、资金承担和派生执行状态的版本化事实。物业只能提出，具有治理权限的主体确认后才可参与锁定。
      */
     public record ResponsibilityDetermination(
             Long determinationId,

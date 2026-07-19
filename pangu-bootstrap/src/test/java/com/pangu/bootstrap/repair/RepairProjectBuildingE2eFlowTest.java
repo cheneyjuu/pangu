@@ -168,7 +168,6 @@ class RepairProjectBuildingE2eFlowTest {
                         "expectedProjectVersion", project.path("project").path("version").asInt(),
                         "responsibilityPath", "SHARED_COMMON_REPAIR",
                         "fundingSourceType", "SPECIAL_MAINTENANCE_LEDGER",
-                        "executionAuthorityType", "OWNER_DECISION",
                         "basisAttachmentId", responsibilityAttachmentId,
                         "basisReference", "本工程经勘验属于楼栋共有维修，需由相关业主决定后使用专项维修资金。",
                         "approvedAmount", PLAN_BUDGET));

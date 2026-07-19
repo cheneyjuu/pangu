@@ -1,8 +1,8 @@
-// 关联业务：接收维修工程责任、资金承担和执行依据的提出请求；确认权不在该请求中授予。
+// 关联业务：接收维修工程责任和资金承担初判；执行状态由服务端派生，确认权不在该请求中授予。
 package com.pangu.interfaces.web.controller.dto.repair;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.pangu.application.repair.command.ProposeRepairResponsibilityDeterminationCommand;
-import com.pangu.domain.model.repair.RepairProject.ExecutionAuthorityType;
 import com.pangu.domain.model.repair.RepairProject.FundingSourceType;
 import com.pangu.domain.model.repair.RepairProject.ResponsibilityPath;
 import jakarta.validation.constraints.DecimalMin;
@@ -13,11 +13,14 @@ import jakarta.validation.constraints.Size;
 
 import java.math.BigDecimal;
 
+/**
+ * 兼容已发布客户端的废弃字段，但绝不让客户端提交的执行依据影响服务端的业务判断。
+ */
+@JsonIgnoreProperties(value = "executionAuthorityType")
 public record ProposeRepairResponsibilityDeterminationRequest(
         @NotNull @Min(0) Integer expectedProjectVersion,
         @NotNull ResponsibilityPath responsibilityPath,
         @NotNull FundingSourceType fundingSourceType,
-        @NotNull ExecutionAuthorityType executionAuthorityType,
         @NotNull Long basisAttachmentId,
         @NotBlank @Size(max = 1000) String basisReference,
         @Size(max = 200) String responsiblePartyName,
@@ -26,7 +29,7 @@ public record ProposeRepairResponsibilityDeterminationRequest(
 ) {
     public ProposeRepairResponsibilityDeterminationCommand toCommand() {
         return new ProposeRepairResponsibilityDeterminationCommand(
-                expectedProjectVersion, responsibilityPath, fundingSourceType, executionAuthorityType,
+                expectedProjectVersion, responsibilityPath, fundingSourceType,
                 basisAttachmentId, basisReference, responsiblePartyName, responsiblePartyReference, approvedAmount);
     }
 }

@@ -1,4 +1,4 @@
-// 关联业务：编排维修工程草案、责任认定、授权提案冻结、授权后实施方案锁定及可信资金快照。
+// 关联业务：编排维修工程草案、责任与资金初判、相关业主决定提案冻结、授权后实施方案锁定及可信资金快照。
 package com.pangu.application.repair;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -74,7 +74,7 @@ import static com.pangu.application.repair.RepairWorkOrderApplicationException.R
 @RequiredArgsConstructor
 public class RepairProjectService {
 
-    /** 责任认定由物业基于勘验、合同或保修依据提出，不能由治理确认方代填。 */
+    /** 责任与资金初判由物业基于勘验、合同或保修依据提出，不能由治理确认方代填。 */
     private static final Set<String> PROPERTY_RESPONSIBILITY_PROPOSER_ROLES = Set.of(
             "PROPERTY_MANAGER", "PROPERTY_STAFF");
 
@@ -198,7 +198,8 @@ public class RepairProjectService {
     }
 
     /**
-     * 物业提出的是待确认事实，而不是资金占用、决定结果或付款指令。每次重新提出都会保留此前版本。
+     * 物业提出的是待确认的责任与资金初判，而不是资金占用、决定结果或付款指令。
+     * 执行状态只能由服务端按责任路径派生，不能由请求字段替代。
      */
     @Transactional
     public RepairProject.Details proposeResponsibilityDetermination(
@@ -208,17 +209,18 @@ public class RepairProjectService {
             throw invalid("expectedProjectVersion 必填");
         }
         RepairProject project = loadProjectForUpdate(projectId, actor.tenantId());
-        requireDraftProjectVersion(project, command.expectedProjectVersion(), "提交工程责任认定");
+        requireDraftProjectVersion(project, command.expectedProjectVersion(), "提交工程责任初判");
         DecisionScope decisionScope = projectRepository.findDecisionScope(projectId, actor.tenantId())
                 .orElseThrow(() -> new RepairWorkOrderApplicationException(
                         INVALID_STATUS, "项目缺少唯一决定范围快照"));
         PlanVersion draftPlan = currentDraftPlan(projectId, actor.tenantId());
         projectRepository.findAttachment(command.basisAttachmentId(), projectId, actor.tenantId())
-                .orElseThrow(() -> notFound("责任认定依据附件不存在"));
+                .orElseThrow(() -> notFound("工程责任初判依据附件不存在"));
         ResponsibilityDetermination determination = new ResponsibilityDetermination(
                 null, projectId, actor.tenantId(), nextResponsibilityDeterminationVersion(projectId, actor.tenantId()),
                 ResponsibilityDeterminationStatus.PENDING_CONFIRMATION,
-                command.responsibilityPath(), command.fundingSourceType(), command.executionAuthorityType(),
+                command.responsibilityPath(), command.fundingSourceType(),
+                deriveExecutionAuthority(command.responsibilityPath()),
                 command.basisAttachmentId(), requireText(command.basisReference(), "basisReference"),
                 trim(command.responsiblePartyName()), trim(command.responsiblePartyReference()),
                 requirePositiveAmount(command.approvedAmount(), "approvedAmount"), actor.accountId(), actor.userId(),
@@ -226,12 +228,12 @@ public class RepairProjectService {
         validateResponsibilityDetermination(determination, decisionScope, draftPlan);
         if (!projectRepository.listFundingSlices(decisionScope.decisionScopeId(), actor.tenantId()).isEmpty()) {
             throw new RepairWorkOrderApplicationException(
-                    INVALID_STATUS, "项目已有可信资金切片，不能直接替换责任认定");
+                    INVALID_STATUS, "项目已有可信资金切片，不能直接替换工程责任初判");
         }
         projectRepository.supersedeCurrentResponsibilityDeterminations(projectId, actor.tenantId());
         ResponsibilityDetermination proposed = projectRepository.insertResponsibilityDetermination(determination);
         if (projectRepository.advanceVersion(projectId, actor.tenantId(), command.expectedProjectVersion()) != 1) {
-            throw new RepairWorkOrderApplicationException(INVALID_STATUS, "项目版本已变化，请刷新后再提交工程责任认定");
+            throw new RepairWorkOrderApplicationException(INVALID_STATUS, "项目版本已变化，请刷新后再提交工程责任初判");
         }
         event(project, actor, "RESPONSIBILITY_DETERMINATION_PROPOSED", Map.of(
                 "determinationId", proposed.determinationId(),
@@ -245,7 +247,7 @@ public class RepairProjectService {
     }
 
     /**
-     * 确认人对本工程的证据、责任路径、资金承担和执行依据负责；服务端不把附件上传或物业提交视为确认。
+     * 确认人对本工程的证据、责任路径和资金承担初判负责；服务端不把附件上传或物业提交视为确认。
      */
     @Transactional
     public RepairProject.Details confirmResponsibilityDetermination(
@@ -257,34 +259,34 @@ public class RepairProjectService {
             throw invalid("expectedProjectVersion 必填");
         }
         RepairProject project = loadProjectForUpdate(projectId, actor.tenantId());
-        requireDraftProjectVersion(project, command.expectedProjectVersion(), "确认工程责任认定");
+        requireDraftProjectVersion(project, command.expectedProjectVersion(), "确认工程责任初判");
         ResponsibilityDetermination current = projectRepository
                 .findCurrentResponsibilityDetermination(projectId, actor.tenantId())
                 .orElseThrow(() -> new RepairWorkOrderApplicationException(
-                        INVALID_STATUS, "项目没有待确认的工程责任认定"));
+                        INVALID_STATUS, "项目没有待确认的工程责任初判"));
         if (!Objects.equals(current.determinationId(), determinationId)
                 || current.status() != ResponsibilityDeterminationStatus.PENDING_CONFIRMATION) {
-            throw new RepairWorkOrderApplicationException(INVALID_STATUS, "工程责任认定已变化，请刷新后再确认");
+            throw new RepairWorkOrderApplicationException(INVALID_STATUS, "工程责任初判已变化，请刷新后再确认");
         }
         DecisionScope decisionScope = projectRepository.findDecisionScope(projectId, actor.tenantId())
                 .orElseThrow(() -> new RepairWorkOrderApplicationException(
                         INVALID_STATUS, "项目缺少唯一决定范围快照"));
         PlanVersion draftPlan = currentDraftPlan(projectId, actor.tenantId());
         projectRepository.findAttachment(current.basisAttachmentId(), projectId, actor.tenantId())
-                .orElseThrow(() -> notFound("责任认定依据附件不存在"));
+                .orElseThrow(() -> notFound("工程责任初判依据附件不存在"));
         validateResponsibilityDetermination(current, decisionScope, draftPlan);
         if (current.responsibilityPath() == ResponsibilityPath.SHARED_COMMON_REPAIR
                 && decisionScope.verificationStatus() != DecisionScopeVerificationStatus.CONFIRMED) {
             throw new RepairWorkOrderApplicationException(
-                    INVALID_STATUS, "共有与决定范围尚待核验，不能确认共有维修责任认定");
+                    INVALID_STATUS, "共有与决定范围尚待核验，不能确认共有维修责任初判");
         }
         if (projectRepository.confirmResponsibilityDetermination(
                 determinationId, projectId, actor.tenantId(), actor.accountId(), actor.userId(),
                 trim(command.confirmationNote())) != 1) {
-            throw new RepairWorkOrderApplicationException(INVALID_STATUS, "工程责任认定已变化，请刷新后再确认");
+            throw new RepairWorkOrderApplicationException(INVALID_STATUS, "工程责任初判已变化，请刷新后再确认");
         }
         if (projectRepository.advanceVersion(projectId, actor.tenantId(), command.expectedProjectVersion()) != 1) {
-            throw new RepairWorkOrderApplicationException(INVALID_STATUS, "项目版本已变化，请刷新后再确认工程责任认定");
+            throw new RepairWorkOrderApplicationException(INVALID_STATUS, "项目版本已变化，请刷新后再确认工程责任初判");
         }
         event(project, actor, "RESPONSIBILITY_DETERMINATION_CONFIRMED", Map.of(
                 "determinationId", current.determinationId(),
@@ -325,7 +327,7 @@ public class RepairProjectService {
     }
 
     /**
-     * 冻结的是供相关业主决定或授权审查的提案，不是最终实施方案。决定前必须固定预算、点位、费用承担范围，
+     * 冻结的是供相关业主决定审查的提案，不是最终实施方案。决定前必须固定预算、点位、费用承担范围，
      * 否则表决通过后仍可改写其所依据的内容；账簿余额、托管归集和支取资格只在最终锁定时核验，不能因尚未
      * 接入账户而阻止业主对已明确的责任与资金路径作出决定。
      */
@@ -382,7 +384,7 @@ public class RepairProjectService {
     }
 
     /**
-     * 最终锁定只在直接执行依据已确认，或相关业主决定/授权已生效后进行。它生成当前责任路径可使用的执行快照；
+     * 最终锁定只在直接责任履行已确认，或共有维修的相关业主决定已生效后进行。
      * 共有维修才可进入业主侧定商、合同和资金支取，直接责任路径不得借此生成业主侧合同或付款资格。
      */
     @Transactional
@@ -403,18 +405,22 @@ public class RepairProjectService {
         requireApprovedAmount(determination, plan, "锁定实施方案");
         List<WorkPoint> workPoints = requireWorkPoints(plan.planId(), actor.tenantId(), "锁定实施方案");
 
-        boolean ownerDecisionRoute = determination.executionAuthorityType() == ExecutionAuthorityType.OWNER_DECISION;
+        boolean ownerDecisionRoute = determination.responsibilityPath() == ResponsibilityPath.SHARED_COMMON_REPAIR;
+        if (ownerDecisionRoute && determination.executionAuthorityType() != ExecutionAuthorityType.OWNER_DECISION) {
+            throw new RepairWorkOrderApplicationException(
+                    INVALID_STATUS, "共有维修执行状态异常，请重新确认责任初判后取得相关业主决定");
+        }
         GovernanceBasis governanceBasis = null;
         List<AllocationRoom> allocationRooms;
         if (ownerDecisionRoute) {
             if (project.status() != Status.AUTHORIZED || plan.status() != PlanStatus.AUTHORIZATION_FROZEN) {
                 throw new RepairWorkOrderApplicationException(
-                        INVALID_STATUS, "需先冻结授权提案并完成有效决定或授权，不能锁定实施方案");
+                        INVALID_STATUS, "需先冻结授权提案并完成有效相关业主决定，不能锁定实施方案");
             }
             governanceBasis = governanceRepository.findActiveGovernanceBasis(
                             projectId, planId, actor.tenantId())
                     .orElseThrow(() -> new RepairWorkOrderApplicationException(
-                            INVALID_STATUS, "项目缺少与授权提案对应的有效决定或授权快照，不能锁定实施方案"));
+                            INVALID_STATUS, "项目缺少与授权提案对应的有效相关业主决定快照，不能锁定实施方案"));
             allocationRooms = projectRepository.listAllocationRooms(plan.planId(), actor.tenantId());
             if (allocationRooms.isEmpty()) {
                 throw new RepairWorkOrderApplicationException(
@@ -855,7 +861,7 @@ public class RepairProjectService {
                 .filter(plan -> plan.status() == PlanStatus.DRAFT)
                 .findFirst()
                 .orElseThrow(() -> new RepairWorkOrderApplicationException(
-                        INVALID_STATUS, "项目没有可提交责任认定的草稿实施方案"));
+                        INVALID_STATUS, "项目没有可提交工程责任初判的草稿实施方案"));
     }
 
     private DecisionScope requireConfirmedDecisionScope(Long projectId, Long tenantId, String actionLabel) {
@@ -874,7 +880,7 @@ public class RepairProjectService {
         return projectRepository.findCurrentResponsibilityDetermination(projectId, tenantId)
                 .filter(candidate -> candidate.status() == ResponsibilityDeterminationStatus.CONFIRMED)
                 .orElseThrow(() -> new RepairWorkOrderApplicationException(
-                        INVALID_STATUS, "工程责任、资金承担或执行依据尚待确认，不能" + actionLabel));
+                        INVALID_STATUS, "工程责任或资金承担初判尚待确认，不能" + actionLabel));
     }
 
     private void requireApprovedAmount(
@@ -904,7 +910,8 @@ public class RepairProjectService {
     }
 
     /**
-     * 责任、资金和执行依据是三个显式字段，采用受限组合而非由项目范围、设备名称或角色名称推导。
+     * 责任路径与资金承担由物业提出、治理主体确认；执行状态由服务端固定派生，
+     * 不得由项目范围、设备名称、角色名称或前端字段伪造。
      */
     private void validateResponsibilityDetermination(
             ResponsibilityDetermination determination,
@@ -912,7 +919,7 @@ public class RepairProjectService {
             PlanVersion draftPlan) {
         if (determination.responsibilityPath() == null || determination.fundingSourceType() == null
                 || determination.executionAuthorityType() == null) {
-            throw invalid("责任路径、资金承担和执行依据均为必填项");
+            throw invalid("责任路径、资金承担和服务端派生执行状态均为必填项");
         }
         if (determination.approvedAmount().compareTo(draftPlan.budgetTotal()) < 0) {
             throw invalid("责任承担上限不得低于当前草案预算");
@@ -940,12 +947,8 @@ public class RepairProjectService {
                         FundingSourceType.OWNER_SELF_FUNDING).contains(determination.fundingSourceType())) {
                     throw invalid("共有维修不能使用当前责任路径不支持的资金承担类型");
                 }
-                if (!Set.of(
-                        ExecutionAuthorityType.OWNER_DECISION,
-                        ExecutionAuthorityType.EXISTING_AUTHORIZATION,
-                        ExecutionAuthorityType.EMERGENCY_REPAIR).contains(
-                                determination.executionAuthorityType())) {
-                    throw invalid("共有维修必须提供相关业主决定、既有授权或紧急维修依据");
+                if (determination.executionAuthorityType() != ExecutionAuthorityType.OWNER_DECISION) {
+                    throw invalid("共有维修只能进入取得相关业主决定的流程");
                 }
                 if (determination.fundingSourceType() == FundingSourceType.PUBLIC_REVENUE_LEDGER
                         && decisionScope.scopeType() != ScopeType.COMMUNITY) {
@@ -953,6 +956,22 @@ public class RepairProjectService {
                 }
             }
         }
+    }
+
+    /**
+     * 共有维修的初判并不等于已有决定：它只能进入后续的相关业主决定流程。
+     * 既有授权和紧急维修须由各自可信事实链路接入，不允许通过本表单声明。
+     */
+    private ExecutionAuthorityType deriveExecutionAuthority(ResponsibilityPath responsibilityPath) {
+        if (responsibilityPath == null) {
+            throw invalid("responsibilityPath 必填");
+        }
+        return switch (responsibilityPath) {
+            case PROPERTY_SERVICE_CONTRACT -> ExecutionAuthorityType.CONTRACTUAL_EXECUTION;
+            case DEVELOPER_WARRANTY -> ExecutionAuthorityType.WARRANTY_EXECUTION;
+            case LIABLE_PARTY -> ExecutionAuthorityType.LIABILITY_EXECUTION;
+            case SHARED_COMMON_REPAIR -> ExecutionAuthorityType.OWNER_DECISION;
+        };
     }
 
     private void requireDirectResponsibility(
@@ -1006,7 +1025,7 @@ public class RepairProjectService {
     }
 
     /**
-     * 资金切片只从已确认的责任认定产生。专项维修资金仍需服务端核验对应账簿；其他责任路径由确认依据
+     * 资金切片只从已确认的责任与资金初判产生。专项维修资金仍需服务端核验对应账簿；其他责任路径由确认依据
      * 作为承担上限快照，绝不因为项目所在楼栋而回退到专项维修资金账户。
      */
     private List<FundingSlice> resolveFundingSlices(
@@ -1027,7 +1046,7 @@ public class RepairProjectService {
                 return current;
             }
             throw new RepairWorkOrderApplicationException(
-                    INVALID_STATUS, "项目资金切片与当前工程责任认定不一致，不能锁定实施方案");
+                    INVALID_STATUS, "项目资金切片与当前工程责任初判不一致，不能锁定实施方案");
         }
         if (determination.fundingSourceType() == FundingSourceType.SPECIAL_MAINTENANCE_LEDGER) {
             return List.of(resolveSpecialMaintenanceFundingSlice(
@@ -1111,7 +1130,7 @@ public class RepairProjectService {
     }
 
     /**
-     * 资金承担范围只能由可信账簿或已确认责任认定写入；附件、范围和前端文本都不能替代该快照。
+     * 资金承担范围只能由可信账簿或已确认责任初判写入；附件、范围和前端文本都不能替代该快照。
      * 决定授权、定商、合同和验收证据仍由各自状态机产生，不能通过资金切片倒置生成。
      */
     private void validateTrustedFundingSlices(
@@ -1333,7 +1352,7 @@ public class RepairProjectService {
         UserContext actor = requireActor();
         if (!actor.hasPermission("repair:workorder:governance")) {
             throw new RepairWorkOrderApplicationException(
-                    FORBIDDEN, "当前工作身份无权确认工程责任、资金承担和执行依据");
+                    FORBIDDEN, "当前工作身份无权确认工程责任与资金承担初判");
         }
         return actor;
     }
@@ -1343,7 +1362,7 @@ public class RepairProjectService {
         if (!PROPERTY_RESPONSIBILITY_PROPOSER_ROLES.contains(actor.roleKey())
                 || !actor.hasPermission("repair:workorder:manage")) {
             throw new RepairWorkOrderApplicationException(
-                    FORBIDDEN, "仅物业可基于勘验、合同或保修依据提出工程责任认定");
+                    FORBIDDEN, "仅物业可基于勘验、合同或保修依据提出工程责任初判");
         }
         return actor;
     }

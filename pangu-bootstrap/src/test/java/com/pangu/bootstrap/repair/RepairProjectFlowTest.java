@@ -17,7 +17,6 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
 
-import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -59,7 +58,6 @@ class RepairProjectFlowTest {
     private long buildingId;
     private long roomId;
     private long otherBuildingId;
-    private Long createdFundingAccountId;
 
     @BeforeEach
     void setUp() {
@@ -100,10 +98,6 @@ class RepairProjectFlowTest {
     void clean() {
         jdbcTemplate.update("DELETE FROM t_repair_project WHERE project_name LIKE ?", PROJECT_PREFIX + "%");
         jdbcTemplate.update("DELETE FROM t_repair_work_order WHERE title LIKE ?", CASE_PREFIX + "%");
-        if (createdFundingAccountId != null) {
-            jdbcTemplate.update("DELETE FROM t_fund_ledger_entry WHERE account_id = ?", createdFundingAccountId);
-            jdbcTemplate.update("DELETE FROM t_maintenance_fund_account WHERE account_id = ?", createdFundingAccountId);
-        }
     }
 
     @Test
@@ -216,73 +210,11 @@ class RepairProjectFlowTest {
                 .content(json(Map.of("expectedProjectVersion", 0))))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.msg", is(
-                        "工程责任、资金承担或执行依据尚待确认，不能锁定实施方案")));
+                        "工程责任或资金承担初判尚待确认，不能锁定实施方案")));
     }
 
     @Test
-    void confirmedBuildingScopeLocksPlanWithScopedMaintenanceAccountAndFrozenAllocationSnapshot() throws Exception {
-        long sourceId = createConfirmedBuildingSource(buildingId);
-        JsonNode created = createProject(buildingRequest(List.of(
-                referenceRoomWorkPoint(buildingId, roomId, List.of(sourceId)))));
-        long projectId = created.path("project").path("projectId").asLong();
-        long planId = created.path("plans").get(0).path("planId").asLong();
-        createdFundingAccountId = seedBuildingMaintenanceAccount(new BigDecimal("2207.00"));
-        int lockVersion = confirmExistingAuthorizationSpecialFundResponsibility(projectId, 0);
-
-        String response = mockMvc.perform(post("/api/v1/admin/repair-projects/" + projectId + "/plans/" + planId + "/lock")
-                        .header("Authorization", bearer(propertyToken))
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(json(Map.of("expectedProjectVersion", lockVersion))))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.project.status", is("AUTHORIZED")))
-                .andExpect(jsonPath("$.data.fundingSlices.length()", is(1)))
-                .andExpect(jsonPath("$.data.fundingSlices[0].sourceType", is("SPECIAL_MAINTENANCE_LEDGER")))
-                .andExpect(jsonPath("$.data.fundingSlices[0].sourceRecordId",
-                        is(createdFundingAccountId.toString())))
-                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
-        JsonNode locked = objectMapper.readTree(response).path("data");
-        assertEquals(64, locked.path("plans").get(0).path("snapshotHash").asText().length());
-        int allocationRoomCount = jdbcTemplate.queryForObject("""
-                SELECT COUNT(*) FROM t_repair_plan_allocation_room WHERE plan_id = ?
-                """, Integer.class, planId);
-        assertTrue(allocationRoomCount > 0);
-        assertEquals(1, jdbcTemplate.queryForObject("""
-                SELECT COUNT(*)
-                FROM t_repair_funding_slice
-                WHERE project_id = ?
-                  AND source_record_type = 'MAINTENANCE_FUND_ACCOUNT'
-                  AND source_record_id = ?
-                  AND allocation_snapshot_hash ~ '^[0-9a-f]{64}$'
-                """, Integer.class, projectId, createdFundingAccountId.toString()));
-    }
-
-    @Test
-    void scopedMaintenanceAccountWithInsufficientAvailableBalanceDoesNotPersistAnySnapshot() throws Exception {
-        long sourceId = createConfirmedBuildingSource(buildingId);
-        JsonNode created = createProject(buildingRequest(List.of(
-                referenceRoomWorkPoint(buildingId, roomId, List.of(sourceId)))));
-        long projectId = created.path("project").path("projectId").asLong();
-        long planId = created.path("plans").get(0).path("planId").asLong();
-        createdFundingAccountId = seedBuildingMaintenanceAccount(new BigDecimal("2206.99"));
-        int lockVersion = confirmExistingAuthorizationSpecialFundResponsibility(projectId, 0);
-
-        mockMvc.perform(post("/api/v1/admin/repair-projects/" + projectId + "/plans/" + planId + "/lock")
-                        .header("Authorization", bearer(propertyToken))
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(json(Map.of("expectedProjectVersion", lockVersion))))
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.msg", is("专项维修资金账户可用余额不足，不能锁定实施方案")));
-
-        assertEquals(0, jdbcTemplate.queryForObject("""
-                SELECT COUNT(*) FROM t_repair_plan_allocation_room WHERE plan_id = ?
-                """, Integer.class, planId));
-        assertEquals(0, jdbcTemplate.queryForObject("""
-                SELECT COUNT(*) FROM t_repair_funding_slice WHERE project_id = ?
-                """, Integer.class, projectId));
-    }
-
-    @Test
-    void ownerDecisionRouteFreezesAuthorizationProposalBeforeAnyFinalPlanLockOrLedgerVerification() throws Exception {
+    void sharedRepairDerivesOwnerDecisionAndFreezesAuthorizationProposalBeforeAnyFinalPlanLockOrLedgerVerification() throws Exception {
         long sourceId = createConfirmedBuildingSource(buildingId);
         JsonNode created = createProject(buildingRequest(List.of(
                 referenceRoomWorkPoint(buildingId, roomId, List.of(sourceId)))));
@@ -294,7 +226,7 @@ class RepairProjectFlowTest {
                 WHERE tenant_id = ? AND account_level = 2 AND reference_id = ?
                 """, Integer.class, TENANT, buildingId));
         int freezeVersion = confirmSharedSpecialFundResponsibility(
-                projectId, 0, "OWNER_DECISION", false);
+                projectId, 0, "EXISTING_AUTHORIZATION", true);
 
         String frozenResponse = mockMvc.perform(post("/api/v1/admin/repair-projects/" + projectId
                         + "/plans/" + planId + "/freeze-for-authorization")
@@ -320,7 +252,7 @@ class RepairProjectFlowTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(Map.of("expectedProjectVersion", lockVersion))))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.msg", is("需先冻结授权提案并完成有效决定或授权，不能锁定实施方案")));
+                .andExpect(jsonPath("$.msg", is("需先冻结授权提案并完成有效相关业主决定，不能锁定实施方案")));
     }
 
     @Test
@@ -341,7 +273,7 @@ class RepairProjectFlowTest {
                                 "expectedProjectVersion", 0,
                                 "responsibilityPath", "PROPERTY_SERVICE_CONTRACT",
                                 "fundingSourceType", "PROPERTY_SERVICE_CONTRACT",
-                                "executionAuthorityType", "CONTRACTUAL_EXECUTION",
+                                "executionAuthorityType", "OWNER_DECISION",
                                 "basisAttachmentId", basisAttachmentId,
                                 "basisReference", "物业服务合同第六条约定本类日常维修由物业承担。",
                                 "responsiblePartyName", "江湾国际公寓物业服务中心",
@@ -349,6 +281,8 @@ class RepairProjectFlowTest {
                                 "approvedAmount", 2207))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.responsibilityDetermination.status", is("PENDING_CONFIRMATION")))
+                .andExpect(jsonPath("$.data.responsibilityDetermination.executionAuthorityType",
+                        is("CONTRACTUAL_EXECUTION")))
                 .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
         JsonNode proposed = objectMapper.readTree(proposedResponse).path("data");
         long determinationId = proposed.path("responsibilityDetermination").path("determinationId").asLong();
@@ -436,21 +370,14 @@ class RepairProjectFlowTest {
         return objectMapper.readTree(response).path("data");
     }
 
-    /** 既有授权路径可直接进入授权后的执行锁定，不应被误当作新的相关业主决定。 */
-    private int confirmExistingAuthorizationSpecialFundResponsibility(
-            long projectId, int expectedProjectVersion) throws Exception {
-        return confirmSharedSpecialFundResponsibility(
-                projectId, expectedProjectVersion, "EXISTING_AUTHORIZATION", true);
-    }
-
     /**
-     * 测试使用已归档的授权原件，并明确验证物业只能提出、治理角色才能确认；不允许由楼栋范围推断资金路径。
+     * 旧客户端携带的执行依据字段必须被忽略：共有维修只能由服务端派生为待取得相关业主决定。
      */
     private int confirmSharedSpecialFundResponsibility(
-            long projectId, int expectedProjectVersion, String executionAuthorityType,
+            long projectId, int expectedProjectVersion, String legacyExecutionAuthorityType,
             boolean assertPropertyCannotConfirm) throws Exception {
         long basisAttachmentId = uploadProjectAttachment(
-                projectId, propertyToken, "专项维修资金责任认定依据.pdf", executionAuthorityType);
+                projectId, propertyToken, "专项维修资金责任初判依据.pdf", legacyExecutionAuthorityType);
         String proposedResponse = mockMvc.perform(post(
                         "/api/v1/admin/repair-projects/" + projectId + "/responsibility-determinations")
                         .header("Authorization", bearer(propertyToken))
@@ -459,12 +386,14 @@ class RepairProjectFlowTest {
                                 "expectedProjectVersion", expectedProjectVersion,
                                 "responsibilityPath", "SHARED_COMMON_REPAIR",
                                 "fundingSourceType", "SPECIAL_MAINTENANCE_LEDGER",
-                                "executionAuthorityType", executionAuthorityType,
+                                "executionAuthorityType", legacyExecutionAuthorityType,
                                 "basisAttachmentId", basisAttachmentId,
-                                "basisReference", "已归档的相关业主授权及专项维修资金使用依据。",
+                                "basisReference", "已完成共有部位与专项维修资金使用条件的初步勘验，尚需取得相关业主决定。",
                                 "approvedAmount", 2207))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.responsibilityDetermination.status", is("PENDING_CONFIRMATION")))
+                .andExpect(jsonPath("$.data.responsibilityDetermination.executionAuthorityType",
+                        is("OWNER_DECISION")))
                 .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
         JsonNode proposed = objectMapper.readTree(proposedResponse).path("data");
         long determinationId = proposed.path("responsibilityDetermination").path("determinationId").asLong();
@@ -487,7 +416,7 @@ class RepairProjectFlowTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(Map.of(
                                 "expectedProjectVersion", confirmationVersion,
-                                "confirmationNote", "已核对授权原件、资金路径和本次预算上限。"))))
+                                "confirmationNote", "已核对共有维修责任、资金路径和本次预算上限；尚需取得相关业主决定。"))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.responsibilityDetermination.status", is("CONFIRMED")))
                 .andExpect(jsonPath("$.data.responsibilityDetermination.confirmedByUserId",
@@ -545,16 +474,6 @@ class RepairProjectFlowTest {
                 "scopeType", "BUILDING",
                 "buildingId", buildingId,
                 "plan", plan);
-    }
-
-    /** 测试仅写入与当前楼栋严格绑定的账簿记录，避免用社区账户替代楼栋资金范围。 */
-    private long seedBuildingMaintenanceAccount(BigDecimal totalBalance) {
-        return jdbcTemplate.queryForObject("""
-                INSERT INTO t_maintenance_fund_account (
-                    tenant_id, account_level, reference_id, ancestors, total_balance, frozen_balance
-                ) VALUES (?, 2, ?, '0', ?, 0)
-                RETURNING account_id
-                """, Long.class, TENANT, buildingId, totalBalance);
     }
 
     private Map<String, Object> referenceRoomWorkPoint(

@@ -1,4 +1,4 @@
-// 关联业务：接收有治理权限主体对维修工程责任认定的确认意见。
+// 关联业务：接收有治理权限主体对维修工程责任与资金初判的确认意见。
 package com.pangu.interfaces.web.controller.dto.repair;
 
 import com.pangu.application.repair.command.ConfirmRepairResponsibilityDeterminationCommand;
