@@ -651,11 +651,11 @@ public class RepairProjectService {
         }
         if (draft.locationType() == WorkPointLocationType.REFERENCE_ROOM) {
             if (draft.referenceRoomId() == null || trim(draft.commonAreaName()) != null) {
-                throw invalid("参照房屋点位必须只填写 referenceRoomId");
+                throw invalid("关联房屋位置必须填写关联房屋，且不能同时填写公共部位名称");
             }
             if (buildingId == null || !workOrderRepository.roomExists(
                     project.tenantId(), buildingId, draft.referenceRoomId())) {
-                throw invalid("参照房屋不在所选楼栋 roomId=" + draft.referenceRoomId());
+                throw invalid("关联房屋不在所选楼栋 roomId=" + draft.referenceRoomId());
             }
             return new WorkPointLocation(buildingId, unitName, draft.locationType(), draft.referenceRoomId(), null);
         }
