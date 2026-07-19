@@ -48,3 +48,10 @@ Pull requests should include the problem, solution summary, affected modules, te
 - Do not present a workaround as the target solution. Mocks, placeholders, manual bypasses, and frontend-only fallbacks are acceptable only when explicitly requested.
 - Put sensitive and high-risk truth on the backend. Identity, permissions, authentication, funds, votes, audit, legal-effect workflows, and personal information should default to trusted backend data and server-side validation; frontend handles presentation and interaction.
 - Generalize repeated mistakes. When an error repeats or exposes a pattern, document the higher-level cause and the pre-implementation checks needed to avoid recurrence.
+
+## Deployment Default
+
+- A user request to "部署", "上线" or "发布" Pangu or Yaochi means an SSH production deployment by default. Do not ask the user to choose a deployment method each time.
+- Build and ship the exact committed version only. Pangu releases use a clean archive and preserve the current production JAR for rollback; Yaochi releases use a timestamped static release and an atomic `current` symlink switch.
+- Reuse the configured SSH host and current credential or key. Ask for deployment access only when authentication is unavailable or fails; never extract credentials from historical conversation logs or commit credentials to the repository.
+- A release is complete only after service, Flyway, public HTTP, and the deployed frontend bundle have been verified. Report the precise failed check when deployment cannot proceed.
