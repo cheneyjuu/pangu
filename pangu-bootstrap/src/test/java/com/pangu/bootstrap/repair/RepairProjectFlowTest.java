@@ -1,4 +1,4 @@
-// 关联业务：验证单一决定范围草稿、维修点位、来源边界和可信快照未接入时的诚实锁定阻断。
+// 关联业务：验证单一决定范围草稿、维修点位、来源边界，以及按可信专项维修资金账簿锁定实施方案。
 package com.pangu.bootstrap.repair;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -16,6 +16,7 @@ import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -49,6 +50,7 @@ class RepairProjectFlowTest {
     private long buildingId;
     private long roomId;
     private long otherBuildingId;
+    private Long createdFundingAccountId;
 
     @BeforeEach
     void setUp() {
@@ -83,6 +85,10 @@ class RepairProjectFlowTest {
     void clean() {
         jdbcTemplate.update("DELETE FROM t_repair_project WHERE project_name LIKE ?", PROJECT_PREFIX + "%");
         jdbcTemplate.update("DELETE FROM t_repair_work_order WHERE title LIKE ?", CASE_PREFIX + "%");
+        if (createdFundingAccountId != null) {
+            jdbcTemplate.update("DELETE FROM t_fund_ledger_entry WHERE account_id = ?", createdFundingAccountId);
+            jdbcTemplate.update("DELETE FROM t_maintenance_fund_account WHERE account_id = ?", createdFundingAccountId);
+        }
     }
 
     @Test
@@ -182,7 +188,7 @@ class RepairProjectFlowTest {
     }
 
     @Test
-    void confirmedScopeWithoutFundingSnapshotBlocksLockBeforeAnyQuoteRequirement() throws Exception {
+    void confirmedScopeWithoutScopedMaintenanceAccountBlocksLockBeforeAnyQuoteRequirement() throws Exception {
         long sourceId = createConfirmedBuildingSource(buildingId);
         JsonNode created = createProject(buildingRequest(List.of(
                 referenceRoomWorkPoint(buildingId, roomId, List.of(sourceId)))));
@@ -195,7 +201,67 @@ class RepairProjectFlowTest {
                         .content(json(Map.of("expectedProjectVersion", 0))))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.msg", is(
-                        "当前版本尚未接入可信的资金切片、承担范围和账簿快照，不能锁定实施方案")));
+                        "当前楼栋尚未接入专项维修资金账户，不能锁定实施方案")));
+    }
+
+    @Test
+    void confirmedBuildingScopeLocksPlanWithScopedMaintenanceAccountAndFrozenAllocationSnapshot() throws Exception {
+        long sourceId = createConfirmedBuildingSource(buildingId);
+        JsonNode created = createProject(buildingRequest(List.of(
+                referenceRoomWorkPoint(buildingId, roomId, List.of(sourceId)))));
+        long projectId = created.path("project").path("projectId").asLong();
+        long planId = created.path("plans").get(0).path("planId").asLong();
+        createdFundingAccountId = seedBuildingMaintenanceAccount(new BigDecimal("2207.00"));
+
+        String response = mockMvc.perform(post("/api/v1/admin/repair-projects/" + projectId + "/plans/" + planId + "/lock")
+                        .header("Authorization", bearer(propertyToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("expectedProjectVersion", 0))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.project.status", is("PLAN_LOCKED")))
+                .andExpect(jsonPath("$.data.fundingSlices.length()", is(1)))
+                .andExpect(jsonPath("$.data.fundingSlices[0].sourceType", is("SPECIAL_MAINTENANCE_LEDGER")))
+                .andExpect(jsonPath("$.data.fundingSlices[0].sourceRecordId",
+                        is(createdFundingAccountId.toString())))
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+        JsonNode locked = objectMapper.readTree(response).path("data");
+        assertEquals(64, locked.path("plans").get(0).path("snapshotHash").asText().length());
+        int allocationRoomCount = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM t_repair_plan_allocation_room WHERE plan_id = ?
+                """, Integer.class, planId);
+        assertTrue(allocationRoomCount > 0);
+        assertEquals(1, jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM t_repair_funding_slice
+                WHERE project_id = ?
+                  AND source_record_type = 'MAINTENANCE_FUND_ACCOUNT'
+                  AND source_record_id = ?
+                  AND allocation_snapshot_hash ~ '^[0-9a-f]{64}$'
+                """, Integer.class, projectId, createdFundingAccountId.toString()));
+    }
+
+    @Test
+    void scopedMaintenanceAccountWithInsufficientAvailableBalanceDoesNotPersistAnySnapshot() throws Exception {
+        long sourceId = createConfirmedBuildingSource(buildingId);
+        JsonNode created = createProject(buildingRequest(List.of(
+                referenceRoomWorkPoint(buildingId, roomId, List.of(sourceId)))));
+        long projectId = created.path("project").path("projectId").asLong();
+        long planId = created.path("plans").get(0).path("planId").asLong();
+        createdFundingAccountId = seedBuildingMaintenanceAccount(new BigDecimal("2206.99"));
+
+        mockMvc.perform(post("/api/v1/admin/repair-projects/" + projectId + "/plans/" + planId + "/lock")
+                        .header("Authorization", bearer(propertyToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("expectedProjectVersion", 0))))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.msg", is("专项维修资金账户可用余额不足，不能锁定实施方案")));
+
+        assertEquals(0, jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM t_repair_plan_allocation_room WHERE plan_id = ?
+                """, Integer.class, planId));
+        assertEquals(0, jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM t_repair_funding_slice WHERE project_id = ?
+                """, Integer.class, projectId));
     }
 
     @Test
@@ -262,6 +328,16 @@ class RepairProjectFlowTest {
                 "scopeType", "BUILDING",
                 "buildingId", buildingId,
                 "plan", plan);
+    }
+
+    /** 测试仅写入与当前楼栋严格绑定的账簿记录，避免用社区账户替代楼栋资金范围。 */
+    private long seedBuildingMaintenanceAccount(BigDecimal totalBalance) {
+        return jdbcTemplate.queryForObject("""
+                INSERT INTO t_maintenance_fund_account (
+                    tenant_id, account_level, reference_id, ancestors, total_balance, frozen_balance
+                ) VALUES (?, 2, ?, '0', ?, 0)
+                RETURNING account_id
+                """, Long.class, TENANT, buildingId, totalBalance);
     }
 
     private Map<String, Object> referenceRoomWorkPoint(

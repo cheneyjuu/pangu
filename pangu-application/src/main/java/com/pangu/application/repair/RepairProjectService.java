@@ -13,9 +13,12 @@ import com.pangu.domain.gateway.RichTextSanitizer;
 import com.pangu.domain.gateway.RichTextSanitizer.SanitizedRichText;
 import com.pangu.domain.model.repair.RepairProject;
 import com.pangu.domain.model.repair.RepairProject.AttachmentPurpose;
+import com.pangu.domain.model.repair.RepairProject.AllocationBasis;
+import com.pangu.domain.model.repair.RepairProject.AllocationRoom;
 import com.pangu.domain.model.repair.RepairProject.DecisionScope;
 import com.pangu.domain.model.repair.RepairProject.DecisionScopeVerificationStatus;
 import com.pangu.domain.model.repair.RepairProject.FundingSlice;
+import com.pangu.domain.model.repair.RepairProject.FundingSourceType;
 import com.pangu.domain.model.repair.RepairProject.FundingSliceVerificationStatus;
 import com.pangu.domain.model.repair.RepairProject.PlanAttachment;
 import com.pangu.domain.model.repair.RepairProject.PlanStatus;
@@ -30,6 +33,9 @@ import com.pangu.domain.model.repair.RepairWorkOrderEvent;
 import com.pangu.domain.model.repair.RepairWorkOrderStatus;
 import com.pangu.domain.model.repair.RepairWorkflowType;
 import com.pangu.domain.policy.RepairCaseLifecyclePolicy;
+import com.pangu.domain.repository.MaintenanceFundAccountRepository;
+import com.pangu.domain.repository.MaintenanceFundAccountRepository.Account;
+import com.pangu.domain.repository.MaintenanceFundAccountRepository.AccountScope;
 import com.pangu.domain.repository.RepairProjectRepository;
 import com.pangu.domain.repository.RepairWorkOrderRepository;
 import lombok.RequiredArgsConstructor;
@@ -40,6 +46,7 @@ import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.LocalDateTime;
 import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
@@ -59,6 +66,7 @@ import static com.pangu.application.repair.RepairWorkOrderApplicationException.R
 public class RepairProjectService {
 
     private final RepairProjectRepository projectRepository;
+    private final MaintenanceFundAccountRepository maintenanceFundAccountRepository;
     private final RepairWorkOrderRepository workOrderRepository;
     private final RepairCaseLifecyclePolicy caseLifecyclePolicy;
     private final UserContextHolder userContextHolder;
@@ -232,12 +240,17 @@ public class RepairProjectService {
         if (workPoints.isEmpty()) {
             throw new RepairWorkOrderApplicationException(INVALID_STATUS, "维修点位为空，禁止锁定实施方案");
         }
-        List<FundingSlice> fundingSlices = projectRepository.listFundingSlices(
-                decisionScope.decisionScopeId(), actor.tenantId());
-        validateTrustedFundingSlices(fundingSlices);
-        assertTrustedGovernanceAndExecutionSnapshots();
+        List<AllocationRoom> allocationRooms = projectRepository.snapshotAllocationRooms(
+                plan.planId(), actor.tenantId(), decisionScope.scopeType(),
+                decisionScope.buildingId(), decisionScope.unitName());
+        AllocationBasis allocationBasis = requireAllocationSnapshot(plan, actor.tenantId(), allocationRooms);
+        String allocationSnapshotHash = allocationSnapshotHash(
+                decisionScope, plan, allocationRooms, allocationBasis);
+        List<FundingSlice> fundingSlices = resolveFundingSlices(
+                project, decisionScope, plan, allocationSnapshotHash, actor.tenantId());
+        validateTrustedFundingSlices(fundingSlices, allocationSnapshotHash, plan.budgetTotal());
         String snapshotHash = snapshotHash(
-                project, decisionScope, plan, workPoints, fundingSlices);
+                project, decisionScope, plan, workPoints, allocationRooms, allocationBasis, fundingSlices);
         if (projectRepository.lockPlan(planId, projectId, actor.tenantId(), snapshotHash, actor.userId()) != 1) {
             throw new RepairWorkOrderApplicationException(INVALID_STATUS, "实施方案锁定失败，请刷新后重试");
         }
@@ -249,7 +262,9 @@ public class RepairProjectService {
         event(project, actor, "PLAN_LOCKED", Map.of(
                 "planId", planId, "planVersion", plan.versionNo(), "snapshotHash", snapshotHash,
                 "decisionScopeId", decisionScope.decisionScopeId(),
-                "decisionScopeVerificationStatus", decisionScope.verificationStatus().name()));
+                "decisionScopeVerificationStatus", decisionScope.verificationStatus().name(),
+                "allocationRoomCount", allocationRooms.size(),
+                "fundingSliceCount", fundingSlices.size()));
         return details(projectId, actor.tenantId());
     }
 
@@ -611,32 +626,133 @@ public class RepairProjectService {
     }
 
     /**
-     * 资金承担范围只能由可信的账簿、责任认定或有效决定适配器写入；附件、范围和前端文本都不能替代该快照。
+     * 方案锁定时首次把已核验产权名册固化为费用承担房屋。该快照是后续楼栋征询的分母，
+     * 不能再用项目端描述、受影响房屋或当前名册替代。
      */
-    private void validateTrustedFundingSlices(List<FundingSlice> fundingSlices) {
+    private AllocationBasis requireAllocationSnapshot(
+            PlanVersion plan, Long tenantId, List<AllocationRoom> allocationRooms) {
+        if (allocationRooms.isEmpty()) {
+            throw new RepairWorkOrderApplicationException(
+                    INVALID_STATUS, "已核验产权名册中没有决定范围对应的费用承担房屋，不能锁定实施方案");
+        }
+        AllocationBasis basis = projectRepository.findAllocationSnapshotBasis(plan.planId(), tenantId)
+                .orElseThrow(() -> new RepairWorkOrderApplicationException(
+                        INVALID_STATUS, "费用承担房屋快照缺少汇总依据，不能锁定实施方案"));
+        long roomCount = allocationRooms.stream().map(AllocationRoom::roomId).distinct().count();
+        long ownerCount = allocationRooms.stream().map(AllocationRoom::ownerUid).distinct().count();
+        BigDecimal totalArea = allocationRooms.stream()
+                .map(AllocationRoom::buildArea)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        if (basis.roomCount() != roomCount
+                || basis.ownerCount() != ownerCount
+                || basis.totalBuildArea().compareTo(totalArea) != 0) {
+            throw new RepairWorkOrderApplicationException(
+                    INVALID_STATUS, "费用承担房屋快照与汇总依据不一致，不能锁定实施方案");
+        }
+        return basis;
+    }
+
+    /**
+     * 新流程当前只实现专项维修资金账簿适配器。若已由其他可信适配器写入资金切片，
+     * 则只校验其快照，不会以建项表单或默认值覆盖它。
+     */
+    private List<FundingSlice> resolveFundingSlices(
+            RepairProject project,
+            DecisionScope decisionScope,
+            PlanVersion plan,
+            String allocationSnapshotHash,
+            Long tenantId) {
+        List<FundingSlice> existing = projectRepository.listFundingSlices(
+                decisionScope.decisionScopeId(), tenantId);
+        if (!existing.isEmpty()) {
+            return existing;
+        }
+        if (decisionScope.scopeType() == ScopeType.BUILDING_UNIT) {
+            throw new RepairWorkOrderApplicationException(
+                    INVALID_STATUS,
+                    "单元共有范围尚未接入可核验的单元账户标识，不能锁定实施方案");
+        }
+        AccountScope accountScope = decisionScope.scopeType() == ScopeType.COMMUNITY
+                ? AccountScope.COMMUNITY
+                : AccountScope.BUILDING;
+        Long referenceId = decisionScope.scopeType() == ScopeType.COMMUNITY
+                ? tenantId
+                : decisionScope.buildingId();
+        Account account = maintenanceFundAccountRepository.findByScopeForUpdate(
+                        tenantId, accountScope, referenceId)
+                .orElseThrow(() -> new RepairWorkOrderApplicationException(
+                        INVALID_STATUS,
+                        decisionScope.scopeType() == ScopeType.COMMUNITY
+                                ? "全小区决定范围尚未接入专项维修资金账户，不能锁定实施方案"
+                                : "当前楼栋尚未接入专项维修资金账户，不能锁定实施方案"));
+        if (account.availableBalance().compareTo(plan.budgetTotal()) < 0) {
+            throw new RepairWorkOrderApplicationException(
+                    INVALID_STATUS, "专项维修资金账户可用余额不足，不能锁定实施方案");
+        }
+        String scopeLabel = accountScope == AccountScope.COMMUNITY ? "全小区" : "楼栋";
+        String ledgerReference = "专项维修资金账户账簿快照（" + scopeLabel
+                + "范围，账户版本 " + account.version()
+                + "，总余额 " + account.totalBalance().toPlainString()
+                + "，已冻结 " + account.frozenBalance().toPlainString()
+                + "，可用余额 " + account.availableBalance().toPlainString() + "）";
+        FundingSlice fundingSlice = projectRepository.insertFundingSlice(new FundingSlice(
+                null, decisionScope.decisionScopeId(), project.projectId(), tenantId,
+                FundingSourceType.SPECIAL_MAINTENANCE_LEDGER,
+                "MAINTENANCE_FUND_ACCOUNT", account.accountId().toString(),
+                ledgerReference,
+                allocationSnapshotHash,
+                // 这里记录的是锁定方案的资金承担上限，不是定商、合同、结算或付款金额。
+                plan.budgetTotal(), FundingSliceVerificationStatus.CONFIRMED, false,
+                LocalDateTime.now(), null));
+        return List.of(fundingSlice);
+    }
+
+    /**
+     * 资金承担范围只能由可信账簿、责任认定或有效决定适配器写入；附件、范围和前端文本都不能替代该快照。
+     * 决定授权、定商、合同和验收证据由各自后续状态机产生，不能被倒置为方案锁定的前置条件。
+     */
+    private void validateTrustedFundingSlices(
+            List<FundingSlice> fundingSlices, String allocationSnapshotHash, BigDecimal budgetTotal) {
         if (fundingSlices.isEmpty() || fundingSlices.stream().anyMatch(slice ->
                 slice.verificationStatus() != FundingSliceVerificationStatus.CONFIRMED
                         || slice.sourceType() == null
                         || trim(slice.sourceRecordType()) == null
                         || trim(slice.sourceRecordId()) == null
                         || trim(slice.ledgerReference()) == null
-                        || trim(slice.allocationSnapshotHash()) == null
+                        || !allocationSnapshotHash.equals(slice.allocationSnapshotHash())
                         || slice.approvedAmount() == null
-                        || slice.approvedAmount().signum() < 0
+                        || slice.approvedAmount().signum() <= 0
                         || slice.verifiedAt() == null)) {
             throw new RepairWorkOrderApplicationException(
-                    INVALID_STATUS,
-                    "当前版本尚未接入可信的资金切片、承担范围和账簿快照，不能锁定实施方案");
+                    INVALID_STATUS, "可信资金切片、费用承担范围或账簿快照不完整，不能锁定实施方案");
+        }
+        BigDecimal totalFundingAmount = fundingSlices.stream()
+                .map(FundingSlice::approvedAmount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        if (totalFundingAmount.compareTo(budgetTotal) != 0) {
+            throw new RepairWorkOrderApplicationException(
+                    INVALID_STATUS, "可信资金切片金额与锁定方案预算不一致，不能锁定实施方案");
         }
     }
 
-    /**
-     * 当前系统尚未接入决定/授权、验收和实施证据的可信快照来源，因此不能把表单文本或现场照片伪装成冻结依据。
-     */
-    private void assertTrustedGovernanceAndExecutionSnapshots() {
-        throw new RepairWorkOrderApplicationException(
-                INVALID_STATUS,
-                "当前版本尚未接入可信的决定或授权、验收和实施证据快照，不能锁定实施方案");
+    private String allocationSnapshotHash(
+            DecisionScope decisionScope,
+            PlanVersion plan,
+            List<AllocationRoom> allocationRooms,
+            AllocationBasis allocationBasis) {
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("decisionScopeId", decisionScope.decisionScopeId());
+        snapshot.put("scopeType", decisionScope.scopeType());
+        snapshot.put("buildingId", decisionScope.buildingId());
+        snapshot.put("unitName", decisionScope.unitName());
+        snapshot.put("planId", plan.planId());
+        snapshot.put("allocationBasis", allocationBasis);
+        snapshot.put("allocationRooms", allocationRooms.stream()
+                .sorted(Comparator.comparing(AllocationRoom::buildingId)
+                        .thenComparing(room -> Objects.toString(room.unitName(), ""))
+                        .thenComparing(AllocationRoom::roomId))
+                .toList());
+        return sha256(snapshot, "维修费用承担范围快照哈希生成失败");
     }
 
     private String snapshotHash(
@@ -644,6 +760,8 @@ public class RepairProjectService {
             DecisionScope decisionScope,
             PlanVersion plan,
             List<WorkPoint> workPoints,
+            List<AllocationRoom> allocationRooms,
+            AllocationBasis allocationBasis,
             List<FundingSlice> fundingSlices) {
         Map<String, Object> snapshot = new LinkedHashMap<>();
         snapshot.put("projectId", project.projectId());
@@ -654,13 +772,23 @@ public class RepairProjectService {
         snapshot.put("decisionScope", decisionScope);
         snapshot.put("plan", immutablePlanSnapshot(plan));
         snapshot.put("workPoints", workPoints.stream().sorted(Comparator.comparing(WorkPoint::sortOrder)).toList());
+        snapshot.put("allocationBasis", allocationBasis);
+        snapshot.put("allocationRooms", allocationRooms.stream()
+                .sorted(Comparator.comparing(AllocationRoom::buildingId)
+                        .thenComparing(room -> Objects.toString(room.unitName(), ""))
+                        .thenComparing(AllocationRoom::roomId))
+                .toList());
         snapshot.put("fundingSlices", fundingSlices.stream()
                 .sorted(Comparator.comparing(FundingSlice::fundingSliceId)).toList());
+        return sha256(snapshot, "维修实施方案快照哈希生成失败");
+    }
+
+    private String sha256(Map<String, Object> snapshot, String failureMessage) {
         try {
             byte[] canonical = objectMapper.writeValueAsString(snapshot).getBytes(StandardCharsets.UTF_8);
             return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(canonical));
         } catch (JsonProcessingException | NoSuchAlgorithmException ex) {
-            throw new IllegalStateException("维修实施方案快照哈希生成失败", ex);
+            throw new IllegalStateException(failureMessage, ex);
         }
     }
 

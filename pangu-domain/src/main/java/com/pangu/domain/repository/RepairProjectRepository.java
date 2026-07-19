@@ -39,6 +39,11 @@ public interface RepairProjectRepository {
      */
     List<FundingSlice> listFundingSlices(Long decisionScopeId, Long tenantId);
 
+    /**
+     * 仅供可信资金来源适配器写入；建项请求不能自行声明资金来源、账簿或金额。
+     */
+    FundingSlice insertFundingSlice(FundingSlice fundingSlice);
+
     WorkPoint insertWorkPoint(WorkPoint workPoint);
 
     void linkWorkPointToWorkOrder(Long workPointId, Long workOrderId, Long tenantId);

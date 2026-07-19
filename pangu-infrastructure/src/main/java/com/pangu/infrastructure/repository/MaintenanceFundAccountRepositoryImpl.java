@@ -1,3 +1,4 @@
+// 关联业务：实现专项维修资金账户的可信读写，供资金动账与维修项目范围账簿快照共用。
 package com.pangu.infrastructure.repository;
 
 import com.pangu.domain.repository.MaintenanceFundAccountRepository;
@@ -17,6 +18,12 @@ public class MaintenanceFundAccountRepositoryImpl implements MaintenanceFundAcco
     @Override
     public Optional<Account> findByIdForUpdate(Long accountId) {
         return Optional.ofNullable(mapper.selectByIdForUpdate(accountId)).map(this::toDomain);
+    }
+
+    @Override
+    public Optional<Account> findByScopeForUpdate(Long tenantId, AccountScope scope, Long referenceId) {
+        return Optional.ofNullable(mapper.selectByScopeForUpdate(
+                tenantId, scope.accountLevel(), referenceId)).map(this::toDomain);
     }
 
     @Override

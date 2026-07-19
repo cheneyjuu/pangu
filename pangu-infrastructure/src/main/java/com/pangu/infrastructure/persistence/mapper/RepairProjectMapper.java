@@ -61,6 +61,8 @@ public interface RepairProjectMapper {
     List<RepairFundingSliceRow> listFundingSlices(@Param("decisionScopeId") Long decisionScopeId,
                                                    @Param("tenantId") Long tenantId);
 
+    int insertFundingSlice(RepairFundingSliceRow row);
+
     int insertWorkPoint(RepairWorkPointRow row);
 
     int linkWorkPointToWorkOrder(@Param("workPointId") Long workPointId,

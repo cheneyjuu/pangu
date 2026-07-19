@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!-- 关联业务：按共有范围读取专项维修资金账户，并在动账或维修方案锁定时保持账簿事实一致。 -->
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.pangu.infrastructure.persistence.mapper.MaintenanceFundAccountMapper">
@@ -16,6 +17,15 @@
         SELECT account_id, tenant_id, total_balance, frozen_balance, version
         FROM t_maintenance_fund_account
         WHERE account_id = #{accountId}
+        FOR UPDATE
+    </select>
+
+    <select id="selectByScopeForUpdate" resultMap="MaintenanceFundAccountRowMap">
+        SELECT account_id, tenant_id, total_balance, frozen_balance, version
+        FROM t_maintenance_fund_account
+        WHERE tenant_id = #{tenantId}
+          AND account_level = #{accountLevel}
+          AND reference_id = #{referenceId}
         FOR UPDATE
     </select>
 

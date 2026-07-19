@@ -100,6 +100,17 @@ public class RepairProjectRepositoryImpl implements RepairProjectRepository {
     }
 
     @Override
+    public FundingSlice insertFundingSlice(FundingSlice fundingSlice) {
+        RepairFundingSliceRow row = toRow(fundingSlice);
+        mapper.insertFundingSlice(row);
+        return mapper.listFundingSlices(fundingSlice.decisionScopeId(), fundingSlice.tenantId()).stream()
+                .filter(candidate -> candidate.getFundingSliceId().equals(row.getFundingSliceId()))
+                .findFirst()
+                .map(this::toDomain)
+                .orElseThrow();
+    }
+
+    @Override
     public WorkPoint insertWorkPoint(WorkPoint workPoint) {
         RepairWorkPointRow row = toRow(workPoint);
         mapper.insertWorkPoint(row);
@@ -384,6 +395,25 @@ public class RepairProjectRepositoryImpl implements RepairProjectRepository {
                 row.getApprovedAmount(), RepairProject.FundingSliceVerificationStatus.valueOf(
                         row.getVerificationStatus()),
                 Boolean.TRUE.equals(row.getLegacyReadOnly()), row.getVerifiedAt(), row.getCreateTime());
+    }
+
+    private RepairFundingSliceRow toRow(FundingSlice fundingSlice) {
+        RepairFundingSliceRow row = new RepairFundingSliceRow();
+        row.setFundingSliceId(fundingSlice.fundingSliceId());
+        row.setDecisionScopeId(fundingSlice.decisionScopeId());
+        row.setProjectId(fundingSlice.projectId());
+        row.setTenantId(fundingSlice.tenantId());
+        row.setSourceType(fundingSlice.sourceType().name());
+        row.setSourceRecordType(fundingSlice.sourceRecordType());
+        row.setSourceRecordId(fundingSlice.sourceRecordId());
+        row.setLedgerReference(fundingSlice.ledgerReference());
+        row.setAllocationSnapshotHash(fundingSlice.allocationSnapshotHash());
+        row.setApprovedAmount(fundingSlice.approvedAmount());
+        row.setVerificationStatus(fundingSlice.verificationStatus().name());
+        row.setLegacyReadOnly(fundingSlice.legacyReadOnly());
+        row.setVerifiedAt(fundingSlice.verifiedAt());
+        row.setCreateTime(fundingSlice.createTime());
+        return row;
     }
 
     private RepairDecisionScopeRow toRow(DecisionScope decisionScope) {

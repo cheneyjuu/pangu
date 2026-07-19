@@ -210,6 +210,19 @@
         ORDER BY funding_slice_id
     </select>
 
+    <insert id="insertFundingSlice" useGeneratedKeys="true"
+            keyProperty="fundingSliceId" keyColumn="funding_slice_id">
+        INSERT INTO t_repair_funding_slice (
+            decision_scope_id, project_id, tenant_id, source_type, source_record_type,
+            source_record_id, ledger_reference, allocation_snapshot_hash, approved_amount,
+            verification_status, legacy_read_only, verified_at
+        ) VALUES (
+            #{decisionScopeId}, #{projectId}, #{tenantId}, #{sourceType}, #{sourceRecordType},
+            #{sourceRecordId}, #{ledgerReference}, #{allocationSnapshotHash}, #{approvedAmount},
+            #{verificationStatus}, #{legacyReadOnly}, #{verifiedAt}
+        )
+    </insert>
+
     <insert id="insertWorkPoint" useGeneratedKeys="true" keyProperty="workPointId" keyColumn="work_point_id">
         INSERT INTO t_repair_work_point (
             project_id, plan_id, tenant_id, business_name, building_id, unit_name,
@@ -309,10 +322,16 @@
         JOIN t_repair_project project
           ON project.project_id = plan.project_id AND project.tenant_id = plan.tenant_id
         JOIN t_tenant_community community ON community.tenant_id = allocation.tenant_id
-        LEFT JOIN c_property_roster roster
-          ON roster.tenant_id = allocation.tenant_id
-         AND roster.room_id = allocation.room_id
-         AND roster.status = 'ACTIVE'
+        <!-- 仅取一条名册名称，避免同一房屋的历史/并列名册行把冻结面积重复相加。 -->
+        LEFT JOIN LATERAL (
+            SELECT item.building_name
+            FROM c_property_roster item
+            WHERE item.tenant_id = allocation.tenant_id
+              AND item.room_id = allocation.room_id
+              AND item.status = 'ACTIVE'
+            ORDER BY item.roster_id
+            LIMIT 1
+        ) roster ON TRUE
         WHERE allocation.plan_id = #{planId}
           AND allocation.tenant_id = #{tenantId}
         GROUP BY community.property_area_name, community.tenant_name,
