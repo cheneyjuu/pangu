@@ -1,4 +1,4 @@
-// 关联业务：登记、替代、查询并受控预览小区维修征询规则备案版本。
+// 关联业务：登记、替代、查询并受控预览小区维修事项表决依据版本。
 package com.pangu.application.repair;
 
 import com.pangu.application.repair.command.RegisterRepairDecisionRuleCommand;
@@ -56,21 +56,21 @@ public class RepairDecisionRuleService {
         Long tenantId = resolveTenant(actor, requestedTenantId);
         return repository.findActive(tenantId)
                 .orElseThrow(() -> new RepairWorkOrderApplicationException(
-                        NOT_FOUND, "当前小区尚未备案有效的维修征询规则"));
+                        NOT_FOUND, "当前小区尚未登记有效的维修事项表决依据"));
     }
 
     @Transactional
     public RepairDecisionRule register(Long requestedTenantId, RegisterRepairDecisionRuleCommand command) {
         UserContext actor = requireActor();
         if (!actor.hasPermission(POLICY_WRITE)) {
-            throw new RepairWorkOrderApplicationException(FORBIDDEN, "当前角色无权备案维修征询规则");
+            throw new RepairWorkOrderApplicationException(FORBIDDEN, "当前角色无权登记维修事项表决依据");
         }
         Long tenantId = resolveTenant(actor, requestedTenantId);
         if (command == null || command.nonResponseRule() == null || command.effectiveDate() == null) {
             throw new RepairWorkOrderApplicationException(PARAM_INVALID, "规则、生效日期和未表态规则均为必填项");
         }
         if (command.effectiveDate().isAfter(LocalDate.now())) {
-            throw new RepairWorkOrderApplicationException(PARAM_INVALID, "只能启用已经生效的备案规则版本");
+            throw new RepairWorkOrderApplicationException(PARAM_INVALID, "只能将已经生效的依据设为当前采用版本");
         }
         String ruleName = requireText(command.ruleName(), "ruleName", 200);
         String ruleVersion = requireText(command.ruleVersion(), "ruleVersion", 64);
@@ -84,7 +84,7 @@ public class RepairDecisionRuleService {
         try {
             metadata = storage.put(objectKey, content, contentType, digestBase64("MD5", content));
         } catch (RuntimeException ex) {
-            throw new RepairWorkOrderApplicationException(STORAGE_UNAVAILABLE, "上传维修征询规则原件失败", ex);
+            throw new RepairWorkOrderApplicationException(STORAGE_UNAVAILABLE, "上传维修事项表决依据原件失败", ex);
         }
         validateStoredObject(objectKey, contentType, content.length, metadata);
         try {
@@ -105,7 +105,7 @@ public class RepairDecisionRuleService {
         UserContext actor = requireActor();
         Long tenantId = resolveTenant(actor, requestedTenantId);
         RepairDecisionRule rule = repository.findById(ruleId, tenantId)
-                .orElseThrow(() -> new RepairWorkOrderApplicationException(NOT_FOUND, "维修征询规则不存在"));
+                .orElseThrow(() -> new RepairWorkOrderApplicationException(NOT_FOUND, "维修事项表决依据不存在"));
         Instant expiresAt = Instant.now().plus(PREVIEW_VALIDITY);
         try {
             return new RepairDecisionRulePreviewTicket(
@@ -123,7 +123,7 @@ public class RepairDecisionRuleService {
             throw new RepairWorkOrderApplicationException(PARAM_INVALID, "未指定小区租户");
         }
         if (actor.tenantId() != null && !actor.tenantId().equals(tenantId)) {
-            throw new RepairWorkOrderApplicationException(FORBIDDEN, "不能跨小区读取或备案维修征询规则");
+            throw new RepairWorkOrderApplicationException(FORBIDDEN, "不能跨小区读取或登记维修事项表决依据");
         }
         return tenantId;
     }
@@ -158,10 +158,10 @@ public class RepairDecisionRuleService {
 
     private void validateFile(String contentType, long size) {
         if (!CONTENT_TYPES.contains(contentType)) {
-            throw new RepairWorkOrderApplicationException(PARAM_INVALID, "备案规则原件仅支持 PDF、DOC 或 DOCX 文件");
+            throw new RepairWorkOrderApplicationException(PARAM_INVALID, "表决依据原件仅支持 PDF、DOC 或 DOCX 文件");
         }
         if (size <= 0 || size > MAX_FILE_SIZE) {
-            throw new RepairWorkOrderApplicationException(PARAM_INVALID, "备案规则原件大小必须在 20MB 以内");
+            throw new RepairWorkOrderApplicationException(PARAM_INVALID, "表决依据原件大小必须在 20MB 以内");
         }
     }
 

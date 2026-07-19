@@ -61,7 +61,7 @@ public class CommunitySettingsTest {
         jdbcTemplate.update("""
                 UPDATE t_tenant_community
                 SET repair_estimate_required = 0,
-                    building_repair_default_decision_channel = 'WECHAT'
+                    building_repair_default_decision_channel = 'ONLINE'
                 WHERE tenant_id = ?
                 """, TENANT_RUSHI);
         jdbcTemplate.update("""
@@ -101,8 +101,8 @@ public class CommunitySettingsTest {
                 .andExpect(jsonPath("$.data.assetLedger.buildings.length()", is(7)))
                 .andExpect(jsonPath("$.data.assetLedger.buildings[6].buildingId", is(30007)))
                 .andExpect(jsonPath("$.data.assetLedger.buildings[6].buildingName", is("冷启楼")))
-                .andExpect(jsonPath("$.data.rules.buildingRepairDefaultDecisionChannel", is("WECHAT")))
-                .andExpect(jsonPath("$.data.rules.currentPolicy.policyCode", is("SH_DEFAULT_MAJORITY_2026")));
+                .andExpect(jsonPath("$.data.rules.buildingRepairDefaultDecisionChannel", is("ONLINE")))
+                .andExpect(jsonPath("$.data.rules.nextPublicIncomeDisclosureDeadline").isNotEmpty());
 
         String response = mockMvc.perform(get("/api/v1/auth/menus")
                         .header("Authorization", "Bearer " + token))
@@ -179,13 +179,25 @@ public class CommunitySettingsTest {
                         .param("tenantId", String.valueOf(TENANT_RUSHI))
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(Map.of("repairEstimateRequired", true))))
+                .content(objectMapper.writeValueAsString(Map.of("repairEstimateRequired", true))))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.rules.repairEstimateRequired", is(true)));
+                .andExpect(jsonPath("$.data.rules.repairEstimateRequired", is(true)))
+                .andExpect(jsonPath("$.data.auditLogs[0].operationType", is("UPDATE_RULES")))
+                .andExpect(jsonPath("$.data.auditLogs[0].operationLabel", is("修改维修项目筹备要求")))
+                .andExpect(jsonPath("$.data.auditLogs[0].sectionCode", is("RULES")))
+                .andExpect(jsonPath("$.data.auditLogs[0].summary", is("已更新维修项目筹备要求")))
+                .andExpect(jsonPath("$.data.auditLogs[0].operatorAccountId", is((int) ACC_SUPER)))
+                .andExpect(jsonPath("$.data.auditLogs[0].operatorUserId", is((int) USR_SUPER)))
+                .andExpect(jsonPath("$.data.auditLogs[0].operatorName", is("王街道")))
+                .andExpect(jsonPath("$.data.auditLogs[0].operatorRoleKey", is("GOV_SUPER_ADMIN")))
+                .andExpect(jsonPath("$.data.auditLogs[0].changes[0].fieldCode", is("repairEstimateRequired")))
+                .andExpect(jsonPath("$.data.auditLogs[0].changes[0].fieldLabel", is("前期询价前编制参考估算")))
+                .andExpect(jsonPath("$.data.auditLogs[0].changes[0].beforeValue", is("未启用")))
+                .andExpect(jsonPath("$.data.auditLogs[0].changes[0].afterValue", is("已启用")));
     }
 
     @Test
-    public void govCanSetBuildingRepairDefaultDecisionChannel() throws Exception {
+    public void govCannotUseAggregateWechatScreenshotAsNewRepairVote() throws Exception {
         String token = token(ACC_SUPER, USR_SUPER, null);
 
         mockMvc.perform(patch("/api/v1/admin/community-settings/rules")
@@ -193,27 +205,8 @@ public class CommunitySettingsTest {
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(Map.of(
-                                "buildingRepairDefaultDecisionChannel", "ONLINE"))))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.rules.buildingRepairDefaultDecisionChannel", is("ONLINE")))
-                .andExpect(jsonPath("$.data.auditLogs[0].operationType", is("UPDATE_RULES")))
-                .andExpect(jsonPath("$.data.auditLogs[0].operationLabel", is("修改自治与财务规则")))
-                .andExpect(jsonPath("$.data.auditLogs[0].sectionCode", is("RULES")))
-                .andExpect(jsonPath("$.data.auditLogs[0].summary", is("已更新自治规则与财务控制配置")))
-                .andExpect(jsonPath("$.data.auditLogs[0].operatorAccountId", is((int) ACC_SUPER)))
-                .andExpect(jsonPath("$.data.auditLogs[0].operatorUserId", is((int) USR_SUPER)))
-                .andExpect(jsonPath("$.data.auditLogs[0].operatorName", is("王街道")))
-                .andExpect(jsonPath("$.data.auditLogs[0].operatorRoleKey", is("GOV_SUPER_ADMIN")))
-                .andExpect(jsonPath("$.data.auditLogs[0].changes[0].fieldCode", is("buildingRepairDefaultDecisionChannel")))
-                .andExpect(jsonPath("$.data.auditLogs[0].changes[0].fieldLabel", is("楼栋维修默认表决方式")))
-                .andExpect(jsonPath("$.data.auditLogs[0].changes[0].beforeValue", is("微信接龙")))
-                .andExpect(jsonPath("$.data.auditLogs[0].changes[0].afterValue", is("C 端在线表决")));
-
-        mockMvc.perform(get("/api/v1/admin/community-settings")
-                        .param("tenantId", String.valueOf(TENANT_RUSHI))
-                        .header("Authorization", "Bearer " + token))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.rules.buildingRepairDefaultDecisionChannel", is("ONLINE")));
+                                "buildingRepairDefaultDecisionChannel", "WECHAT"))))
+                .andExpect(status().isBadRequest());
     }
 
     @Test

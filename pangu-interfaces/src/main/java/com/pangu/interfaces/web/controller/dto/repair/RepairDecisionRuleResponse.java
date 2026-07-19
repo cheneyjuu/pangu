@@ -1,4 +1,4 @@
-// 关联业务：向管理端输出小区维修征询规则备案版本，不暴露私有对象存储键。
+// 关联业务：向管理端输出小区维修事项表决依据版本，不暴露私有对象存储键。
 package com.pangu.interfaces.web.controller.dto.repair;
 
 import com.pangu.domain.model.repair.RepairDecisionRule;

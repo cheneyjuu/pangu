@@ -6,7 +6,7 @@ import com.pangu.domain.model.repair.RepairProjectGovernance.NonResponseRule;
 import java.time.LocalDateTime;
 
 /**
- * 小区维修征询规则版本。
+ * 小区维修事项表决依据版本。
  *
  * <p>新版本以新增记录并替代旧版本的方式生效，历史版本及原始文件不得覆盖。
  */

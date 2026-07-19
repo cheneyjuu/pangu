@@ -251,13 +251,8 @@
 
     <update id="updateRules" parameterType="com.pangu.infrastructure.persistence.entity.TenantCommunityRow">
         UPDATE t_tenant_community
-        SET rule_config_id = #{ruleConfigId},
-            shared_ownership_strategy = #{sharedOwnershipStrategy},
-            repair_estimate_required = #{repairEstimateRequired},
+        SET repair_estimate_required = #{repairEstimateRequired},
             building_repair_default_decision_channel = #{buildingRepairDefaultDecisionChannel},
-            fund_managed_enabled = #{fundManagedEnabled},
-            financial_control_config_id = #{financialControlConfigId},
-            quarterly_disclosure_deadline_day = #{quarterlyDisclosureDeadlineDay},
             update_time = CURRENT_TIMESTAMP
         WHERE tenant_id = #{tenantId}
           AND status = 'ACTIVE'

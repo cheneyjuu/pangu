@@ -96,7 +96,7 @@ public class RepairWorkOrderFlowTest {
         jdbcTemplate.update("""
                 UPDATE t_tenant_community
                 SET repair_estimate_required = 0,
-                    building_repair_default_decision_channel = 'WECHAT'
+                    building_repair_default_decision_channel = 'ONLINE'
                 WHERE tenant_id = ?
                 """, TENANT);
         jdbcTemplate.update("""

@@ -1,4 +1,4 @@
-// 关联业务：提供小区维修征询规则备案、历史查询和原件受控预览接口。
+// 关联业务：提供小区维修事项表决依据登记、历史查询和原件受控预览接口。
 package com.pangu.interfaces.web.controller;
 
 import com.pangu.application.repair.RepairDecisionRuleService;
@@ -64,7 +64,7 @@ public class RepairDecisionRuleController extends BaseController {
                     parseNonResponseRule(nonResponseRule), file.getOriginalFilename(),
                     file.getContentType(), file.getBytes()));
             return ResponseEntity.status(HttpStatus.CREATED)
-                    .body(success("维修征询规则已备案", RepairDecisionRuleResponse.from(rule)));
+                    .body(success("维修事项表决依据已登记", RepairDecisionRuleResponse.from(rule)));
         } catch (IOException ex) {
             throw new RepairWorkOrderApplicationException(
                     RepairWorkOrderApplicationException.Reason.PARAM_INVALID, "读取规则原件失败", ex);

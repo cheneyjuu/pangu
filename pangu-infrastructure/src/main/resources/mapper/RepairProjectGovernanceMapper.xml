@@ -234,7 +234,7 @@
           AND decision.decision_channel = 'ONLINE'
           AND decision.result = 'COLLECTING'
           AND process.status = 'DECISION_COLLECTING'
-          AND project.status = 'GOVERNANCE_IN_PROGRESS'
+          AND project.status IN ('GOVERNANCE_IN_PROGRESS', 'AUTHORIZATION_IN_PROGRESS')
           <if test="decisionId != null">AND decision.decision_id = #{decisionId}</if>
         GROUP BY decision.decision_id, decision.project_id, decision.plan_id,
                  project.project_no, project.project_name, decision.scope_label, entry.choice
@@ -271,7 +271,7 @@
             submission_channel, submitted_by_account_id, revision_no
         ) VALUES (
             #{decisionId}, #{tenantId}, #{roomId}, #{ownerUid}, #{choice}, #{buildArea},
-            'C端业主在线表决', 'VERIFIED', NULL, 'ONLINE', #{accountId}, 1
+            '业主线上实名表决', 'VERIFIED', NULL, 'ONLINE', #{accountId}, 1
         )
         ON CONFLICT (decision_id, room_id) DO UPDATE
         SET owner_uid = EXCLUDED.owner_uid,

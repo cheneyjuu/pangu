@@ -52,13 +52,8 @@ public final class CommunitySettingsCommands {
     }
 
     public record Rules(
-            Long ruleConfigId,
-            String sharedOwnershipStrategy,
             Boolean repairEstimateRequired,
-            String buildingRepairDefaultDecisionChannel,
-            Boolean fundManagedEnabled,
-            String financialControlConfigId,
-            Integer quarterlyDisclosureDeadlineDay
+            String buildingRepairDefaultDecisionChannel
     ) {
     }
 

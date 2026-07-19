@@ -983,17 +983,21 @@ public class RepairWorkOrderService {
         RepairPlanningPolicy planningPolicy = planningPolicy(order.tenantId());
         RepairLocalDecisionChannel communityDefaultChannel = parseEnum(
                 planningPolicy.buildingRepairDefaultDecisionChannel(),
-                RepairLocalDecisionChannel.class, RepairLocalDecisionChannel.WECHAT,
+                RepairLocalDecisionChannel.class, RepairLocalDecisionChannel.ONLINE,
                 "buildingRepairDefaultDecisionChannel");
         String requestedChannel = trim(command.decisionChannel());
         RepairLocalDecisionChannel decisionChannel = parseEnum(requestedChannel,
                 RepairLocalDecisionChannel.class, communityDefaultChannel, "decisionChannel");
+        if (decisionChannel != RepairLocalDecisionChannel.ONLINE) {
+            throw new RepairWorkOrderApplicationException(PARAM_INVALID,
+                    "新发起的维修事项表决须逐户记录记名选择，当前仅支持线上实名投票");
+        }
         String channelSource = requestedChannel != null && decisionChannel != communityDefaultChannel
                 ? "WORK_ORDER_OVERRIDE"
                 : "COMMUNITY_DEFAULT";
         String unitName = trim(command.unitName());
         if (scopeType == RepairLocalDecisionScopeType.BUILDING_UNIT && unitName == null) {
-            throw new RepairWorkOrderApplicationException(PARAM_INVALID, "按单元接龙时 unitName 必填");
+            throw new RepairWorkOrderApplicationException(PARAM_INVALID, "按单元征询时必须填写单元名称");
         }
         if (scopeType == RepairLocalDecisionScopeType.BUILDING) {
             unitName = null;
@@ -1003,7 +1007,7 @@ public class RepairWorkOrderService {
                 .orElseThrow(() -> new RepairWorkOrderApplicationException(PARAM_INVALID, "未找到楼栋业主分母"));
         if (snapshot.totalOwnerCount() <= 0 || snapshot.totalArea() == null
                 || snapshot.totalArea().compareTo(BigDecimal.ZERO) <= 0) {
-            throw new RepairWorkOrderApplicationException(PARAM_INVALID, "楼栋业主分母为空，禁止发起接龙");
+            throw new RepairWorkOrderApplicationException(PARAM_INVALID, "尚未形成相关业主人数和面积基数，不能发起表决");
         }
         RepairLocalDecision decision = repository.insertLocalDecision(new RepairLocalDecision(
                 null,
@@ -2584,7 +2588,7 @@ public class RepairWorkOrderService {
                 .map(community -> new RepairPlanningPolicy(
                         community.repairEstimateRequired(),
                         community.buildingRepairDefaultDecisionChannel()))
-                .orElseGet(() -> new RepairPlanningPolicy(false, RepairLocalDecisionChannel.WECHAT.name()));
+                .orElseGet(() -> new RepairPlanningPolicy(false, RepairLocalDecisionChannel.ONLINE.name()));
     }
 
     private RepairWorkOrder loadVisible(UserContext ctx, Long workOrderId) {

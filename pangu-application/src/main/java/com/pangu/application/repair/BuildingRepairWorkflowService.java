@@ -100,9 +100,9 @@ public class BuildingRepairWorkflowService {
         }
         PlanVersion plan = activeAuthorizationPlan(project);
         RepairDecisionRule rule = decisionRuleRepository.findActive(project.tenantId())
-                .orElseThrow(() -> conflict("当前小区尚未备案有效的维修征询规则，禁止发起征询"));
+                .orElseThrow(() -> conflict("当前小区尚未登记有效的维修事项表决依据，不能发起表决"));
         if (rule.nonResponseRule() != NonResponseRule.NOT_PARTICIPATED) {
-            throw invalid("当前备案规则包含未表态推导票，但系统尚未支持该计票方式，禁止发起征询");
+            throw invalid("当前表决依据约定了未反馈表决票的推导方式，本系统暂不能按该方式完成计票");
         }
         List<AllocationRoom> allocation = projectRepository.listAllocationRooms(plan.planId(), project.tenantId());
         if (allocation.isEmpty()) {
@@ -308,7 +308,7 @@ public class BuildingRepairWorkflowService {
                 command.supplierSelectionAuthorization());
         DecisionPolicySnapshot policy = governanceRepository.findPolicySnapshot(
                         process.policySnapshotId(), project.tenantId())
-                .orElseThrow(() -> notFound("本项目采用的小区备案规则不存在"));
+                .orElseThrow(() -> notFound("本项目采用的维修事项表决依据不存在"));
         BuildingDecision decision = governanceRepository.findBuildingDecision(
                         process.decisionId(), project.tenantId())
                 .orElseThrow(() -> notFound("楼栋维修决定不存在"));
@@ -481,7 +481,7 @@ public class BuildingRepairWorkflowService {
             RepairProject project, BuildingProcess process, boolean includeChoices) {
         DecisionPolicySnapshot policy = governanceRepository.findPolicySnapshot(
                         process.policySnapshotId(), project.tenantId())
-                .orElseThrow(() -> notFound("本项目采用的小区备案规则不存在"));
+                .orElseThrow(() -> notFound("本项目采用的维修事项表决依据不存在"));
         BuildingDecision decision = governanceRepository.findBuildingDecision(
                         process.decisionId(), project.tenantId())
                 .orElseThrow(() -> notFound("楼栋维修决定不存在"));
@@ -498,11 +498,15 @@ public class BuildingRepairWorkflowService {
     private RepairLocalDecisionChannel decisionChannel(Long tenantId) {
         String configured = communitySettingsRepository.findCommunity(tenantId)
                 .map(TenantCommunity::buildingRepairDefaultDecisionChannel)
-                .orElse(RepairLocalDecisionChannel.WECHAT.name());
+                .orElse(RepairLocalDecisionChannel.ONLINE.name());
         try {
-            return RepairLocalDecisionChannel.valueOf(configured);
+            RepairLocalDecisionChannel channel = RepairLocalDecisionChannel.valueOf(configured);
+            if (channel != RepairLocalDecisionChannel.ONLINE) {
+                throw invalid("新发起的维修事项表决须逐户记录记名选择，当前仅支持线上实名投票");
+            }
+            return channel;
         } catch (IllegalArgumentException ex) {
-            throw invalid("小区楼栋维修默认表决方式配置不合法：" + configured);
+            throw invalid("小区维修事项表决收集方式配置不正确：" + configured);
         }
     }
 

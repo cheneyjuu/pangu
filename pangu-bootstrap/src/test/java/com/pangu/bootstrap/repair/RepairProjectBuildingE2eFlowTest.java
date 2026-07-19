@@ -197,16 +197,27 @@ class RepairProjectBuildingE2eFlowTest {
                 "/api/v1/admin/repair-projects/" + projectId + "/building-governance/start",
                 propertyManagerToken, Map.of("expectedProjectVersion", frozen.path("project").path("version").asInt()));
         assertEquals("DECISION_COLLECTING", started.path("process").path("status").asText());
-        assertEquals("WECHAT", started.path("decision").path("decisionChannel").asText());
-
-        long decisionEvidenceAttachmentId = uploadProjectAttachment(
-                projectId, propertyManagerToken, "楼栋维修接龙原始截图.pdf", "decision-evidence");
+        assertEquals("ONLINE", started.path("decision").path("decisionChannel").asText());
+        long decisionId = started.path("decision").path("decisionId").asLong();
+        List<Map<String, Object>> voters = jdbcTemplate.queryForList("""
+                SELECT allocation.owner_uid, owner.account_id, MIN(allocation.room_id) AS room_id
+                FROM t_repair_plan_allocation_room allocation
+                JOIN c_user owner ON owner.uid = allocation.owner_uid
+                WHERE allocation.plan_id = ?
+                GROUP BY allocation.owner_uid, owner.account_id
+                """, planId);
+        assertTrue(!voters.isEmpty());
+        for (Map<String, Object> voter : voters) {
+            long ownerUid = ((Number) voter.get("owner_uid")).longValue();
+            long ownerAccountId = ((Number) voter.get("account_id")).longValue();
+            long roomId = ((Number) voter.get("room_id")).longValue();
+            String ownerToken = jwtTokenProvider.generateToken(ownerAccountId, "C_USER", ownerUid, TENANT);
+            postData("/api/v1/me/repair-projects/decisions/" + decisionId + "/votes",
+                    ownerToken, Map.of("roomId", roomId, "choice", "AGREE"));
+        }
         JsonNode completed = postData(
                 "/api/v1/admin/repair-projects/" + projectId + "/building-governance/decision/complete",
-                propertyManagerToken, Map.of(
-                        "expectedProcessVersion", processVersion(started),
-                        "evidenceAttachmentId", decisionEvidenceAttachmentId,
-                        "confirmedResult", "PASSED"));
+                propertyManagerToken, Map.of("expectedProcessVersion", processVersion(started)));
         assertEquals("DECISION_PASSED", completed.path("process").path("status").asText());
         assertEquals("PASSED", completed.path("decision").path("result").asText());
 

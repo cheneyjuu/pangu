@@ -7,7 +7,6 @@ import com.pangu.domain.context.UserContextHolder;
 import com.pangu.domain.model.community.CommunityLedgerStats;
 import com.pangu.domain.model.community.CommunitySettingsOperation;
 import com.pangu.domain.model.community.DenominatorReviewRequest;
-import com.pangu.domain.model.community.GovernancePolicy;
 import com.pangu.domain.model.community.TenantCommunity;
 import com.pangu.domain.repository.CommunitySettingsRepository;
 import lombok.RequiredArgsConstructor;
@@ -28,6 +27,8 @@ import java.util.Set;
 @Service
 @RequiredArgsConstructor
 public class CommunitySettingsService {
+
+    private static final int PUBLIC_INCOME_DISCLOSURE_DEADLINE_DAY = 15;
 
     private static final String READ = "community:settings:read";
     private static final String OFFICIAL_WRITE = "community:settings:official:write";
@@ -52,10 +53,7 @@ public class CommunitySettingsService {
         requirePermission(ctx, READ);
         Long tenantId = resolveTenantId(ctx, requestedTenantId);
         TenantCommunity community = loadCommunity(tenantId);
-        GovernancePolicy policy = community.ruleConfigId() == null
-                ? null
-                : repository.findPolicy(community.ruleConfigId()).orElse(null);
-        return buildView(ctx, community, policy);
+        return buildView(ctx, community);
     }
 
     @Transactional
@@ -89,12 +87,6 @@ public class CommunitySettingsService {
         requirePermission(ctx, POLICY_WRITE);
         Long tenantId = resolveTenantId(ctx, requestedTenantId);
         TenantCommunity current = loadCommunity(tenantId);
-        if (cmd.ruleConfigId() != null && repository.findPolicy(cmd.ruleConfigId()).isEmpty()) {
-            throw new CommunitySettingsApplicationException(
-                    CommunitySettingsApplicationException.Reason.POLICY_NOT_FOUND,
-                    "治理规则模板不存在：policyId=" + cmd.ruleConfigId());
-        }
-        verifyRulesChangeAllowed(ctx, current, cmd);
         TenantCommunity updated = copyRules(current, cmd);
         ensureUpdated(repository.updateRules(updated), tenantId);
         auditService.recordRulesChange(current, updated, ctx);
@@ -198,12 +190,11 @@ public class CommunitySettingsService {
         return getSettings(tenantId);
     }
 
-    private CommunitySettingsView buildView(UserContext ctx, TenantCommunity community, GovernancePolicy policy) {
+    private CommunitySettingsView buildView(UserContext ctx, TenantCommunity community) {
         CommunitySettingsView.Permissions permissions = permissions(ctx, community);
+        LocalDate nextDisclosureDeadline = nextPublicIncomeDisclosureDeadline();
         return new CommunitySettingsView(
                 community,
-                policy,
-                repository.listActivePolicies(),
                 repository.calculateLiveLedgerStats(community.tenantId()),
                 repository.listBuildingDirectory(community.tenantId()),
                 repository.listDenominatorBreakdown(community.tenantId()),
@@ -211,7 +202,8 @@ public class CommunitySettingsService {
                 auditService.toView(repository.listAuditLogs(
                         community.tenantId(), visibleAuditOperationCodes(permissions), 20)),
                 permissions,
-                daysUntilDisclosureDeadline(community.quarterlyDisclosureDeadlineDay())
+                nextDisclosureDeadline,
+                (int) ChronoUnit.DAYS.between(LocalDate.now(), nextDisclosureDeadline)
         );
     }
 
@@ -231,7 +223,6 @@ public class CommunitySettingsService {
     }
 
     private CommunitySettingsView.Permissions permissions(UserContext ctx, TenantCommunity community) {
-        boolean government = isGovernment(ctx);
         boolean committeeDirector = isCommitteeDirector(ctx);
         boolean propertyRole = PROPERTY_ROLES.contains(ctx.roleKey());
         boolean propertyStaff = "PROPERTY_STAFF".equals(ctx.roleKey());
@@ -239,7 +230,7 @@ public class CommunitySettingsService {
         boolean canEditAssetLedger = ctx.hasPermission(ASSET_WRITE);
         boolean canEditRules = ctx.hasPermission(POLICY_WRITE);
         boolean canReconcile = ctx.hasPermission(DENOMINATOR_RECONCILE);
-        boolean canEditFinancialControl = government && canEditRules;
+        boolean government = isGovernment(ctx);
         boolean canEditLegalArea = government || (committeeDirector && community.totalExclusiveArea().signum() == 0);
         boolean canRequestReview = committeeDirector && !canReconcile;
         boolean canSubmit = canEditOfficialData || canEditAssetLedger || canEditRules || canReconcile || canRequestReview;
@@ -253,7 +244,6 @@ public class CommunitySettingsService {
                 canEditAssetLedger,
                 canEditLegalArea,
                 canEditRules,
-                canEditFinancialControl,
                 canReconcile,
                 canRequestReview,
                 canSubmit
@@ -343,20 +333,6 @@ public class CommunitySettingsService {
         }
     }
 
-    private void verifyRulesChangeAllowed(UserContext ctx,
-                                          TenantCommunity current,
-                                          CommunitySettingsCommands.Rules cmd) {
-        if (!isGovernment(ctx)) {
-            if (changed(cmd.fundManagedEnabled(), current.fundManagedEnabled())
-                    || changed(cmd.financialControlConfigId(), current.financialControlConfigId())
-                    || changed(cmd.quarterlyDisclosureDeadlineDay(), current.quarterlyDisclosureDeadlineDay())) {
-                throw new CommunitySettingsApplicationException(
-                        CommunitySettingsApplicationException.Reason.FORBIDDEN,
-                        "非 G 端不得修改财务公示督办与资金托管配置");
-            }
-        }
-    }
-
     private TenantCommunity copyOrganization(TenantCommunity c, CommunitySettingsCommands.Organization cmd) {
         return new TenantCommunity(
                 c.tenantId(), c.tenantCode(), c.tenantShortCode(), str(cmd.tenantName(), c.tenantName()),
@@ -411,18 +387,12 @@ public class CommunitySettingsService {
     }
 
     private TenantCommunity copyRules(TenantCommunity c, CommunitySettingsCommands.Rules cmd) {
-        String sharedStrategy = str(cmd.sharedOwnershipStrategy(), c.sharedOwnershipStrategy());
-        if (!Set.of("REPRESENTATIVE_ONLY", "PROPORTIONAL_SPLIT").contains(sharedStrategy)) {
-            throw new CommunitySettingsApplicationException(
-                    CommunitySettingsApplicationException.Reason.PARAM_INVALID,
-                    "sharedOwnershipStrategy 取值非法：" + sharedStrategy);
-        }
         String defaultDecisionChannel = str(cmd.buildingRepairDefaultDecisionChannel(),
                 c.buildingRepairDefaultDecisionChannel());
-        if (!Set.of("ONLINE", "WECHAT").contains(defaultDecisionChannel)) {
+        if (!"ONLINE".equals(defaultDecisionChannel)) {
             throw new CommunitySettingsApplicationException(
                     CommunitySettingsApplicationException.Reason.PARAM_INVALID,
-                    "buildingRepairDefaultDecisionChannel 取值非法：" + defaultDecisionChannel);
+                    "新发起的维修事项表决须逐户记录记名选择，当前仅支持线上实名投票");
         }
         return new TenantCommunity(
                 c.tenantId(), c.tenantCode(), c.tenantShortCode(), c.tenantName(), c.propertyAreaName(),
@@ -433,13 +403,11 @@ public class CommunitySettingsService {
                 c.totalPlannedBuildingArea(), c.totalExclusiveArea(), c.registeredVotingTotalArea(),
                 c.excludedParkingArea(), c.publicArea(), c.buildingCount(), c.unitCount(), c.parkingSpaceCount(),
                 c.plotRatio(), c.ownersAssemblyEstablished(), c.committeeEstablished(), c.currentCommitteeTermName(),
-                c.transitionOrgType(), c.transitionOrgStatus(), val(cmd.ruleConfigId(), c.ruleConfigId()),
-                sharedStrategy, bool(cmd.repairEstimateRequired(), c.repairEstimateRequired()),
+                c.transitionOrgType(), c.transitionOrgStatus(), c.ruleConfigId(),
+                c.sharedOwnershipStrategy(), bool(cmd.repairEstimateRequired(), c.repairEstimateRequired()),
                 defaultDecisionChannel,
-                c.propertyManagementMode(), bool(cmd.fundManagedEnabled(), c.fundManagedEnabled()),
-                str(cmd.financialControlConfigId(), c.financialControlConfigId()),
-                nonNegative(cmd.quarterlyDisclosureDeadlineDay(), c.quarterlyDisclosureDeadlineDay(),
-                        "quarterlyDisclosureDeadlineDay"),
+                c.propertyManagementMode(), c.fundManagedEnabled(),
+                c.financialControlConfigId(), c.quarterlyDisclosureDeadlineDay(),
                 c.statisticsVersion(), c.statisticsUpdatedAt(), c.governanceStatus(), c.status(), c.updateTime());
     }
 
@@ -473,15 +441,11 @@ public class CommunitySettingsService {
         }
     }
 
-    private int daysUntilDisclosureDeadline(int deadlineDay) {
+    private LocalDate nextPublicIncomeDisclosureDeadline() {
         LocalDate today = LocalDate.now();
         int month = ((today.getMonthValue() - 1) / 3) * 3 + 1;
-        LocalDate deadline = LocalDate.of(today.getYear(), month, Math.min(deadlineDay, 28));
-        if (today.isAfter(deadline)) {
-            LocalDate nextQuarter = deadline.plusMonths(3);
-            return (int) ChronoUnit.DAYS.between(today, nextQuarter);
-        }
-        return (int) ChronoUnit.DAYS.between(today, deadline);
+        LocalDate deadline = LocalDate.of(today.getYear(), month, PUBLIC_INCOME_DISCLOSURE_DEADLINE_DAY);
+        return today.isAfter(deadline) ? deadline.plusMonths(3) : deadline;
     }
 
     private String str(String candidate, String fallback) {

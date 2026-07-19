@@ -6,11 +6,11 @@ import com.pangu.domain.model.community.CommunityLedgerStats;
 import com.pangu.domain.model.community.CommunityBuilding;
 import com.pangu.domain.model.community.DenominatorBreakdown;
 import com.pangu.domain.model.community.DenominatorReviewRequest;
-import com.pangu.domain.model.community.GovernancePolicy;
 import com.pangu.domain.model.community.TenantCommunity;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 
 public record CommunitySettingsResponse(
@@ -33,7 +33,8 @@ public record CommunitySettingsResponse(
                         view.denominatorBreakdown(), view.permissions()),
                 Denominator.from(community, view.denominatorBreakdown(), view.pendingReviewRequests()),
                 view.permissions().canViewRules()
-                        ? Rules.from(community, view.currentPolicy(), view.policyOptions(), view.daysUntilDisclosureDeadline())
+                        ? Rules.from(community, view.nextPublicIncomeDisclosureDeadline(),
+                                view.daysUntilDisclosureDeadline())
                         : null,
                 view.auditLogs().stream().map(AuditLog::from).toList(),
                 permissions
@@ -156,46 +157,16 @@ public record CommunitySettingsResponse(
     }
 
     public record Rules(
-            Policy currentPolicy,
-            List<Policy> policyOptions,
-            String sharedOwnershipStrategy,
             boolean repairEstimateRequired,
             String buildingRepairDefaultDecisionChannel,
-            boolean fundManagedEnabled,
-            String financialControlConfigId,
-            int quarterlyDisclosureDeadlineDay,
+            LocalDate nextPublicIncomeDisclosureDeadline,
             int daysUntilDisclosureDeadline
     ) {
         private static Rules from(TenantCommunity c,
-                                  GovernancePolicy current,
-                                  List<GovernancePolicy> options,
+                                  LocalDate nextPublicIncomeDisclosureDeadline,
                                   int daysUntilDisclosureDeadline) {
-            return new Rules(Policy.from(current), options.stream().map(Policy::from).toList(),
-                    c.sharedOwnershipStrategy(), c.repairEstimateRequired(),
-                    c.buildingRepairDefaultDecisionChannel(), c.fundManagedEnabled(), c.financialControlConfigId(),
-                    c.quarterlyDisclosureDeadlineDay(), daysUntilDisclosureDeadline);
-        }
-    }
-
-    public record Policy(
-            Long policyId,
-            String policyCode,
-            String policyName,
-            String policyVersion,
-            String abstentionStrategy,
-            String sharedOwnershipStrategy,
-            String ownerRepresentativeStrategy,
-            String unvotedOwnerStrategy,
-            String summaryJson,
-            Instant effectiveAt
-    ) {
-        private static Policy from(GovernancePolicy p) {
-            if (p == null) {
-                return null;
-            }
-            return new Policy(p.policyId(), p.policyCode(), p.policyName(), p.policyVersion(),
-                    p.abstentionStrategy(), p.sharedOwnershipStrategy(), p.ownerRepresentativeStrategy(),
-                    p.unvotedOwnerStrategy(), p.summaryJson(), p.effectiveAt());
+            return new Rules(c.repairEstimateRequired(), c.buildingRepairDefaultDecisionChannel(),
+                    nextPublicIncomeDisclosureDeadline, daysUntilDisclosureDeadline);
         }
     }
 
@@ -296,7 +267,6 @@ public record CommunitySettingsResponse(
             boolean canEditAssetLedger,
             boolean canEditLegalArea,
             boolean canEditRules,
-            boolean canEditFinancialControl,
             boolean canReconcileDenominator,
             boolean canRequestDenominatorReview,
             boolean canSubmitPageChanges
@@ -304,7 +274,7 @@ public record CommunitySettingsResponse(
         private static Permissions from(CommunitySettingsView.Permissions p) {
             return new Permissions(p.government(), p.committeeDirector(), p.propertyRole(),
                     p.canViewOrganization(), p.canViewRules(), p.canEditOfficialData(), p.canEditAssetLedger(),
-                    p.canEditLegalArea(), p.canEditRules(), p.canEditFinancialControl(),
+                    p.canEditLegalArea(), p.canEditRules(),
                     p.canReconcileDenominator(), p.canRequestDenominatorReview(), p.canSubmitPageChanges());
         }
     }

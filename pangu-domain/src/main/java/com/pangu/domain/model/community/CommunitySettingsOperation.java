@@ -16,7 +16,7 @@ public enum CommunitySettingsOperation {
     RECALCULATE_DENOMINATOR("重新对账并发布计票基数", "DENOMINATOR"),
     SUBMIT_DENOMINATOR_REVIEW("提交计票基数复核", "DENOMINATOR"),
     REVIEW_DENOMINATOR_REQUEST("复核计票基数变更", "DENOMINATOR"),
-    UPDATE_RULES("修改自治与财务规则", "RULES");
+    UPDATE_RULES("修改维修项目筹备要求", "RULES");
 
     private final String label;
     private final String sectionCode;

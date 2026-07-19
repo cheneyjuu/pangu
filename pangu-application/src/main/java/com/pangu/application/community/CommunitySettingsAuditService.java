@@ -100,16 +100,11 @@ public class CommunitySettingsAuditService {
         writeChange(
                 CommunitySettingsOperation.UPDATE_RULES,
                 before.tenantId(),
-                "已更新自治规则与财务控制配置",
+                "已更新维修项目筹备要求",
                 null,
                 diff(before, after, List.of(
-                        field("ruleConfigId", "治理规则模板", value -> text(value.ruleConfigId())),
-                        field("sharedOwnershipStrategy", "共有产权代表策略", value -> sharedOwnership(value.sharedOwnershipStrategy())),
-                        field("repairEstimateRequired", "邀价前填写物业内部估算", value -> enabled(value.repairEstimateRequired())),
-                        field("buildingRepairDefaultDecisionChannel", "楼栋维修默认表决方式", value -> decisionChannel(value.buildingRepairDefaultDecisionChannel())),
-                        field("fundManagedEnabled", "第三方资金托管", value -> enabled(value.fundManagedEnabled())),
-                        field("financialControlConfigId", "财务审批配置", TenantCommunity::financialControlConfigId),
-                        field("quarterlyDisclosureDeadlineDay", "季度收益公示期限日", value -> text(value.quarterlyDisclosureDeadlineDay()))
+                        field("repairEstimateRequired", "前期询价前编制参考估算", value -> enabled(value.repairEstimateRequired())),
+                        field("buildingRepairDefaultDecisionChannel", "系统内表决收集方式", value -> decisionChannel(value.buildingRepairDefaultDecisionChannel()))
                 )),
                 actor,
                 false);
@@ -334,18 +329,10 @@ public class CommunitySettingsAuditService {
         return value ? "已启用" : "未启用";
     }
 
-    private static String sharedOwnership(String value) {
-        return switch (value == null ? "" : value) {
-            case "REPRESENTATIVE_ONLY" -> "唯一代表制";
-            case "PROPORTIONAL_SPLIT" -> "按份额拆分";
-            default -> value;
-        };
-    }
-
     private static String decisionChannel(String value) {
         return switch (value == null ? "" : value) {
-            case "ONLINE" -> "C 端在线表决";
-            case "WECHAT" -> "微信接龙";
+            case "ONLINE" -> "线上实名投票";
+            case "WECHAT" -> "历史微信材料记录";
             default -> value;
         };
     }
@@ -393,13 +380,8 @@ public class CommunitySettingsAuditService {
         labels.put("unitCount", "单元数量");
         labels.put("parkingSpaceCount", "车位数量");
         labels.put("plotRatio", "容积率");
-        labels.put("ruleConfigId", "治理规则模板");
-        labels.put("sharedOwnershipStrategy", "共有产权代表策略");
-        labels.put("repairEstimateRequired", "邀价前填写物业内部估算");
-        labels.put("buildingRepairDefaultDecisionChannel", "楼栋维修默认表决方式");
-        labels.put("fundManagedEnabled", "第三方资金托管");
-        labels.put("financialControlConfigId", "财务审批配置");
-        labels.put("quarterlyDisclosureDeadlineDay", "季度收益公示期限日");
+        labels.put("repairEstimateRequired", "前期询价前编制参考估算");
+        labels.put("buildingRepairDefaultDecisionChannel", "系统内表决收集方式");
         return Map.copyOf(labels);
     }
 

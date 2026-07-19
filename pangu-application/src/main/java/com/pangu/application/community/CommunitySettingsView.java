@@ -5,10 +5,10 @@ import com.pangu.domain.model.community.CommunityLedgerStats;
 import com.pangu.domain.model.community.CommunityBuilding;
 import com.pangu.domain.model.community.DenominatorBreakdown;
 import com.pangu.domain.model.community.DenominatorReviewRequest;
-import com.pangu.domain.model.community.GovernancePolicy;
 import com.pangu.domain.model.community.TenantCommunity;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 
 /**
@@ -16,14 +16,13 @@ import java.util.List;
  */
 public record CommunitySettingsView(
         TenantCommunity community,
-        GovernancePolicy currentPolicy,
-        List<GovernancePolicy> policyOptions,
         CommunityLedgerStats liveLedgerStats,
         List<CommunityBuilding> buildings,
         List<DenominatorBreakdown> denominatorBreakdown,
         List<DenominatorReviewRequest> pendingReviewRequests,
         List<AuditLog> auditLogs,
         Permissions permissions,
+        LocalDate nextPublicIncomeDisclosureDeadline,
         int daysUntilDisclosureDeadline
 ) {
     /** 管理端可直接展示的社区设置变更记录。 */
@@ -63,7 +62,6 @@ public record CommunitySettingsView(
             boolean canEditAssetLedger,
             boolean canEditLegalArea,
             boolean canEditRules,
-            boolean canEditFinancialControl,
             boolean canReconcileDenominator,
             boolean canRequestDenominatorReview,
             boolean canSubmitPageChanges
