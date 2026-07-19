@@ -27,6 +27,7 @@ import com.pangu.domain.repository.RepairDocumentPreviewConverter;
 import com.pangu.domain.repository.RepairEvidenceObjectStorage;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -422,6 +423,11 @@ public class RepairWorkOrderFlowTest {
                 ORDER BY opid LIMIT 1
                 """, Long.class, UID_OWNER, TENANT);
         long id = createPrivate(ownerToken, opid, "IT-报修-业主现场照片-" + System.nanoTime());
+
+        assertNull(jdbcTemplate.queryForObject(
+                "SELECT survey_summary FROM t_repair_work_order WHERE work_order_id = ?",
+                String.class,
+                id));
 
         MockMultipartFile file = new MockMultipartFile(
                 "file", "业主现场.jpg", "image/jpeg", new byte[1024]);

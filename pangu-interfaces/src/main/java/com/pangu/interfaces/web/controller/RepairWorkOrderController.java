@@ -246,7 +246,7 @@ public class RepairWorkOrderController extends BaseController {
     public ResponseEntity<Result<RepairWorkOrderResponse>> createPrivate(
             @Valid @RequestBody CreatePrivateRepairRequest request) {
         RepairWorkOrder order = service.createPrivate(new CreatePrivateRepairCommand(
-                request.opid(), request.title(), request.description(), request.category(), request.evidenceText()));
+                request.opid(), request.title(), request.description(), request.category()));
         return ResponseEntity.status(HttpStatus.CREATED).body(success(RepairWorkOrderResponse.from(order)));
     }
 
@@ -793,7 +793,7 @@ public class RepairWorkOrderController extends BaseController {
     private CreatePublicRepairCommand toCommand(CreatePublicRepairRequest request) {
         return new CreatePublicRepairCommand(
                 request.publicAreaScope(), request.buildingId(), request.locationText(), request.title(),
-                request.description(), request.category(), request.evidenceText());
+                request.description(), request.category());
     }
 
     private RepairActionCommand action(RepairActionRequest request) {

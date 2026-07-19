@@ -204,7 +204,7 @@ public class RepairWorkOrderService {
                 RepairSpaceScope.PRIVATE, null, RepairWorkOrderStatus.SUBMITTED, ctx.accountId(),
                 ctx.uid(), null, property.roomId(), property.buildingId(), null,
                 false, false, null, null, null, normalizeCategory(command.category()), null,
-                trim(command.evidenceText()), null, null, null, true, null, null, 0L, null, null));
+                null, null, null, null, true, null, null, 0L, null, null));
         event(inserted, "OWNER_SUBMIT_PRIVATE", null, inserted.status(), "业主提交私有空间报修");
         return inserted;
     }
@@ -232,7 +232,7 @@ public class RepairWorkOrderService {
                 null, null, ctx.tenantId(), title, trim(command.description()), RepairSource.C_OWNER_APP,
                 RepairSpaceScope.PUBLIC, publicAreaScope, status, ctx.accountId(), ctx.uid(), null,
                 null, buildingId, trim(command.locationText()), needManualLocation, false,
-                null, null, null, normalizeCategory(command.category()), null, trim(command.evidenceText()),
+                null, null, null, normalizeCategory(command.category()), null, null,
                 null, null, null, true, null, null, 0L, null, null));
         event(inserted, "OWNER_SUBMIT_PUBLIC", null, inserted.status(),
                 needManualLocation ? "公共报修信息不足，进入现场补充" : "业主提交公共区域报修");
@@ -259,7 +259,7 @@ public class RepairWorkOrderService {
                 null, null, tenantId, title, trim(command.description()), RepairSource.ADMIN_PC,
                 RepairSpaceScope.PUBLIC, publicAreaScope, status, ctx.accountId(), null, ctx.userId(),
                 null, buildingId, trim(command.locationText()), needManualLocation, false,
-                null, null, null, normalizeCategory(command.category()), null, trim(command.evidenceText()),
+                null, null, null, normalizeCategory(command.category()), null, null,
                 null, null, null, true, null, null, 0L, null, null));
         event(inserted, "ADMIN_REGISTER_PUBLIC", null, inserted.status(),
                 needManualLocation ? "物业登记公共报修，待现场定位" : "物业登记公共报修");
