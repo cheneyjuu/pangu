@@ -164,6 +164,13 @@ public class RepairProjectVotingChannelService {
                         context.project().projectId(), context.project().tenantId())
                 .filter(item -> Objects.equals(item.sha256(), context.voting().paperBallotTemplateHash()))
                 .orElseThrow(() -> conflict("本次表决锁定的纸质表决票模板无法核对"));
+        PaperVotingService.Workbench paperWorkbench;
+        try {
+            paperWorkbench = paperVotingService.getWorkbench(
+                    context.executionPackage().getPackageId(), context.project().tenantId());
+        } catch (PaperVotingException ex) {
+            throw translate(ex);
+        }
         return new Workbench(
                 votingExecutionRepository.findElectorateSnapshot(
                                 context.executionPackage().getElectorateSnapshotId(), context.project().tenantId())
@@ -171,8 +178,7 @@ public class RepairProjectVotingChannelService {
                                 .map(item -> toElectorateWorkbenchItem(item, context.project().tenantId()))
                                 .toList())
                         .orElseGet(List::of),
-                paperVotingService.getWorkbench(
-                        context.executionPackage().getPackageId(), context.project().tenantId()),
+                paperWorkbench,
                 onlineVotingService.managementProgress(
                         context.executionPackage().getPackageId(), context.project().tenantId()),
                 onlineVotingService.listPaperAssistanceRequests(

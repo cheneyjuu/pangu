@@ -300,9 +300,9 @@ public class PaperVotingStateService {
         if (votingRequired && ballotPackage.getStatus() != VotingExecutionPackage.Status.VOTING) {
             throw new PaperVotingException(INVALID_STATUS, "当前不在纸质表决收票阶段");
         }
-        if (!votingRequired && ballotPackage.getStatus() != VotingExecutionPackage.Status.FROZEN
-                && ballotPackage.getStatus() != VotingExecutionPackage.Status.VOTING) {
-            throw new PaperVotingException(INVALID_STATUS, "表决包尚未锁定或已经结束");
+        // 办理结束后仍须保留纸票送达、录入、复核和重复材料记录供查阅。
+        if (!votingRequired && ballotPackage.getStatus() == VotingExecutionPackage.Status.DRAFT) {
+            throw new PaperVotingException(INVALID_STATUS, "表决包尚未锁定");
         }
         return ballotPackage;
     }

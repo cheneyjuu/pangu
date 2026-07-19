@@ -338,6 +338,16 @@ class RepairProjectBuildingE2eFlowTest {
                 .path("sourceType").asText());
         assertEquals(64, locked.path("plans").get(0).path("snapshotHash").asText().length());
 
+        // 办理结束后仍可查阅纸票原件、复核结果和线上汇总，不能把归档工作台误判为收票操作。
+        JsonNode archivedWorkbench = getData(
+                "/api/v1/admin/repair-projects/" + projectId + "/voting/workbench",
+                committeeDirectorToken);
+        assertEquals(1, archivedWorkbench.path("paper").path("ballots").size());
+        assertEquals("COUNTED", archivedWorkbench.path("paper").path("ballots").get(0)
+                .path("outcomes").get(0).path("status").asText());
+        assertEquals(voters.size() - 1,
+                archivedWorkbench.path("online").path("completedPropertyCount").asInt());
+
         // 授权提案被冻结后，既有报价可读；完成授权和最终锁定后也不能再更改参考询价。
         mockMvc.perform(post(sourcingPath(projectId, "/invitations"))
                         .header("Authorization", bearer(propertyManagerToken))
