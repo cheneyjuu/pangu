@@ -1,0 +1,604 @@
+// 关联业务：统一编排正式表决包创建、名册冻结、送达和跨渠道有效票写入。
+package com.pangu.application.voting;
+
+import com.pangu.application.support.PayloadHasher;
+import com.pangu.application.voting.command.SettleSubjectCommand;
+import com.pangu.domain.model.voting.SubjectStatus;
+import com.pangu.domain.model.voting.SubjectType;
+import com.pangu.domain.model.voting.VoteChannel;
+import com.pangu.domain.model.voting.VoteChoice;
+import com.pangu.domain.model.voting.VoteItem;
+import com.pangu.domain.model.voting.VotingBallotRecord;
+import com.pangu.domain.model.voting.VotingDeliveryRecord;
+import com.pangu.domain.model.voting.VotingElectorateSnapshot;
+import com.pangu.domain.model.voting.VotingExecutionPackage;
+import com.pangu.domain.model.voting.VotingExecutionTrace;
+import com.pangu.domain.model.voting.VotingSettlementPolicy;
+import com.pangu.domain.model.voting.VotingScope;
+import com.pangu.domain.model.voting.VotingSubject;
+import com.pangu.domain.model.voting.VotingSubjectActions;
+import com.pangu.domain.repository.VoteItemRepository;
+import com.pangu.domain.repository.VotingExecutionRepository;
+import com.pangu.domain.repository.VotingSubjectRepository;
+import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.math.BigDecimal;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+
+/**
+ * 正式表决执行内核。
+ *
+ * <p>上层业务只提供已经确认的方案和规则快照；本服务负责把范围、时间、名册、送达和
+ * 有效票固化为同一条审计链。任何正式事项都不得绕过本服务直接依据实时产权数据收票。
+ */
+@Service
+@RequiredArgsConstructor
+public class VotingExecutionService {
+
+    private final VotingExecutionRepository executionRepository;
+    private final VotingSubjectRepository subjectRepository;
+    private final VoteItemRepository voteItemRepository;
+    private final VotingApplicationService votingApplicationService;
+
+    @Transactional
+    public VotingExecutionPackage create(CreatePackageCommand command) {
+        Objects.requireNonNull(command, "command 不能为空");
+        VotingExecutionPackage ballotPackage = VotingExecutionPackage.draft(
+                command.tenantId(), command.businessType(), command.businessReferenceId(),
+                command.proposalSnapshotType(), command.proposalSnapshotId(), command.proposalSnapshotHash(),
+                command.ruleSnapshotType(), command.ruleSnapshotId(), command.ruleSnapshotHash(),
+                command.scope(), command.scopeReferenceId(), command.collectionMode(),
+                command.voteStartAt(), command.voteEndAt(), command.createdByUserId());
+        VotingExecutionPackage inserted = executionRepository.insertPackage(ballotPackage);
+        executionRepository.insertAudit(
+                inserted.getPackageId(), inserted.getTenantId(), "PACKAGE_CREATED", null,
+                inserted.getStatus().name(), command.createdByUserId(), null, Instant.now());
+        return inserted;
+    }
+
+    @Transactional
+    public void attachSubject(Long packageId, Long tenantId, Long subjectId, Long actorUserId) {
+        VotingExecutionPackage ballotPackage = requirePackageForUpdate(packageId, tenantId);
+        requireStatus(ballotPackage, VotingExecutionPackage.Status.DRAFT);
+        VotingSubject subject = requireSubject(subjectId, tenantId);
+        if (subject.getStatus() != SubjectStatus.DRAFT) {
+            throw new VotingExecutionException("只有草稿事项可以加入正式表决包");
+        }
+        if (subject.getSubjectType() == SubjectType.ELECTION) {
+            throw new VotingExecutionException("选举事项尚未接入统一表决人名册");
+        }
+        if (subject.getScope() != ballotPackage.getScope()
+                || !Objects.equals(subject.getScopeReferenceId(), ballotPackage.getScopeReferenceId())) {
+            throw new VotingExecutionException("表决事项的决定范围与表决包不一致");
+        }
+        if (!Objects.equals(subject.getVoteStartAt(), ballotPackage.getVoteStartAt())
+                || !Objects.equals(subject.getVoteEndAt(), ballotPackage.getVoteEndAt())) {
+            throw new VotingExecutionException("表决事项的投票时间与表决包不一致");
+        }
+        try {
+            executionRepository.attachSubject(packageId, tenantId, subjectId);
+        } catch (DataIntegrityViolationException ex) {
+            throw new VotingExecutionException("该表决事项已属于其他正式表决包", ex);
+        }
+        executionRepository.insertAudit(
+                packageId, tenantId, "SUBJECT_ATTACHED", ballotPackage.getStatus().name(),
+                ballotPackage.getStatus().name(), actorUserId,
+                "{\"subjectId\":" + subjectId + "}", Instant.now());
+    }
+
+    @Transactional
+    public VotingExecutionPackage freeze(Long packageId, Long tenantId, Long actorUserId, Instant now) {
+        VotingExecutionPackage ballotPackage = requirePackageForUpdate(packageId, tenantId);
+        requireStatus(ballotPackage, VotingExecutionPackage.Status.DRAFT);
+        requirePositive(actorUserId, "actorUserId");
+        Objects.requireNonNull(now, "now 不能为空");
+        List<Long> subjectIds = executionRepository.listSubjectIds(packageId, tenantId);
+        if (subjectIds.isEmpty()) {
+            throw new VotingExecutionException("正式表决包至少需要一个表决事项");
+        }
+        List<VotingElectorateSnapshot.Candidate> candidates = executionRepository.listElectorateCandidates(
+                tenantId, ballotPackage.getScope(), ballotPackage.getScopeReferenceId());
+        VotingElectorateSnapshot snapshot = buildElectorateSnapshot(ballotPackage, candidates, now);
+        VotingElectorateSnapshot insertedSnapshot = executionRepository.insertElectorateSnapshot(snapshot);
+        for (Long subjectId : subjectIds) {
+            VotingSubject subject = requireSubject(subjectId, tenantId);
+            if (subject.getStatus() != SubjectStatus.DRAFT) {
+                throw new VotingExecutionException("锁定时表决事项必须仍为草稿 subjectId=" + subjectId);
+            }
+            executionRepository.insertSubjectDenominatorSnapshot(
+                    subjectId, ballotPackage.getScope(), ballotPackage.getScopeReferenceId(), insertedSnapshot);
+        }
+        String packageHash = buildPackageHash(ballotPackage, insertedSnapshot, subjectIds);
+        ballotPackage.freeze(insertedSnapshot.snapshotId(), packageHash, actorUserId, now);
+        updatePackage(ballotPackage);
+        for (Long subjectId : subjectIds) {
+            publishSubject(requireSubject(subjectId, tenantId));
+        }
+        executionRepository.insertAudit(
+                packageId, tenantId, "PACKAGE_FROZEN", VotingExecutionPackage.Status.DRAFT.name(),
+                VotingExecutionPackage.Status.FROZEN.name(), actorUserId,
+                "{\"electorateSnapshotId\":" + insertedSnapshot.snapshotId()
+                        + ",\"electorateHash\":\"" + insertedSnapshot.aggregateHash() + "\"}", now);
+        return requirePackage(packageId, tenantId);
+    }
+
+    @Transactional
+    public VotingExecutionPackage open(Long packageId, Long tenantId, Long actorUserId, Instant now) {
+        VotingExecutionPackage ballotPackage = requirePackageForUpdate(packageId, tenantId);
+        VotingExecutionPackage.Status fromStatus = ballotPackage.getStatus();
+        try {
+            ballotPackage.open(now, actorUserId);
+        } catch (IllegalStateException | IllegalArgumentException ex) {
+            throw new VotingExecutionException(ex.getMessage(), ex);
+        }
+        updatePackage(ballotPackage);
+        for (Long subjectId : executionRepository.listSubjectIds(packageId, tenantId)) {
+            openSubject(requireSubject(subjectId, tenantId), now);
+        }
+        executionRepository.insertAudit(
+                packageId, tenantId, "VOTING_OPENED", fromStatus.name(), ballotPackage.getStatus().name(),
+                actorUserId, null, now);
+        return requirePackage(packageId, tenantId);
+    }
+
+    @Transactional
+    public VotingDeliveryRecord recordDelivery(RecordDeliveryCommand command) {
+        Objects.requireNonNull(command, "command 不能为空");
+        VotingExecutionPackage ballotPackage = requirePackage(command.packageId(), command.tenantId());
+        if (ballotPackage.getStatus() != VotingExecutionPackage.Status.FROZEN
+                && ballotPackage.getStatus() != VotingExecutionPackage.Status.VOTING) {
+            throw new VotingExecutionException("表决材料只能在表决包锁定后送达");
+        }
+        VoteChannel channel = normalizeDeliveryChannel(command.deliveryChannel());
+        requireChannelAllowed(ballotPackage, channel);
+        VotingElectorateSnapshot.Item item = requireElectorateItem(
+                command.packageId(), command.tenantId(), command.opid());
+        VotingDeliveryRecord delivery = new VotingDeliveryRecord(
+                null, ballotPackage.getPackageId(), item.snapshotItemId(), ballotPackage.getTenantId(),
+                item.representativeOpid(), item.representativeUid(), channel,
+                requireText(command.deliveryMethod(), "deliveryMethod"),
+                requireText(command.evidenceHash(), "evidenceHash"),
+                command.deliveredByUserId(), requireInstant(command.deliveredAt(), "deliveredAt"));
+        try {
+            VotingDeliveryRecord inserted = executionRepository.insertDelivery(delivery);
+            executionRepository.insertAudit(
+                    ballotPackage.getPackageId(), ballotPackage.getTenantId(), "DELIVERY_RECORDED",
+                    ballotPackage.getStatus().name(), ballotPackage.getStatus().name(),
+                    command.deliveredByUserId(),
+                    "{\"opid\":" + item.representativeOpid()
+                            + ",\"channel\":\"" + channel.name() + "\"}", command.deliveredAt());
+            return inserted;
+        } catch (DataIntegrityViolationException ex) {
+            throw new VotingExecutionException("该专有部分在此渠道已有送达记录", ex);
+        }
+    }
+
+    @Transactional
+    public long cast(CastBallotCommand command) {
+        return castRecordInternal(command).voteId();
+    }
+
+    /**
+     * 接收一张正式选票并返回写入后的通用票据记录，供需要回显审计编号的业务适配层使用。
+     */
+    @Transactional
+    public VotingBallotRecord castRecord(CastBallotCommand command) {
+        return castRecordInternal(command);
+    }
+
+    private VotingBallotRecord castRecordInternal(CastBallotCommand command) {
+        Objects.requireNonNull(command, "command 不能为空");
+        VotingExecutionPackage ballotPackage = requirePackage(command.packageId(), command.tenantId());
+        Instant castAt = requireInstant(command.castAt(), "castAt");
+        if (ballotPackage.getStatus() != VotingExecutionPackage.Status.VOTING
+                || castAt.isBefore(ballotPackage.getVoteStartAt())
+                || !castAt.isBefore(ballotPackage.getVoteEndAt())) {
+            throw new VotingExecutionException(Reason.INVALID_STATUS, "当前不在正式表决收票时间内");
+        }
+        requireChannelAllowed(ballotPackage, command.voteChannel());
+        if (!executionRepository.listSubjectIds(command.packageId(), command.tenantId())
+                .contains(command.subjectId())) {
+            throw new VotingExecutionException("表决事项不属于当前正式表决包");
+        }
+        VotingSubject subject = requireSubject(command.subjectId(), command.tenantId());
+        if (subject.getStatus() != SubjectStatus.VOTING) {
+            throw new VotingExecutionException("表决事项尚未开始收票");
+        }
+        VotingElectorateSnapshot.Item item = requireElectorateItem(
+                command.packageId(), command.tenantId(), command.opid());
+        if (command.uid() != null && !command.uid().equals(item.representativeUid())) {
+            throw new VotingExecutionException("提交身份与冻结表决人名册不一致");
+        }
+        VoteChannel deliveryChannel = normalizeDeliveryChannel(command.voteChannel());
+        if (!executionRepository.deliveryExists(
+                command.packageId(), command.tenantId(), item.snapshotItemId(), deliveryChannel)) {
+            throw new VotingExecutionException(Reason.DELIVERY_REQUIRED, "尚无与本次收票渠道对应的有效送达记录");
+        }
+        if (command.voteChannel().paperLike()) {
+            requireText(command.ballotFileHash(), "ballotFileHash");
+        }
+        VoteItem vote = VoteItem.builder()
+                .opid(item.representativeOpid())
+                .uid(item.representativeUid())
+                .propertyArea(item.certifiedArea())
+                .choice(Objects.requireNonNull(command.choice(), "choice 不能为空"))
+                .voteChannel(command.voteChannel())
+                .build();
+        long voteId;
+        VotingBallotRecord insertedBallot;
+        try {
+            voteId = voteItemRepository.insert(command.subjectId(), vote, command.signatureHash());
+            insertedBallot = executionRepository.insertBallot(new VotingBallotRecord(
+                    null, ballotPackage.getPackageId(), command.subjectId(), voteId,
+                    item.snapshotItemId(), ballotPackage.getTenantId(), item.representativeOpid(),
+                    item.representativeUid(), command.voteChannel(), ballotPackage.getPackageHash(),
+                    trim(command.ballotFileHash()), trim(command.signatureHash()),
+                    command.recordedByUserId(), castAt));
+        } catch (VoteItemRepository.DuplicateVoteException | DataIntegrityViolationException ex) {
+            throw new VotingExecutionException(
+                    Reason.DUPLICATE_BALLOT, "该专有部分对本事项已有有效票，不能跨渠道重复提交", ex);
+        }
+        executionRepository.insertAudit(
+                ballotPackage.getPackageId(), ballotPackage.getTenantId(), "BALLOT_ACCEPTED",
+                ballotPackage.getStatus().name(), ballotPackage.getStatus().name(),
+                command.recordedByUserId(),
+                "{\"subjectId\":" + command.subjectId() + ",\"opid\":" + item.representativeOpid()
+                        + ",\"channel\":\"" + command.voteChannel().name() + "\",\"voteId\":" + voteId + "}",
+                castAt);
+        return insertedBallot;
+    }
+
+    @Transactional
+    public VotingExecutionPackage closeAndSettle(Long packageId,
+                                                 Long tenantId,
+                                                 Long actorUserId,
+                                                 Instant now) {
+        return closeAndSettle(packageId, tenantId, actorUserId, now, subject -> null);
+    }
+
+    /**
+     * 截止收票并以冻结名册和上层提供的实际生效规则结算全部事项。
+     */
+    @Transactional
+    public VotingExecutionPackage closeAndSettle(Long packageId,
+                                                 Long tenantId,
+                                                 Long actorUserId,
+                                                 Instant now,
+                                                 SettlementPolicyProvider settlementPolicyProvider) {
+        VotingExecutionPackage ballotPackage = requirePackageForUpdate(packageId, tenantId);
+        VotingExecutionPackage.Status fromStatus = ballotPackage.getStatus();
+        try {
+            ballotPackage.close(now);
+        } catch (IllegalStateException ex) {
+            throw new VotingExecutionException(ex.getMessage(), ex);
+        }
+        updatePackage(ballotPackage);
+        executionRepository.insertAudit(
+                packageId, tenantId, "VOTING_CLOSED", fromStatus.name(),
+                VotingExecutionPackage.Status.CLOSED.name(), actorUserId, null, now);
+
+        VotingElectorateSnapshot snapshot = executionRepository.findElectorateSnapshot(
+                        ballotPackage.getElectorateSnapshotId(), tenantId)
+                .orElseThrow(() -> new VotingExecutionException("正式表决包关联的冻结名册不存在"));
+        String recomputedElectorateHash = PayloadHasher.sha256Hex(
+                snapshot.items().stream().map(VotingElectorateSnapshot.Item::rowHash)
+                        .collect(java.util.stream.Collectors.joining("|")));
+        if (!snapshot.aggregateHash().equals(recomputedElectorateHash)) {
+            throw new VotingExecutionException("冻结表决人名册摘要无效");
+        }
+        VotingExecutionTrace trace = new VotingExecutionTrace(
+                ballotPackage.getPackageId(), snapshot.snapshotId(),
+                ballotPackage.getProposalSnapshotHash(), ballotPackage.getRuleSnapshotHash(),
+                ballotPackage.getPackageHash());
+        for (Long subjectId : executionRepository.listSubjectIds(packageId, tenantId)) {
+            VotingSubject subject = requireSubject(subjectId, tenantId);
+            VotingSettlementPolicy policy = settlementPolicyProvider == null
+                    ? null : settlementPolicyProvider.forSubject(subject);
+            votingApplicationService.settle(
+                    new SettleSubjectCommand(subjectId, ballotPackage.getBusinessType().name()),
+                    policy,
+                    trace);
+        }
+
+        VotingExecutionPackage closed = requirePackageForUpdate(packageId, tenantId);
+        closed.settle();
+        updatePackage(closed);
+        executionRepository.insertAudit(
+                packageId, tenantId, "PACKAGE_SETTLED", VotingExecutionPackage.Status.CLOSED.name(),
+                VotingExecutionPackage.Status.SETTLED.name(), actorUserId, null, now);
+        return requirePackage(packageId, tenantId);
+    }
+
+    public java.util.Optional<VotingExecutionPackage> findPackageBySubjectId(Long subjectId) {
+        return executionRepository.findPackageBySubjectId(subjectId);
+    }
+
+    private VotingElectorateSnapshot buildElectorateSnapshot(
+            VotingExecutionPackage ballotPackage,
+            List<VotingElectorateSnapshot.Candidate> candidates,
+            Instant frozenAt) {
+        if (candidates == null || candidates.isEmpty()) {
+            throw new VotingExecutionException("决定范围内没有可冻结的房屋名册");
+        }
+        Map<Long, List<VotingElectorateSnapshot.Candidate>> byRoom = new LinkedHashMap<>();
+        for (VotingElectorateSnapshot.Candidate candidate : candidates) {
+            byRoom.computeIfAbsent(candidate.roomId(), ignored -> new ArrayList<>()).add(candidate);
+        }
+        List<VotingElectorateSnapshot.Item> items = new ArrayList<>();
+        LinkedHashSet<Long> representativeUids = new LinkedHashSet<>();
+        BigDecimal totalArea = BigDecimal.ZERO;
+        for (Map.Entry<Long, List<VotingElectorateSnapshot.Candidate>> entry : byRoom.entrySet()) {
+            List<VotingElectorateSnapshot.Candidate> roomRows = entry.getValue();
+            VotingElectorateSnapshot.Candidate base = roomRows.getFirst();
+            if (base.certifiedArea() == null || base.certifiedArea().signum() <= 0) {
+                throw new VotingExecutionException("房屋名册缺少有效法定面积 roomId=" + base.roomId());
+            }
+            List<VotingElectorateSnapshot.Candidate> owners = roomRows.stream()
+                    .filter(row -> row.opid() != null && row.uid() != null)
+                    .toList();
+            if (owners.isEmpty()) {
+                throw new VotingExecutionException("房屋尚无已核验产权人，不能冻结表决名册 roomId=" + base.roomId());
+            }
+            VotingElectorateSnapshot.Candidate representative;
+            if (owners.size() == 1) {
+                representative = owners.getFirst();
+            } else {
+                List<VotingElectorateSnapshot.Candidate> delegates = owners.stream()
+                        .filter(VotingElectorateSnapshot.Candidate::votingDelegate)
+                        .toList();
+                if (delegates.size() != 1) {
+                    throw new VotingExecutionException(
+                            "共有产权房屋尚未唯一确认表决代表 roomId=" + base.roomId());
+                }
+                representative = delegates.getFirst();
+            }
+            List<Long> coOwnerUids = owners.stream()
+                    .map(VotingElectorateSnapshot.Candidate::uid)
+                    .distinct()
+                    .sorted()
+                    .toList();
+            String rowHash = PayloadHasher.sha256Hex(String.join("|",
+                    base.rosterId().toString(), base.roomId().toString(), base.buildingId().toString(),
+                    canonical(base.certifiedArea()), representative.opid().toString(),
+                    representative.uid().toString(), coOwnerUids.toString()));
+            items.add(new VotingElectorateSnapshot.Item(
+                    null, null, base.rosterId(), base.roomId(), base.buildingId(), base.certifiedArea(),
+                    representative.opid(), representative.uid(), coOwnerUids, rowHash));
+            totalArea = totalArea.add(base.certifiedArea());
+            representativeUids.add(representative.uid());
+        }
+        items.sort(Comparator.comparing(VotingElectorateSnapshot.Item::buildingId)
+                .thenComparing(VotingElectorateSnapshot.Item::roomId));
+        String aggregateHash = PayloadHasher.sha256Hex(
+                items.stream().map(VotingElectorateSnapshot.Item::rowHash)
+                        .collect(java.util.stream.Collectors.joining("|")));
+        return new VotingElectorateSnapshot(
+                null, ballotPackage.getPackageId(), ballotPackage.getTenantId(),
+                ballotPackage.getScope(), ballotPackage.getScopeReferenceId(), totalArea,
+                representativeUids.size(), items.size(), aggregateHash, frozenAt, items);
+    }
+
+    private String buildPackageHash(VotingExecutionPackage ballotPackage,
+                                    VotingElectorateSnapshot snapshot,
+                                    List<Long> subjectIds) {
+        return PayloadHasher.sha256Hex(String.join("|",
+                ballotPackage.getPackageId().toString(),
+                ballotPackage.getBusinessType().name(),
+                ballotPackage.getBusinessReferenceId().toString(),
+                ballotPackage.getProposalSnapshotType(),
+                ballotPackage.getProposalSnapshotId().toString(),
+                ballotPackage.getProposalSnapshotHash(),
+                ballotPackage.getRuleSnapshotType(),
+                ballotPackage.getRuleSnapshotId().toString(),
+                ballotPackage.getRuleSnapshotHash(),
+                ballotPackage.getScope().name(),
+                ballotPackage.getScopeReferenceId() == null ? "" : ballotPackage.getScopeReferenceId().toString(),
+                ballotPackage.getCollectionMode().name(),
+                ballotPackage.getVoteStartAt().toString(),
+                ballotPackage.getVoteEndAt().toString(),
+                subjectIds.stream().sorted().toList().toString(),
+                snapshot.aggregateHash()));
+    }
+
+    private void publishSubject(VotingSubject subject) {
+        VotingSubjectActions.publish(subject);
+        updateSubjectStatus(subject, SubjectStatus.PUBLISHED);
+    }
+
+    private void openSubject(VotingSubject subject, Instant now) {
+        try {
+            VotingSubjectActions.openVoting(subject, now);
+        } catch (VotingSubjectActions.IllegalSubjectTransitionException ex) {
+            throw new VotingExecutionException(ex.getMessage(), ex);
+        }
+        updateSubjectStatus(subject, SubjectStatus.VOTING);
+    }
+
+    private void updateSubjectStatus(VotingSubject subject, SubjectStatus target) {
+        int updated = subjectRepository.updateStatus(subject.getSubjectId(), target.getDbValue(), subject.getVersion());
+        if (updated != 1) {
+            throw new VotingExecutionException("表决事项已被并发修改 subjectId=" + subject.getSubjectId());
+        }
+    }
+
+    private VotingExecutionPackage requirePackage(Long packageId, Long tenantId) {
+        return executionRepository.findPackage(packageId, tenantId)
+                .orElseThrow(() -> new VotingExecutionException(Reason.NOT_FOUND, "正式表决包不存在"));
+    }
+
+    private VotingExecutionPackage requirePackageForUpdate(Long packageId, Long tenantId) {
+        return executionRepository.findPackageForUpdate(packageId, tenantId)
+                .orElseThrow(() -> new VotingExecutionException(Reason.NOT_FOUND, "正式表决包不存在"));
+    }
+
+    private VotingSubject requireSubject(Long subjectId, Long tenantId) {
+        VotingSubject subject = subjectRepository.findById(subjectId)
+                .orElseThrow(() -> new VotingExecutionException("表决事项不存在 subjectId=" + subjectId));
+        if (!tenantId.equals(subject.getTenantId())) {
+            throw new VotingExecutionException("表决事项不属于当前小区");
+        }
+        return subject;
+    }
+
+    private VotingElectorateSnapshot.Item requireElectorateItem(Long packageId, Long tenantId, Long opid) {
+        return executionRepository.findElectorateItem(packageId, tenantId, opid)
+                .orElseThrow(() -> new VotingExecutionException(
+                        Reason.ELECTORATE_NOT_FOUND, "该专有部分不在本次冻结表决人名册中"));
+    }
+
+    private void updatePackage(VotingExecutionPackage ballotPackage) {
+        if (executionRepository.updatePackage(ballotPackage) != 1) {
+            throw new VotingExecutionException(Reason.CONCURRENT_MODIFICATION, "正式表决包已被并发修改");
+        }
+    }
+
+    private void requireStatus(VotingExecutionPackage ballotPackage, VotingExecutionPackage.Status status) {
+        if (ballotPackage.getStatus() != status) {
+            throw new VotingExecutionException("正式表决包状态不允许该操作 status=" + ballotPackage.getStatus());
+        }
+    }
+
+    private void requireChannelAllowed(VotingExecutionPackage ballotPackage, VoteChannel channel) {
+        if (channel == null || !ballotPackage.accepts(channel)) {
+            throw new VotingExecutionException(Reason.CHANNEL_NOT_ALLOWED, "本次表决未采用该收票方式");
+        }
+    }
+
+    private VoteChannel normalizeDeliveryChannel(VoteChannel channel) {
+        if (channel == null) {
+            throw new VotingExecutionException("deliveryChannel 不能为空");
+        }
+        return channel.paperLike() ? VoteChannel.PAPER : VoteChannel.ONLINE;
+    }
+
+    private static void requirePositive(Long value, String field) {
+        if (value == null || value <= 0) {
+            throw new VotingExecutionException(field + " 必须为正整数");
+        }
+    }
+
+    private String requireText(String value, String field) {
+        String normalized = trim(value);
+        if (normalized == null) {
+            throw new VotingExecutionException(field + " 不能为空");
+        }
+        return normalized;
+    }
+
+    private Instant requireInstant(Instant value, String field) {
+        if (value == null) {
+            throw new VotingExecutionException(field + " 不能为空");
+        }
+        return value;
+    }
+
+    private String trim(String value) {
+        if (value == null) {
+            return null;
+        }
+        String normalized = value.trim();
+        return normalized.isEmpty() ? null : normalized;
+    }
+
+    private String canonical(BigDecimal value) {
+        return value.stripTrailingZeros().toPlainString();
+    }
+
+    public record CreatePackageCommand(
+            Long tenantId,
+            VotingExecutionPackage.BusinessType businessType,
+            Long businessReferenceId,
+            String proposalSnapshotType,
+            Long proposalSnapshotId,
+            String proposalSnapshotHash,
+            String ruleSnapshotType,
+            Long ruleSnapshotId,
+            String ruleSnapshotHash,
+            VotingScope scope,
+            Long scopeReferenceId,
+            VotingExecutionPackage.CollectionMode collectionMode,
+            Instant voteStartAt,
+            Instant voteEndAt,
+            Long createdByUserId
+    ) {
+    }
+
+    public record RecordDeliveryCommand(
+            Long packageId,
+            Long tenantId,
+            Long opid,
+            VoteChannel deliveryChannel,
+            String deliveryMethod,
+            String evidenceHash,
+            Long deliveredByUserId,
+            Instant deliveredAt
+    ) {
+    }
+
+    public record CastBallotCommand(
+            Long packageId,
+            Long subjectId,
+            Long tenantId,
+            Long opid,
+            Long uid,
+            VoteChoice choice,
+            VoteChannel voteChannel,
+            String ballotFileHash,
+            String signatureHash,
+            Long recordedByUserId,
+            Instant castAt
+    ) {
+    }
+
+    @FunctionalInterface
+    public interface SettlementPolicyProvider {
+        VotingSettlementPolicy forSubject(VotingSubject subject);
+    }
+
+    public enum Reason {
+        NOT_FOUND,
+        INVALID_STATUS,
+        ELECTORATE_NOT_FOUND,
+        DUPLICATE_BALLOT,
+        CHANNEL_NOT_ALLOWED,
+        DELIVERY_REQUIRED,
+        CONCURRENT_MODIFICATION,
+        INVALID_COMMAND
+    }
+
+    public static class VotingExecutionException extends RuntimeException {
+        private final Reason reason;
+
+        public VotingExecutionException(String message) {
+            this(Reason.INVALID_COMMAND, message);
+        }
+
+        public VotingExecutionException(String message, Throwable cause) {
+            this(Reason.INVALID_COMMAND, message, cause);
+        }
+
+        public VotingExecutionException(Reason reason, String message) {
+            super(message);
+            this.reason = reason;
+        }
+
+        public VotingExecutionException(Reason reason, String message, Throwable cause) {
+            super(message, cause);
+            this.reason = reason;
+        }
+
+        public Reason getReason() {
+            return reason;
+        }
+    }
+}

@@ -1,7 +1,9 @@
+// 关联业务：验证选举事项的候选人资格、选择和每户投票名额限制。
 package com.pangu.bootstrap.voting;
 
 import com.pangu.application.voting.VoteSubmissionService;
 import com.pangu.application.voting.VotingApplicationException;
+import com.pangu.application.voting.VotingExecutionService;
 import com.pangu.application.voting.command.CastVoteCommand;
 import com.pangu.domain.context.UserContextHolder;
 import com.pangu.domain.gateway.VoteCastMonitorGateway;
@@ -68,6 +70,8 @@ public class ElectionVoteSubmissionTest {
     private ElectionCandidateRegistry electionCandidateRegistry;
     @Mock
     private VoteCastMonitorGateway voteCastMonitorGateway;
+    @Mock
+    private VotingExecutionService votingExecutionService;
 
     @InjectMocks
     private VoteSubmissionService service;

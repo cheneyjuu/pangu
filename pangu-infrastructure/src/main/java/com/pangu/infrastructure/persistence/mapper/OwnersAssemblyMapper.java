@@ -1,13 +1,11 @@
-// 关联业务：映射业主大会会前事项、材料、公示安排、纸质送达和投票记录的数据库访问。
+// 关联业务：映射业主大会会前事项、材料、公示安排及历史参与记录的数据库访问。
 package com.pangu.infrastructure.persistence.mapper;
 
-import com.pangu.infrastructure.persistence.entity.OwnersAssemblyDeliveryRecordRow;
 import com.pangu.infrastructure.persistence.entity.OwnersAssemblyMaterialRow;
 import com.pangu.infrastructure.persistence.entity.OwnersAssemblyPackageRow;
 import com.pangu.infrastructure.persistence.entity.OwnersAssemblyRuleSnapshotRow;
 import com.pangu.infrastructure.persistence.entity.OwnersAssemblySessionRow;
 import com.pangu.infrastructure.persistence.entity.OwnersAssemblySubjectDraftRow;
-import com.pangu.infrastructure.persistence.entity.OwnersAssemblyVoteRecordRow;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
@@ -93,26 +91,9 @@ public interface OwnersAssemblyMapper {
     int markPackageSettled(@Param("packageId") Long packageId,
                            @Param("tenantId") Long tenantId);
 
-    int insertDelivery(OwnersAssemblyDeliveryRecordRow row);
-
-    boolean deliveryExists(@Param("packageId") Long packageId,
-                           @Param("tenantId") Long tenantId,
-                           @Param("opid") Long opid,
-                           @Param("uid") Long uid,
-                           @Param("deliveryChannel") String deliveryChannel);
-
-    int insertVoteRecord(OwnersAssemblyVoteRecordRow row);
-
-    OwnersAssemblyVoteRecordRow findActiveVoteRecord(@Param("subjectId") Long subjectId,
-                                                     @Param("opid") Long opid);
-
     LocalDateTime findOwnerParticipationAt(@Param("packageId") Long packageId,
                                             @Param("tenantId") Long tenantId,
                                             @Param("uid") Long uid);
-
-    int invalidateVoteRecordByVoteId(@Param("voteId") Long voteId,
-                                     @Param("invalidatedByVoteId") Long invalidatedByVoteId,
-                                     @Param("invalidReason") String invalidReason);
 
     boolean allSubjectsPassed(@Param("packageId") Long packageId,
                               @Param("tenantId") Long tenantId);

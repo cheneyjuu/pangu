@@ -11,10 +11,10 @@ import com.pangu.application.assembly.command.CreateOwnersAssemblySessionCommand
 import com.pangu.application.assembly.command.RecordAssemblyDeliveryWithMaterialCommand;
 import com.pangu.application.assembly.command.UploadOwnersAssemblyMaterialCommand;
 import com.pangu.domain.model.assembly.OwnersAssemblyMaterial.MaterialType;
-import com.pangu.domain.model.assembly.OwnersAssemblyDeliveryRecord;
 import com.pangu.domain.model.assembly.OwnersAssemblyPackage;
 import com.pangu.domain.model.assembly.OwnersAssemblySession;
-import com.pangu.domain.model.assembly.OwnersAssemblyVoteRecord;
+import com.pangu.domain.model.voting.VotingBallotRecord;
+import com.pangu.domain.model.voting.VotingDeliveryRecord;
 import com.pangu.interfaces.security.SecurityUtils;
 import com.pangu.interfaces.web.controller.dto.assembly.CastAssemblyPaperVoteWithMaterialRequest;
 import com.pangu.interfaces.web.controller.dto.assembly.ConfirmAssemblyArrangementRequest;
@@ -161,7 +161,7 @@ public class OwnersAssemblyController extends BaseController {
     public ResponseEntity<Result<OwnersAssemblyDeliveryResponse>> recordPaperDelivery(
             @PathVariable("sessionId") Long sessionId,
             @Valid @RequestBody RecordAssemblyDeliveryWithMaterialRequest request) {
-        OwnersAssemblyDeliveryRecord delivery = service.recordPaperDelivery(new RecordAssemblyDeliveryWithMaterialCommand(
+        VotingDeliveryRecord delivery = service.recordPaperDelivery(new RecordAssemblyDeliveryWithMaterialCommand(
                 sessionId,
                 requireTenantId(),
                 request.opid(),
@@ -177,7 +177,7 @@ public class OwnersAssemblyController extends BaseController {
     public ResponseEntity<Result<OwnersAssemblyVoteResponse>> castPaperVoteWithMaterial(
             @PathVariable("sessionId") Long sessionId,
             @Valid @RequestBody CastAssemblyPaperVoteWithMaterialRequest request) {
-        OwnersAssemblyVoteRecord vote = service.castPaperVoteWithMaterial(new CastAssemblyPaperVoteWithMaterialCommand(
+        VotingBallotRecord vote = service.castPaperVoteWithMaterial(new CastAssemblyPaperVoteWithMaterialCommand(
                 sessionId,
                 requireTenantId(),
                 request.subjectId(),

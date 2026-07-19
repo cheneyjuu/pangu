@@ -27,6 +27,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.hamcrest.Matchers.is;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.times;
@@ -59,6 +60,7 @@ class OwnersAssemblyFlowTest {
     @MockBean private RepairEvidenceObjectStorage objectStorage;
 
     private Long previousActiveRuleId;
+    private int originalPrimaryOwnerDelegate;
 
     @BeforeEach
     void setUp() {
@@ -66,6 +68,10 @@ class OwnersAssemblyFlowTest {
                 "SELECT rule_id FROM t_owners_assembly_rule WHERE tenant_id = ? AND status = 'ACTIVE'",
                 resultSet -> resultSet.next() ? resultSet.getLong(1) : null,
                 TENANT);
+        originalPrimaryOwnerDelegate = jdbcTemplate.queryForObject(
+                "SELECT is_voting_delegate FROM c_owner_property WHERE opid = 1", Integer.class);
+        // 固定测试名册中的唯一共有产权代表；生产流程遇到歧义必须拒绝冻结，不能自行猜测。
+        jdbcTemplate.update("UPDATE c_owner_property SET is_voting_delegate = 0 WHERE opid = 1");
         when(objectStorage.put(anyString(), any(byte[].class), anyString(), anyString()))
                 .thenAnswer(invocation -> new RepairEvidenceObjectStorage.StoredObjectMetadata(
                         ((byte[]) invocation.getArgument(1)).length,
@@ -75,7 +81,33 @@ class OwnersAssemblyFlowTest {
 
     @AfterEach
     void clean() {
-        jdbcTemplate.update("DELETE FROM t_owners_assembly_session WHERE title LIKE ?", ASSEMBLY_TITLE_PREFIX + "%");
+        jdbcTemplate.update("""
+                DELETE FROM t_voting_result
+                WHERE subject_id IN (
+                    SELECT subject_id FROM t_voting_subject WHERE title LIKE ?
+                )
+                """, ASSEMBLY_TITLE_PREFIX + "%");
+        List<Long> executionPackageIds = jdbcTemplate.queryForList("""
+                SELECT DISTINCT package_subject.package_id
+                FROM t_voting_package_subject package_subject
+                JOIN t_voting_subject subject ON subject.subject_id = package_subject.subject_id
+                WHERE subject.title LIKE ?
+                """, Long.class, ASSEMBLY_TITLE_PREFIX + "%");
+        for (Long executionPackageId : executionPackageIds) {
+            jdbcTemplate.update("DELETE FROM t_voting_ballot_record WHERE package_id = ?", executionPackageId);
+            jdbcTemplate.update("DELETE FROM t_voting_delivery_record WHERE package_id = ?", executionPackageId);
+            jdbcTemplate.update("DELETE FROM t_voting_package_subject WHERE package_id = ?", executionPackageId);
+            jdbcTemplate.update("""
+                    UPDATE t_voting_execution_package
+                    SET status = 'DRAFT', package_hash = NULL,
+                        electorate_snapshot_id = NULL, frozen_at = NULL
+                    WHERE package_id = ?
+                    """, executionPackageId);
+            jdbcTemplate.update(
+                    "DELETE FROM t_voting_electorate_snapshot WHERE package_id = ?", executionPackageId);
+            jdbcTemplate.update(
+                    "DELETE FROM t_voting_execution_package WHERE package_id = ?", executionPackageId);
+        }
         jdbcTemplate.update("""
                 DELETE FROM t_vote_item
                 WHERE subject_id IN (
@@ -83,11 +115,21 @@ class OwnersAssemblyFlowTest {
                 )
                 """, ASSEMBLY_TITLE_PREFIX + "%");
         jdbcTemplate.update("""
-                DELETE FROM t_voting_result
+                DELETE FROM t_voting_denominator_item_snapshot
+                WHERE snapshot_id IN (
+                    SELECT snapshot_id FROM t_voting_denominator_snapshot
+                    WHERE subject_id IN (
+                        SELECT subject_id FROM t_voting_subject WHERE title LIKE ?
+                    )
+                )
+                """, ASSEMBLY_TITLE_PREFIX + "%");
+        jdbcTemplate.update("""
+                DELETE FROM t_voting_denominator_snapshot
                 WHERE subject_id IN (
                     SELECT subject_id FROM t_voting_subject WHERE title LIKE ?
                 )
                 """, ASSEMBLY_TITLE_PREFIX + "%");
+        jdbcTemplate.update("DELETE FROM t_owners_assembly_session WHERE title LIKE ?", ASSEMBLY_TITLE_PREFIX + "%");
         jdbcTemplate.update("DELETE FROM t_voting_subject WHERE title LIKE ?", ASSEMBLY_TITLE_PREFIX + "%");
         jdbcTemplate.update("""
                 DELETE FROM t_owners_assembly_rule_field_confirmation
@@ -109,6 +151,9 @@ class OwnersAssemblyFlowTest {
                     WHERE rule_id = ?
                     """, previousActiveRuleId);
         }
+        jdbcTemplate.update(
+                "UPDATE c_owner_property SET is_voting_delegate = ? WHERE opid = 1",
+                originalPrimaryOwnerDelegate);
     }
 
     @Test
@@ -247,6 +292,88 @@ class OwnersAssemblyFlowTest {
     }
 
     @Test
+    void paperDeliveryAndBallotUseUnifiedFrozenRosterLedger() throws Exception {
+        String propertyToken = token(ACCOUNT_PROPERTY_MANAGER, USER_PROPERTY_MANAGER);
+        String directorToken = token(ACCOUNT_DIRECTOR, USER_DIRECTOR);
+        activateRule(propertyToken, directorToken, "2026-IT-unified-ledger-" + System.nanoTime(), 0, 0, 0);
+        long sessionId = prepareFormalArrangement(directorToken);
+        Instant voteStartAt = Instant.now().minus(1, ChronoUnit.MINUTES);
+        Instant voteEndAt = Instant.now().plus(1, ChronoUnit.HOURS);
+
+        mockMvc.perform(post("/api/v1/owners-assemblies/" + sessionId + "/arrangement")
+                        .header("Authorization", "Bearer " + directorToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(arrangementRequest(sessionId, directorToken, voteStartAt, voteEndAt)))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/owners-assemblies/" + sessionId + "/publish")
+                        .header("Authorization", "Bearer " + directorToken))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/owners-assemblies/" + sessionId + "/start-voting")
+                        .header("Authorization", "Bearer " + directorToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status", is("VOTING")));
+
+        Long legacyPackageId = jdbcTemplate.queryForObject(
+                "SELECT package_id FROM t_owners_assembly_package WHERE session_id = ?", Long.class, sessionId);
+        Long subjectId = jdbcTemplate.queryForObject("""
+                SELECT subject_id FROM t_owners_assembly_subject
+                WHERE package_id = ? ORDER BY subject_id LIMIT 1
+                """, Long.class, legacyPackageId);
+        long deliveryEvidenceId = uploadMaterial(
+                directorToken, sessionId, "DELIVERY_EVIDENCE", "送达凭证.pdf", "application/pdf", "delivery");
+        long ballotMaterialId = uploadMaterial(
+                directorToken, sessionId, "PAPER_BALLOT", "回收选票.pdf", "application/pdf", "vote");
+
+        mockMvc.perform(post("/api/v1/owners-assemblies/" + sessionId + "/paper-deliveries")
+                        .header("Authorization", "Bearer " + directorToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "opid", 9,
+                                "deliveryMethod", "DOOR_TO_DOOR",
+                                "evidenceMaterialId", deliveryEvidenceId))))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.uid", is((int) USER_OWNER)))
+                .andExpect(jsonPath("$.data.deliveryChannel", is("PAPER")));
+        mockMvc.perform(post("/api/v1/owners-assemblies/" + sessionId + "/paper-votes")
+                        .header("Authorization", "Bearer " + directorToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "subjectId", subjectId,
+                                "opid", 9,
+                                "choice", "SUPPORT",
+                                "ballotMaterialId", ballotMaterialId))))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.assemblyVoteId").isNumber())
+                .andExpect(jsonPath("$.data.valid", is(true)));
+
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM t_voting_delivery_record delivery
+                JOIN t_voting_execution_package execution_package
+                  ON execution_package.package_id = delivery.package_id
+                WHERE execution_package.business_type = 'OWNERS_ASSEMBLY'
+                  AND execution_package.business_reference_id = ?
+                """, Long.class, legacyPackageId)).isEqualTo(1L);
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM t_voting_ballot_record ballot
+                JOIN t_voting_execution_package execution_package
+                  ON execution_package.package_id = ballot.package_id
+                WHERE execution_package.business_type = 'OWNERS_ASSEMBLY'
+                  AND execution_package.business_reference_id = ?
+                """, Long.class, legacyPackageId)).isEqualTo(1L);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_owners_assembly_delivery WHERE package_id = ?",
+                Long.class, legacyPackageId)).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_owners_assembly_vote_record WHERE package_id = ?",
+                Long.class, legacyPackageId)).isZero();
+
+        mockMvc.perform(get("/api/v1/me/owners-assembly-disclosures/" + legacyPackageId)
+                        .header("Authorization", "Bearer " + ownerToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.participation.participated", is(true)));
+    }
+
+    @Test
     void newAssemblyWorkflowRejectsMeetingModesWithoutImplementableEvidenceChain() throws Exception {
         String directorToken = token(ACCOUNT_DIRECTOR, USER_DIRECTOR);
 
@@ -273,6 +400,17 @@ class OwnersAssemblyFlowTest {
     }
 
     private String arrangementRequest(long sessionId, String token) throws Exception {
+        return arrangementRequest(
+                sessionId,
+                token,
+                Instant.now().plus(8, ChronoUnit.DAYS),
+                Instant.now().plus(15, ChronoUnit.DAYS));
+    }
+
+    private String arrangementRequest(long sessionId,
+                                      String token,
+                                      Instant voteStartAt,
+                                      Instant voteEndAt) throws Exception {
         long publicNoticeMaterialId = uploadMaterial(
                 token, sessionId, "PUBLIC_NOTICE", "公示公告.pdf", "application/pdf", "notice");
         long planMaterialId = uploadMaterial(
@@ -280,8 +418,8 @@ class OwnersAssemblyFlowTest {
         long ballotTemplateMaterialId = uploadMaterial(
                 token, sessionId, "PAPER_BALLOT_TEMPLATE", "盖章选票模板.pdf", "application/pdf", "ballot");
         return json(Map.of(
-                "voteStartAt", Instant.now().plus(8, ChronoUnit.DAYS).toString(),
-                "voteEndAt", Instant.now().plus(15, ChronoUnit.DAYS).toString(),
+                "voteStartAt", voteStartAt.toString(),
+                "voteEndAt", voteEndAt.toString(),
                 "publicNoticeMaterialId", publicNoticeMaterialId,
                 "planAttachmentMaterialIds", List.of(planMaterialId),
                 "ballotTemplateMaterialId", ballotTemplateMaterialId));

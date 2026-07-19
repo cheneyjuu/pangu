@@ -3,22 +3,18 @@ package com.pangu.infrastructure.repository;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.pangu.domain.model.assembly.OwnersAssemblyDeliveryRecord;
 import com.pangu.domain.model.assembly.OwnersAssemblyMaterial;
 import com.pangu.domain.model.assembly.OwnersAssemblyPackage;
 import com.pangu.domain.model.assembly.OwnersAssemblyRuleConfiguration;
 import com.pangu.domain.model.assembly.OwnersAssemblyRuleSnapshot;
 import com.pangu.domain.model.assembly.OwnersAssemblySession;
 import com.pangu.domain.model.assembly.OwnersAssemblySubjectDraft;
-import com.pangu.domain.model.assembly.OwnersAssemblyVoteRecord;
 import com.pangu.domain.repository.OwnersAssemblyRepository;
-import com.pangu.infrastructure.persistence.entity.OwnersAssemblyDeliveryRecordRow;
 import com.pangu.infrastructure.persistence.entity.OwnersAssemblyMaterialRow;
 import com.pangu.infrastructure.persistence.entity.OwnersAssemblyPackageRow;
 import com.pangu.infrastructure.persistence.entity.OwnersAssemblyRuleSnapshotRow;
 import com.pangu.infrastructure.persistence.entity.OwnersAssemblySessionRow;
 import com.pangu.infrastructure.persistence.entity.OwnersAssemblySubjectDraftRow;
-import com.pangu.infrastructure.persistence.entity.OwnersAssemblyVoteRecordRow;
 import com.pangu.infrastructure.persistence.mapper.OwnersAssemblyMapper;
 import com.pangu.domain.model.voting.SubjectType;
 import com.pangu.domain.model.voting.VotingScope;
@@ -191,63 +187,9 @@ public class OwnersAssemblyRepositoryImpl implements OwnersAssemblyRepository {
     }
 
     @Override
-    public OwnersAssemblyDeliveryRecord insertDelivery(OwnersAssemblyDeliveryRecord delivery) {
-        OwnersAssemblyDeliveryRecordRow row = toRow(delivery);
-        mapper.insertDelivery(row);
-        return new OwnersAssemblyDeliveryRecord(
-                row.getDeliveryId(),
-                delivery.packageId(),
-                delivery.tenantId(),
-                delivery.opid(),
-                delivery.uid(),
-                delivery.deliveryChannel(),
-                delivery.deliveryMethod(),
-                delivery.evidenceHash(),
-                delivery.deliveredByUserId(),
-                delivery.deliveredAt());
-    }
-
-    @Override
-    public boolean deliveryExists(Long packageId, Long tenantId, Long opid, Long uid, String deliveryChannel) {
-        return mapper.deliveryExists(packageId, tenantId, opid, uid, deliveryChannel);
-    }
-
-    @Override
-    public OwnersAssemblyVoteRecord insertVoteRecord(OwnersAssemblyVoteRecord voteRecord) {
-        OwnersAssemblyVoteRecordRow row = toRow(voteRecord);
-        mapper.insertVoteRecord(row);
-        return new OwnersAssemblyVoteRecord(
-                row.getAssemblyVoteId(),
-                voteRecord.packageId(),
-                voteRecord.subjectId(),
-                voteRecord.voteId(),
-                voteRecord.tenantId(),
-                voteRecord.opid(),
-                voteRecord.uid(),
-                voteRecord.voteChannel(),
-                voteRecord.packageHash(),
-                voteRecord.ballotFileHash(),
-                voteRecord.signatureHash(),
-                voteRecord.valid(),
-                voteRecord.invalidatedByVoteId(),
-                voteRecord.invalidReason(),
-                voteRecord.createTime());
-    }
-
-    @Override
-    public Optional<OwnersAssemblyVoteRecord> findActiveVoteRecord(Long subjectId, Long opid) {
-        return Optional.ofNullable(mapper.findActiveVoteRecord(subjectId, opid)).map(this::toDomain);
-    }
-
-    @Override
     public Optional<Instant> findOwnerParticipationAt(Long packageId, Long tenantId, Long uid) {
         return Optional.ofNullable(mapper.findOwnerParticipationAt(packageId, tenantId, uid))
                 .map(this::toInstant);
-    }
-
-    @Override
-    public int invalidateVoteRecordByVoteId(Long voteId, Long invalidatedByVoteId, String invalidReason) {
-        return mapper.invalidateVoteRecordByVoteId(voteId, invalidatedByVoteId, invalidReason);
     }
 
     @Override
@@ -402,59 +344,6 @@ public class OwnersAssemblyRepositoryImpl implements OwnersAssemblyRepository {
         row.setConfigurationSha256(domain.configurationSha256());
         row.setSnapshottedByAccountId(domain.snapshottedByAccountId());
         row.setSnapshottedByUserId(domain.snapshottedByUserId());
-        return row;
-    }
-
-    private OwnersAssemblyDeliveryRecordRow toRow(OwnersAssemblyDeliveryRecord domain) {
-        OwnersAssemblyDeliveryRecordRow row = new OwnersAssemblyDeliveryRecordRow();
-        row.setDeliveryId(domain.deliveryId());
-        row.setPackageId(domain.packageId());
-        row.setTenantId(domain.tenantId());
-        row.setOpid(domain.opid());
-        row.setUid(domain.uid());
-        row.setDeliveryChannel(domain.deliveryChannel());
-        row.setDeliveryMethod(domain.deliveryMethod());
-        row.setEvidenceHash(domain.evidenceHash());
-        row.setDeliveredByUserId(domain.deliveredByUserId());
-        row.setDeliveredAt(toLocal(domain.deliveredAt()));
-        return row;
-    }
-
-    private OwnersAssemblyVoteRecord toDomain(OwnersAssemblyVoteRecordRow row) {
-        return new OwnersAssemblyVoteRecord(
-                row.getAssemblyVoteId(),
-                row.getPackageId(),
-                row.getSubjectId(),
-                row.getVoteId(),
-                row.getTenantId(),
-                row.getOpid(),
-                row.getUid(),
-                row.getVoteChannel(),
-                row.getPackageHash(),
-                row.getBallotFileHash(),
-                row.getSignatureHash(),
-                row.getValidFlag() != null && row.getValidFlag() == 1,
-                row.getInvalidatedByVoteId(),
-                row.getInvalidReason(),
-                toInstant(row.getCreateTime()));
-    }
-
-    private OwnersAssemblyVoteRecordRow toRow(OwnersAssemblyVoteRecord domain) {
-        OwnersAssemblyVoteRecordRow row = new OwnersAssemblyVoteRecordRow();
-        row.setAssemblyVoteId(domain.assemblyVoteId());
-        row.setPackageId(domain.packageId());
-        row.setSubjectId(domain.subjectId());
-        row.setVoteId(domain.voteId());
-        row.setTenantId(domain.tenantId());
-        row.setOpid(domain.opid());
-        row.setUid(domain.uid());
-        row.setVoteChannel(domain.voteChannel());
-        row.setPackageHash(domain.packageHash());
-        row.setBallotFileHash(domain.ballotFileHash());
-        row.setSignatureHash(domain.signatureHash());
-        row.setValidFlag(domain.valid() ? 1 : 0);
-        row.setInvalidatedByVoteId(domain.invalidatedByVoteId());
-        row.setInvalidReason(domain.invalidReason());
         return row;
     }
 

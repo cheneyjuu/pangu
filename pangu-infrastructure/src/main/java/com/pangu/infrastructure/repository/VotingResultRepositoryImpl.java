@@ -1,3 +1,4 @@
+// 关联业务：持久化议题结算结果及其正式表决包、冻结名册、方案和规则追溯信息。
 package com.pangu.infrastructure.repository;
 
 import com.pangu.domain.repository.VotingResultRepository;
@@ -52,6 +53,11 @@ public class VotingResultRepositoryImpl implements VotingResultRepository {
         row.setResultPayload(s.resultPayloadJson());
         row.setDenominatorSnapshotId(s.denominatorSnapshotId());
         row.setAttestationTxHash(s.attestationTxHash());
+        row.setExecutionPackageId(s.executionPackageId());
+        row.setElectorateSnapshotId(s.electorateSnapshotId());
+        row.setProposalSnapshotHash(s.proposalSnapshotHash());
+        row.setRuleSnapshotHash(s.ruleSnapshotHash());
+        row.setExecutionPackageHash(s.executionPackageHash());
         return row;
     }
 
@@ -67,6 +73,11 @@ public class VotingResultRepositoryImpl implements VotingResultRepository {
                 row.getPassed() != null && row.getPassed() == 1,
                 row.getResultPayload(),
                 row.getDenominatorSnapshotId(),
-                row.getAttestationTxHash());
+                row.getAttestationTxHash(),
+                row.getExecutionPackageId(),
+                row.getElectorateSnapshotId(),
+                row.getProposalSnapshotHash(),
+                row.getRuleSnapshotHash(),
+                row.getExecutionPackageHash());
     }
 }

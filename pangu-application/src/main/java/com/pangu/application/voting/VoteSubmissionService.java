@@ -1,3 +1,4 @@
+// 关联业务：接收业主线上表决；正式表决事项必须转入冻结名册和跨渠道唯一票内核。
 package com.pangu.application.voting;
 
 import com.pangu.application.voting.command.CastVoteCommand;
@@ -56,6 +57,7 @@ public class VoteSubmissionService {
     private final UserContextHolder userContextHolder;
     private final ElectionCandidateRegistry electionCandidateRegistry;
     private final VoteCastMonitorGateway voteCastMonitorGateway;
+    private final VotingExecutionService votingExecutionService;
 
     @Transactional
     public long cast(CastVoteCommand cmd) {
@@ -120,6 +122,26 @@ public class VoteSubmissionService {
                         VotingApplicationException.Reason.AUTH_LEVEL_INSUFFICIENT,
                         eval.getMessage() == null ? "当前认证等级不足" : eval.getMessage());
             }
+        }
+
+        // 正式共同决定已绑定通用表决包时，只能使用锁定名册、渠道和送达事实收票。
+        var formalPackage = votingExecutionService.findPackageBySubjectId(cmd.subjectId());
+        if (formalPackage.isPresent()) {
+            long voteId;
+            try {
+                var executionPackage = formalPackage.orElseThrow();
+                voteId = votingExecutionService.cast(new VotingExecutionService.CastBallotCommand(
+                        executionPackage.getPackageId(), cmd.subjectId(), cmd.tenantId(), cmd.opid(), cmd.uid(),
+                        cmd.choice(), voteChannel, null, cmd.signatureHash(), null, Instant.now()));
+            } catch (VotingExecutionService.VotingExecutionException ex) {
+                throw translateExecutionFailure(ex);
+            }
+            log.info("Formal vote cast subjectId={} uid={} opid={} choice={} channel={} voteId={}",
+                    cmd.subjectId(), cmd.uid(), cmd.opid(), cmd.choice(), voteChannel, voteId);
+            recordMonitorAfterCommit(new VoteCastMonitorGateway.VoteCastEvent(
+                    cmd.subjectId(), cmd.tenantId(), cmd.uid(), cmd.opid(), cmd.targetId(),
+                    subject.getSubjectType(), cmd.choice(), cmd.signatureHash(), voteChannel, Instant.now()));
+            return voteId;
         }
 
         // 3. opid 归属 + scope 范围校验
@@ -193,6 +215,19 @@ public class VoteSubmissionService {
                 voteChannel,
                 Instant.now()));
         return voteId;
+    }
+
+    private VotingApplicationException translateExecutionFailure(
+            VotingExecutionService.VotingExecutionException exception) {
+        VotingApplicationException.Reason reason = switch (exception.getReason()) {
+            case DUPLICATE_BALLOT -> VotingApplicationException.Reason.VOTE_ALREADY_CAST;
+            case ELECTORATE_NOT_FOUND, INVALID_COMMAND -> VotingApplicationException.Reason.OPID_OUT_OF_SCOPE;
+            case NOT_FOUND -> VotingApplicationException.Reason.SUBJECT_NOT_FOUND;
+            case CONCURRENT_MODIFICATION -> VotingApplicationException.Reason.CONCURRENT_LIFECYCLE_MODIFICATION;
+            case INVALID_STATUS, CHANNEL_NOT_ALLOWED, DELIVERY_REQUIRED ->
+                    VotingApplicationException.Reason.SUBJECT_NOT_VOTING_CASTABLE;
+        };
+        return new VotingApplicationException(reason, exception.getMessage(), exception);
     }
 
     private void recordMonitorAfterCommit(VoteCastMonitorGateway.VoteCastEvent event) {

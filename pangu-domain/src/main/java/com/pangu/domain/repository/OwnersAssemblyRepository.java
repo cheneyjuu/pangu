@@ -1,13 +1,11 @@
-// 关联业务：定义业主大会会前事项、材料、公示安排、送达和投票记录的持久化端口。
+// 关联业务：定义业主大会会前事项、材料、公示安排及历史参与记录的持久化端口。
 package com.pangu.domain.repository;
 
-import com.pangu.domain.model.assembly.OwnersAssemblyDeliveryRecord;
 import com.pangu.domain.model.assembly.OwnersAssemblyMaterial;
 import com.pangu.domain.model.assembly.OwnersAssemblyPackage;
 import com.pangu.domain.model.assembly.OwnersAssemblyRuleSnapshot;
 import com.pangu.domain.model.assembly.OwnersAssemblySession;
 import com.pangu.domain.model.assembly.OwnersAssemblySubjectDraft;
-import com.pangu.domain.model.assembly.OwnersAssemblyVoteRecord;
 
 import java.time.Instant;
 import java.util.List;
@@ -72,18 +70,8 @@ public interface OwnersAssemblyRepository {
 
     int markPackageSettled(Long packageId, Long tenantId);
 
-    OwnersAssemblyDeliveryRecord insertDelivery(OwnersAssemblyDeliveryRecord delivery);
-
-    boolean deliveryExists(Long packageId, Long tenantId, Long opid, Long uid, String deliveryChannel);
-
-    OwnersAssemblyVoteRecord insertVoteRecord(OwnersAssemblyVoteRecord voteRecord);
-
-    Optional<OwnersAssemblyVoteRecord> findActiveVoteRecord(Long subjectId, Long opid);
-
-    /** 仅返回当前业主是否已参与纸质表决及首次参与时间，不返回任何选择内容。 */
+    /** 同时读取历史纸质台账和统一表决票据，仅返回首次参与时间，不返回任何选择内容。 */
     Optional<Instant> findOwnerParticipationAt(Long packageId, Long tenantId, Long uid);
-
-    int invalidateVoteRecordByVoteId(Long voteId, Long invalidatedByVoteId, String invalidReason);
 
     boolean allSubjectsPassed(Long packageId, Long tenantId);
 }

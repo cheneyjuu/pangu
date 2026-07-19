@@ -1,0 +1,263 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 关联业务：持久化正式表决包、冻结名册、送达、有效票和执行审计。 -->
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pangu.infrastructure.persistence.mapper.VotingExecutionMapper">
+
+    <resultMap id="PackageMap" type="com.pangu.infrastructure.persistence.entity.VotingExecutionPackageRow">
+        <id property="packageId" column="package_id"/>
+        <result property="tenantId" column="tenant_id"/>
+        <result property="businessType" column="business_type"/>
+        <result property="businessReferenceId" column="business_reference_id"/>
+        <result property="proposalSnapshotType" column="proposal_snapshot_type"/>
+        <result property="proposalSnapshotId" column="proposal_snapshot_id"/>
+        <result property="proposalSnapshotHash" column="proposal_snapshot_hash"/>
+        <result property="ruleSnapshotType" column="rule_snapshot_type"/>
+        <result property="ruleSnapshotId" column="rule_snapshot_id"/>
+        <result property="ruleSnapshotHash" column="rule_snapshot_hash"/>
+        <result property="scope" column="scope"/>
+        <result property="scopeReferenceId" column="scope_reference_id"/>
+        <result property="collectionMode" column="collection_mode"/>
+        <result property="status" column="status"/>
+        <result property="voteStartAt" column="vote_start_at"/>
+        <result property="voteEndAt" column="vote_end_at"/>
+        <result property="packageHash" column="package_hash"/>
+        <result property="electorateSnapshotId" column="electorate_snapshot_id"/>
+        <result property="createdByUserId" column="created_by_user_id"/>
+        <result property="frozenByUserId" column="frozen_by_user_id"/>
+        <result property="frozenAt" column="frozen_at"/>
+        <result property="version" column="version"/>
+    </resultMap>
+
+    <resultMap id="CandidateMap" type="com.pangu.infrastructure.persistence.entity.VotingElectorateCandidateRow">
+        <result property="rosterId" column="roster_id"/>
+        <result property="roomId" column="room_id"/>
+        <result property="buildingId" column="building_id"/>
+        <result property="certifiedArea" column="certified_area"/>
+        <result property="opid" column="opid"/>
+        <result property="uid" column="uid"/>
+        <result property="votingDelegate" column="is_voting_delegate"/>
+    </resultMap>
+
+    <resultMap id="ElectorateSnapshotMap" type="com.pangu.infrastructure.persistence.entity.VotingElectorateSnapshotRow">
+        <id property="snapshotId" column="snapshot_id"/>
+        <result property="packageId" column="package_id"/>
+        <result property="tenantId" column="tenant_id"/>
+        <result property="scope" column="scope"/>
+        <result property="scopeReferenceId" column="scope_reference_id"/>
+        <result property="totalArea" column="total_area"/>
+        <result property="totalOwnerCount" column="total_owner_count"/>
+        <result property="itemCount" column="item_count"/>
+        <result property="aggregateHash" column="aggregate_hash"/>
+        <result property="frozenAt" column="frozen_at"/>
+    </resultMap>
+
+    <resultMap id="ElectorateItemMap" type="com.pangu.infrastructure.persistence.entity.VotingElectorateItemRow">
+        <id property="snapshotItemId" column="snapshot_item_id"/>
+        <result property="snapshotId" column="snapshot_id"/>
+        <result property="rosterId" column="roster_id"/>
+        <result property="roomId" column="room_id"/>
+        <result property="buildingId" column="building_id"/>
+        <result property="certifiedArea" column="certified_area"/>
+        <result property="representativeOpid" column="representative_opid"/>
+        <result property="representativeUid" column="representative_uid"/>
+        <result property="coOwnerUidsJson" column="co_owner_uids_json"/>
+        <result property="rowHash" column="row_hash"/>
+    </resultMap>
+
+    <insert id="insertPackage" useGeneratedKeys="true" keyProperty="packageId" keyColumn="package_id">
+        INSERT INTO t_voting_execution_package (
+            tenant_id, business_type, business_reference_id,
+            proposal_snapshot_type, proposal_snapshot_id, proposal_snapshot_hash,
+            rule_snapshot_type, rule_snapshot_id, rule_snapshot_hash,
+            scope, scope_reference_id, collection_mode, status,
+            vote_start_at, vote_end_at, created_by_user_id, version
+        ) VALUES (
+            #{tenantId}, #{businessType}, #{businessReferenceId},
+            #{proposalSnapshotType}, #{proposalSnapshotId}, #{proposalSnapshotHash},
+            #{ruleSnapshotType}, #{ruleSnapshotId}, #{ruleSnapshotHash},
+            #{scope}, #{scopeReferenceId}, #{collectionMode}, #{status},
+            #{voteStartAt}, #{voteEndAt}, #{createdByUserId}, #{version}
+        )
+    </insert>
+
+    <sql id="PackageColumns">
+        package_id, tenant_id, business_type, business_reference_id,
+        proposal_snapshot_type, proposal_snapshot_id, proposal_snapshot_hash,
+        rule_snapshot_type, rule_snapshot_id, rule_snapshot_hash,
+        scope, scope_reference_id, collection_mode, status,
+        vote_start_at, vote_end_at, package_hash, electorate_snapshot_id,
+        created_by_user_id, frozen_by_user_id, frozen_at, version
+    </sql>
+
+    <select id="selectPackage" resultMap="PackageMap">
+        SELECT <include refid="PackageColumns"/>
+        FROM t_voting_execution_package
+        WHERE package_id = #{packageId} AND tenant_id = #{tenantId}
+    </select>
+
+    <select id="selectPackageForUpdate" resultMap="PackageMap">
+        SELECT <include refid="PackageColumns"/>
+        FROM t_voting_execution_package
+        WHERE package_id = #{packageId} AND tenant_id = #{tenantId}
+        FOR UPDATE
+    </select>
+
+    <select id="selectPackageBySubjectId" resultMap="PackageMap">
+        SELECT p.package_id, p.tenant_id, p.business_type, p.business_reference_id,
+               p.proposal_snapshot_type, p.proposal_snapshot_id, p.proposal_snapshot_hash,
+               p.rule_snapshot_type, p.rule_snapshot_id, p.rule_snapshot_hash,
+               p.scope, p.scope_reference_id, p.collection_mode, p.status,
+               p.vote_start_at, p.vote_end_at, p.package_hash, p.electorate_snapshot_id,
+               p.created_by_user_id, p.frozen_by_user_id, p.frozen_at, p.version
+        FROM t_voting_package_subject ps
+        INNER JOIN t_voting_execution_package p ON p.package_id = ps.package_id
+        WHERE ps.subject_id = #{subjectId}
+    </select>
+
+    <insert id="insertPackageSubject">
+        INSERT INTO t_voting_package_subject(package_id, tenant_id, subject_id)
+        VALUES (#{packageId}, #{tenantId}, #{subjectId})
+    </insert>
+
+    <select id="selectSubjectIds" resultType="java.lang.Long">
+        SELECT subject_id
+        FROM t_voting_package_subject
+        WHERE package_id = #{packageId} AND tenant_id = #{tenantId}
+        ORDER BY subject_id
+    </select>
+
+    <!-- 房屋名册提供专有部分与法定面积；有效产权关系只提供共有人和已确认代表。 -->
+    <select id="selectElectorateCandidates" resultMap="CandidateMap">
+        SELECT r.roster_id,
+               r.room_id,
+               r.building_id,
+               r.build_area AS certified_area,
+               op.opid,
+               op.uid,
+               op.is_voting_delegate
+        FROM c_property_roster r
+        LEFT JOIN c_owner_property op
+          ON op.tenant_id = r.tenant_id
+         AND op.room_id = r.room_id
+         AND op.verify_status = 'VERIFIED'
+         AND op.superseded_at IS NULL
+        WHERE r.tenant_id = #{tenantId}
+          AND r.status = 'ACTIVE'
+        <if test="scope == 2">
+          AND r.building_id = #{scopeReferenceId}
+        </if>
+        ORDER BY r.building_id, r.room_id, op.opid
+    </select>
+
+    <insert id="insertElectorateSnapshot" useGeneratedKeys="true" keyProperty="snapshotId" keyColumn="snapshot_id">
+        INSERT INTO t_voting_electorate_snapshot (
+            package_id, tenant_id, scope, scope_reference_id,
+            total_area, total_owner_count, item_count, aggregate_hash, frozen_at
+        ) VALUES (
+            #{packageId}, #{tenantId}, #{scope}, #{scopeReferenceId},
+            #{totalArea}, #{totalOwnerCount}, #{itemCount}, #{aggregateHash}, #{frozenAt}
+        )
+    </insert>
+
+    <insert id="insertElectorateItems">
+        INSERT INTO t_voting_electorate_item_snapshot (
+            snapshot_id, roster_id, room_id, building_id, certified_area,
+            representative_opid, representative_uid, co_owner_uids, row_hash
+        ) VALUES
+        <foreach collection="items" item="item" separator=",">
+            (#{snapshotId}, #{item.rosterId}, #{item.roomId}, #{item.buildingId}, #{item.certifiedArea},
+             #{item.representativeOpid}, #{item.representativeUid},
+             CAST(#{item.coOwnerUidsJson} AS JSONB), #{item.rowHash})
+        </foreach>
+    </insert>
+
+    <select id="selectElectorateSnapshot" resultMap="ElectorateSnapshotMap">
+        SELECT snapshot_id, package_id, tenant_id, scope, scope_reference_id,
+               total_area, total_owner_count, item_count, aggregate_hash, frozen_at
+        FROM t_voting_electorate_snapshot
+        WHERE snapshot_id = #{snapshotId} AND tenant_id = #{tenantId}
+    </select>
+
+    <select id="selectElectorateItems" resultMap="ElectorateItemMap">
+        SELECT snapshot_item_id, snapshot_id, roster_id, room_id, building_id, certified_area,
+               representative_opid, representative_uid, co_owner_uids::text AS co_owner_uids_json, row_hash
+        FROM t_voting_electorate_item_snapshot
+        WHERE snapshot_id = #{snapshotId}
+        ORDER BY building_id, room_id
+    </select>
+
+    <select id="selectElectorateItemByOpid" resultMap="ElectorateItemMap">
+        SELECT i.snapshot_item_id, i.snapshot_id, i.roster_id, i.room_id, i.building_id,
+               i.certified_area, i.representative_opid, i.representative_uid,
+               i.co_owner_uids::text AS co_owner_uids_json, i.row_hash
+        FROM t_voting_execution_package p
+        INNER JOIN t_voting_electorate_item_snapshot i
+                ON i.snapshot_id = p.electorate_snapshot_id
+        WHERE p.package_id = #{packageId}
+          AND p.tenant_id = #{tenantId}
+          AND i.representative_opid = #{opid}
+    </select>
+
+    <update id="updatePackage">
+        UPDATE t_voting_execution_package
+        SET status = #{status},
+            package_hash = #{packageHash},
+            electorate_snapshot_id = #{electorateSnapshotId},
+            frozen_by_user_id = #{frozenByUserId},
+            frozen_at = #{frozenAt},
+            version = version + 1,
+            update_time = CURRENT_TIMESTAMP
+        WHERE package_id = #{packageId}
+          AND tenant_id = #{tenantId}
+          AND version = #{version}
+    </update>
+
+    <insert id="insertDelivery" useGeneratedKeys="true" keyProperty="deliveryId" keyColumn="delivery_id">
+        INSERT INTO t_voting_delivery_record (
+            package_id, electorate_item_id, tenant_id, delivery_channel,
+            delivery_method, evidence_hash, delivered_by_user_id, delivered_at
+        ) VALUES (
+            #{packageId}, #{electorateItemId}, #{tenantId}, #{deliveryChannel},
+            #{deliveryMethod}, #{evidenceHash}, #{deliveredByUserId}, #{deliveredAt}
+        )
+    </insert>
+
+    <select id="deliveryExists" resultType="boolean">
+        SELECT EXISTS (
+            SELECT 1
+            FROM t_voting_delivery_record
+            WHERE package_id = #{packageId}
+              AND tenant_id = #{tenantId}
+              AND electorate_item_id = #{electorateItemId}
+              AND delivery_channel = #{deliveryChannel}
+        )
+    </select>
+
+    <insert id="insertBallot" useGeneratedKeys="true" keyProperty="ballotId" keyColumn="ballot_id">
+        INSERT INTO t_voting_ballot_record (
+            package_id, subject_id, vote_id, electorate_item_id, tenant_id,
+            vote_channel, package_hash, ballot_file_hash, signature_hash,
+            recorded_by_user_id, cast_at
+        ) VALUES (
+            #{packageId}, #{subjectId}, #{voteId}, #{electorateItemId}, #{tenantId},
+            #{voteChannel}, #{packageHash}, #{ballotFileHash}, #{signatureHash},
+            #{recordedByUserId}, #{castAt}
+        )
+    </insert>
+
+    <insert id="insertAudit">
+        INSERT INTO t_voting_execution_audit (
+            package_id, tenant_id, event_type, from_status, to_status,
+            actor_user_id, detail, occurred_at
+        ) VALUES (
+            #{packageId}, #{tenantId}, #{eventType}, #{fromStatus}, #{toStatus},
+            #{actorUserId},
+            <choose>
+                <when test="detailJson != null">CAST(#{detailJson} AS JSONB)</when>
+                <otherwise>NULL</otherwise>
+            </choose>,
+            #{occurredAt}
+        )
+    </insert>
+</mapper>

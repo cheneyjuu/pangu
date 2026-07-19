@@ -1,3 +1,4 @@
+// 关联业务：映射议题结算统计及正式表决冻结依据的追溯字段。
 package com.pangu.infrastructure.persistence.entity;
 
 import lombok.Data;
@@ -30,5 +31,10 @@ public class VotingResultRow {
     private String resultPayload;
     private Long denominatorSnapshotId;
     private String attestationTxHash;
+    private Long executionPackageId;
+    private Long electorateSnapshotId;
+    private String proposalSnapshotHash;
+    private String ruleSnapshotHash;
+    private String executionPackageHash;
     private Instant settledAt;
 }

@@ -1,3 +1,4 @@
+// 关联业务：以冻结计票基数和实际生效规则结算议题，并固化可追溯的正式表决结果。
 package com.pangu.application.voting;
 
 import com.pangu.application.support.PayloadHasher;
@@ -14,10 +15,12 @@ import com.pangu.domain.model.voting.SubjectType;
 import com.pangu.domain.model.voting.VoteItem;
 import com.pangu.domain.model.voting.VotingDenominatorResolver;
 import com.pangu.domain.model.voting.VotingEngineRouter;
+import com.pangu.domain.model.voting.VotingExecutionTrace;
 import com.pangu.domain.model.voting.VotingResult;
 import com.pangu.domain.model.voting.VotingSettlementPolicy;
 import com.pangu.domain.model.voting.VotingSubject;
 import com.pangu.domain.repository.VoteItemRepository;
+import com.pangu.domain.repository.VotingMobilizationPermissionRepository;
 import com.pangu.domain.repository.VotingResultRepository;
 import com.pangu.domain.repository.VotingSubjectRepository;
 import lombok.RequiredArgsConstructor;
@@ -64,7 +67,7 @@ public class VotingApplicationService {
     private final JudicialChainPort judicialChainPort;
     private final PayloadHasher payloadHasher;
     private final TenantTermLockService tenantTermLockService;
-    private final VotingMobilizationService votingMobilizationService;
+    private final VotingMobilizationPermissionRepository mobilizationPermissionRepository;
 
     /**
      * 触发议题结算。幂等：重复调用对已 SETTLED 的议题直接返回历史快照。
@@ -74,7 +77,7 @@ public class VotingApplicationService {
      */
     @Transactional
     public VotingResultRepository.Snapshot settle(SettleSubjectCommand cmd) {
-        return settle(cmd, null);
+        return settle(cmd, null, null);
     }
 
     /**
@@ -85,6 +88,16 @@ public class VotingApplicationService {
      */
     @Transactional
     public VotingResultRepository.Snapshot settle(SettleSubjectCommand cmd, VotingSettlementPolicy settlementPolicy) {
+        return settle(cmd, settlementPolicy, null);
+    }
+
+    /**
+     * 以正式表决执行包的冻结依据结算，并把包、名册、方案和规则摘要写入结果快照。
+     */
+    @Transactional
+    public VotingResultRepository.Snapshot settle(SettleSubjectCommand cmd,
+                                                   VotingSettlementPolicy settlementPolicy,
+                                                   VotingExecutionTrace executionTrace) {
         if (settlementPolicy != null) {
             settlementPolicy.requireExecutable();
         }
@@ -141,14 +154,16 @@ public class VotingApplicationService {
         int newSettleVersion = resultRepository.findBySubjectId(cmd.subjectId())
                 .map(s -> s.statisticsVersion() + 1)
                 .orElse(1);
-        String payloadJson = serializeResult(result, effectiveRatio, denom, newSettleVersion, settlementPolicy);
+        String payloadJson = serializeResult(
+                result, effectiveRatio, denom, newSettleVersion, settlementPolicy, executionTrace);
         String localHash = PayloadHasher.sha256Hex(payloadJson);
         AttestationPayload payload = new AttestationPayload(
                 "VOTING_RESULT_ATTEST",
                 cmd.subjectId(),
                 subject.getTenantId(),
                 localHash,
-                buildBusinessPayload(result, effectiveRatio, denom, newSettleVersion, settlementPolicy),
+                buildBusinessPayload(
+                        result, effectiveRatio, denom, newSettleVersion, settlementPolicy, executionTrace),
                 Instant.now());
         AttestationReceipt receipt;
         try {
@@ -161,7 +176,7 @@ public class VotingApplicationService {
 
         // 7. 写入结果快照
         VotingResultRepository.Snapshot snapshot = VotingResultRepository.Snapshot.from(
-                result, newSettleVersion, payloadJson, denom.snapshotId(), receipt.txHash());
+                result, newSettleVersion, payloadJson, denom.snapshotId(), receipt.txHash(), executionTrace);
         resultRepository.upsert(snapshot);
 
         // 8. 议题 status -> SETTLED（乐观锁）
@@ -172,7 +187,8 @@ public class VotingApplicationService {
                     VotingApplicationException.Reason.CONCURRENT_SETTLEMENT,
                     "议题在结算过程中被并发修改 subjectId=" + cmd.subjectId());
         }
-        votingMobilizationService.deactivateForSubject(cmd.subjectId(), Instant.now());
+        // 结算只负责关闭该事项的动员权限，不反向依赖包含收票入口的上层动员编排服务。
+        mobilizationPermissionRepository.deactivateForSubject(cmd.subjectId(), Instant.now());
         tenantTermLockService.engageAfterElectionSettled(subject);
 
         log.info("Subject settled subjectId={} type={} statisticsVersion={} passed={} txHash={}",
@@ -190,7 +206,8 @@ public class VotingApplicationService {
                                     BigDecimal effectiveRatio,
                                     Denominator denom,
                                     int statisticsVersion,
-                                    VotingSettlementPolicy settlementPolicy) {
+                                    VotingSettlementPolicy settlementPolicy,
+                                    VotingExecutionTrace executionTrace) {
         StringBuilder sb = new StringBuilder(256);
         sb.append('{');
         appendJson(sb, "subjectId", result.getSubject().getSubjectId()); sb.append(',');
@@ -213,6 +230,14 @@ public class VotingApplicationService {
             appendJson(sb, "ownersAssemblyRuleSnapshotId", settlementPolicy.ruleSnapshotId()); sb.append(',');
             appendJson(sb, "ownersAssemblyRuleConfigurationSha256", settlementPolicy.ruleConfigurationSha256());
         }
+        if (executionTrace != null) {
+            sb.append(',');
+            appendJson(sb, "executionPackageId", executionTrace.executionPackageId()); sb.append(',');
+            appendJson(sb, "electorateSnapshotId", executionTrace.electorateSnapshotId()); sb.append(',');
+            appendJson(sb, "proposalSnapshotHash", executionTrace.proposalSnapshotHash()); sb.append(',');
+            appendJson(sb, "ruleSnapshotHash", executionTrace.ruleSnapshotHash()); sb.append(',');
+            appendJson(sb, "executionPackageHash", executionTrace.executionPackageHash());
+        }
         sb.append('}');
         return sb.toString();
     }
@@ -221,7 +246,8 @@ public class VotingApplicationService {
                                                       BigDecimal effectiveRatio,
                                                       Denominator denom,
                                                       int statisticsVersion,
-                                                      VotingSettlementPolicy settlementPolicy) {
+                                                      VotingSettlementPolicy settlementPolicy,
+                                                      VotingExecutionTrace executionTrace) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("subjectId", result.getSubject().getSubjectId());
         payload.put("subjectType", result.getSubject().getSubjectType() == null
@@ -235,6 +261,13 @@ public class VotingApplicationService {
         if (settlementPolicy != null) {
             payload.put("ownersAssemblyRuleSnapshotId", settlementPolicy.ruleSnapshotId());
             payload.put("ownersAssemblyRuleConfigurationSha256", settlementPolicy.ruleConfigurationSha256());
+        }
+        if (executionTrace != null) {
+            payload.put("executionPackageId", executionTrace.executionPackageId());
+            payload.put("electorateSnapshotId", executionTrace.electorateSnapshotId());
+            payload.put("proposalSnapshotHash", executionTrace.proposalSnapshotHash());
+            payload.put("ruleSnapshotHash", executionTrace.ruleSnapshotHash());
+            payload.put("executionPackageHash", executionTrace.executionPackageHash());
         }
         return payload;
     }

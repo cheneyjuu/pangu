@@ -1,6 +1,7 @@
+// 关联业务：向管理端返回业主大会纸质选票进入统一有效票台账后的回执。
 package com.pangu.interfaces.web.controller.dto.assembly;
 
-import com.pangu.domain.model.assembly.OwnersAssemblyVoteRecord;
+import com.pangu.domain.model.voting.VotingBallotRecord;
 
 public record OwnersAssemblyVoteResponse(
         Long assemblyVoteId,
@@ -10,13 +11,13 @@ public record OwnersAssemblyVoteResponse(
         String voteChannel,
         boolean valid
 ) {
-    public static OwnersAssemblyVoteResponse from(OwnersAssemblyVoteRecord record) {
+    public static OwnersAssemblyVoteResponse from(VotingBallotRecord record) {
         return new OwnersAssemblyVoteResponse(
-                record.assemblyVoteId(),
+                record.ballotId(),
                 record.packageId(),
                 record.subjectId(),
                 record.voteId(),
-                record.voteChannel(),
-                record.valid());
+                record.voteChannel().name(),
+                true);
     }
 }

@@ -1,7 +1,9 @@
+// 关联业务：验证普通线上、纸质及线下代录投票的资格、渠道和重复提交闸门。
 package com.pangu.bootstrap.voting;
 
 import com.pangu.application.voting.VoteSubmissionService;
 import com.pangu.application.voting.VotingApplicationException;
+import com.pangu.application.voting.VotingExecutionService;
 import com.pangu.application.voting.command.CastVoteCommand;
 import com.pangu.domain.context.UserContext;
 import com.pangu.domain.context.UserContextHolder;
@@ -73,6 +75,8 @@ public class VoteSubmissionServiceTest {
     private ElectionCandidateRegistry electionCandidateRegistry;
     @Mock
     private VoteCastMonitorGateway voteCastMonitorGateway;
+    @Mock
+    private VotingExecutionService votingExecutionService;
 
     @InjectMocks
     private VoteSubmissionService service;

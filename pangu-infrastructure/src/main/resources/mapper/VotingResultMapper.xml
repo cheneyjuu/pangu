@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!-- 关联业务：持久化议题结算结果及正式表决冻结依据的追溯字段。 -->
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.pangu.infrastructure.persistence.mapper.VotingResultMapper">
@@ -17,6 +18,11 @@
         <result property="resultPayload" column="result_payload"/>
         <result property="denominatorSnapshotId" column="denominator_snapshot_id"/>
         <result property="attestationTxHash" column="attestation_tx_hash"/>
+        <result property="executionPackageId" column="execution_package_id"/>
+        <result property="electorateSnapshotId" column="electorate_snapshot_id"/>
+        <result property="proposalSnapshotHash" column="proposal_snapshot_hash"/>
+        <result property="ruleSnapshotHash" column="rule_snapshot_hash"/>
+        <result property="executionPackageHash" column="execution_package_hash"/>
         <result property="settledAt" column="settled_at"/>
     </resultMap>
 
@@ -24,7 +30,10 @@
         SELECT result_id, subject_id, statistics_version,
                total_area, total_owner_count, participating_area, participating_owner_count,
                quorum_satisfied, passed, result_payload::text AS result_payload,
-               denominator_snapshot_id, attestation_tx_hash, settled_at
+               denominator_snapshot_id, attestation_tx_hash,
+               execution_package_id, electorate_snapshot_id,
+               proposal_snapshot_hash, rule_snapshot_hash, execution_package_hash,
+               settled_at
         FROM t_voting_result
         WHERE subject_id = #{subjectId}
     </select>
@@ -34,7 +43,9 @@
             subject_id, statistics_version,
             total_area, total_owner_count, participating_area, participating_owner_count,
             quorum_satisfied, passed, result_payload,
-            denominator_snapshot_id, attestation_tx_hash
+            denominator_snapshot_id, attestation_tx_hash,
+            execution_package_id, electorate_snapshot_id,
+            proposal_snapshot_hash, rule_snapshot_hash, execution_package_hash
         ) VALUES (
             #{subjectId}, #{statisticsVersion},
             #{totalArea}, #{totalOwnerCount}, #{participatingArea}, #{participatingOwnerCount},
@@ -43,7 +54,9 @@
                 <when test="resultPayload != null">CAST(#{resultPayload} AS JSONB)</when>
                 <otherwise>NULL</otherwise>
             </choose>,
-            #{denominatorSnapshotId}, #{attestationTxHash}
+            #{denominatorSnapshotId}, #{attestationTxHash},
+            #{executionPackageId}, #{electorateSnapshotId},
+            #{proposalSnapshotHash}, #{ruleSnapshotHash}, #{executionPackageHash}
         )
     </insert>
 
@@ -63,6 +76,11 @@
                 </choose>,
             denominator_snapshot_id  = #{denominatorSnapshotId},
             attestation_tx_hash      = #{attestationTxHash},
+            execution_package_id    = #{executionPackageId},
+            electorate_snapshot_id  = #{electorateSnapshotId},
+            proposal_snapshot_hash  = #{proposalSnapshotHash},
+            rule_snapshot_hash      = #{ruleSnapshotHash},
+            execution_package_hash = #{executionPackageHash},
             settled_at               = CURRENT_TIMESTAMP
         WHERE subject_id = #{subjectId}
     </update>

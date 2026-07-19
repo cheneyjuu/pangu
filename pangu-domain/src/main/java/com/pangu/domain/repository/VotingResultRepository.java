@@ -1,6 +1,8 @@
+// 关联业务：保存通用议题结算结果，并追溯正式表决时冻结的包、名册、方案和规则。
 package com.pangu.domain.repository;
 
 import com.pangu.domain.model.voting.VotingResult;
+import com.pangu.domain.model.voting.VotingExecutionTrace;
 import com.pangu.domain.model.voting.VotingSubject;
 
 import java.util.Optional;
@@ -55,7 +57,12 @@ public interface VotingResultRepository {
             boolean passed,
             String resultPayloadJson,
             Long denominatorSnapshotId,
-            String attestationTxHash
+            String attestationTxHash,
+            Long executionPackageId,
+            Long electorateSnapshotId,
+            String proposalSnapshotHash,
+            String ruleSnapshotHash,
+            String executionPackageHash
     ) {
         public Snapshot {
             if (subjectId == null) {
@@ -81,6 +88,15 @@ public interface VotingResultRepository {
                                      String payloadJson,
                                      Long denominatorSnapshotId,
                                      String attestationTxHash) {
+            return from(result, statisticsVersion, payloadJson, denominatorSnapshotId, attestationTxHash, null);
+        }
+
+        public static Snapshot from(VotingResult<? extends VotingSubject> result,
+                                     int statisticsVersion,
+                                     String payloadJson,
+                                     Long denominatorSnapshotId,
+                                     String attestationTxHash,
+                                     VotingExecutionTrace executionTrace) {
             return new Snapshot(
                     result.getSubject().getSubjectId(),
                     statisticsVersion,
@@ -92,7 +108,12 @@ public interface VotingResultRepository {
                     result.isPassed(),
                     payloadJson,
                     denominatorSnapshotId,
-                    attestationTxHash);
+                    attestationTxHash,
+                    executionTrace == null ? null : executionTrace.executionPackageId(),
+                    executionTrace == null ? null : executionTrace.electorateSnapshotId(),
+                    executionTrace == null ? null : executionTrace.proposalSnapshotHash(),
+                    executionTrace == null ? null : executionTrace.ruleSnapshotHash(),
+                    executionTrace == null ? null : executionTrace.executionPackageHash());
         }
     }
 }

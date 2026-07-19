@@ -9,11 +9,9 @@ import com.pangu.application.assembly.command.CastAssemblyPaperVoteWithMaterialC
 import com.pangu.application.assembly.command.RecordAssemblyDeliveryWithMaterialCommand;
 import com.pangu.application.assembly.command.UploadOwnersAssemblyMaterialCommand;
 import com.pangu.application.support.PayloadHasher;
-import com.pangu.application.voting.VotingApplicationService;
-import com.pangu.application.voting.command.SettleSubjectCommand;
+import com.pangu.application.voting.VotingExecutionService;
 import com.pangu.domain.context.UserContext;
 import com.pangu.domain.context.UserContextHolder;
-import com.pangu.domain.model.assembly.OwnersAssemblyDeliveryRecord;
 import com.pangu.domain.model.assembly.OwnersAssemblyMaterial;
 import com.pangu.domain.model.assembly.OwnersAssemblyMaterial.MaterialType;
 import com.pangu.domain.model.assembly.OwnersAssemblyPackage;
@@ -22,24 +20,20 @@ import com.pangu.domain.model.assembly.OwnersAssemblyRuleConfiguration;
 import com.pangu.domain.model.assembly.OwnersAssemblyRuleSnapshot;
 import com.pangu.domain.model.assembly.OwnersAssemblySession;
 import com.pangu.domain.model.assembly.OwnersAssemblySubjectDraft;
-import com.pangu.domain.model.assembly.OwnersAssemblyVoteRecord;
-import com.pangu.domain.model.asset.OwnerPropertyVotingView;
-import com.pangu.domain.model.voting.SubjectStatus;
 import com.pangu.domain.model.voting.SubjectType;
 import com.pangu.domain.model.voting.VoteChannel;
-import com.pangu.domain.model.voting.VoteChoice;
-import com.pangu.domain.model.voting.VoteItem;
+import com.pangu.domain.model.voting.VotingBallotRecord;
+import com.pangu.domain.model.voting.VotingDeliveryRecord;
+import com.pangu.domain.model.voting.VotingExecutionPackage;
 import com.pangu.domain.model.voting.VotingScope;
 import com.pangu.domain.model.voting.VotingDecisionRule;
 import com.pangu.domain.model.voting.VotingSettlementPolicy;
 import com.pangu.domain.model.voting.VotingSubject;
 import com.pangu.domain.model.voting.VotingSubjectActions;
-import com.pangu.domain.repository.OwnerPropertyVotingRepository;
 import com.pangu.domain.repository.CommitteePositionRepository;
 import com.pangu.domain.repository.OwnersAssemblyMaterialStorage;
 import com.pangu.domain.repository.OwnersAssemblyRepository;
 import com.pangu.domain.repository.OwnersAssemblyRuleRepository;
-import com.pangu.domain.repository.VoteItemRepository;
 import com.pangu.domain.repository.VotingSubjectRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -65,7 +59,6 @@ import static com.pangu.application.assembly.OwnersAssemblyApplicationException.
 import static com.pangu.application.assembly.OwnersAssemblyApplicationException.Reason.INVALID_STATUS;
 import static com.pangu.application.assembly.OwnersAssemblyApplicationException.Reason.NOTICE_NOT_COMPLETED;
 import static com.pangu.application.assembly.OwnersAssemblyApplicationException.Reason.NOT_FOUND;
-import static com.pangu.application.assembly.OwnersAssemblyApplicationException.Reason.OPID_NOT_OWNED;
 import static com.pangu.application.assembly.OwnersAssemblyApplicationException.Reason.OPID_OUT_OF_SCOPE;
 import static com.pangu.application.assembly.OwnersAssemblyApplicationException.Reason.PARAM_INVALID;
 import static com.pangu.application.assembly.OwnersAssemblyApplicationException.Reason.STORAGE_UNAVAILABLE;
@@ -101,9 +94,7 @@ public class OwnersAssemblyApplicationService {
     private final OwnersAssemblyMaterialStorage ownersAssemblyMaterialStorage;
     private final CommitteePositionRepository committeePositionRepository;
     private final VotingSubjectRepository votingSubjectRepository;
-    private final VoteItemRepository voteItemRepository;
-    private final OwnerPropertyVotingRepository ownerPropertyVotingRepository;
-    private final VotingApplicationService votingApplicationService;
+    private final VotingExecutionService votingExecutionService;
     private final UserContextHolder userContextHolder;
 
     @Transactional
@@ -286,6 +277,41 @@ public class OwnersAssemblyApplicationService {
         for (OwnersAssemblySubjectDraft draft : drafts) {
             addDraftSubjectToArrangement(arrangement, draft, actor.userId());
         }
+        List<Long> subjectIds = ownersAssemblyRepository.listSubjectIds(
+                arrangement.packageId(), arrangement.tenantId());
+        VotingScope executionScope = drafts.getFirst().scope() == null
+                ? VotingScope.COMMUNITY : drafts.getFirst().scope();
+        Long executionScopeReferenceId = drafts.getFirst().scopeReferenceId();
+        boolean mixedScope = drafts.stream().anyMatch(draft -> {
+            VotingScope draftScope = draft.scope() == null ? VotingScope.COMMUNITY : draft.scope();
+            return draftScope != executionScope
+                    || !java.util.Objects.equals(draft.scopeReferenceId(), executionScopeReferenceId);
+        });
+        if (mixedScope) {
+            throw new OwnersAssemblyApplicationException(
+                    PARAM_INVALID, "同一个正式表决包内的事项必须面向同一批相关业主；不同范围请分别办理");
+        }
+        VotingExecutionPackage executionPackage = votingExecutionService.create(
+                new VotingExecutionService.CreatePackageCommand(
+                        arrangement.tenantId(),
+                        VotingExecutionPackage.BusinessType.OWNERS_ASSEMBLY,
+                        arrangement.packageId(),
+                        "OWNERS_ASSEMBLY_PACKAGE",
+                        arrangement.packageId(),
+                        buildPackageHash(arrangement, ruleSnapshot, subjectIds),
+                        "OWNERS_ASSEMBLY_RULE",
+                        ruleSnapshot.ruleSnapshotId(),
+                        requireText(ruleSnapshot.configurationSha256(), "议事规则配置摘要"),
+                        executionScope,
+                        executionScopeReferenceId,
+                        VotingExecutionPackage.CollectionMode.PAPER,
+                        arrangement.voteStartAt(),
+                        arrangement.voteEndAt(),
+                        actor.userId()));
+        for (Long subjectId : subjectIds) {
+            votingExecutionService.attachSubject(
+                    executionPackage.getPackageId(), arrangement.tenantId(), subjectId, actor.userId());
+        }
         return arrangement;
     }
 
@@ -390,6 +416,11 @@ public class OwnersAssemblyApplicationService {
             throw new OwnersAssemblyApplicationException(PARAM_INVALID, "表决包至少需要一个表决事项");
         }
         String packageHash = buildPackageHash(ballotPackage, ruleSnapshot, subjectIds);
+        VotingExecutionPackage executionPackage = requireExecutionPackage(ballotPackage, subjectIds);
+        if (!packageHash.equals(executionPackage.getProposalSnapshotHash())) {
+            throw new OwnersAssemblyApplicationException(
+                    INVALID_STATUS, "当前公示材料或表决事项与已确认安排不一致，请重新核对");
+        }
         Instant noticeStartAt = Instant.now();
         Instant noticeEndAt = noticeStartAt.plus(ballotPackage.publicNoticeDays(), ChronoUnit.DAYS);
         int updated = ownersAssemblyRepository.lockPackage(
@@ -397,9 +428,8 @@ public class OwnersAssemblyApplicationService {
         if (updated != 1) {
             throw new OwnersAssemblyApplicationException(CONCURRENT_MODIFICATION, "表决包已被并发修改");
         }
-        for (Long subjectId : subjectIds) {
-            publishSubject(subjectId);
-        }
+        votingExecutionService.freeze(
+                executionPackage.getPackageId(), tenantId, ctx.userId(), noticeStartAt);
         ownersAssemblyRepository.updateSessionStatus(
                 ballotPackage.sessionId(), ballotPackage.tenantId(), STATUS_PUBLIC_NOTICE);
         return ownersAssemblyRepository.findPackage(packageId, tenantId).orElseThrow();
@@ -407,7 +437,7 @@ public class OwnersAssemblyApplicationService {
 
     @Transactional
     public OwnersAssemblyPackage openVoting(Long packageId, Long tenantId) {
-        requireFormalAssemblyExecutive(tenantId);
+        UserContext actor = requireFormalAssemblyExecutive(tenantId);
         OwnersAssemblyPackage ballotPackage = ownersAssemblyRepository.findPackageForUpdate(packageId, tenantId)
                 .orElseThrow(() -> new OwnersAssemblyApplicationException(NOT_FOUND, "表决包不存在"));
         requirePackageStatus(ballotPackage, STATUS_PUBLIC_NOTICE);
@@ -423,9 +453,9 @@ public class OwnersAssemblyApplicationService {
         if (updated != 1) {
             throw new OwnersAssemblyApplicationException(CONCURRENT_MODIFICATION, "表决包已被并发修改");
         }
-        for (Long subjectId : ownersAssemblyRepository.listSubjectIds(packageId, tenantId)) {
-            openSubject(subjectId, now);
-        }
+        VotingExecutionPackage executionPackage = requireExecutionPackage(
+                ballotPackage, ownersAssemblyRepository.listSubjectIds(packageId, tenantId));
+        votingExecutionService.open(executionPackage.getPackageId(), tenantId, actor.userId(), now);
         ownersAssemblyRepository.updateSessionStatus(
                 ballotPackage.sessionId(), ballotPackage.tenantId(), STATUS_VOTING);
         return ownersAssemblyRepository.findPackage(packageId, tenantId).orElseThrow();
@@ -446,7 +476,7 @@ public class OwnersAssemblyApplicationService {
     }
 
     @Transactional
-    public OwnersAssemblyDeliveryRecord recordPaperDelivery(RecordAssemblyDeliveryWithMaterialCommand command) {
+    public VotingDeliveryRecord recordPaperDelivery(RecordAssemblyDeliveryWithMaterialCommand command) {
         requireSysContext(command.tenantId(), command.deliveredByUserId());
         OwnersAssemblySession session = ownersAssemblyRepository.findSession(command.sessionId(), command.tenantId())
                 .orElseThrow(() -> new OwnersAssemblyApplicationException(NOT_FOUND, "业主大会不存在"));
@@ -463,7 +493,7 @@ public class OwnersAssemblyApplicationService {
     }
 
     @Transactional
-    public OwnersAssemblyVoteRecord castPaperVoteWithMaterial(CastAssemblyPaperVoteWithMaterialCommand command) {
+    public VotingBallotRecord castPaperVoteWithMaterial(CastAssemblyPaperVoteWithMaterialCommand command) {
         requireSysContext(command.tenantId(), command.enteredByUserId());
         OwnersAssemblySession session = ownersAssemblyRepository.findSession(command.sessionId(), command.tenantId())
                 .orElseThrow(() -> new OwnersAssemblyApplicationException(NOT_FOUND, "业主大会不存在"));
@@ -482,12 +512,12 @@ public class OwnersAssemblyApplicationService {
     /**
      * 纸质选票送达只能从本会次已归档的凭证触发，且送达方式必须来自冻结规则，不能由接口传入任意字符串。
      */
-    private OwnersAssemblyDeliveryRecord recordPaperDelivery(Long packageId,
-                                                              Long tenantId,
-                                                              Long opid,
-                                                              OwnersAssemblyRuleConfiguration.DeliveryMethod deliveryMethod,
-                                                              String evidenceHash,
-                                                              Long deliveredByUserId) {
+    private VotingDeliveryRecord recordPaperDelivery(Long packageId,
+                                                      Long tenantId,
+                                                      Long opid,
+                                                      OwnersAssemblyRuleConfiguration.DeliveryMethod deliveryMethod,
+                                                      String evidenceHash,
+                                                      Long deliveredByUserId) {
         OwnersAssemblyPackage ballotPackage = loadDeliveryPackage(packageId, tenantId);
         OwnersAssemblyRuleSnapshot ruleSnapshot = requireRuleSnapshot(ballotPackage);
         requireChannelAllowed(ballotPackage, CHANNEL_PAPER);
@@ -495,66 +525,56 @@ public class OwnersAssemblyApplicationService {
             throw new OwnersAssemblyApplicationException(
                     PARAM_INVALID, "送达方式不在本次业主大会冻结议事规则认可范围内");
         }
-        OwnerPropertyVotingView owner = loadOwner(opid, tenantId, null);
-        return ownersAssemblyRepository.insertDelivery(new OwnersAssemblyDeliveryRecord(
-                null,
-                ballotPackage.packageId(),
-                ballotPackage.tenantId(),
-                owner.opid(),
-                owner.uid(),
-                CHANNEL_PAPER,
-                deliveryMethod.name(),
-                requireText(evidenceHash, "evidenceHash"),
-                deliveredByUserId,
-                Instant.now()));
+        VotingExecutionPackage executionPackage = requireExecutionPackage(
+                ballotPackage, ownersAssemblyRepository.listSubjectIds(packageId, tenantId));
+        try {
+            return votingExecutionService.recordDelivery(new VotingExecutionService.RecordDeliveryCommand(
+                    executionPackage.getPackageId(), tenantId, opid, VoteChannel.PAPER,
+                    deliveryMethod.name(), requireText(evidenceHash, "evidenceHash"),
+                    deliveredByUserId, Instant.now()));
+        } catch (VotingExecutionService.VotingExecutionException ex) {
+            throw translateExecutionFailure(ex);
+        }
     }
 
-    private OwnersAssemblyVoteRecord castPaperVote(CastAssemblyPaperVoteCommand command) {
+    private VotingBallotRecord castPaperVote(CastAssemblyPaperVoteCommand command) {
         requireSysContext(command.tenantId(), command.enteredByUserId());
         OwnersAssemblyPackage ballotPackage = loadVotingPackage(command.packageId(), command.tenantId());
         requireChannelAllowed(ballotPackage, CHANNEL_PAPER);
         validateSubjectInPackage(ballotPackage, command.subjectId());
-        VotingSubject subject = loadVotingSubject(command.subjectId(), command.tenantId());
-        OwnerPropertyVotingView owner = loadOwner(command.opid(), command.tenantId(), null);
-        validateOwnerScope(subject, owner);
-        requireDelivery(ballotPackage, owner, CHANNEL_PAPER);
-        if (voteItemRepository.findActiveVote(subject.getSubjectId(), owner.opid(), null).isPresent()) {
-            throw new OwnersAssemblyApplicationException(VOTE_ALREADY_CAST, "该房产已有有效票，不能重复录入纸票");
+        VotingExecutionPackage executionPackage = requireExecutionPackage(
+                ballotPackage, ownersAssemblyRepository.listSubjectIds(
+                        ballotPackage.packageId(), ballotPackage.tenantId()));
+        try {
+            return votingExecutionService.castRecord(new VotingExecutionService.CastBallotCommand(
+                    executionPackage.getPackageId(), command.subjectId(), command.tenantId(),
+                    command.opid(), null, command.choice(), VoteChannel.PAPER,
+                    requireText(command.ballotFileHash(), "ballotFileHash"), null,
+                    command.enteredByUserId(), Instant.now()));
+        } catch (VotingExecutionService.VotingExecutionException ex) {
+            throw translateExecutionFailure(ex);
         }
-        long voteId = insertVote(subject, owner, command.choice(), VoteChannel.PAPER, null);
-        return ownersAssemblyRepository.insertVoteRecord(new OwnersAssemblyVoteRecord(
-                null,
-                ballotPackage.packageId(),
-                subject.getSubjectId(),
-                voteId,
-                ballotPackage.tenantId(),
-                owner.opid(),
-                owner.uid(),
-                CHANNEL_PAPER,
-                ballotPackage.packageHash(),
-                requireText(command.ballotFileHash(), "ballotFileHash"),
-                null,
-                true,
-                null,
-                null,
-                null));
     }
 
     @Transactional
     public OwnersAssemblyPackage settlePackage(Long packageId, Long tenantId) {
-        requireFormalAssemblyExecutive(tenantId);
+        UserContext actor = requireFormalAssemblyExecutive(tenantId);
         OwnersAssemblyPackage ballotPackage = ownersAssemblyRepository.findPackageForUpdate(packageId, tenantId)
                 .orElseThrow(() -> new OwnersAssemblyApplicationException(NOT_FOUND, "表决包不存在"));
         requirePackageStatus(ballotPackage, STATUS_VOTING);
         OwnersAssemblyRuleSnapshot ruleSnapshot = requireRuleSnapshot(ballotPackage);
-        if (Instant.now().isBefore(ballotPackage.voteEndAt())) {
+        Instant now = Instant.now();
+        if (now.isBefore(ballotPackage.voteEndAt())) {
             throw new OwnersAssemblyApplicationException(INVALID_STATUS, "尚未到达投票截止时间，禁止结算");
         }
-        for (Long subjectId : ownersAssemblyRepository.listSubjectIds(packageId, tenantId)) {
-            VotingSubject subject = loadVotingSubject(subjectId, tenantId);
-            votingApplicationService.settle(
-                    new SettleSubjectCommand(subjectId, "OWNERS_ASSEMBLY"),
-                    settlementPolicyFor(subject, ruleSnapshot));
+        List<Long> subjectIds = ownersAssemblyRepository.listSubjectIds(packageId, tenantId);
+        VotingExecutionPackage executionPackage = requireExecutionPackage(ballotPackage, subjectIds);
+        try {
+            votingExecutionService.closeAndSettle(
+                    executionPackage.getPackageId(), tenantId, actor.userId(), now,
+                    subject -> settlementPolicyFor(subject, ruleSnapshot));
+        } catch (VotingExecutionService.VotingExecutionException ex) {
+            throw translateExecutionFailure(ex);
         }
         int updated = ownersAssemblyRepository.markPackageSettled(packageId, tenantId);
         if (updated != 1) {
@@ -880,44 +900,6 @@ public class OwnersAssemblyApplicationService {
         return ballotPackage;
     }
 
-    private void publishSubject(Long subjectId) {
-        VotingSubject subject = votingSubjectRepository.findByIdForUpdate(subjectId)
-                .orElseThrow(() -> new OwnersAssemblyApplicationException(NOT_FOUND, "表决事项不存在"));
-        if (subject.getStatus() != SubjectStatus.DRAFT) {
-            throw new OwnersAssemblyApplicationException(INVALID_STATUS, "表决事项不在草稿状态 subjectId=" + subjectId);
-        }
-        VotingSubjectActions.publish(subject);
-        int updated = votingSubjectRepository.updateStatus(
-                subjectId, SubjectStatus.PUBLISHED.getDbValue(), subject.getVersion());
-        if (updated != 1) {
-            throw new OwnersAssemblyApplicationException(CONCURRENT_MODIFICATION, "表决事项已被并发修改");
-        }
-    }
-
-    private void openSubject(Long subjectId, Instant now) {
-        VotingSubject subject = votingSubjectRepository.findByIdForUpdate(subjectId)
-                .orElseThrow(() -> new OwnersAssemblyApplicationException(NOT_FOUND, "表决事项不存在"));
-        try {
-            VotingSubjectActions.openVoting(subject, now);
-        } catch (VotingSubjectActions.IllegalSubjectTransitionException ex) {
-            throw new OwnersAssemblyApplicationException(INVALID_STATUS, ex.getMessage(), ex);
-        }
-        int updated = votingSubjectRepository.updateStatus(
-                subjectId, SubjectStatus.VOTING.getDbValue(), subject.getVersion());
-        if (updated != 1) {
-            throw new OwnersAssemblyApplicationException(CONCURRENT_MODIFICATION, "表决事项已被并发修改");
-        }
-    }
-
-    private VotingSubject loadVotingSubject(Long subjectId, Long tenantId) {
-        VotingSubject subject = votingSubjectRepository.findById(subjectId)
-                .orElseThrow(() -> new OwnersAssemblyApplicationException(NOT_FOUND, "表决事项不存在"));
-        if (!tenantId.equals(subject.getTenantId()) || subject.getStatus() != SubjectStatus.VOTING) {
-            throw new OwnersAssemblyApplicationException(INVALID_STATUS, "表决事项不在投票中");
-        }
-        return subject;
-    }
-
     private void validateSubjectInPackage(OwnersAssemblyPackage ballotPackage, Long subjectId) {
         if (subjectId == null || !ownersAssemblyRepository
                 .listSubjectIds(ballotPackage.packageId(), ballotPackage.tenantId()).contains(subjectId)) {
@@ -925,55 +907,47 @@ public class OwnersAssemblyApplicationService {
         }
     }
 
-    private OwnerPropertyVotingView loadOwner(Long opid, Long tenantId, Long uid) {
-        OwnerPropertyVotingView owner = ownerPropertyVotingRepository.findByOpid(opid)
-                .orElseThrow(() -> new OwnersAssemblyApplicationException(OPID_NOT_OWNED, "房产身份不存在"));
-        if (!tenantId.equals(owner.tenantId()) || (uid != null && !uid.equals(owner.uid()))) {
-            throw new OwnersAssemblyApplicationException(OPID_NOT_OWNED, "房产身份与当前业主或租户不匹配");
+    /**
+     * 业主大会旧表决安排与统一表决包必须一一对应，不能仅凭任一事项碰巧有关联就继续办理。
+     */
+    private VotingExecutionPackage requireExecutionPackage(OwnersAssemblyPackage ballotPackage,
+                                                            List<Long> subjectIds) {
+        if (subjectIds == null || subjectIds.isEmpty()) {
+            throw new OwnersAssemblyApplicationException(PARAM_INVALID, "表决安排至少需要一个表决事项");
         }
-        if (!owner.isValidForVoting()) {
-            throw new OwnersAssemblyApplicationException(OPID_OUT_OF_SCOPE, "该房产当前不具备投票资格");
+        VotingExecutionPackage executionPackage = votingExecutionService.findPackageBySubjectId(subjectIds.getFirst())
+                .orElseThrow(() -> new OwnersAssemblyApplicationException(
+                        INVALID_STATUS, "本次表决安排尚未建立统一收票记录，不能继续办理"));
+        if (!ballotPackage.tenantId().equals(executionPackage.getTenantId())
+                || executionPackage.getBusinessType() != VotingExecutionPackage.BusinessType.OWNERS_ASSEMBLY
+                || !ballotPackage.packageId().equals(executionPackage.getBusinessReferenceId())) {
+            throw new OwnersAssemblyApplicationException(INVALID_STATUS, "表决安排与统一收票记录不一致");
         }
-        return owner;
+        for (Long subjectId : subjectIds) {
+            VotingExecutionPackage subjectPackage = votingExecutionService.findPackageBySubjectId(subjectId)
+                    .orElseThrow(() -> new OwnersAssemblyApplicationException(
+                            INVALID_STATUS, "表决事项尚未加入统一收票记录 subjectId=" + subjectId));
+            if (!executionPackage.getPackageId().equals(subjectPackage.getPackageId())) {
+                throw new OwnersAssemblyApplicationException(
+                        INVALID_STATUS, "同一表决安排的事项被拆分到了不同收票记录");
+            }
+        }
+        return executionPackage;
     }
 
-    private void validateOwnerScope(VotingSubject subject, OwnerPropertyVotingView owner) {
-        if (subject.getScope() == VotingScope.BUILDING && !subject.getScopeReferenceId().equals(owner.buildingId())) {
-            throw new OwnersAssemblyApplicationException(OPID_OUT_OF_SCOPE, "房产不在该表决事项楼栋范围内");
-        }
-        if (subject.getScope() == VotingScope.UNIT) {
-            throw new OwnersAssemblyApplicationException(OPID_OUT_OF_SCOPE, "UNIT 范围暂未实现");
-        }
-    }
-
-    private void requireDelivery(OwnersAssemblyPackage ballotPackage,
-                                 OwnerPropertyVotingView owner,
-                                 String channel) {
-        if (!ownersAssemblyRepository.deliveryExists(
-                ballotPackage.packageId(), ballotPackage.tenantId(), owner.opid(), owner.uid(), channel)) {
-            throw new OwnersAssemblyApplicationException(DELIVERY_REQUIRED, "投票前必须完成对应通道送达留痕");
-        }
-    }
-
-    private long insertVote(VotingSubject subject,
-                            OwnerPropertyVotingView owner,
-                            VoteChoice choice,
-                            VoteChannel channel,
-                            String signatureHash) {
-        if (choice == null) {
-            throw new OwnersAssemblyApplicationException(PARAM_INVALID, "choice 必填");
-        }
-        try {
-            return voteItemRepository.insert(subject.getSubjectId(), VoteItem.builder()
-                    .opid(owner.opid())
-                    .uid(owner.uid())
-                    .propertyArea(owner.buildArea())
-                    .choice(choice)
-                    .voteChannel(channel)
-                    .build(), signatureHash);
-        } catch (VoteItemRepository.DuplicateVoteException ex) {
-            throw new OwnersAssemblyApplicationException(VOTE_ALREADY_CAST, "该房产已有有效票", ex);
-        }
+    private OwnersAssemblyApplicationException translateExecutionFailure(
+            VotingExecutionService.VotingExecutionException failure) {
+        OwnersAssemblyApplicationException.Reason reason = switch (failure.getReason()) {
+            case NOT_FOUND -> NOT_FOUND;
+            case INVALID_STATUS -> INVALID_STATUS;
+            case ELECTORATE_NOT_FOUND -> OPID_OUT_OF_SCOPE;
+            case DUPLICATE_BALLOT -> VOTE_ALREADY_CAST;
+            case CHANNEL_NOT_ALLOWED -> FORBIDDEN;
+            case DELIVERY_REQUIRED -> DELIVERY_REQUIRED;
+            case CONCURRENT_MODIFICATION -> CONCURRENT_MODIFICATION;
+            case INVALID_COMMAND -> PARAM_INVALID;
+        };
+        return new OwnersAssemblyApplicationException(reason, failure.getMessage(), failure);
     }
 
     private UserContext requireSysContext(Long tenantId, Long expectedUserId) {
