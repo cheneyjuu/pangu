@@ -339,22 +339,22 @@ public class RepairProjectService {
             throw invalid("expectedProjectVersion 必填");
         }
         RepairProject project = loadProjectForUpdate(projectId, actor.tenantId());
-        requireDraftProjectVersion(project, expectedProjectVersion, "冻结授权提案");
+        requireDraftProjectVersion(project, expectedProjectVersion, "冻结相关业主决定提案");
         PlanVersion plan = projectRepository.findPlanForUpdate(planId, projectId, actor.tenantId())
                 .orElseThrow(() -> notFound("实施方案不存在"));
         if (plan.status() != PlanStatus.DRAFT) {
-            throw new RepairWorkOrderApplicationException(INVALID_STATUS, "当前实施方案不能冻结为授权提案");
+            throw new RepairWorkOrderApplicationException(INVALID_STATUS, "当前实施方案不能冻结为相关业主决定提案");
         }
-        DecisionScope decisionScope = requireConfirmedDecisionScope(projectId, actor.tenantId(), "冻结授权提案");
+        DecisionScope decisionScope = requireConfirmedDecisionScope(projectId, actor.tenantId(), "冻结相关业主决定提案");
         ResponsibilityDetermination determination = requireConfirmedResponsibilityDetermination(
-                projectId, actor.tenantId(), "冻结授权提案");
+                projectId, actor.tenantId(), "冻结相关业主决定提案");
         if (determination.responsibilityPath() != ResponsibilityPath.SHARED_COMMON_REPAIR
                 || determination.executionAuthorityType() != ExecutionAuthorityType.OWNER_DECISION) {
             throw new RepairWorkOrderApplicationException(
-                    INVALID_STATUS, "只有已确认需相关业主决定的共有维修可以冻结授权提案");
+                    INVALID_STATUS, "只有已确认需相关业主决定的共有维修可以冻结相关业主决定提案");
         }
-        requireApprovedAmount(determination, plan, "冻结授权提案");
-        List<WorkPoint> workPoints = requireWorkPoints(plan.planId(), actor.tenantId(), "冻结授权提案");
+        requireApprovedAmount(determination, plan, "冻结相关业主决定提案");
+        List<WorkPoint> workPoints = requireWorkPoints(plan.planId(), actor.tenantId(), "冻结相关业主决定提案");
         List<AllocationRoom> allocationRooms = projectRepository.snapshotAllocationRooms(
                 plan.planId(), actor.tenantId(), decisionScope.scopeType(),
                 decisionScope.buildingId(), decisionScope.unitName());
@@ -366,7 +366,7 @@ public class RepairProjectService {
                 allocationSnapshotHash);
         if (projectRepository.freezePlanForAuthorization(
                 planId, projectId, actor.tenantId(), authorizationSnapshotHash, actor.userId()) != 1) {
-            throw new RepairWorkOrderApplicationException(INVALID_STATUS, "授权提案冻结失败，请刷新后重试");
+            throw new RepairWorkOrderApplicationException(INVALID_STATUS, "相关业主决定提案冻结失败，请刷新后重试");
         }
         if (projectRepository.activateAuthorizationProposal(
                 projectId, actor.tenantId(), planId, expectedProjectVersion) != 1) {
@@ -415,21 +415,21 @@ public class RepairProjectService {
         if (ownerDecisionRoute) {
             if (project.status() != Status.AUTHORIZED || plan.status() != PlanStatus.AUTHORIZATION_FROZEN) {
                 throw new RepairWorkOrderApplicationException(
-                        INVALID_STATUS, "需先冻结授权提案并完成有效相关业主决定，不能锁定实施方案");
+                        INVALID_STATUS, "需先冻结相关业主决定提案并完成有效相关业主决定，不能锁定实施方案");
             }
             governanceBasis = governanceRepository.findActiveGovernanceBasis(
                             projectId, planId, actor.tenantId())
                     .orElseThrow(() -> new RepairWorkOrderApplicationException(
-                            INVALID_STATUS, "项目缺少与授权提案对应的有效相关业主决定快照，不能锁定实施方案"));
+                            INVALID_STATUS, "项目缺少与相关业主决定提案对应的有效相关业主决定快照，不能锁定实施方案"));
             allocationRooms = projectRepository.listAllocationRooms(plan.planId(), actor.tenantId());
             if (allocationRooms.isEmpty()) {
                 throw new RepairWorkOrderApplicationException(
-                        INVALID_STATUS, "授权提案缺少费用承担房屋快照，不能锁定实施方案");
+                        INVALID_STATUS, "相关业主决定提案缺少费用承担房屋快照，不能锁定实施方案");
             }
         } else {
             if (project.status() != Status.DRAFT || plan.status() != PlanStatus.DRAFT) {
                 throw new RepairWorkOrderApplicationException(
-                        INVALID_STATUS, "当前项目状态不能按直接执行依据锁定实施方案 status=" + project.status());
+                        INVALID_STATUS, "当前项目状态不能按直接责任履行路径锁定实施方案 status=" + project.status());
             }
             allocationRooms = determination.responsibilityPath() == ResponsibilityPath.SHARED_COMMON_REPAIR
                     ? projectRepository.snapshotAllocationRooms(
@@ -447,7 +447,7 @@ public class RepairProjectService {
                 project, decisionScope, determination, plan, workPoints, allocationRooms, allocationBasis,
                 allocationSnapshotHash))) {
             throw new RepairWorkOrderApplicationException(
-                    INVALID_STATUS, "授权提案快照与当前不可变事实不一致，不能锁定实施方案");
+                    INVALID_STATUS, "相关业主决定提案快照与当前不可变事实不一致，不能锁定实施方案");
         }
         List<FundingSlice> fundingSlices = resolveFundingSlices(
                 project, decisionScope, determination, plan, allocationSnapshotHash, actor.tenantId());
@@ -981,7 +981,7 @@ public class RepairProjectService {
             String responsiblePartyLabel) {
         if (determination.fundingSourceType() != expectedFundingSource
                 || determination.executionAuthorityType() != expectedExecutionAuthority) {
-            throw invalid(responsiblePartyLabel + "必须使用与责任依据相匹配的资金承担和执行依据");
+            throw invalid(responsiblePartyLabel + "必须使用与责任依据相匹配的资金承担和后续执行路径");
         }
         if (trim(determination.responsiblePartyName()) == null) {
             throw invalid(responsiblePartyLabel + "名称必填");
@@ -989,7 +989,7 @@ public class RepairProjectService {
     }
 
     /**
-     * 授权提案冻结或直接执行锁定时首次把已核验产权名册固化为费用承担房屋。该快照是后续决定的分母，
+     * 相关业主决定提案冻结或直接执行锁定时首次把已核验产权名册固化为费用承担房屋。该快照是后续决定的分母，
      * 不能再用项目端描述、受影响房屋或当前名册替代。
      */
     private AllocationBasis requireAllocationSnapshot(
@@ -1215,7 +1215,7 @@ public class RepairProjectService {
                         .thenComparing(AllocationRoom::roomId))
                 .toList());
         snapshot.put("allocationSnapshotHash", allocationSnapshotHash);
-        return sha256(snapshot, "授权提案快照哈希生成失败");
+        return sha256(snapshot, "相关业主决定提案快照哈希生成失败");
     }
 
     private String snapshotHash(

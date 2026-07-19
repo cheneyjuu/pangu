@@ -1,4 +1,4 @@
-// 关联业务：验证单一决定范围草稿、责任认定、授权提案与实施方案锁定的真实前后关系。
+// 关联业务：验证单一决定范围草稿、责任初判、相关业主决定提案与实施方案锁定的真实前后关系。
 package com.pangu.bootstrap.repair;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -252,7 +252,7 @@ class RepairProjectFlowTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(Map.of("expectedProjectVersion", lockVersion))))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.msg", is("需先冻结授权提案并完成有效相关业主决定，不能锁定实施方案")));
+                .andExpect(jsonPath("$.msg", is("需先冻结相关业主决定提案并完成有效相关业主决定，不能锁定实施方案")));
     }
 
     @Test
