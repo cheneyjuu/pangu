@@ -23,6 +23,7 @@
 ### 当前实施 SPEC
 
 - [业主大会议事规则版本治理](specs/owners-assembly-rule-governance/requirements.md)：切片二的需求、设计和可执行任务；只描述当前变更，不复制全局业务规范。
+- [统一表决执行内核](specs/unified-voting-execution-core/requirements.md)：切片三的需求、设计和实施记录。
 
 ### 架构决策
 
