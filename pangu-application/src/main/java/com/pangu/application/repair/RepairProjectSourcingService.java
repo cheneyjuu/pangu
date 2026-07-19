@@ -595,8 +595,9 @@ public class RepairProjectSourcingService {
                 ? projectRepository.findProjectForUpdate(projectId, tenantId)
                 : projectRepository.findProject(projectId, tenantId))
                 .orElseThrow(() -> support.notFound("维修工程项目不存在"));
-        if (project.status() != Status.DRAFT && project.status() != Status.PLAN_LOCKED) {
-            throw support.conflict("当前项目已锁定方案，不能再修改询价和中选结果");
+        // 参考询价只服务于尚未冻结的方案；锁定后只能读取既有报价并等待授权后的最终定商。
+        if (project.status() != Status.DRAFT) {
+            throw support.conflict("当前项目不是实施方案草稿，不能修改参考询价");
         }
         PlanVersion plan = projectRepository.listPlans(projectId, tenantId).stream()
                 .filter(candidate -> candidate.status() == PlanStatus.DRAFT)
