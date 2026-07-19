@@ -172,6 +172,66 @@ class OwnersAssemblyRuleFlowTest {
                 .andExpect(status().isBadRequest());
     }
 
+    @Test
+    void draftCannotBeSubmittedWhenOneStructuredFieldHasNoSourceClause() throws Exception {
+        String propertyToken = token(ACCOUNT_PROPERTY_MANAGER, USER_PROPERTY_MANAGER);
+        Map<String, Object> configuration = completeConfiguration();
+        @SuppressWarnings("unchecked")
+        Map<String, Object> sourceReferences = (Map<String, Object>) configuration.get("sourceClauseReferences");
+        sourceReferences.remove(
+                OwnersAssemblyRuleConfiguration.RuleConfigurationField.VOTING_CHANNEL_POLICY.name());
+        long ruleId = createDraft(
+                propertyToken,
+                RULE_NAME_PREFIX + System.nanoTime(),
+                "2026-IT-missing-source",
+                configuration);
+
+        mockMvc.perform(post("/api/v1/admin/owners-assembly-rules/" + ruleId + "/submit")
+                        .header("Authorization", "Bearer " + propertyToken))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.msg", is("请为每项结构化规则填写原件页码和条款依据")));
+    }
+
+    @Test
+    void tenantBoundWorkIdentityCannotReadOrOperateRulesAsAnotherTenant() throws Exception {
+        String propertyToken = token(ACCOUNT_PROPERTY_MANAGER, USER_PROPERTY_MANAGER);
+        long ruleId = createDraft(
+                propertyToken,
+                RULE_NAME_PREFIX + System.nanoTime(),
+                "2026-IT-tenant-isolation",
+                completeConfiguration());
+
+        mockMvc.perform(get("/api/v1/admin/owners-assembly-rules")
+                        .param("tenantId", "10002")
+                        .header("Authorization", "Bearer " + propertyToken))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.msg", is("不能跨小区操作业主大会议事规则")));
+
+        mockMvc.perform(post("/api/v1/admin/owners-assembly-rules/" + ruleId + "/submit")
+                        .param("tenantId", "10002")
+                        .header("Authorization", "Bearer " + propertyToken))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.msg", is("不能跨小区操作业主大会议事规则")));
+    }
+
+    @Test
+    void fullyConfirmedRuleCannotBeActivatedBeforeItsEffectiveDate() throws Exception {
+        String propertyToken = token(ACCOUNT_PROPERTY_MANAGER, USER_PROPERTY_MANAGER);
+        String directorToken = token(ACCOUNT_DIRECTOR, USER_DIRECTOR);
+        long ruleId = createDraft(
+                propertyToken,
+                RULE_NAME_PREFIX + System.nanoTime(),
+                "2026-IT-future-effective-date",
+                completeConfiguration(),
+                LocalDate.now().plusDays(1));
+        submitAndConfirmAll(propertyToken, directorToken, ruleId);
+
+        mockMvc.perform(post("/api/v1/admin/owners-assembly-rules/" + ruleId + "/activate")
+                        .header("Authorization", "Bearer " + directorToken))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.msg", is("只能启用已经生效的议事规则版本")));
+    }
+
     private void submitAndConfirmAll(String propertyToken, String directorToken, long ruleId) throws Exception {
         mockMvc.perform(post("/api/v1/admin/owners-assembly-rules/" + ruleId + "/submit")
                         .header("Authorization", "Bearer " + propertyToken))
@@ -187,6 +247,14 @@ class OwnersAssemblyRuleFlowTest {
 
     private long createDraft(String token, String ruleName, String ruleVersion, Map<String, Object> configuration)
             throws Exception {
+        return createDraft(token, ruleName, ruleVersion, configuration, LocalDate.now().minusDays(1));
+    }
+
+    private long createDraft(String token,
+                             String ruleName,
+                             String ruleVersion,
+                             Map<String, Object> configuration,
+                             LocalDate effectiveDate) throws Exception {
         MockMultipartFile configurationPart = new MockMultipartFile(
                 "configuration",
                 "configuration.json",
@@ -202,7 +270,7 @@ class OwnersAssemblyRuleFlowTest {
                         .file(sourceFile)
                         .param("ruleName", ruleName)
                         .param("ruleVersion", ruleVersion)
-                        .param("effectiveDate", LocalDate.now().minusDays(1).toString())
+                        .param("effectiveDate", effectiveDate.toString())
                         .param("changeReason", "集成测试规则录入")
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isCreated())
