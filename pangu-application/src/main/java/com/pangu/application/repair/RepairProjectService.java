@@ -74,6 +74,10 @@ import static com.pangu.application.repair.RepairWorkOrderApplicationException.R
 @RequiredArgsConstructor
 public class RepairProjectService {
 
+    /** 责任认定由物业基于勘验、合同或保修依据提出，不能由治理确认方代填。 */
+    private static final Set<String> PROPERTY_RESPONSIBILITY_PROPOSER_ROLES = Set.of(
+            "PROPERTY_MANAGER", "PROPERTY_STAFF");
+
     private final RepairProjectRepository projectRepository;
     private final RepairProjectGovernanceRepository governanceRepository;
     private final MaintenanceFundAccountRepository maintenanceFundAccountRepository;
@@ -199,7 +203,7 @@ public class RepairProjectService {
     @Transactional
     public RepairProject.Details proposeResponsibilityDetermination(
             Long projectId, ProposeRepairResponsibilityDeterminationCommand command) {
-        UserContext actor = requireActor();
+        UserContext actor = requirePropertyResponsibilityProposer();
         if (command == null || command.expectedProjectVersion() == null) {
             throw invalid("expectedProjectVersion 必填");
         }
@@ -322,7 +326,8 @@ public class RepairProjectService {
 
     /**
      * 冻结的是供相关业主决定或授权审查的提案，不是最终实施方案。决定前必须固定预算、点位、费用承担范围，
-     * 否则表决通过后仍可改写其所依据的内容；但该状态绝不赋予定商、合同或付款资格。
+     * 否则表决通过后仍可改写其所依据的内容；账簿余额、托管归集和支取资格只在最终锁定时核验，不能因尚未
+     * 接入账户而阻止业主对已明确的责任与资金路径作出决定。
      */
     @Transactional
     public RepairProject.Details freezePlanForAuthorization(
@@ -354,7 +359,6 @@ public class RepairProjectService {
         AllocationBasis allocationBasis = requireAllocationSnapshot(plan, actor.tenantId(), allocationRooms);
         String allocationSnapshotHash = allocationSnapshotHash(
                 decisionScope, determination, plan, allocationRooms, allocationBasis);
-        assertFundingRouteReadyForAuthorization(determination, decisionScope, plan, actor.tenantId());
         String authorizationSnapshotHash = authorizationProposalSnapshotHash(
                 project, decisionScope, determination, plan, workPoints, allocationRooms, allocationBasis,
                 allocationSnapshotHash);
@@ -378,8 +382,8 @@ public class RepairProjectService {
     }
 
     /**
-     * 最终锁定只在直接执行依据已确认，或相关业主决定/授权已生效后进行。它生成定商、合同、施工、验收和付款
-     * 所引用的执行快照；不能再承担“发起表决”的职责。
+     * 最终锁定只在直接执行依据已确认，或相关业主决定/授权已生效后进行。它生成当前责任路径可使用的执行快照；
+     * 共有维修才可进入业主侧定商、合同和资金支取，直接责任路径不得借此生成业主侧合同或付款资格。
      */
     @Transactional
     public RepairProject.Details lockPlan(Long projectId, Long planId, Integer expectedProjectVersion) {
@@ -1098,24 +1102,6 @@ public class RepairProjectService {
         return account;
     }
 
-    /**
-     * 授权提案进入表决前只做资金路径的真实性预检，不写资金切片、不冻结余额也不产生支取资格。
-     */
-    private void assertFundingRouteReadyForAuthorization(
-            ResponsibilityDetermination determination, DecisionScope decisionScope, PlanVersion plan, Long tenantId) {
-        switch (determination.fundingSourceType()) {
-            case SPECIAL_MAINTENANCE_LEDGER ->
-                    requireSpecialMaintenanceAccount(decisionScope, plan, tenantId, "冻结授权提案");
-            case PUBLIC_REVENUE_LEDGER -> throw new RepairWorkOrderApplicationException(
-                    INVALID_STATUS, "公共收益账簿尚未接入可信余额与授权快照，不能冻结授权提案");
-            case OWNER_SELF_FUNDING -> throw new RepairWorkOrderApplicationException(
-                    INVALID_STATUS, "业主自筹资金归集或托管账簿尚未接入可信快照，不能冻结授权提案");
-            case PROPERTY_SERVICE_CONTRACT, LIABLE_PARTY, DEVELOPER_WARRANTY -> {
-                // 直接责任路径由已确认责任认定及其原始依据承担，不在本方法伪造资金账户。
-            }
-        }
-    }
-
     private String directResponsibilityReference(ResponsibilityDetermination determination) {
         String responsibleParty = trim(determination.responsiblePartyName());
         String prefix = responsibleParty == null
@@ -1348,6 +1334,16 @@ public class RepairProjectService {
         if (!actor.hasPermission("repair:workorder:governance")) {
             throw new RepairWorkOrderApplicationException(
                     FORBIDDEN, "当前工作身份无权确认工程责任、资金承担和执行依据");
+        }
+        return actor;
+    }
+
+    private UserContext requirePropertyResponsibilityProposer() {
+        UserContext actor = requireActor();
+        if (!PROPERTY_RESPONSIBILITY_PROPOSER_ROLES.contains(actor.roleKey())
+                || !actor.hasPermission("repair:workorder:manage")) {
+            throw new RepairWorkOrderApplicationException(
+                    FORBIDDEN, "仅物业可基于勘验、合同或保修依据提出工程责任认定");
         }
         return actor;
     }

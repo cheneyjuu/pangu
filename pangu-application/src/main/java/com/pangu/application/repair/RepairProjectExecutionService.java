@@ -1,4 +1,4 @@
-// 关联业务：编排维修工程审价、按资金流程区分签约方的施工合同、开工、施工取证、材料进场和结构化竣工结算。
+// 关联业务：编排需业主侧定商的维修工程审价、施工合同、开工、施工取证、材料进场和结构化竣工结算；直接责任履行不进入该合同链路。
 package com.pangu.application.repair;
 
 import com.pangu.application.repair.RepairProjectApplicationSupport.Context;
@@ -18,6 +18,8 @@ import com.pangu.domain.model.repair.RepairProject.Attachment;
 import com.pangu.domain.model.repair.RepairProject.EvidenceRequirement;
 import com.pangu.domain.model.repair.RepairProject.EvidenceStage;
 import com.pangu.domain.model.repair.RepairProject.PlanAffectedOwner;
+import com.pangu.domain.model.repair.RepairProject.ResponsibilityDeterminationStatus;
+import com.pangu.domain.model.repair.RepairProject.ResponsibilityPath;
 import com.pangu.domain.model.repair.RepairProject.Status;
 import com.pangu.domain.model.repair.RepairProjectExecution.AcceptancePolicy;
 import com.pangu.domain.model.repair.RepairProjectExecution.Contract;
@@ -119,6 +121,7 @@ public class RepairProjectExecutionService {
                 "expectedProjectVersion 必填");
         Context context = support.loadForUpdate(projectId, actor.tenantId(), Status.AUTHORIZED);
         requireVersion(context, command.expectedProjectVersion());
+        rejectDirectResponsibilityContract(context);
         if (executionRepository.findContract(projectId, actor.tenantId()).isPresent()) {
             throw support.conflict("当前项目已有生效合同");
         }
@@ -171,6 +174,20 @@ public class RepairProjectExecutionService {
                 "propertyEnterpriseName", propertyEnterprise.legalName(),
                 "selectionId", selection.selectionId(), "quoteId", selection.quoteId()));
         return contract;
+    }
+
+    /**
+     * 已确认由合同责任方、保修责任方或第三方直接履行的工程，没有业主侧中选供应商这一事实。
+     * 先在服务端阻断，避免把缺少中选报价误报成普通合同资料不全。
+     */
+    private void rejectDirectResponsibilityContract(Context context) {
+        projectRepository.findCurrentResponsibilityDetermination(
+                        context.project().projectId(), context.project().tenantId())
+                .filter(determination -> determination.status() == ResponsibilityDeterminationStatus.CONFIRMED)
+                .filter(determination -> determination.responsibilityPath() != ResponsibilityPath.SHARED_COMMON_REPAIR)
+                .ifPresent(determination -> {
+                    throw support.invalid("当前工程已确认由直接责任方履行，不适用业主侧施工合同归档");
+                });
     }
 
     @Transactional

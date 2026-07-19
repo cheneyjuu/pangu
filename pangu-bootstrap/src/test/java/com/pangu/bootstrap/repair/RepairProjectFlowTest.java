@@ -282,13 +282,17 @@ class RepairProjectFlowTest {
     }
 
     @Test
-    void ownerDecisionRouteFreezesAuthorizationProposalBeforeAnyFinalPlanLock() throws Exception {
+    void ownerDecisionRouteFreezesAuthorizationProposalBeforeAnyFinalPlanLockOrLedgerVerification() throws Exception {
         long sourceId = createConfirmedBuildingSource(buildingId);
         JsonNode created = createProject(buildingRequest(List.of(
                 referenceRoomWorkPoint(buildingId, roomId, List.of(sourceId)))));
         long projectId = created.path("project").path("projectId").asLong();
         long planId = created.path("plans").get(0).path("planId").asLong();
-        createdFundingAccountId = seedBuildingMaintenanceAccount(new BigDecimal("2207.00"));
+        assertEquals(0, jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM t_maintenance_fund_account
+                WHERE tenant_id = ? AND account_level = 2 AND reference_id = ?
+                """, Integer.class, TENANT, buildingId));
         int freezeVersion = confirmSharedSpecialFundResponsibility(
                 projectId, 0, "OWNER_DECISION", false);
 
@@ -306,6 +310,7 @@ class RepairProjectFlowTest {
         JsonNode frozen = objectMapper.readTree(frozenResponse).path("data");
         int lockVersion = frozen.path("project").path("version").asInt();
         assertTrue(frozen.path("currentPlanAffectedOwners").isEmpty());
+        assertTrue(frozen.path("fundingSlices").isEmpty());
         assertTrue(jdbcTemplate.queryForObject("""
                 SELECT COUNT(*) > 0 FROM t_repair_plan_allocation_room WHERE plan_id = ?
                 """, Boolean.class, planId));
@@ -362,13 +367,15 @@ class RepairProjectFlowTest {
         int lockVersion = objectMapper.readTree(confirmedResponse).path("data")
                 .path("project").path("version").asInt();
 
-        mockMvc.perform(post("/api/v1/admin/repair-projects/" + projectId + "/plans/" + planId + "/lock")
+        String lockedResponse = mockMvc.perform(post("/api/v1/admin/repair-projects/" + projectId + "/plans/" + planId + "/lock")
                         .header("Authorization", bearer(propertyToken))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(Map.of("expectedProjectVersion", lockVersion))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.project.status", is("AUTHORIZED")))
-                .andExpect(jsonPath("$.data.fundingSlices[0].sourceType", is("PROPERTY_SERVICE_CONTRACT")));
+                .andExpect(jsonPath("$.data.fundingSlices[0].sourceType", is("PROPERTY_SERVICE_CONTRACT")))
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+        int contractVersion = objectMapper.readTree(lockedResponse).path("data").path("project").path("version").asInt();
 
         mockMvc.perform(get("/api/v1/admin/repair-projects/" + projectId + "/sourcing")
                         .header("Authorization", bearer(propertyToken)))
@@ -376,6 +383,31 @@ class RepairProjectFlowTest {
                 .andExpect(jsonPath("$.data.selectionAuthorization.status", is("UNSUPPORTED_WORKFLOW")))
                 .andExpect(jsonPath("$.data.selectionAuthorization.blockingReason", is(
                         "本工程已确认由物业服务合同责任方承担，不适用业主侧供应商定商；应按已确认责任依据另行执行")));
+
+        mockMvc.perform(post("/api/v1/admin/repair-projects/" + projectId + "/contract")
+                        .header("Authorization", bearer(propertyToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "expectedProjectVersion", contractVersion,
+                                "supplierDeptId", 1,
+                                "supplierName", "不应进入的业主侧施工单位",
+                                "contractAmount", 1,
+                                "contractAttachmentId", basisAttachmentId,
+                                "signatures", List.of(
+                                        Map.of(
+                                                "partyType", "PROPERTY",
+                                                "signerName", "物业经办人",
+                                                "signatureMethod", "PAPER_SCAN",
+                                                "signatureAttachmentId", basisAttachmentId,
+                                                "signedAt", "2026-07-19T12:00:00"),
+                                        Map.of(
+                                                "partyType", "SUPPLIER",
+                                                "signerName", "不应进入的施工单位",
+                                                "signatureMethod", "PAPER_SCAN",
+                                                "signatureAttachmentId", basisAttachmentId,
+                                                "signedAt", "2026-07-19T12:00:00"))))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.msg", is("当前工程已确认由直接责任方履行，不适用业主侧施工合同归档")));
     }
 
     @Test
