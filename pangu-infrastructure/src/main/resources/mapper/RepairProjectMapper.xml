@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- 关联业务：持久化维修工程项目、单一决定范围、维修点位、实施方案版本、费用分摊及受影响业主快照与项目附件。 -->
+<!-- 关联业务：持久化维修工程项目、责任认定、授权提案冻结、实施方案锁定、费用承担及项目附件。 -->
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.pangu.infrastructure.persistence.mapper.RepairProjectMapper">
 
@@ -29,7 +29,8 @@
         affected_owner_pass_rule, affected_owner_approval_ratio, settlement_method,
         planned_start_date, planned_completion_date, warranty_days, governance_path,
         price_review_required, payment_milestones_json::TEXT AS payment_milestones_json,
-        status, snapshot_hash, created_by_account_id, created_by_user_id,
+        status, authorization_snapshot_hash, authorization_frozen_by_user_id, authorization_frozen_at,
+        snapshot_hash, created_by_account_id, created_by_user_id,
         locked_by_user_id, create_time, locked_at
     </sql>
 
@@ -199,9 +200,71 @@
           AND legacy_read_only = FALSE
     </update>
 
+    <insert id="insertResponsibilityDetermination" useGeneratedKeys="true"
+            keyProperty="determinationId" keyColumn="determination_id">
+        INSERT INTO t_repair_project_responsibility_determination (
+            project_id, tenant_id, version_no, status, responsibility_path,
+            funding_source_type, execution_authority_type, basis_attachment_id, basis_reference,
+            responsible_party_name, responsible_party_reference, approved_amount,
+            proposed_by_account_id, proposed_by_user_id, proposed_at
+        ) VALUES (
+            #{projectId}, #{tenantId}, #{versionNo}, #{status}, #{responsibilityPath},
+            #{fundingSourceType}, #{executionAuthorityType}, #{basisAttachmentId}, #{basisReference},
+            #{responsiblePartyName}, #{responsiblePartyReference}, #{approvedAmount},
+            #{proposedByAccountId}, #{proposedByUserId}, #{proposedAt}
+        )
+    </insert>
+
+    <select id="findCurrentResponsibilityDetermination"
+            resultType="com.pangu.infrastructure.persistence.entity.RepairResponsibilityDeterminationRow">
+        SELECT determination_id, project_id, tenant_id, version_no, status, responsibility_path,
+               funding_source_type, execution_authority_type, basis_attachment_id, basis_reference,
+               responsible_party_name, responsible_party_reference, approved_amount,
+               proposed_by_account_id, proposed_by_user_id, proposed_at,
+               confirmed_by_account_id, confirmed_by_user_id, confirmed_at, confirmation_note, create_time
+        FROM t_repair_project_responsibility_determination
+        WHERE project_id = #{projectId}
+          AND tenant_id = #{tenantId}
+          AND status IN ('PENDING_CONFIRMATION', 'CONFIRMED')
+    </select>
+
+    <select id="listResponsibilityDeterminations"
+            resultType="com.pangu.infrastructure.persistence.entity.RepairResponsibilityDeterminationRow">
+        SELECT determination_id, project_id, tenant_id, version_no, status, responsibility_path,
+               funding_source_type, execution_authority_type, basis_attachment_id, basis_reference,
+               responsible_party_name, responsible_party_reference, approved_amount,
+               proposed_by_account_id, proposed_by_user_id, proposed_at,
+               confirmed_by_account_id, confirmed_by_user_id, confirmed_at, confirmation_note, create_time
+        FROM t_repair_project_responsibility_determination
+        WHERE project_id = #{projectId}
+          AND tenant_id = #{tenantId}
+        ORDER BY version_no DESC
+    </select>
+
+    <update id="supersedeCurrentResponsibilityDeterminations">
+        UPDATE t_repair_project_responsibility_determination
+        SET status = 'SUPERSEDED'
+        WHERE project_id = #{projectId}
+          AND tenant_id = #{tenantId}
+          AND status IN ('PENDING_CONFIRMATION', 'CONFIRMED')
+    </update>
+
+    <update id="confirmResponsibilityDetermination">
+        UPDATE t_repair_project_responsibility_determination
+        SET status = 'CONFIRMED',
+            confirmed_by_account_id = #{confirmedByAccountId},
+            confirmed_by_user_id = #{confirmedByUserId},
+            confirmed_at = CURRENT_TIMESTAMP,
+            confirmation_note = #{confirmationNote}
+        WHERE determination_id = #{determinationId}
+          AND project_id = #{projectId}
+          AND tenant_id = #{tenantId}
+          AND status = 'PENDING_CONFIRMATION'
+    </update>
+
     <select id="listFundingSlices"
             resultType="com.pangu.infrastructure.persistence.entity.RepairFundingSliceRow">
-        SELECT funding_slice_id, decision_scope_id, project_id, tenant_id, source_type,
+        SELECT funding_slice_id, responsibility_determination_id, decision_scope_id, project_id, tenant_id, source_type,
                source_record_type, source_record_id, ledger_reference, allocation_snapshot_hash,
                approved_amount, verification_status, legacy_read_only, verified_at, create_time
         FROM t_repair_funding_slice
@@ -213,11 +276,11 @@
     <insert id="insertFundingSlice" useGeneratedKeys="true"
             keyProperty="fundingSliceId" keyColumn="funding_slice_id">
         INSERT INTO t_repair_funding_slice (
-            decision_scope_id, project_id, tenant_id, source_type, source_record_type,
+            responsibility_determination_id, decision_scope_id, project_id, tenant_id, source_type, source_record_type,
             source_record_id, ledger_reference, allocation_snapshot_hash, approved_amount,
             verification_status, legacy_read_only, verified_at
         ) VALUES (
-            #{decisionScopeId}, #{projectId}, #{tenantId}, #{sourceType}, #{sourceRecordType},
+            #{responsibilityDeterminationId}, #{decisionScopeId}, #{projectId}, #{tenantId}, #{sourceType}, #{sourceRecordType},
             #{sourceRecordId}, #{ledgerReference}, #{allocationSnapshotHash}, #{approvedAmount},
             #{verificationStatus}, #{legacyReadOnly}, #{verifiedAt}
         )
@@ -424,6 +487,36 @@
         ORDER BY link.sort_order, link.attachment_id
     </select>
 
+    <update id="freezePlanForAuthorization">
+        UPDATE t_repair_plan_version
+        SET status = 'AUTHORIZATION_FROZEN', authorization_snapshot_hash = #{authorizationSnapshotHash},
+            authorization_frozen_by_user_id = #{frozenByUserId}, authorization_frozen_at = CURRENT_TIMESTAMP
+        WHERE plan_id = #{planId}
+          AND project_id = #{projectId}
+          AND tenant_id = #{tenantId}
+          AND status = 'DRAFT'
+    </update>
+
+    <update id="activateAuthorizationProposal">
+        UPDATE t_repair_project
+        SET active_plan_id = #{planId}, status = 'AUTHORIZATION_IN_PROGRESS',
+            version = version + 1, update_time = CURRENT_TIMESTAMP
+        WHERE project_id = #{projectId}
+          AND tenant_id = #{tenantId}
+          AND version = #{expectedVersion}
+          AND status = 'DRAFT'
+    </update>
+
+    <update id="reopenAfterAuthorizationFailure">
+        UPDATE t_repair_project
+        SET active_plan_id = NULL, status = 'DRAFT',
+            version = version + 1, update_time = CURRENT_TIMESTAMP
+        WHERE project_id = #{projectId}
+          AND tenant_id = #{tenantId}
+          AND status = #{expectedStatus}
+          AND version = #{expectedVersion}
+    </update>
+
     <update id="lockPlan">
         UPDATE t_repair_plan_version
         SET status = 'LOCKED', snapshot_hash = #{snapshotHash},
@@ -431,7 +524,7 @@
         WHERE plan_id = #{planId}
           AND project_id = #{projectId}
           AND tenant_id = #{tenantId}
-          AND status = 'DRAFT'
+          AND status IN ('DRAFT', 'AUTHORIZATION_FROZEN')
     </update>
 
     <update id="supersedeLockedPlans">
@@ -443,14 +536,22 @@
           AND status = 'LOCKED'
     </update>
 
-    <update id="activatePlan">
+    <update id="activateExecutionPlan">
         UPDATE t_repair_project
-        SET active_plan_id = #{planId}, status = 'PLAN_LOCKED',
+        SET active_plan_id = #{planId}, status = #{nextStatus},
             version = version + 1, update_time = CURRENT_TIMESTAMP
         WHERE project_id = #{projectId}
           AND tenant_id = #{tenantId}
           AND version = #{expectedVersion}
-          AND status IN ('DRAFT', 'PLAN_LOCKED')
+          AND status = #{expectedStatus}
+    </update>
+
+    <update id="advanceVersion">
+        UPDATE t_repair_project
+        SET version = version + 1, update_time = CURRENT_TIMESTAMP
+        WHERE project_id = #{projectId}
+          AND tenant_id = #{tenantId}
+          AND version = #{expectedVersion}
     </update>
 
     <update id="advanceStatus">

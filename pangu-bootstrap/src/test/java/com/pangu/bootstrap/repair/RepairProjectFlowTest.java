@@ -1,4 +1,4 @@
-// 关联业务：验证单一决定范围草稿、维修点位、来源边界，以及按可信专项维修资金账簿锁定实施方案。
+// 关联业务：验证单一决定范围草稿、责任认定、授权提案与实施方案锁定的真实前后关系。
 package com.pangu.bootstrap.repair;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -14,6 +14,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.math.BigDecimal;
@@ -26,6 +27,11 @@ import static org.hamcrest.Matchers.is;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -37,6 +43,8 @@ class RepairProjectFlowTest {
     private static final long TENANT = 10001L;
     private static final long ACCOUNT_PROPERTY_MANAGER = 999821L;
     private static final long USER_PROPERTY_MANAGER = 800201L;
+    private static final long ACCOUNT_COMMITTEE_DIRECTOR = 999811L;
+    private static final long USER_COMMITTEE_DIRECTOR = 800101L;
     private static final String PROJECT_PREFIX = "IT-维修点位-";
     private static final String CASE_PREFIX = "IT-维修点位来源-";
 
@@ -47,6 +55,7 @@ class RepairProjectFlowTest {
     @MockBean private RepairEvidenceObjectStorage objectStorage;
 
     private String propertyToken;
+    private String committeeDirectorToken;
     private long buildingId;
     private long roomId;
     private long otherBuildingId;
@@ -56,6 +65,12 @@ class RepairProjectFlowTest {
     void setUp() {
         propertyToken = jwtTokenProvider.generateToken(
                 ACCOUNT_PROPERTY_MANAGER, "SYS_USER", USER_PROPERTY_MANAGER, TENANT);
+        committeeDirectorToken = jwtTokenProvider.generateToken(
+                ACCOUNT_COMMITTEE_DIRECTOR, "SYS_USER", USER_COMMITTEE_DIRECTOR, TENANT);
+        when(objectStorage.put(anyString(), any(byte[].class), anyString(), anyString()))
+                .thenAnswer(invocation -> new RepairEvidenceObjectStorage.StoredObjectMetadata(
+                        ((byte[]) invocation.getArgument(1)).length,
+                        invocation.getArgument(2), "repair-project-flow-etag"));
         buildingId = jdbcTemplate.queryForObject("""
                 SELECT building_id
                 FROM c_owner_property
@@ -188,7 +203,7 @@ class RepairProjectFlowTest {
     }
 
     @Test
-    void confirmedScopeWithoutScopedMaintenanceAccountBlocksLockBeforeAnyQuoteRequirement() throws Exception {
+    void confirmedScopeWithoutResponsibilityDeterminationCannotLockPlan() throws Exception {
         long sourceId = createConfirmedBuildingSource(buildingId);
         JsonNode created = createProject(buildingRequest(List.of(
                 referenceRoomWorkPoint(buildingId, roomId, List.of(sourceId)))));
@@ -198,10 +213,10 @@ class RepairProjectFlowTest {
         mockMvc.perform(post("/api/v1/admin/repair-projects/" + projectId + "/plans/" + planId + "/lock")
                         .header("Authorization", bearer(propertyToken))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(json(Map.of("expectedProjectVersion", 0))))
+                .content(json(Map.of("expectedProjectVersion", 0))))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.msg", is(
-                        "当前楼栋尚未接入专项维修资金账户，不能锁定实施方案")));
+                        "工程责任、资金承担或执行依据尚待确认，不能锁定实施方案")));
     }
 
     @Test
@@ -212,13 +227,14 @@ class RepairProjectFlowTest {
         long projectId = created.path("project").path("projectId").asLong();
         long planId = created.path("plans").get(0).path("planId").asLong();
         createdFundingAccountId = seedBuildingMaintenanceAccount(new BigDecimal("2207.00"));
+        int lockVersion = confirmExistingAuthorizationSpecialFundResponsibility(projectId, 0);
 
         String response = mockMvc.perform(post("/api/v1/admin/repair-projects/" + projectId + "/plans/" + planId + "/lock")
                         .header("Authorization", bearer(propertyToken))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(json(Map.of("expectedProjectVersion", 0))))
+                        .content(json(Map.of("expectedProjectVersion", lockVersion))))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.project.status", is("PLAN_LOCKED")))
+                .andExpect(jsonPath("$.data.project.status", is("AUTHORIZED")))
                 .andExpect(jsonPath("$.data.fundingSlices.length()", is(1)))
                 .andExpect(jsonPath("$.data.fundingSlices[0].sourceType", is("SPECIAL_MAINTENANCE_LEDGER")))
                 .andExpect(jsonPath("$.data.fundingSlices[0].sourceRecordId",
@@ -248,11 +264,12 @@ class RepairProjectFlowTest {
         long projectId = created.path("project").path("projectId").asLong();
         long planId = created.path("plans").get(0).path("planId").asLong();
         createdFundingAccountId = seedBuildingMaintenanceAccount(new BigDecimal("2206.99"));
+        int lockVersion = confirmExistingAuthorizationSpecialFundResponsibility(projectId, 0);
 
         mockMvc.perform(post("/api/v1/admin/repair-projects/" + projectId + "/plans/" + planId + "/lock")
                         .header("Authorization", bearer(propertyToken))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(json(Map.of("expectedProjectVersion", 0))))
+                        .content(json(Map.of("expectedProjectVersion", lockVersion))))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.msg", is("专项维修资金账户可用余额不足，不能锁定实施方案")));
 
@@ -262,6 +279,103 @@ class RepairProjectFlowTest {
         assertEquals(0, jdbcTemplate.queryForObject("""
                 SELECT COUNT(*) FROM t_repair_funding_slice WHERE project_id = ?
                 """, Integer.class, projectId));
+    }
+
+    @Test
+    void ownerDecisionRouteFreezesAuthorizationProposalBeforeAnyFinalPlanLock() throws Exception {
+        long sourceId = createConfirmedBuildingSource(buildingId);
+        JsonNode created = createProject(buildingRequest(List.of(
+                referenceRoomWorkPoint(buildingId, roomId, List.of(sourceId)))));
+        long projectId = created.path("project").path("projectId").asLong();
+        long planId = created.path("plans").get(0).path("planId").asLong();
+        createdFundingAccountId = seedBuildingMaintenanceAccount(new BigDecimal("2207.00"));
+        int freezeVersion = confirmSharedSpecialFundResponsibility(
+                projectId, 0, "OWNER_DECISION", false);
+
+        String frozenResponse = mockMvc.perform(post("/api/v1/admin/repair-projects/" + projectId
+                        + "/plans/" + planId + "/freeze-for-authorization")
+                        .header("Authorization", bearer(propertyToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("expectedProjectVersion", freezeVersion))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.project.status", is("AUTHORIZATION_IN_PROGRESS")))
+                .andExpect(jsonPath("$.data.plans[0].status", is("AUTHORIZATION_FROZEN")))
+                .andExpect(jsonPath("$.data.plans[0].authorizationSnapshotHash").isString())
+                .andExpect(jsonPath("$.data.plans[0].snapshotHash").doesNotExist())
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+        JsonNode frozen = objectMapper.readTree(frozenResponse).path("data");
+        int lockVersion = frozen.path("project").path("version").asInt();
+        assertTrue(frozen.path("currentPlanAffectedOwners").isEmpty());
+        assertTrue(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) > 0 FROM t_repair_plan_allocation_room WHERE plan_id = ?
+                """, Boolean.class, planId));
+
+        mockMvc.perform(post("/api/v1/admin/repair-projects/" + projectId + "/plans/" + planId + "/lock")
+                        .header("Authorization", bearer(propertyToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("expectedProjectVersion", lockVersion))))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.msg", is("需先冻结授权提案并完成有效决定或授权，不能锁定实施方案")));
+    }
+
+    @Test
+    void propertyContractResponsibilityLocksWithoutPretendingThereIsAnOwnerSideSupplierSelection() throws Exception {
+        long sourceId = createConfirmedBuildingSource(buildingId);
+        JsonNode created = createProject(buildingRequest(List.of(
+                referenceRoomWorkPoint(buildingId, roomId, List.of(sourceId)))));
+        long projectId = created.path("project").path("projectId").asLong();
+        long planId = created.path("plans").get(0).path("planId").asLong();
+
+        long basisAttachmentId = uploadProjectAttachment(
+                projectId, propertyToken, "物业服务合同维修责任条款.pdf", "物业服务合同约定的日常维修责任");
+        String proposedResponse = mockMvc.perform(post(
+                        "/api/v1/admin/repair-projects/" + projectId + "/responsibility-determinations")
+                        .header("Authorization", bearer(propertyToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "expectedProjectVersion", 0,
+                                "responsibilityPath", "PROPERTY_SERVICE_CONTRACT",
+                                "fundingSourceType", "PROPERTY_SERVICE_CONTRACT",
+                                "executionAuthorityType", "CONTRACTUAL_EXECUTION",
+                                "basisAttachmentId", basisAttachmentId,
+                                "basisReference", "物业服务合同第六条约定本类日常维修由物业承担。",
+                                "responsiblePartyName", "江湾国际公寓物业服务中心",
+                                "responsiblePartyReference", "物业服务合同第六条",
+                                "approvedAmount", 2207))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.responsibilityDetermination.status", is("PENDING_CONFIRMATION")))
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+        JsonNode proposed = objectMapper.readTree(proposedResponse).path("data");
+        long determinationId = proposed.path("responsibilityDetermination").path("determinationId").asLong();
+        int confirmationVersion = proposed.path("project").path("version").asInt();
+
+        String confirmedResponse = mockMvc.perform(post("/api/v1/admin/repair-projects/" + projectId
+                        + "/responsibility-determinations/" + determinationId + "/confirm")
+                        .header("Authorization", bearer(committeeDirectorToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "expectedProjectVersion", confirmationVersion,
+                                "confirmationNote", "已核验物业服务合同责任范围。"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.responsibilityDetermination.status", is("CONFIRMED")))
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+        int lockVersion = objectMapper.readTree(confirmedResponse).path("data")
+                .path("project").path("version").asInt();
+
+        mockMvc.perform(post("/api/v1/admin/repair-projects/" + projectId + "/plans/" + planId + "/lock")
+                        .header("Authorization", bearer(propertyToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("expectedProjectVersion", lockVersion))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.project.status", is("AUTHORIZED")))
+                .andExpect(jsonPath("$.data.fundingSlices[0].sourceType", is("PROPERTY_SERVICE_CONTRACT")));
+
+        mockMvc.perform(get("/api/v1/admin/repair-projects/" + projectId + "/sourcing")
+                        .header("Authorization", bearer(propertyToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.selectionAuthorization.status", is("UNSUPPORTED_WORKFLOW")))
+                .andExpect(jsonPath("$.data.selectionAuthorization.blockingReason", is(
+                        "本工程已确认由物业服务合同责任方承担，不适用业主侧供应商定商；应按已确认责任依据另行执行")));
     }
 
     @Test
@@ -288,6 +402,77 @@ class RepairProjectFlowTest {
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
         return objectMapper.readTree(response).path("data");
+    }
+
+    /** 既有授权路径可直接进入授权后的执行锁定，不应被误当作新的相关业主决定。 */
+    private int confirmExistingAuthorizationSpecialFundResponsibility(
+            long projectId, int expectedProjectVersion) throws Exception {
+        return confirmSharedSpecialFundResponsibility(
+                projectId, expectedProjectVersion, "EXISTING_AUTHORIZATION", true);
+    }
+
+    /**
+     * 测试使用已归档的授权原件，并明确验证物业只能提出、治理角色才能确认；不允许由楼栋范围推断资金路径。
+     */
+    private int confirmSharedSpecialFundResponsibility(
+            long projectId, int expectedProjectVersion, String executionAuthorityType,
+            boolean assertPropertyCannotConfirm) throws Exception {
+        long basisAttachmentId = uploadProjectAttachment(
+                projectId, propertyToken, "专项维修资金责任认定依据.pdf", executionAuthorityType);
+        String proposedResponse = mockMvc.perform(post(
+                        "/api/v1/admin/repair-projects/" + projectId + "/responsibility-determinations")
+                        .header("Authorization", bearer(propertyToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "expectedProjectVersion", expectedProjectVersion,
+                                "responsibilityPath", "SHARED_COMMON_REPAIR",
+                                "fundingSourceType", "SPECIAL_MAINTENANCE_LEDGER",
+                                "executionAuthorityType", executionAuthorityType,
+                                "basisAttachmentId", basisAttachmentId,
+                                "basisReference", "已归档的相关业主授权及专项维修资金使用依据。",
+                                "approvedAmount", 2207))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.responsibilityDetermination.status", is("PENDING_CONFIRMATION")))
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+        JsonNode proposed = objectMapper.readTree(proposedResponse).path("data");
+        long determinationId = proposed.path("responsibilityDetermination").path("determinationId").asLong();
+        int confirmationVersion = proposed.path("project").path("version").asInt();
+
+        if (assertPropertyCannotConfirm) {
+            mockMvc.perform(post("/api/v1/admin/repair-projects/" + projectId
+                            + "/responsibility-determinations/" + determinationId + "/confirm")
+                            .header("Authorization", bearer(propertyToken))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(json(Map.of(
+                                    "expectedProjectVersion", confirmationVersion,
+                                    "confirmationNote", "物业无权自行确认。"))))
+                    .andExpect(status().isForbidden());
+        }
+
+        String confirmedResponse = mockMvc.perform(post("/api/v1/admin/repair-projects/" + projectId
+                        + "/responsibility-determinations/" + determinationId + "/confirm")
+                        .header("Authorization", bearer(committeeDirectorToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "expectedProjectVersion", confirmationVersion,
+                                "confirmationNote", "已核对授权原件、资金路径和本次预算上限。"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.responsibilityDetermination.status", is("CONFIRMED")))
+                .andExpect(jsonPath("$.data.responsibilityDetermination.confirmedByUserId",
+                        is((int) USER_COMMITTEE_DIRECTOR)))
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+        return objectMapper.readTree(confirmedResponse).path("data").path("project").path("version").asInt();
+    }
+
+    private long uploadProjectAttachment(long projectId, String token, String fileName, String content) throws Exception {
+        MockMultipartFile file = new MockMultipartFile(
+                "file", fileName, "application/pdf", content.getBytes(StandardCharsets.UTF_8));
+        String response = mockMvc.perform(multipart("/api/v1/admin/repair-projects/" + projectId + "/attachments")
+                        .file(file)
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+        return objectMapper.readTree(response).path("data").path("attachmentId").asLong();
     }
 
     private long createConfirmedBuildingSource(long sourceBuildingId) throws Exception {

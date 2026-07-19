@@ -160,32 +160,43 @@ class RepairProjectBuildingE2eFlowTest {
         assertEquals("OFFLINE_EVIDENCE_VERIFIED", quote.path("confirmationStatus").asText());
         assertEquals(0, QUOTE_AMOUNT.compareTo(quote.path("quoteAmount").decimalValue()));
 
-        JsonNode locked = postData(
-                "/api/v1/admin/repair-projects/" + projectId + "/plans/" + planId + "/lock",
-                propertyManagerToken, Map.of("expectedProjectVersion", project.path("project").path("version").asInt()));
-        assertEquals("PLAN_LOCKED", locked.path("project").path("status").asText());
-        assertEquals("SPECIAL_MAINTENANCE_LEDGER", locked.path("fundingSlices").get(0)
-                .path("sourceType").asText());
+        long responsibilityAttachmentId = uploadProjectAttachment(
+                projectId, propertyManagerToken, "工程责任与专项维修资金使用依据.pdf", "responsibility-basis");
+        JsonNode responsibility = postData(
+                "/api/v1/admin/repair-projects/" + projectId + "/responsibility-determinations",
+                propertyManagerToken, Map.of(
+                        "expectedProjectVersion", project.path("project").path("version").asInt(),
+                        "responsibilityPath", "SHARED_COMMON_REPAIR",
+                        "fundingSourceType", "SPECIAL_MAINTENANCE_LEDGER",
+                        "executionAuthorityType", "OWNER_DECISION",
+                        "basisAttachmentId", responsibilityAttachmentId,
+                        "basisReference", "本工程经勘验属于楼栋共有维修，需由相关业主决定后使用专项维修资金。",
+                        "approvedAmount", PLAN_BUDGET));
+        assertEquals("PENDING_CONFIRMATION", responsibility.path("responsibilityDetermination").path("status").asText());
+        JsonNode responsibilityConfirmed = postData(
+                "/api/v1/admin/repair-projects/" + projectId + "/responsibility-determinations/"
+                        + responsibility.path("responsibilityDetermination").path("determinationId").asLong() + "/confirm",
+                committeeDirectorToken, Map.of(
+                        "expectedProjectVersion", responsibility.path("project").path("version").asInt(),
+                        "confirmationNote", "已核验共有责任、专项维修资金路径和需要相关业主决定的执行依据。"));
+        assertEquals("CONFIRMED", responsibilityConfirmed.path("responsibilityDetermination").path("status").asText());
+
+        JsonNode frozen = postData(
+                "/api/v1/admin/repair-projects/" + projectId + "/plans/" + planId + "/freeze-for-authorization",
+                propertyManagerToken, Map.of("expectedProjectVersion",
+                        responsibilityConfirmed.path("project").path("version").asInt()));
+        assertEquals("AUTHORIZATION_IN_PROGRESS", frozen.path("project").path("status").asText());
+        assertEquals("AUTHORIZATION_FROZEN", frozen.path("plans").get(0).path("status").asText());
+        assertEquals(64, frozen.path("plans").get(0).path("authorizationSnapshotHash").asText().length());
         assertTrue(jdbcTemplate.queryForObject("""
                 SELECT COUNT(*) > 0
                 FROM t_repair_plan_allocation_room
                 WHERE plan_id = ?
                 """, Boolean.class, planId));
-        assertEquals(64, locked.path("plans").get(0).path("snapshotHash").asText().length());
-
-        // 锁定后既有报价仍可用于后续授权定商，但不能再更改参考询价。
-        mockMvc.perform(post(sourcingPath(projectId, "/invitations"))
-                        .header("Authorization", bearer(propertyManagerToken))
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(json(Map.of(
-                                "supplierDeptIds", List.of(supplierDeptId),
-                                "deadline", LocalDateTime.now().plusDays(3)))))
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.msg", is("当前项目不是实施方案草稿，不能修改参考询价")));
 
         JsonNode started = postData(
                 "/api/v1/admin/repair-projects/" + projectId + "/building-governance/start",
-                propertyManagerToken, Map.of("expectedProjectVersion", locked.path("project").path("version").asInt()));
+                propertyManagerToken, Map.of("expectedProjectVersion", frozen.path("project").path("version").asInt()));
         assertEquals("DECISION_COLLECTING", started.path("process").path("status").asText());
         assertEquals("WECHAT", started.path("decision").path("decisionChannel").asText());
 
@@ -249,6 +260,27 @@ class RepairProjectBuildingE2eFlowTest {
                 FROM t_repair_governance_basis
                 WHERE project_id = ? AND plan_id = ? AND status = 'ACTIVE'
                 """, Integer.class, projectId, planId));
+
+        int authorizedProjectVersion = jdbcTemplate.queryForObject(
+                "SELECT version FROM t_repair_project WHERE project_id = ?", Integer.class, projectId);
+        JsonNode locked = postData(
+                "/api/v1/admin/repair-projects/" + projectId + "/plans/" + planId + "/lock",
+                propertyManagerToken, Map.of("expectedProjectVersion", authorizedProjectVersion));
+        assertEquals("AUTHORIZED", locked.path("project").path("status").asText());
+        assertEquals("LOCKED", locked.path("plans").get(0).path("status").asText());
+        assertEquals("SPECIAL_MAINTENANCE_LEDGER", locked.path("fundingSlices").get(0)
+                .path("sourceType").asText());
+        assertEquals(64, locked.path("plans").get(0).path("snapshotHash").asText().length());
+
+        // 授权提案被冻结后，既有报价可读；完成授权和最终锁定后也不能再更改参考询价。
+        mockMvc.perform(post(sourcingPath(projectId, "/invitations"))
+                        .header("Authorization", bearer(propertyManagerToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "supplierDeptIds", List.of(supplierDeptId),
+                                "deadline", LocalDateTime.now().plusDays(3)))))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.msg", is("当前项目不是实施方案草稿，不能修改参考询价")));
 
         long selectionEvidenceAttachmentId = uploadProjectAttachment(
                 projectId, committeeDirectorToken, "施工单位评审记录.pdf", "supplier-selection-evidence");

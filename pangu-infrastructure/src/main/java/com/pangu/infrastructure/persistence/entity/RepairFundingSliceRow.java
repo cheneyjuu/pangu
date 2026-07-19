@@ -9,6 +9,7 @@ import java.time.LocalDateTime;
 @Data
 public class RepairFundingSliceRow {
     private Long fundingSliceId;
+    private Long responsibilityDeterminationId;
     private Long decisionScopeId;
     private Long projectId;
     private Long tenantId;

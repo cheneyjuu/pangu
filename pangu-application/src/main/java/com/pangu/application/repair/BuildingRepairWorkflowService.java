@@ -1,4 +1,4 @@
-// 关联业务：编排楼栋/单元维修接龙、物业报审、业委会审价审批盖章和授权依据。
+// 关联业务：编排楼栋/单元维修授权提案、相关业主决定、审价用印与授权后执行依据。
 package com.pangu.application.repair;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -94,11 +94,11 @@ public class BuildingRepairWorkflowService {
             throw invalid("expectedProjectVersion 必填");
         }
         RepairProject project = loadProjectForUpdate(projectId, actor.tenantId());
-        requireBuildingProject(project, Status.PLAN_LOCKED);
+        boolean authorizationProposal = requireBuildingProjectForDecisionStart(project);
         if (!project.version().equals(command.expectedProjectVersion())) {
             throw conflict("项目版本已变化，请刷新后再发起楼栋维修征询");
         }
-        PlanVersion plan = activeLockedPlan(project);
+        PlanVersion plan = activeAuthorizationPlan(project);
         RepairDecisionRule rule = decisionRuleRepository.findActive(project.tenantId())
                 .orElseThrow(() -> conflict("当前小区尚未备案有效的维修征询规则，禁止发起征询"));
         if (rule.nonResponseRule() != NonResponseRule.NOT_PARTICIPATED) {
@@ -134,7 +134,7 @@ public class BuildingRepairWorkflowService {
                 policy.policySnapshotId(), decision.decisionId(), BuildingProcessStatus.DECISION_COLLECTING,
                 null, null, null, null, null, null, null, null, null, null, null, null,
                 null, 0, null, null));
-        if (projectRepository.advanceStatus(
+        if (!authorizationProposal && projectRepository.advanceStatus(
                 project.projectId(), project.tenantId(), Status.PLAN_LOCKED,
                 Status.GOVERNANCE_IN_PROGRESS, project.version()) != 1) {
             throw conflict("项目状态已变化，请刷新后重试");
@@ -154,8 +154,8 @@ public class BuildingRepairWorkflowService {
             throw invalid("expectedProcessVersion 必填");
         }
         RepairProject project = loadProjectForUpdate(projectId, actor.tenantId());
-        requireBuildingProject(project, Status.GOVERNANCE_IN_PROGRESS);
-        PlanVersion plan = activeLockedPlan(project);
+        boolean authorizationProposal = requireBuildingProjectInAuthorization(project);
+        PlanVersion plan = activeAuthorizationPlan(project);
         BuildingProcess process = activeProcessForUpdate(project, plan);
         requireProcess(process, BuildingProcessStatus.DECISION_COLLECTING, command.expectedProcessVersion());
         BuildingDecision decision = governanceRepository.findBuildingDecision(
@@ -174,10 +174,16 @@ public class BuildingRepairWorkflowService {
                 process.processVersion()) != 1) {
             throw conflict("楼栋维修流程已变化，请刷新后重试");
         }
-        if (!passed && projectRepository.advanceStatus(
-                project.projectId(), project.tenantId(), Status.GOVERNANCE_IN_PROGRESS,
-                Status.PLAN_LOCKED, project.version()) != 1) {
-            throw conflict("项目状态已变化，请刷新后重试");
+        if (!passed) {
+            int updated = authorizationProposal
+                    ? projectRepository.reopenAfterAuthorizationFailure(
+                            project.projectId(), project.tenantId(), Status.AUTHORIZATION_IN_PROGRESS, project.version())
+                    : projectRepository.advanceStatus(
+                            project.projectId(), project.tenantId(), Status.GOVERNANCE_IN_PROGRESS,
+                            Status.PLAN_LOCKED, project.version());
+            if (updated != 1) {
+                throw conflict("项目状态已变化，请刷新后重试");
+            }
         }
         event(project, actor, "BUILDING_DECISION_COMPLETED", completion.eventPayload(process.processId()));
         return details(project, reloadProcess(project, plan));
@@ -191,8 +197,8 @@ public class BuildingRepairWorkflowService {
             throw invalid("expectedProcessVersion 和 attachmentId 均为必填项");
         }
         RepairProject project = loadProjectForUpdate(projectId, actor.tenantId());
-        requireBuildingProject(project, Status.GOVERNANCE_IN_PROGRESS);
-        PlanVersion plan = activeLockedPlan(project);
+        requireBuildingProjectInAuthorization(project);
+        PlanVersion plan = activeAuthorizationPlan(project);
         BuildingProcess process = activeProcessForUpdate(project, plan);
         requireProcess(process, BuildingProcessStatus.DECISION_PASSED, command.expectedProcessVersion());
         attachment(project, command.attachmentId(), this::isDocument, "物业正式报审文件");
@@ -212,8 +218,8 @@ public class BuildingRepairWorkflowService {
             throw invalid("expectedProcessVersion 必填");
         }
         RepairProject project = loadProjectForUpdate(projectId, actor.tenantId());
-        requireBuildingProject(project, Status.GOVERNANCE_IN_PROGRESS);
-        PlanVersion plan = activeLockedPlan(project);
+        boolean authorizationProposal = requireBuildingProjectInAuthorization(project);
+        PlanVersion plan = activeAuthorizationPlan(project);
         BuildingProcess process = activeProcessForUpdate(project, plan);
         requireProcess(process, BuildingProcessStatus.OFFICIAL_DOCUMENT_READY, command.expectedProcessVersion());
         String reviewMode = requireAllowed(command.reviewMode(), "reviewMode", REVIEW_MODES);
@@ -222,10 +228,10 @@ public class BuildingRepairWorkflowService {
             throw invalid("reviewedAmount 必须大于 0");
         }
         if (command.reviewedAmount().compareTo(plan.budgetTotal()) > 0) {
-            throw invalid("审价金额超过锁定方案预算，必须先形成新方案并重新履行楼栋决定");
+            throw invalid("审价金额超过授权提案预算，必须先形成新方案并重新履行楼栋决定");
         }
         if (plan.priceReviewRequired() && "NOT_REQUIRED".equals(reviewMode)) {
-            throw invalid("锁定方案要求审价，不能标记为无需审价");
+            throw invalid("授权提案要求审价，不能标记为无需审价");
         }
         if (!"NOT_REQUIRED".equals(reviewMode)) {
             if (command.reportAttachmentId() == null) {
@@ -239,10 +245,16 @@ public class BuildingRepairWorkflowService {
                 process.processVersion()) != 1) {
             throw conflict("楼栋维修流程已变化，请刷新后重试");
         }
-        if ("REJECTED".equals(conclusion) && projectRepository.advanceStatus(
-                project.projectId(), project.tenantId(), Status.GOVERNANCE_IN_PROGRESS,
-                Status.PLAN_LOCKED, project.version()) != 1) {
-            throw conflict("项目状态已变化，请刷新后重试");
+        if ("REJECTED".equals(conclusion)) {
+            int updated = authorizationProposal
+                    ? projectRepository.reopenAfterAuthorizationFailure(
+                            project.projectId(), project.tenantId(), Status.AUTHORIZATION_IN_PROGRESS, project.version())
+                    : projectRepository.advanceStatus(
+                            project.projectId(), project.tenantId(), Status.GOVERNANCE_IN_PROGRESS,
+                            Status.PLAN_LOCKED, project.version());
+            if (updated != 1) {
+                throw conflict("项目状态已变化，请刷新后重试");
+            }
         }
         event(project, actor, "BUILDING_PRICE_REVIEWED", Map.of(
                 "processId", process.processId(), "reviewMode", reviewMode,
@@ -257,8 +269,8 @@ public class BuildingRepairWorkflowService {
             throw invalid("expectedProcessVersion 必填");
         }
         RepairProject project = loadProjectForUpdate(projectId, actor.tenantId());
-        requireBuildingProject(project, Status.GOVERNANCE_IN_PROGRESS);
-        PlanVersion plan = activeLockedPlan(project);
+        requireBuildingProjectInAuthorization(project);
+        PlanVersion plan = activeAuthorizationPlan(project);
         BuildingProcess process = activeProcessForUpdate(project, plan);
         requireProcess(process, BuildingProcessStatus.PRICE_REVIEWED, command.expectedProcessVersion());
         String position = workOrderRepository.findActiveCommitteePosition(project.tenantId(), actor.userId())
@@ -288,8 +300,8 @@ public class BuildingRepairWorkflowService {
             throw invalid("expectedProcessVersion、sealedAttachmentId 和施工单位选择授权快照均为必填项");
         }
         RepairProject project = loadProjectForUpdate(projectId, actor.tenantId());
-        requireBuildingProject(project, Status.GOVERNANCE_IN_PROGRESS);
-        PlanVersion plan = activeLockedPlan(project);
+        boolean authorizationProposal = requireBuildingProjectInAuthorization(project);
+        PlanVersion plan = activeAuthorizationPlan(project);
         BuildingProcess process = activeProcessForUpdate(project, plan);
         requireProcess(process, BuildingProcessStatus.COMMITTEE_APPROVED, command.expectedProcessVersion());
         SupplierSelectionAuthorization authorization = validateSupplierSelectionAuthorization(
@@ -319,7 +331,7 @@ public class BuildingRepairWorkflowService {
             throw conflict("楼栋维修流程已变化，请刷新后重试");
         }
         String basisHash = sha256(String.join("|",
-                value(plan.snapshotHash()), value(process.processId()), value(policy.policySnapshotId()),
+                value(authorizationProposalSnapshotHash(plan)), value(process.processId()), value(policy.policySnapshotId()),
                 value(policy.ruleHash()), value(process.decisionId()), value(decision.result()),
                 value(process.reviewedAmount()), value(source.sha256()), value(sealed.sha256()),
                 value(authorization.selectionMethod()), value(authorization.evaluationRule()),
@@ -331,8 +343,9 @@ public class BuildingRepairWorkflowService {
                 basisHash, authorization.selectionMethod(), authorization.evaluationRule(),
                 authorization.minimumInvitedSupplierCount(), authorization.minimumValidQuoteCount(),
                 authorization.nonCompetitiveSelectionBasis(), actor.userId());
+        Status expectedStatus = authorizationProposal ? Status.AUTHORIZATION_IN_PROGRESS : Status.GOVERNANCE_IN_PROGRESS;
         if (projectRepository.advanceStatus(
-                project.projectId(), project.tenantId(), Status.GOVERNANCE_IN_PROGRESS,
+                project.projectId(), project.tenantId(), expectedStatus,
                 Status.AUTHORIZED, project.version()) != 1) {
             throw conflict("项目状态已变化，请刷新后重试");
         }
@@ -513,11 +526,15 @@ public class BuildingRepairWorkflowService {
         }
     }
 
-    private PlanVersion activeLockedPlan(RepairProject project) {
+    /** 返回当前决定/授权所依据的冻结提案；兼容历史已锁定项目，但新项目不会再以最终锁定发起决定。 */
+    private PlanVersion activeAuthorizationPlan(RepairProject project) {
+        PlanStatus expectedPlanStatus = project.status() == Status.AUTHORIZATION_IN_PROGRESS
+                ? PlanStatus.AUTHORIZATION_FROZEN
+                : PlanStatus.LOCKED;
         return projectRepository.listPlans(project.projectId(), project.tenantId()).stream()
-                .filter(plan -> plan.planId().equals(project.activePlanId()) && plan.status() == PlanStatus.LOCKED)
+                .filter(plan -> plan.planId().equals(project.activePlanId()) && plan.status() == expectedPlanStatus)
                 .findFirst()
-                .orElseThrow(() -> conflict("项目没有有效的锁定实施方案"));
+                .orElseThrow(() -> conflict("项目没有有效的授权提案或历史锁定实施方案"));
     }
 
     private Attachment attachment(
@@ -586,13 +603,44 @@ public class BuildingRepairWorkflowService {
                 authorization.selectionMethod(), authorization.evaluationRule(), invited, quotes, nonCompetitiveBasis);
     }
 
-    private void requireBuildingProject(RepairProject project, Status expectedStatus) {
+    /**
+     * 新项目从 AUTHORIZATION_IN_PROGRESS 的授权提案开始；PLAN_LOCKED 仅用于不中断历史项目。
+     */
+    private boolean requireBuildingProjectForDecisionStart(RepairProject project) {
         if (project.workflowType() != RepairWorkflowType.BUILDING_REPAIR) {
             throw invalid("全小区公共维修不能进入楼栋维修治理流程");
         }
-        if (project.status() != expectedStatus) {
-            throw conflict("当前项目状态不允许该动作 status=" + project.status());
+        if (project.status() == Status.AUTHORIZATION_IN_PROGRESS) {
+            return true;
         }
+        if (project.status() == Status.PLAN_LOCKED) {
+            return false;
+        }
+        throw conflict("当前项目状态不允许发起楼栋维修征询 status=" + project.status());
+    }
+
+    private boolean requireBuildingProjectInAuthorization(RepairProject project) {
+        if (project.workflowType() != RepairWorkflowType.BUILDING_REPAIR) {
+            throw invalid("全小区公共维修不能进入楼栋维修治理流程");
+        }
+        if (project.status() == Status.AUTHORIZATION_IN_PROGRESS) {
+            return true;
+        }
+        if (project.status() == Status.GOVERNANCE_IN_PROGRESS) {
+            return false;
+        }
+        throw conflict("当前项目状态不允许该授权动作 status=" + project.status());
+    }
+
+    private String authorizationProposalSnapshotHash(PlanVersion plan) {
+        String proposalHash = plan.authorizationSnapshotHash();
+        if (proposalHash != null) {
+            return proposalHash;
+        }
+        if (plan.snapshotHash() != null) {
+            return plan.snapshotHash();
+        }
+        throw conflict("项目缺少授权提案或历史锁定快照");
     }
 
     private RepairProject loadProjectForUpdate(Long projectId, Long tenantId) {

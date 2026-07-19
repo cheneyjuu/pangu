@@ -10,6 +10,9 @@ import com.pangu.domain.model.repair.RepairProject;
 import com.pangu.domain.model.repair.RepairProject.Attachment;
 import com.pangu.domain.model.repair.RepairProject.PlanStatus;
 import com.pangu.domain.model.repair.RepairProject.PlanVersion;
+import com.pangu.domain.model.repair.RepairProject.ResponsibilityDetermination;
+import com.pangu.domain.model.repair.RepairProject.ResponsibilityDeterminationStatus;
+import com.pangu.domain.model.repair.RepairProject.ResponsibilityPath;
 import com.pangu.domain.model.repair.RepairProject.Status;
 import com.pangu.domain.model.repair.RepairProject.WorkPoint;
 import com.pangu.domain.model.repair.RepairProjectSourcing;
@@ -413,6 +416,15 @@ public class RepairProjectSourcingService {
      */
     private SelectionAuthorization resolveSelectionAuthorization(
             RepairProject project, PlanVersion plan, UserContext actor) {
+        ResponsibilityDetermination determination = projectRepository.findCurrentResponsibilityDetermination(
+                        project.projectId(), project.tenantId())
+                .orElse(null);
+        if (determination != null
+                && determination.status() == ResponsibilityDeterminationStatus.CONFIRMED
+                && determination.responsibilityPath() != ResponsibilityPath.SHARED_COMMON_REPAIR) {
+            return unsupported("本工程已确认由" + directResponsibilityLabel(determination.responsibilityPath())
+                    + "承担，不适用业主侧供应商定商；应按已确认责任依据另行执行");
+        }
         if (project.workflowType() != RepairWorkflowType.BUILDING_REPAIR) {
             return unsupported("全小区维修尚未接入与楼栋流程等价的施工单位选择授权快照，不能最终定商");
         }
@@ -470,6 +482,16 @@ public class RepairProjectSourcingService {
                 basis.minimumInvitedSupplierCount(), basis.minimumValidQuoteCount(),
                 basis.nonCompetitiveSelectionBasis(), process.reviewedAmount(), basis.basisId(),
                 basis.snapshotHash(), process.processId(), decision.decisionId(), mayConfirm);
+    }
+
+    /** 直接责任路径不产生业主侧施工单位选择权，文案必须反映真实责任主体而非笼统报“未授权”。 */
+    private String directResponsibilityLabel(ResponsibilityPath responsibilityPath) {
+        return switch (responsibilityPath) {
+            case PROPERTY_SERVICE_CONTRACT -> "物业服务合同责任方";
+            case DEVELOPER_WARRANTY -> "建设单位保修责任方";
+            case LIABLE_PARTY -> "责任人或第三方";
+            case SHARED_COMMON_REPAIR -> throw new IllegalArgumentException("共有维修不属于直接责任路径");
+        };
     }
 
     private boolean authorizationStageReached(Status status) {

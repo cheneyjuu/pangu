@@ -1,4 +1,4 @@
-// 关联业务：持久化维修工程项目、单一决定范围、维修点位、可信资金切片、实施方案版本及项目附件。
+// 关联业务：持久化维修工程项目、责任认定、单一决定范围、可信资金切片、实施方案版本及项目附件。
 package com.pangu.domain.repository;
 
 import com.pangu.domain.model.repair.RepairProject;
@@ -8,6 +8,8 @@ import com.pangu.domain.model.repair.RepairProject.AllocationBasis;
 import com.pangu.domain.model.repair.RepairProject.Attachment;
 import com.pangu.domain.model.repair.RepairProject.DecisionScope;
 import com.pangu.domain.model.repair.RepairProject.FundingSlice;
+import com.pangu.domain.model.repair.RepairProject.ResponsibilityDetermination;
+import com.pangu.domain.model.repair.RepairProject.ResponsibilityDeterminationStatus;
 import com.pangu.domain.model.repair.RepairProject.EligibleAffectedOwner;
 import com.pangu.domain.model.repair.RepairProject.PlanAttachment;
 import com.pangu.domain.model.repair.RepairProject.PlanAffectedOwner;
@@ -33,6 +35,27 @@ public interface RepairProjectRepository {
             Long tenantId,
             RepairProject.DecisionScopeVerificationStatus verificationStatus,
             String verificationBasis);
+
+    /**
+     * 责任认定按项目版本保留；物业提出的新认定会替代当前待确认/已确认认定，但不会改写历史记录。
+     */
+    ResponsibilityDetermination insertResponsibilityDetermination(
+            ResponsibilityDetermination determination);
+
+    Optional<ResponsibilityDetermination> findCurrentResponsibilityDetermination(
+            Long projectId, Long tenantId);
+
+    List<ResponsibilityDetermination> listResponsibilityDeterminations(Long projectId, Long tenantId);
+
+    int supersedeCurrentResponsibilityDeterminations(Long projectId, Long tenantId);
+
+    int confirmResponsibilityDetermination(
+            Long determinationId,
+            Long projectId,
+            Long tenantId,
+            Long confirmedByAccountId,
+            Long confirmedByUserId,
+            String confirmationNote);
 
     /**
      * 资金切片只能由可信账簿/责任认定/决定适配器写入；建项草稿只读查询其冻结前置条件。
@@ -93,11 +116,33 @@ public interface RepairProjectRepository {
 
     Attachment insertAttachment(Attachment attachment);
 
+    /**
+     * 固定供业主决定或授权审查的提案版本；不会赋予施工、定商、合同或付款资格。
+     */
+    int freezePlanForAuthorization(Long planId, Long projectId, Long tenantId,
+                                   String authorizationSnapshotHash, Long frozenByUserId);
+
+    /** 将冻结提案设为当前待授权方案，并把项目推进到授权办理中。 */
+    int activateAuthorizationProposal(Long projectId, Long tenantId, Long planId, Integer expectedVersion);
+
+    /** 决定、审价或授权未通过时，保留失败提案证据并回到可修订的项目草稿。 */
+    int reopenAfterAuthorizationFailure(Long projectId, Long tenantId,
+                                        RepairProject.Status expectedStatus, Integer expectedVersion);
+
+    /**
+     * 写入最终实施方案锁定。调用方必须先校验决定/授权或直接执行依据；该方法本身不推导资金或授权。
+     */
     int lockPlan(Long planId, Long projectId, Long tenantId, String snapshotHash, Long lockedByUserId);
 
     int supersedeLockedPlans(Long projectId, Long tenantId, Long exceptPlanId);
 
-    int activatePlan(Long projectId, Long tenantId, Long planId, Integer expectedVersion);
+    /** 锁定后把当前实施方案与项目执行状态一起推进，支持直接责任路径和已授权共有维修路径。 */
+    int activateExecutionPlan(Long projectId, Long tenantId, Long planId,
+                              RepairProject.Status expectedStatus, RepairProject.Status nextStatus,
+                              Integer expectedVersion);
+
+    /** 认定等不改变项目状态的动作也必须推进项目版本，避免并发覆盖。 */
+    int advanceVersion(Long projectId, Long tenantId, Integer expectedVersion);
 
     int advanceStatus(Long projectId, Long tenantId, Status expectedStatus,
                       Status nextStatus, Integer expectedVersion);

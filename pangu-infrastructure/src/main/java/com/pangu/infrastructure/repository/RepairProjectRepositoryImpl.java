@@ -1,4 +1,4 @@
-// 关联业务：实现维修工程项目、单一决定范围、维修点位、可信资金切片、实施方案版本及项目附件的数据访问。
+// 关联业务：实现维修工程项目、责任认定、单一决定范围、维修点位、可信资金切片、实施方案版本及项目附件的数据访问。
 package com.pangu.infrastructure.repository;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -13,6 +13,7 @@ import com.pangu.domain.model.repair.RepairProject.EvidenceRequirement;
 import com.pangu.domain.model.repair.RepairProject.EligibleAffectedOwner;
 import com.pangu.domain.model.repair.RepairProject.DecisionScope;
 import com.pangu.domain.model.repair.RepairProject.FundingSlice;
+import com.pangu.domain.model.repair.RepairProject.ResponsibilityDetermination;
 import com.pangu.domain.model.repair.RepairProject.PaymentMilestone;
 import com.pangu.domain.model.repair.RepairProject.PlanAttachment;
 import com.pangu.domain.model.repair.RepairProject.PlanAffectedOwner;
@@ -32,6 +33,7 @@ import com.pangu.infrastructure.persistence.entity.RepairProjectAttachmentRow;
 import com.pangu.infrastructure.persistence.entity.RepairProjectProcessEventRow;
 import com.pangu.infrastructure.persistence.entity.RepairDecisionScopeRow;
 import com.pangu.infrastructure.persistence.entity.RepairFundingSliceRow;
+import com.pangu.infrastructure.persistence.entity.RepairResponsibilityDeterminationRow;
 import com.pangu.infrastructure.persistence.entity.RepairWorkPointRow;
 import com.pangu.infrastructure.persistence.entity.RepairProjectRow;
 import com.pangu.infrastructure.persistence.mapper.RepairProjectMapper;
@@ -92,6 +94,50 @@ public class RepairProjectRepositoryImpl implements RepairProjectRepository {
             String verificationBasis) {
         return mapper.updateDecisionScopeVerification(
                 projectId, tenantId, verificationStatus.name(), verificationBasis);
+    }
+
+    @Override
+    public ResponsibilityDetermination insertResponsibilityDetermination(
+            ResponsibilityDetermination determination) {
+        RepairResponsibilityDeterminationRow row = toRow(determination);
+        mapper.insertResponsibilityDetermination(row);
+        return mapper.listResponsibilityDeterminations(determination.projectId(), determination.tenantId()).stream()
+                .filter(candidate -> candidate.getDeterminationId().equals(row.getDeterminationId()))
+                .findFirst()
+                .map(this::toDomain)
+                .orElseThrow();
+    }
+
+    @Override
+    public Optional<ResponsibilityDetermination> findCurrentResponsibilityDetermination(
+            Long projectId, Long tenantId) {
+        return Optional.ofNullable(mapper.findCurrentResponsibilityDetermination(projectId, tenantId))
+                .map(this::toDomain);
+    }
+
+    @Override
+    public List<ResponsibilityDetermination> listResponsibilityDeterminations(
+            Long projectId, Long tenantId) {
+        return mapper.listResponsibilityDeterminations(projectId, tenantId).stream()
+                .map(this::toDomain)
+                .toList();
+    }
+
+    @Override
+    public int supersedeCurrentResponsibilityDeterminations(Long projectId, Long tenantId) {
+        return mapper.supersedeCurrentResponsibilityDeterminations(projectId, tenantId);
+    }
+
+    @Override
+    public int confirmResponsibilityDetermination(
+            Long determinationId,
+            Long projectId,
+            Long tenantId,
+            Long confirmedByAccountId,
+            Long confirmedByUserId,
+            String confirmationNote) {
+        return mapper.confirmResponsibilityDetermination(
+                determinationId, projectId, tenantId, confirmedByAccountId, confirmedByUserId, confirmationNote);
     }
 
     @Override
@@ -248,6 +294,25 @@ public class RepairProjectRepositoryImpl implements RepairProjectRepository {
     }
 
     @Override
+    public int freezePlanForAuthorization(
+            Long planId, Long projectId, Long tenantId, String authorizationSnapshotHash, Long frozenByUserId) {
+        return mapper.freezePlanForAuthorization(
+                planId, projectId, tenantId, authorizationSnapshotHash, frozenByUserId);
+    }
+
+    @Override
+    public int activateAuthorizationProposal(Long projectId, Long tenantId, Long planId, Integer expectedVersion) {
+        return mapper.activateAuthorizationProposal(projectId, tenantId, planId, expectedVersion);
+    }
+
+    @Override
+    public int reopenAfterAuthorizationFailure(
+            Long projectId, Long tenantId, Status expectedStatus, Integer expectedVersion) {
+        return mapper.reopenAfterAuthorizationFailure(
+                projectId, tenantId, expectedStatus.name(), expectedVersion);
+    }
+
+    @Override
     public int lockPlan(Long planId, Long projectId, Long tenantId, String snapshotHash, Long lockedByUserId) {
         return mapper.lockPlan(planId, projectId, tenantId, snapshotHash, lockedByUserId);
     }
@@ -258,8 +323,16 @@ public class RepairProjectRepositoryImpl implements RepairProjectRepository {
     }
 
     @Override
-    public int activatePlan(Long projectId, Long tenantId, Long planId, Integer expectedVersion) {
-        return mapper.activatePlan(projectId, tenantId, planId, expectedVersion);
+    public int activateExecutionPlan(
+            Long projectId, Long tenantId, Long planId, Status expectedStatus, Status nextStatus,
+            Integer expectedVersion) {
+        return mapper.activateExecutionPlan(
+                projectId, tenantId, planId, expectedStatus.name(), nextStatus.name(), expectedVersion);
+    }
+
+    @Override
+    public int advanceVersion(Long projectId, Long tenantId, Integer expectedVersion) {
+        return mapper.advanceVersion(projectId, tenantId, expectedVersion);
     }
 
     @Override
@@ -339,7 +412,9 @@ public class RepairProjectRepositoryImpl implements RepairProjectRepository {
                 enumOrNull(RepairProject.GovernancePath.class, row.getGovernancePath()),
                 Integer.valueOf(1).equals(row.getPriceReviewRequired()),
                 readJson(row.getPaymentMilestonesJson(), PAYMENT_MILESTONES_TYPE),
-                RepairProject.PlanStatus.valueOf(row.getStatus()), row.getSnapshotHash(),
+                RepairProject.PlanStatus.valueOf(row.getStatus()),
+                row.getAuthorizationSnapshotHash(), row.getAuthorizationFrozenByUserId(),
+                row.getAuthorizationFrozenAt(), row.getSnapshotHash(),
                 row.getCreatedByAccountId(), row.getCreatedByUserId(), row.getLockedByUserId(),
                 row.getCreateTime(), row.getLockedAt());
     }
@@ -389,7 +464,8 @@ public class RepairProjectRepositoryImpl implements RepairProjectRepository {
 
     private FundingSlice toDomain(RepairFundingSliceRow row) {
         return new FundingSlice(
-                row.getFundingSliceId(), row.getDecisionScopeId(), row.getProjectId(), row.getTenantId(),
+                row.getFundingSliceId(), row.getResponsibilityDeterminationId(), row.getDecisionScopeId(),
+                row.getProjectId(), row.getTenantId(),
                 RepairProject.FundingSourceType.valueOf(row.getSourceType()), row.getSourceRecordType(),
                 row.getSourceRecordId(), row.getLedgerReference(), row.getAllocationSnapshotHash(),
                 row.getApprovedAmount(), RepairProject.FundingSliceVerificationStatus.valueOf(
@@ -400,6 +476,7 @@ public class RepairProjectRepositoryImpl implements RepairProjectRepository {
     private RepairFundingSliceRow toRow(FundingSlice fundingSlice) {
         RepairFundingSliceRow row = new RepairFundingSliceRow();
         row.setFundingSliceId(fundingSlice.fundingSliceId());
+        row.setResponsibilityDeterminationId(fundingSlice.responsibilityDeterminationId());
         row.setDecisionScopeId(fundingSlice.decisionScopeId());
         row.setProjectId(fundingSlice.projectId());
         row.setTenantId(fundingSlice.tenantId());
@@ -413,6 +490,45 @@ public class RepairProjectRepositoryImpl implements RepairProjectRepository {
         row.setLegacyReadOnly(fundingSlice.legacyReadOnly());
         row.setVerifiedAt(fundingSlice.verifiedAt());
         row.setCreateTime(fundingSlice.createTime());
+        return row;
+    }
+
+    private ResponsibilityDetermination toDomain(RepairResponsibilityDeterminationRow row) {
+        return new ResponsibilityDetermination(
+                row.getDeterminationId(), row.getProjectId(), row.getTenantId(), row.getVersionNo(),
+                RepairProject.ResponsibilityDeterminationStatus.valueOf(row.getStatus()),
+                RepairProject.ResponsibilityPath.valueOf(row.getResponsibilityPath()),
+                RepairProject.FundingSourceType.valueOf(row.getFundingSourceType()),
+                RepairProject.ExecutionAuthorityType.valueOf(row.getExecutionAuthorityType()),
+                row.getBasisAttachmentId(), row.getBasisReference(), row.getResponsiblePartyName(),
+                row.getResponsiblePartyReference(), row.getApprovedAmount(), row.getProposedByAccountId(),
+                row.getProposedByUserId(), row.getProposedAt(), row.getConfirmedByAccountId(),
+                row.getConfirmedByUserId(), row.getConfirmedAt(), row.getConfirmationNote(), row.getCreateTime());
+    }
+
+    private RepairResponsibilityDeterminationRow toRow(ResponsibilityDetermination determination) {
+        RepairResponsibilityDeterminationRow row = new RepairResponsibilityDeterminationRow();
+        row.setDeterminationId(determination.determinationId());
+        row.setProjectId(determination.projectId());
+        row.setTenantId(determination.tenantId());
+        row.setVersionNo(determination.versionNo());
+        row.setStatus(determination.status().name());
+        row.setResponsibilityPath(determination.responsibilityPath().name());
+        row.setFundingSourceType(determination.fundingSourceType().name());
+        row.setExecutionAuthorityType(determination.executionAuthorityType().name());
+        row.setBasisAttachmentId(determination.basisAttachmentId());
+        row.setBasisReference(determination.basisReference());
+        row.setResponsiblePartyName(determination.responsiblePartyName());
+        row.setResponsiblePartyReference(determination.responsiblePartyReference());
+        row.setApprovedAmount(determination.approvedAmount());
+        row.setProposedByAccountId(determination.proposedByAccountId());
+        row.setProposedByUserId(determination.proposedByUserId());
+        row.setProposedAt(determination.proposedAt());
+        row.setConfirmedByAccountId(determination.confirmedByAccountId());
+        row.setConfirmedByUserId(determination.confirmedByUserId());
+        row.setConfirmedAt(determination.confirmedAt());
+        row.setConfirmationNote(determination.confirmationNote());
+        row.setCreateTime(determination.createTime());
         return row;
     }
 

@@ -62,7 +62,7 @@ class RepairProjectGovernanceFlowTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"expectedProjectVersion\":0}"))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.msg", is("当前项目状态不允许该动作 status=DRAFT")));
+                .andExpect(jsonPath("$.msg", is("当前项目状态不允许发起楼栋维修征询 status=DRAFT")));
 
         assertEquals("DRAFT", jdbcTemplate.queryForObject(
                 "SELECT status FROM t_repair_project WHERE project_id = ?", String.class, projectId));

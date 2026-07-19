@@ -1,4 +1,4 @@
-// 关联业务：映射维修工程不可变实施方案版本及锁定快照。
+// 关联业务：映射维修工程的授权提案冻结与授权后不可变实施方案锁定快照。
 package com.pangu.infrastructure.persistence.entity;
 
 import lombok.Data;
@@ -37,6 +37,9 @@ public class RepairPlanVersionRow {
     private Integer priceReviewRequired;
     private String paymentMilestonesJson;
     private String status;
+    private String authorizationSnapshotHash;
+    private Long authorizationFrozenByUserId;
+    private LocalDateTime authorizationFrozenAt;
     private String snapshotHash;
     private Long createdByAccountId;
     private Long createdByUserId;

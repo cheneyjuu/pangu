@@ -1,4 +1,4 @@
-// 关联业务：暴露维修工程筹备草稿、决定范围复核、实施方案版本、项目附件和方案冻结后台接口。
+// 关联业务：暴露维修工程筹备草稿、责任认定、决定范围复核、实施方案版本、项目附件和方案冻结后台接口。
 package com.pangu.interfaces.web.controller;
 
 import com.pangu.application.repair.RepairProjectAttachmentService;
@@ -14,7 +14,9 @@ import com.pangu.domain.model.repair.RepairProject.Attachment;
 import com.pangu.interfaces.web.controller.dto.PageResponse;
 import com.pangu.interfaces.web.controller.dto.repair.CreateRepairPlanVersionRequest;
 import com.pangu.interfaces.web.controller.dto.repair.CreateRepairProjectRequest;
+import com.pangu.interfaces.web.controller.dto.repair.ConfirmRepairResponsibilityDeterminationRequest;
 import com.pangu.interfaces.web.controller.dto.repair.LockRepairPlanRequest;
+import com.pangu.interfaces.web.controller.dto.repair.ProposeRepairResponsibilityDeterminationRequest;
 import com.pangu.interfaces.web.controller.dto.repair.RepairAttachmentDownloadTicketResponse;
 import com.pangu.interfaces.web.controller.dto.repair.RepairPlanAttachmentLinkRequest;
 import com.pangu.interfaces.web.controller.dto.repair.RepairNarrativeImageResponse;
@@ -124,6 +126,29 @@ public class RepairProjectController extends BaseController {
                 projectService.reverifyDecisionScope(projectId, request.expectedProjectVersion()));
     }
 
+    /**
+     * 物业可提出本工程的责任、资金承担和执行依据；该动作只形成待确认版本，不产生锁定或付款资格。
+     */
+    @PostMapping("/{projectId}/responsibility-determinations")
+    @PreAuthorize("hasAuthority('repair:workorder:manage')")
+    public Result<RepairProject.Details> proposeResponsibilityDetermination(
+            @PathVariable("projectId") Long projectId,
+            @Valid @RequestBody ProposeRepairResponsibilityDeterminationRequest request) {
+        return success("工程责任认定已提交确认",
+                projectService.proposeResponsibilityDetermination(projectId, request.toCommand()));
+    }
+
+    /** 有治理权限的主体确认责任、资金承担和执行依据；附件上传本身不会越过该确认。 */
+    @PostMapping("/{projectId}/responsibility-determinations/{determinationId}/confirm")
+    @PreAuthorize("hasAuthority('repair:workorder:governance')")
+    public Result<RepairProject.Details> confirmResponsibilityDetermination(
+            @PathVariable("projectId") Long projectId,
+            @PathVariable("determinationId") Long determinationId,
+            @Valid @RequestBody ConfirmRepairResponsibilityDeterminationRequest request) {
+        return success("工程责任认定已确认", projectService.confirmResponsibilityDetermination(
+                projectId, determinationId, request.toCommand()));
+    }
+
     @PostMapping("/{projectId}/plans/{planId}/attachments")
     @PreAuthorize("hasAuthority('repair:workorder:manage')")
     public Result<RepairProject.Details> linkPlanAttachment(
@@ -132,6 +157,19 @@ public class RepairProjectController extends BaseController {
             @Valid @RequestBody RepairPlanAttachmentLinkRequest request) {
         return success("实施方案附件已关联", projectService.linkDraftPlanAttachment(
                 projectId, planId, request.attachmentId(), request.purpose()));
+    }
+
+    /**
+     * 冻结供相关业主决定或授权审查的提案，不等同于最终实施方案锁定。
+     */
+    @PostMapping("/{projectId}/plans/{planId}/freeze-for-authorization")
+    @PreAuthorize("hasAuthority('repair:workorder:manage')")
+    public Result<RepairProject.Details> freezePlanForAuthorization(
+            @PathVariable("projectId") Long projectId,
+            @PathVariable("planId") Long planId,
+            @Valid @RequestBody LockRepairPlanRequest request) {
+        return success("授权提案已冻结",
+                projectService.freezePlanForAuthorization(projectId, planId, request.expectedProjectVersion()));
     }
 
     @PostMapping("/{projectId}/plans/{planId}/lock")

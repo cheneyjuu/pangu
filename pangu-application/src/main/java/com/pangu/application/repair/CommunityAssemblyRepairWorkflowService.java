@@ -1,4 +1,4 @@
-// 关联业务：编排全小区公共维修项目与正式业主大会会议、表决包和单个事项的关联及结算。
+// 关联业务：编排全体共用维修授权提案与正式业主大会会议、表决包和单个事项的关联及结算。
 package com.pangu.application.repair;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -68,11 +68,11 @@ public class CommunityAssemblyRepairWorkflowService {
             throw invalid("expectedProjectVersion、packageId 和 subjectId 均为必填项");
         }
         RepairProject project = loadProjectForUpdate(projectId, actor.tenantId());
-        requireCommunityProject(project, Status.PLAN_LOCKED);
+        boolean authorizationProposal = requireCommunityProjectForAuthorizationStart(project);
         if (!project.version().equals(command.expectedProjectVersion())) {
             throw conflict("项目版本已变化，请刷新后再关联业主大会事项");
         }
-        PlanVersion plan = activeLockedPlan(project);
+        PlanVersion plan = activeAuthorizationPlan(project);
         OwnersAssemblyPackage ballotPackage = ownersAssemblyRepository
                 .findPackage(command.packageId(), project.tenantId())
                 .orElseThrow(() -> notFound("业主大会表决包不存在"));
@@ -92,7 +92,7 @@ public class CommunityAssemblyRepairWorkflowService {
                 null, project.projectId(), plan.planId(), project.tenantId(), ballotPackage.sessionId(),
                 ballotPackage.packageId(), subject.getSubjectId(), AssemblyLinkStatus.LINKED,
                 null, actor.userId(), null, null, null));
-        if (projectRepository.advanceStatus(
+        if (!authorizationProposal && projectRepository.advanceStatus(
                 project.projectId(), project.tenantId(), Status.PLAN_LOCKED,
                 Status.GOVERNANCE_IN_PROGRESS, project.version()) != 1) {
             throw conflict("项目状态已变化，请刷新后重试");
@@ -111,11 +111,11 @@ public class CommunityAssemblyRepairWorkflowService {
             throw invalid("expectedProjectVersion 必填");
         }
         RepairProject project = loadProjectForUpdate(projectId, actor.tenantId());
-        requireCommunityProject(project, Status.GOVERNANCE_IN_PROGRESS);
+        boolean authorizationProposal = requireCommunityProjectInAuthorization(project);
         if (!project.version().equals(command.expectedProjectVersion())) {
             throw conflict("项目版本已变化，请刷新后再读取业主大会结果");
         }
-        PlanVersion plan = activeLockedPlan(project);
+        PlanVersion plan = activeAuthorizationPlan(project);
         AssemblySubjectLink link = governanceRepository.findAssemblySubjectLinkForUpdate(
                         project.projectId(), plan.planId(), project.tenantId())
                 .orElseThrow(() -> notFound("维修项目尚未关联业主大会事项"));
@@ -142,19 +142,32 @@ public class CommunityAssemblyRepairWorkflowService {
                 link.linkId(), project.tenantId(), governanceResult.name(), actor.userId()) != 1) {
             throw conflict("业主大会事项关联状态已变化，请刷新后重试");
         }
-        Status nextStatus = result.passed() ? Status.AUTHORIZED : Status.PLAN_LOCKED;
         if (result.passed()) {
             String basisHash = sha256(String.join("|",
-                    plan.snapshotHash(), value(ballotPackage.packageHash()), link.subjectId().toString(),
+                    authorizationProposalSnapshotHash(plan), value(ballotPackage.packageHash()), link.subjectId().toString(),
                     value(result.attestationTxHash())));
             governanceRepository.insertGovernanceBasis(
                     project.projectId(), plan.planId(), project.tenantId(),
                     "COMMUNITY_ASSEMBLY_DECISION", "ASSEMBLY_SUBJECT", link.subjectId(),
                     basisHash, null, null, null, null, null, actor.userId());
         }
-        if (projectRepository.advanceStatus(
-                project.projectId(), project.tenantId(), Status.GOVERNANCE_IN_PROGRESS,
-                nextStatus, project.version()) != 1) {
+        int updated;
+        if (result.passed()) {
+            Status expectedStatus = authorizationProposal
+                    ? Status.AUTHORIZATION_IN_PROGRESS
+                    : Status.GOVERNANCE_IN_PROGRESS;
+            updated = projectRepository.advanceStatus(
+                    project.projectId(), project.tenantId(), expectedStatus,
+                    Status.AUTHORIZED, project.version());
+        } else if (authorizationProposal) {
+            updated = projectRepository.reopenAfterAuthorizationFailure(
+                    project.projectId(), project.tenantId(), Status.AUTHORIZATION_IN_PROGRESS, project.version());
+        } else {
+            updated = projectRepository.advanceStatus(
+                    project.projectId(), project.tenantId(), Status.GOVERNANCE_IN_PROGRESS,
+                    Status.PLAN_LOCKED, project.version());
+        }
+        if (updated != 1) {
             throw conflict("项目状态已变化，请刷新后重试");
         }
         event(project, actor, "COMMUNITY_ASSEMBLY_SUBJECT_SETTLED", Map.of(
@@ -179,20 +192,51 @@ public class CommunityAssemblyRepairWorkflowService {
                 .orElseThrow(() -> notFound("全小区维修业主大会事项关联不存在"));
     }
 
-    private void requireCommunityProject(RepairProject project, Status status) {
+    /** 新项目以授权提案进入业主大会；PLAN_LOCKED 仅用于兼容已在办理的历史项目。 */
+    private boolean requireCommunityProjectForAuthorizationStart(RepairProject project) {
         if (project.workflowType() != RepairWorkflowType.COMMUNITY_PUBLIC_REPAIR) {
             throw invalid("楼栋维修不能进入全小区业主大会流程");
         }
-        if (project.status() != status) {
-            throw conflict("当前项目状态不允许该动作 status=" + project.status());
+        if (project.status() == Status.AUTHORIZATION_IN_PROGRESS) {
+            return true;
         }
+        if (project.status() == Status.PLAN_LOCKED) {
+            return false;
+        }
+        throw conflict("当前项目状态不允许关联业主大会事项 status=" + project.status());
     }
 
-    private PlanVersion activeLockedPlan(RepairProject project) {
+    private boolean requireCommunityProjectInAuthorization(RepairProject project) {
+        if (project.workflowType() != RepairWorkflowType.COMMUNITY_PUBLIC_REPAIR) {
+            throw invalid("楼栋维修不能进入全小区业主大会流程");
+        }
+        if (project.status() == Status.AUTHORIZATION_IN_PROGRESS) {
+            return true;
+        }
+        if (project.status() == Status.GOVERNANCE_IN_PROGRESS) {
+            return false;
+        }
+        throw conflict("当前项目状态不允许结算业主大会事项 status=" + project.status());
+    }
+
+    private PlanVersion activeAuthorizationPlan(RepairProject project) {
+        PlanStatus expectedPlanStatus = project.status() == Status.AUTHORIZATION_IN_PROGRESS
+                ? PlanStatus.AUTHORIZATION_FROZEN
+                : PlanStatus.LOCKED;
         return projectRepository.listPlans(project.projectId(), project.tenantId()).stream()
-                .filter(plan -> plan.planId().equals(project.activePlanId()) && plan.status() == PlanStatus.LOCKED)
+                .filter(plan -> plan.planId().equals(project.activePlanId()) && plan.status() == expectedPlanStatus)
                 .findFirst()
-                .orElseThrow(() -> conflict("项目没有有效的锁定实施方案"));
+                .orElseThrow(() -> conflict("项目没有有效的授权提案或历史锁定实施方案"));
+    }
+
+    private String authorizationProposalSnapshotHash(PlanVersion plan) {
+        if (plan.authorizationSnapshotHash() != null) {
+            return plan.authorizationSnapshotHash();
+        }
+        if (plan.snapshotHash() != null) {
+            return plan.snapshotHash();
+        }
+        throw conflict("项目缺少授权提案或历史锁定快照");
     }
 
     private RepairProject loadProjectForUpdate(Long projectId, Long tenantId) {

@@ -1,4 +1,4 @@
-// 关联业务：维修工程项目、单一决定范围、维修点位、资金切片、不可变实施方案及项目附件。
+// 关联业务：维修工程项目、责任认定、单一决定范围、资金切片、不可变实施方案及项目附件。
 package com.pangu.domain.model.repair;
 
 import java.math.BigDecimal;
@@ -48,9 +48,40 @@ public record RepairProject(
     public enum FundingSourceType {
         SPECIAL_MAINTENANCE_LEDGER,
         PUBLIC_REVENUE_LEDGER,
+        PROPERTY_SERVICE_CONTRACT,
         LIABLE_PARTY,
         DEVELOPER_WARRANTY,
         OWNER_SELF_FUNDING
+    }
+
+    /**
+     * 本次工程由谁承担的认定路径。它不由楼栋、设备名称或报修来源自动推导。
+     */
+    public enum ResponsibilityPath {
+        PROPERTY_SERVICE_CONTRACT,
+        DEVELOPER_WARRANTY,
+        LIABLE_PARTY,
+        SHARED_COMMON_REPAIR
+    }
+
+    /**
+     * 允许形成执行快照的依据类型。相关业主决定与既有授权必须以独立证据确认，不能由物业勾选替代。
+     */
+    public enum ExecutionAuthorityType {
+        CONTRACTUAL_EXECUTION,
+        WARRANTY_EXECUTION,
+        LIABILITY_EXECUTION,
+        OWNER_DECISION,
+        EXISTING_AUTHORIZATION,
+        EMERGENCY_REPAIR
+    }
+
+    /** 项目责任认定的确认生命周期；新认定不能覆盖已确认历史。 */
+    public enum ResponsibilityDeterminationStatus {
+        PENDING_CONFIRMATION,
+        CONFIRMED,
+        SUPERSEDED,
+        REJECTED
     }
 
     /** 资金来源、承担范围和金额快照的核验状态。 */
@@ -67,6 +98,10 @@ public record RepairProject(
 
     public enum Status {
         DRAFT,
+        /**
+         * 已冻结供相关业主决定或授权审查的方案，但尚未形成可施工、可定商或可付款的执行快照。
+         */
+        AUTHORIZATION_IN_PROGRESS,
         PLAN_LOCKED,
         GOVERNANCE_IN_PROGRESS,
         AUTHORIZED,
@@ -81,6 +116,10 @@ public record RepairProject(
 
     public enum PlanStatus {
         DRAFT,
+        /**
+         * 为决定/授权固定的提案版本；它不是实施锁定，不能据此签约、定商或付款。
+         */
+        AUTHORIZATION_FROZEN,
         LOCKED,
         SUPERSEDED
     }
@@ -196,6 +235,9 @@ public record RepairProject(
             boolean priceReviewRequired,
             List<PaymentMilestone> paymentMilestones,
             PlanStatus status,
+            String authorizationSnapshotHash,
+            Long authorizationFrozenByUserId,
+            LocalDateTime authorizationFrozenAt,
             String snapshotHash,
             Long createdByAccountId,
             Long createdByUserId,
@@ -219,7 +261,8 @@ public record RepairProject(
                     evidenceRequirements, safetyRequirements, acceptanceMethod, requiredAcceptanceRoles,
                     affectedOwnerScopeDescription, minimumAffectedOwnerAcceptors, affectedOwnerPassRule,
                     affectedOwnerApprovalRatio, settlementMethod, plannedStartDate, plannedCompletionDate,
-                    warrantyDays, governancePath, priceReviewRequired, paymentMilestones, status, snapshotHash,
+                    warrantyDays, governancePath, priceReviewRequired, paymentMilestones, status,
+                    authorizationSnapshotHash, authorizationFrozenByUserId, authorizationFrozenAt, snapshotHash,
                     createdByAccountId, createdByUserId, lockedByUserId, createTime, lockedAt);
         }
     }
@@ -240,10 +283,39 @@ public record RepairProject(
     }
 
     /**
+     * 工程责任、资金承担和执行依据的版本化事实。物业只能提出，具有治理权限的主体确认后才可参与锁定。
+     */
+    public record ResponsibilityDetermination(
+            Long determinationId,
+            Long projectId,
+            Long tenantId,
+            Integer versionNo,
+            ResponsibilityDeterminationStatus status,
+            ResponsibilityPath responsibilityPath,
+            FundingSourceType fundingSourceType,
+            ExecutionAuthorityType executionAuthorityType,
+            Long basisAttachmentId,
+            String basisReference,
+            String responsiblePartyName,
+            String responsiblePartyReference,
+            BigDecimal approvedAmount,
+            Long proposedByAccountId,
+            Long proposedByUserId,
+            LocalDateTime proposedAt,
+            Long confirmedByAccountId,
+            Long confirmedByUserId,
+            LocalDateTime confirmedAt,
+            String confirmationNote,
+            LocalDateTime createTime
+    ) {
+    }
+
+    /**
      * 资金承担的最小不可伪造关系。来源记录由可信账簿/责任认定/有效决定适配器写入，建项表单不得直接写入。
      */
     public record FundingSlice(
             Long fundingSliceId,
+            Long responsibilityDeterminationId,
             Long decisionScopeId,
             Long projectId,
             Long tenantId,
@@ -409,6 +481,8 @@ public record RepairProject(
     public record Details(
             RepairProject project,
             DecisionScope decisionScope,
+            ResponsibilityDetermination responsibilityDetermination,
+            List<ResponsibilityDetermination> responsibilityDeterminationHistory,
             List<PlanVersion> plans,
             List<WorkPoint> currentPlanWorkPoints,
             List<FundingSlice> fundingSlices,
@@ -417,6 +491,9 @@ public record RepairProject(
             List<PlanAttachment> currentPlanAttachments
     ) {
         public Details {
+            responsibilityDeterminationHistory = responsibilityDeterminationHistory == null
+                    ? List.of()
+                    : List.copyOf(responsibilityDeterminationHistory);
             plans = plans == null ? List.of() : List.copyOf(plans);
             currentPlanWorkPoints = currentPlanWorkPoints == null
                     ? List.of()

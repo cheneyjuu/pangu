@@ -99,42 +99,20 @@ _Avoid_: 投票范围（中文歧义大）
 
 ### 维修资金与议案绑定
 
-**议案-账户严格 1:1 绑定 (Strict Subject-Account Binding)**:
-议案 [VotingScope] 与资金账户 `t_maintenance_fund_account.account_level` 严格一一对应：`COMMUNITY → 1` / `BUILDING → 2` / `UNIT → 3`，绑定 `reference_id` 完全一致的唯一账户（`uk_fund_level_ref` 兜底）。**禁止跨级动用**——`BUILDING` 议案不可动用 `COMMUNITY` 全局账户，`UNIT` 议案不可动用 `BUILDING` 账户。法律依据：《民法典》第 278 条第 6/7 款"局部共有物业的维修资金由局部共有人按份额分摊"——专项维修资金账户的物权归属严格按楼栋/单元划分，跨级动用即侵权。`VotingResolutionService.resolveAndAllocate(...)` 在议案过半决议时按 `subject.scope → account_level` 唯一定位 + 冻结 `frozen_balance`，工程完结时核销。
-_Avoid_: 跨级兜底、组合分摊、向上申请（B/C 方案均破坏物权归属）
+**决定范围不等于资金路径**:
+`VotingScope` 只决定共同权利人的决定范围和计票基数，不能从 `BUILDING`、`UNIT` 或 `COMMUNITY` 直接推导专项维修资金、公共收益、物业合同、保修或责任人承担。每个维修工程必须先有经确认的责任认定，再以该认定的资金路径和真实账簿/责任依据生成后续快照。
 
-**公共收益账户唯一例外 (Common Revenue Single Exception)**:
-[议案-账户严格 1:1 绑定] 的唯一例外：**`COMMUNITY` 议案** 可同时动用 `account_level=1` 维修资金 + 公共收益账户（`t_common_revenue_account`）两类资金，议案在表决时声明各自分摊金额，两笔分别冻结。理由：公共收益本质是"全小区业主共有的物业租赁/广告收益"，归属与 COMMUNITY 维修资金一致，不破坏物权对齐。**`BUILDING`/`UNIT` 议案不可动用公共收益**——同样违反"局部分摊"原则。
-_Avoid_: 公共收益分摊、跨账户支付（前者太宽，后者掩盖了"仅 COMMUNITY 议案"这一硬约束）
+**专项维修资金账簿校验**:
+确认走专项维修资金的工程，才按其已确认的费用承担范围读取对应可信账簿并核验可用余额。没有账簿或余额不足时，系统可以保留报修、勘验、草案和参考询价，但不能形成最终实施方案锁定、定商、合同或付款资格。账簿层级与范围对应关系必须来自当地实际账户结构，不能由界面默认值或跨级兜底补造。
 
-**议案登记预校验 (Pre-Registration Budget Check)**:
-议案登记瞬间（`VotingSubjectRegistrationService.register(...)`）**强制**预校验 `subject.budget ≤ account.availableBalance()`，超额直接抛 `INSUFFICIENT_FUND_BALANCE`，议案进不了表决。**预校验前置到登记**而非延后到决议——杜绝"业主投票通过了一个根本没钱执行的议案"的尴尬，避免议案过期或被打回的浪费。代价：业委会登记议案时得先与物业核对账户余额，门槛上升但合理。预算超额的三条法定出路（写 PRD 不写代码兜底）：(1) 业主临时加征（最常用）；(2) 议案降标重投；(3) 业主大会动议调整资金分摊模式（罕见）。
-_Avoid_: 预算校验、资金校验（语义太弱，没体现"登记瞬间"这一时点）
+**公共收益是独立路径，不是专项维修资金的补足项**:
+公共收益的归属、用途、授权和账簿必须独立确认。属于专项维修资金使用范围的工程不得因为专项维修资金不足而改以公共收益绕过该路径；未接入可信公共收益余额和授权快照时，也不得生成最终实施方案锁定。
 
-**议案登记预冻结 (Pre-Registration Fund Freeze)**:
-议案登记瞬间在**同事务**内冻结对应预算 `account.frozen_balance += budget`，扩展 V2.2 `frozen_balance` 注释"已立项工程占用"为"任何活跃议案对账户的预占用"。落地三层并发防御：(1) `SELECT FOR UPDATE` 锁账户行；(2) 乐观锁 `version` 兜底；(3) DB CHECK `chk_fund_acc_frozen_le_total CHECK (frozen_balance <= total_balance)` 终极兜底。议案 `REJECTED`/`EXPIRED` 终态时 `frozen -= budget` unfreeze；`EXECUTED_COMPLETED` 时 `total -= 实际花销, frozen -= budget`，差额释放回 available。**与 [议案登记预校验] 的关系**：登记瞬间预校验仅判 `budget ≤ available`，预冻结改的是"available 怎么算"——任何活跃议案对账户都立即占用，杜绝议案 A 表决期间议案 B 看到"假可用"余额的 race condition。
-_Avoid_: 议案预占、登记冻结（前者太弱，后者没说清"事务内+三层并发防御"）
+**授权提案冻结与最终实施锁定分离**:
+需要相关业主决定或业主大会授权的工程，先冻结工程范围、预算、费用承担基数和施工单位选择规则，作为不可变的授权提案；该阶段不冻结余额、不产生中选、合同或付款资格。决定/授权生效后，服务端重新校验责任认定、授权依据和资金账簿，再形成最终实施方案锁定。未通过的提案回到草案修订，原提案和结果只读留痕。
 
-**议案最大生命周期 (Subject Lifecycle Bounds)**:
-两条强制时限避免"幽灵议案"永久占用 `frozen_balance`：
-- **最大表决期 30 日**：议案登记后 30 日内业委会必须发起表决，超期 → `EXPIRED_NO_VOTE` 自动释放冻结；
-- **最大执行期 90 日**：议案通过后 90 日内物业 / G 端必须执行性落库（与 [议案有效期] 90 日机制对齐），超期 → `EXPIRED_NO_EXECUTION` 自动释放。
-
-由 `SubjectLifecycleScheduler` 每日 00:30 扫描批量推进。
-_Avoid_: 议案过期（语义重叠 [议案有效期]——前者是 [议案最大生命周期] 内的子机制，后者特指模式切换议案）
-
-**防囤积三层阈值 (Hoarding Prevention Three-Tier)**:
-[议案登记预冻结] 的反恶意囤积兜底——业委会主任不能登记 10 个议案瞬间锁死整个账户：
-- **L1（单议案占比）**：`subject.budget ≤ account.availableBalance × 60%`（单议案不能吃掉一个账户 > 60%）；
-- **L2（同账户活跃数）**：同 `account_id` 同时最多 3 个 `REGISTERED/IN_VOTE` 状态议案；
-- **L3（同发起人速率）**：同 `proposer_user_id` 7 日内最多发 5 个议案。
-
-任一超限抛 `SUBJECT_HOARDING_REJECTED`，议案进不了表决。三层叠加足以阻断 99% 资源耗尽攻击且不压制正常议案。三个阈值落 `application.yml` 的 `platform.voting.hoarding-prevention.{single-budget-ratio, account-active-limit, proposer-weekly-limit}`，方便基于线上数据微调。
-_Avoid_: 频次限制、流量控制（前者太弱，后者技术词错位）
-
-**议案账户余额可见性 (Subject-Account Balance Visibility)**:
-C 端业主端账户余额必须**区分总余额 / 可用余额 / 冻结明细**三个数字：(1) 总余额 = `total_balance`；(2) 可用余额 = `total_balance - frozen_balance`；(3) 冻结明细 = 当前所有占用 `frozen_balance` 的议案列表（议案 ID / 标题 / 预算 / 状态 / 发起人）。**杜绝**业主端只显示 total 不显示 frozen——业主必须知道"小区账上有 100 万但能动的只有 30 万"，否则会误以为账户钱多但议案总通不过。
-_Avoid_: 余额公示（语义太弱，没说清"三数字必现 + 冻结明细必列"）
+**余额披露**:
+对已接入的专项维修资金或公共收益账簿，业主侧应区分总余额、已占用/冻结金额、可用余额和占用依据；未接入的账簿必须明确标示为“尚未接入可信账簿”，不能展示推算余额。
 
 ### G 端公共维修前置审查
 

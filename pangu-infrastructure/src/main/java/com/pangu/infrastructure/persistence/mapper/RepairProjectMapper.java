@@ -1,4 +1,4 @@
-// 关联业务：读写维修工程项目、单一决定范围、维修点位、可信资金切片、不可变实施方案及项目附件。
+// 关联业务：读写维修工程项目、责任认定、单一决定范围、可信资金切片、不可变实施方案及项目附件。
 package com.pangu.infrastructure.persistence.mapper;
 
 import com.pangu.infrastructure.persistence.entity.RepairPlanAllocationRoomRow;
@@ -11,6 +11,7 @@ import com.pangu.infrastructure.persistence.entity.RepairProjectAttachmentRow;
 import com.pangu.infrastructure.persistence.entity.RepairProjectProcessEventRow;
 import com.pangu.infrastructure.persistence.entity.RepairDecisionScopeRow;
 import com.pangu.infrastructure.persistence.entity.RepairFundingSliceRow;
+import com.pangu.infrastructure.persistence.entity.RepairResponsibilityDeterminationRow;
 import com.pangu.infrastructure.persistence.entity.RepairWorkPointRow;
 import com.pangu.infrastructure.persistence.entity.RepairProjectRow;
 import org.apache.ibatis.annotations.Mapper;
@@ -57,6 +58,26 @@ public interface RepairProjectMapper {
                                         @Param("tenantId") Long tenantId,
                                         @Param("verificationStatus") String verificationStatus,
                                         @Param("verificationBasis") String verificationBasis);
+
+    int insertResponsibilityDetermination(RepairResponsibilityDeterminationRow row);
+
+    RepairResponsibilityDeterminationRow findCurrentResponsibilityDetermination(
+            @Param("projectId") Long projectId,
+            @Param("tenantId") Long tenantId);
+
+    List<RepairResponsibilityDeterminationRow> listResponsibilityDeterminations(
+            @Param("projectId") Long projectId,
+            @Param("tenantId") Long tenantId);
+
+    int supersedeCurrentResponsibilityDeterminations(@Param("projectId") Long projectId,
+                                                     @Param("tenantId") Long tenantId);
+
+    int confirmResponsibilityDetermination(@Param("determinationId") Long determinationId,
+                                           @Param("projectId") Long projectId,
+                                           @Param("tenantId") Long tenantId,
+                                           @Param("confirmedByAccountId") Long confirmedByAccountId,
+                                           @Param("confirmedByUserId") Long confirmedByUserId,
+                                           @Param("confirmationNote") String confirmationNote);
 
     List<RepairFundingSliceRow> listFundingSlices(@Param("decisionScopeId") Long decisionScopeId,
                                                    @Param("tenantId") Long tenantId);
@@ -118,6 +139,22 @@ public interface RepairProjectMapper {
     List<RepairPlanAttachmentRow> listPlanAttachments(@Param("planId") Long planId,
                                                       @Param("tenantId") Long tenantId);
 
+    int freezePlanForAuthorization(@Param("planId") Long planId,
+                                   @Param("projectId") Long projectId,
+                                   @Param("tenantId") Long tenantId,
+                                   @Param("authorizationSnapshotHash") String authorizationSnapshotHash,
+                                   @Param("frozenByUserId") Long frozenByUserId);
+
+    int activateAuthorizationProposal(@Param("projectId") Long projectId,
+                                      @Param("tenantId") Long tenantId,
+                                      @Param("planId") Long planId,
+                                      @Param("expectedVersion") Integer expectedVersion);
+
+    int reopenAfterAuthorizationFailure(@Param("projectId") Long projectId,
+                                        @Param("tenantId") Long tenantId,
+                                        @Param("expectedStatus") String expectedStatus,
+                                        @Param("expectedVersion") Integer expectedVersion);
+
     int lockPlan(@Param("planId") Long planId,
                  @Param("projectId") Long projectId,
                  @Param("tenantId") Long tenantId,
@@ -128,10 +165,16 @@ public interface RepairProjectMapper {
                              @Param("tenantId") Long tenantId,
                              @Param("exceptPlanId") Long exceptPlanId);
 
-    int activatePlan(@Param("projectId") Long projectId,
-                     @Param("tenantId") Long tenantId,
-                     @Param("planId") Long planId,
-                     @Param("expectedVersion") Integer expectedVersion);
+    int activateExecutionPlan(@Param("projectId") Long projectId,
+                              @Param("tenantId") Long tenantId,
+                              @Param("planId") Long planId,
+                              @Param("expectedStatus") String expectedStatus,
+                              @Param("nextStatus") String nextStatus,
+                              @Param("expectedVersion") Integer expectedVersion);
+
+    int advanceVersion(@Param("projectId") Long projectId,
+                       @Param("tenantId") Long tenantId,
+                       @Param("expectedVersion") Integer expectedVersion);
 
     int advanceStatus(@Param("projectId") Long projectId,
                       @Param("tenantId") Long tenantId,
