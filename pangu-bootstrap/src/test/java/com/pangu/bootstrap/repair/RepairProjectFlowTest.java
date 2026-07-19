@@ -171,7 +171,7 @@ class RepairProjectFlowTest {
                         .content(json(buildingRequest(workPoints))))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.msg", is(
-                        "来源报修事项不属于当前决定范围 workOrderId=" + otherScopeSource)));
+                        "来源报修事项不属于当前决定范围（报修事项编号：" + otherScopeSource + "）")));
     }
 
     @Test
@@ -193,7 +193,7 @@ class RepairProjectFlowTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(Map.of("expectedProjectVersion", 0))))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.msg", is("决定范围尚待核验，不能锁定实施方案")));
+                .andExpect(jsonPath("$.msg", is("维修范围尚待核对，不能确认实施方案")));
     }
 
     @Test
@@ -210,7 +210,7 @@ class RepairProjectFlowTest {
                 .content(json(Map.of("expectedProjectVersion", 0))))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.msg", is(
-                        "工程责任或资金承担初判尚待确认，不能锁定实施方案")));
+                        "责任与费用初步意见尚待业委会确认，不能确认实施方案")));
     }
 
     @Test
@@ -252,7 +252,7 @@ class RepairProjectFlowTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(Map.of("expectedProjectVersion", lockVersion))))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.msg", is("需先冻结相关业主决定提案并完成有效相关业主决定，不能锁定实施方案")));
+                .andExpect(jsonPath("$.msg", is("请先提交实施方案并完成相关业主表决，再确认最终实施方案")));
     }
 
     @Test
@@ -316,7 +316,7 @@ class RepairProjectFlowTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.selectionAuthorization.status", is("UNSUPPORTED_WORKFLOW")))
                 .andExpect(jsonPath("$.data.selectionAuthorization.blockingReason", is(
-                        "本工程已确认由物业服务合同责任方承担，不适用业主侧供应商定商；应按已确认责任依据另行执行")));
+                        "本工程已确认由物业服务合同责任方承担，应按相应合同、保修或责任材料办理，无需由业主另行确定施工单位")));
 
         mockMvc.perform(post("/api/v1/admin/repair-projects/" + projectId + "/contract")
                         .header("Authorization", bearer(propertyToken))
@@ -357,7 +357,7 @@ class RepairProjectFlowTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(request)))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.msg", is("planDescription 必填")));
+                .andExpect(jsonPath("$.msg", is("问题与维修方案 必填")));
     }
 
     private JsonNode createProject(Map<String, Object> request) throws Exception {

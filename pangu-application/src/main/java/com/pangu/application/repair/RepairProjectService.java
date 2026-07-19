@@ -91,9 +91,9 @@ public class RepairProjectService {
     public RepairProject.Details createProject(CreateRepairProjectCommand command) {
         UserContext actor = requireActor();
         if (command == null || command.plan() == null) {
-            throw invalid("project 和 plan 均为必填项");
+            throw invalid("项目范围和初步方案均为必填项");
         }
-        String projectName = requireText(command.projectName(), "projectName");
+        String projectName = requireText(command.projectName(), "项目名称");
         String unitName = normalizeUnitName(command.scopeType(), command.unitName());
         validateScopeShape(command.scopeType(), command.buildingId(), unitName);
         validateBuilding(actor.tenantId(), command.scopeType(), command.buildingId());
@@ -121,7 +121,7 @@ public class RepairProjectService {
     public RepairProject.Details createPlanVersion(Long projectId, CreateRepairPlanVersionCommand command) {
         UserContext actor = requireActor();
         if (command == null || command.plan() == null || command.expectedProjectVersion() == null) {
-            throw invalid("expectedProjectVersion 和 plan 均为必填项");
+            throw invalid("项目版本和实施方案均为必填项，请刷新后重试");
         }
         RepairProject project = loadProjectForUpdate(projectId, actor.tenantId());
         if (!Objects.equals(project.version(), command.expectedProjectVersion())) {
@@ -130,16 +130,16 @@ public class RepairProjectService {
         }
         if (project.status() != Status.DRAFT) {
             throw new RepairWorkOrderApplicationException(
-                    INVALID_STATUS, "当前项目状态不能修改实施方案 status=" + project.status());
+                    INVALID_STATUS, "当前办理进度不能修改实施方案，请刷新后查看");
         }
         List<PlanVersion> plans = projectRepository.listPlans(projectId, actor.tenantId());
         if (plans.stream().anyMatch(plan -> plan.status() == PlanStatus.DRAFT)) {
-            throw new RepairWorkOrderApplicationException(INVALID_STATUS, "当前项目已有未锁定的实施方案草稿");
+            throw new RepairWorkOrderApplicationException(INVALID_STATUS, "当前项目已有实施方案草稿");
         }
         int nextVersion = plans.stream().mapToInt(PlanVersion::versionNo).max().orElse(0) + 1;
         DecisionScope decisionScope = projectRepository.findDecisionScope(projectId, actor.tenantId())
                 .orElseThrow(() -> new RepairWorkOrderApplicationException(
-                        INVALID_STATUS, "项目缺少唯一决定范围快照，不能创建新方案"));
+                        INVALID_STATUS, "项目维修范围尚未确认，不能创建新方案"));
         if (decisionScope.legacyReadOnly()) {
             throw new RepairWorkOrderApplicationException(
                     INVALID_STATUS, "历史只读项目不能写入新维修点位方案");
@@ -157,7 +157,7 @@ public class RepairProjectService {
     public RepairProject.Details reverifyDecisionScope(Long projectId, Integer expectedProjectVersion) {
         UserContext actor = requireActor();
         if (expectedProjectVersion == null) {
-            throw invalid("expectedProjectVersion 必填");
+            throw invalid("项目版本信息缺失，请刷新后重试");
         }
         RepairProject project = loadProjectForUpdate(projectId, actor.tenantId());
         if (!Objects.equals(project.version(), expectedProjectVersion)) {
@@ -170,7 +170,7 @@ public class RepairProjectService {
         }
         DecisionScope current = projectRepository.findDecisionScope(projectId, actor.tenantId())
                 .orElseThrow(() -> new RepairWorkOrderApplicationException(
-                        INVALID_STATUS, "项目缺少唯一决定范围快照"));
+                        INVALID_STATUS, "项目维修范围尚未确认"));
         if (current.legacyReadOnly()) {
             throw new RepairWorkOrderApplicationException(INVALID_STATUS, "历史只读项目不能重新核验决定范围");
         }
@@ -205,13 +205,13 @@ public class RepairProjectService {
             Long projectId, ProposeRepairResponsibilityDeterminationCommand command) {
         UserContext actor = requirePropertyResponsibilityProposer();
         if (command == null || command.expectedProjectVersion() == null) {
-            throw invalid("expectedProjectVersion 必填");
+            throw invalid("项目版本信息缺失，请刷新后重试");
         }
         RepairProject project = loadProjectForUpdate(projectId, actor.tenantId());
         requireDraftProjectVersion(project, command.expectedProjectVersion(), "提交工程责任初判");
         DecisionScope decisionScope = projectRepository.findDecisionScope(projectId, actor.tenantId())
                 .orElseThrow(() -> new RepairWorkOrderApplicationException(
-                        INVALID_STATUS, "项目缺少唯一决定范围快照"));
+                        INVALID_STATUS, "项目维修范围尚未确认"));
         currentDraftPlan(projectId, actor.tenantId());
         projectRepository.findAttachment(command.basisAttachmentId(), projectId, actor.tenantId())
                 .orElseThrow(() -> notFound("工程责任初判依据附件不存在"));
@@ -220,14 +220,14 @@ public class RepairProjectService {
                 ResponsibilityDeterminationStatus.PENDING_CONFIRMATION,
                 command.responsibilityPath(), command.fundingSourceType(),
                 deriveExecutionAuthority(command.responsibilityPath()),
-                command.basisAttachmentId(), requireText(command.basisReference(), "basisReference"),
+                command.basisAttachmentId(), requireText(command.basisReference(), "判断依据说明"),
                 trim(command.responsiblePartyName()), trim(command.responsiblePartyReference()),
                 actor.accountId(), actor.userId(),
                 LocalDateTime.now(), null, null, null, null, null);
         validateResponsibilityDetermination(determination, decisionScope);
         if (!projectRepository.listFundingSlices(decisionScope.decisionScopeId(), actor.tenantId()).isEmpty()) {
             throw new RepairWorkOrderApplicationException(
-                    INVALID_STATUS, "项目已有可信资金切片，不能直接替换工程责任初判");
+                    INVALID_STATUS, "项目已经形成费用承担记录，不能直接替换责任与费用初步意见");
         }
         projectRepository.supersedeCurrentResponsibilityDeterminations(projectId, actor.tenantId());
         ResponsibilityDetermination proposed = projectRepository.insertResponsibilityDetermination(determination);
@@ -254,7 +254,7 @@ public class RepairProjectService {
             ConfirmRepairResponsibilityDeterminationCommand command) {
         UserContext actor = requireGovernanceActor();
         if (command == null || command.expectedProjectVersion() == null) {
-            throw invalid("expectedProjectVersion 必填");
+            throw invalid("项目版本信息缺失，请刷新后重试");
         }
         RepairProject project = loadProjectForUpdate(projectId, actor.tenantId());
         requireDraftProjectVersion(project, command.expectedProjectVersion(), "确认工程责任初判");
@@ -268,7 +268,7 @@ public class RepairProjectService {
         }
         DecisionScope decisionScope = projectRepository.findDecisionScope(projectId, actor.tenantId())
                 .orElseThrow(() -> new RepairWorkOrderApplicationException(
-                        INVALID_STATUS, "项目缺少唯一决定范围快照"));
+                        INVALID_STATUS, "项目维修范围尚未确认"));
         currentDraftPlan(projectId, actor.tenantId());
         projectRepository.findAttachment(current.basisAttachmentId(), projectId, actor.tenantId())
                 .orElseThrow(() -> notFound("工程责任初判依据附件不存在"));
@@ -284,7 +284,7 @@ public class RepairProjectService {
             throw new RepairWorkOrderApplicationException(INVALID_STATUS, "工程责任初判已变化，请刷新后再确认");
         }
         if (projectRepository.advanceVersion(projectId, actor.tenantId(), command.expectedProjectVersion()) != 1) {
-            throw new RepairWorkOrderApplicationException(INVALID_STATUS, "项目版本已变化，请刷新后再确认工程责任初判");
+            throw new RepairWorkOrderApplicationException(INVALID_STATUS, "项目内容已变化，请刷新后再确认责任与费用意见");
         }
         event(project, actor, "RESPONSIBILITY_DETERMINATION_CONFIRMED", Map.of(
                 "determinationId", current.determinationId(),
@@ -301,13 +301,13 @@ public class RepairProjectService {
             Long projectId, Long planId, Long attachmentId, AttachmentPurpose purpose) {
         UserContext actor = requireActor();
         if (purpose == null) {
-            throw invalid("purpose 必填");
+            throw invalid("请选择材料用途");
         }
         RepairProject project = loadProjectForUpdate(projectId, actor.tenantId());
         PlanVersion plan = projectRepository.findPlanForUpdate(planId, projectId, actor.tenantId())
                 .orElseThrow(() -> notFound("实施方案不存在"));
         if (plan.status() != PlanStatus.DRAFT) {
-            throw new RepairWorkOrderApplicationException(INVALID_STATUS, "锁定方案不能再绑定附件");
+            throw new RepairWorkOrderApplicationException(INVALID_STATUS, "已确认的实施方案不能再添加附件");
         }
         projectRepository.findAttachment(attachmentId, projectId, actor.tenantId())
                 .orElseThrow(() -> notFound("项目附件不存在"));
@@ -333,24 +333,24 @@ public class RepairProjectService {
             Long projectId, Long planId, Integer expectedProjectVersion) {
         UserContext actor = requireActor();
         if (expectedProjectVersion == null) {
-            throw invalid("expectedProjectVersion 必填");
+            throw invalid("项目版本信息缺失，请刷新后重试");
         }
         RepairProject project = loadProjectForUpdate(projectId, actor.tenantId());
-        requireDraftProjectVersion(project, expectedProjectVersion, "冻结相关业主决定提案");
+        requireDraftProjectVersion(project, expectedProjectVersion, "提交实施方案");
         PlanVersion plan = projectRepository.findPlanForUpdate(planId, projectId, actor.tenantId())
                 .orElseThrow(() -> notFound("实施方案不存在"));
         if (plan.status() != PlanStatus.DRAFT) {
-            throw new RepairWorkOrderApplicationException(INVALID_STATUS, "当前实施方案不能冻结为相关业主决定提案");
+            throw new RepairWorkOrderApplicationException(INVALID_STATUS, "当前实施方案已经提交或确认，请刷新后查看");
         }
-        DecisionScope decisionScope = requireConfirmedDecisionScope(projectId, actor.tenantId(), "冻结相关业主决定提案");
+        DecisionScope decisionScope = requireConfirmedDecisionScope(projectId, actor.tenantId(), "提交实施方案");
         ResponsibilityDetermination determination = requireConfirmedResponsibilityDetermination(
-                projectId, actor.tenantId(), "冻结相关业主决定提案");
+                projectId, actor.tenantId(), "提交实施方案");
         if (determination.responsibilityPath() != ResponsibilityPath.SHARED_COMMON_REPAIR
                 || determination.executionAuthorityType() != ExecutionAuthorityType.OWNER_DECISION) {
             throw new RepairWorkOrderApplicationException(
-                    INVALID_STATUS, "只有已确认需相关业主决定的共有维修可以冻结相关业主决定提案");
+                    INVALID_STATUS, "只有属于共有部位维修且需相关业主表决的项目，才能提交本实施方案");
         }
-        List<WorkPoint> workPoints = requireWorkPoints(plan.planId(), actor.tenantId(), "冻结相关业主决定提案");
+        List<WorkPoint> workPoints = requireWorkPoints(plan.planId(), actor.tenantId(), "提交实施方案");
         List<AllocationRoom> allocationRooms = projectRepository.snapshotAllocationRooms(
                 plan.planId(), actor.tenantId(), decisionScope.scopeType(),
                 decisionScope.buildingId(), decisionScope.unitName());
@@ -362,7 +362,7 @@ public class RepairProjectService {
                 allocationSnapshotHash);
         if (projectRepository.freezePlanForAuthorization(
                 planId, projectId, actor.tenantId(), authorizationSnapshotHash, actor.userId()) != 1) {
-            throw new RepairWorkOrderApplicationException(INVALID_STATUS, "相关业主决定提案冻结失败，请刷新后重试");
+            throw new RepairWorkOrderApplicationException(INVALID_STATUS, "实施方案提交失败，请刷新后重试");
         }
         if (projectRepository.activateAuthorizationProposal(
                 projectId, actor.tenantId(), planId, expectedProjectVersion) != 1) {
@@ -387,44 +387,44 @@ public class RepairProjectService {
     public RepairProject.Details lockPlan(Long projectId, Long planId, Integer expectedProjectVersion) {
         UserContext actor = requireActor();
         if (expectedProjectVersion == null) {
-            throw invalid("expectedProjectVersion 必填");
+            throw invalid("项目版本信息缺失，请刷新后重试");
         }
         RepairProject project = loadProjectForUpdate(projectId, actor.tenantId());
         if (!Objects.equals(project.version(), expectedProjectVersion)) {
-            throw new RepairWorkOrderApplicationException(INVALID_STATUS, "项目版本已变化，请刷新后再锁定");
+            throw new RepairWorkOrderApplicationException(INVALID_STATUS, "项目内容已变化，请刷新后再确认实施方案");
         }
         PlanVersion plan = projectRepository.findPlanForUpdate(planId, projectId, actor.tenantId())
                 .orElseThrow(() -> notFound("实施方案不存在"));
-        DecisionScope decisionScope = requireConfirmedDecisionScope(projectId, actor.tenantId(), "锁定实施方案");
+        DecisionScope decisionScope = requireConfirmedDecisionScope(projectId, actor.tenantId(), "确认实施方案");
         ResponsibilityDetermination determination = requireConfirmedResponsibilityDetermination(
-                projectId, actor.tenantId(), "锁定实施方案");
-        List<WorkPoint> workPoints = requireWorkPoints(plan.planId(), actor.tenantId(), "锁定实施方案");
+                projectId, actor.tenantId(), "确认实施方案");
+        List<WorkPoint> workPoints = requireWorkPoints(plan.planId(), actor.tenantId(), "确认实施方案");
 
         boolean ownerDecisionRoute = determination.responsibilityPath() == ResponsibilityPath.SHARED_COMMON_REPAIR;
         if (ownerDecisionRoute && determination.executionAuthorityType() != ExecutionAuthorityType.OWNER_DECISION) {
             throw new RepairWorkOrderApplicationException(
-                    INVALID_STATUS, "共有维修执行状态异常，请重新确认责任初判后取得相关业主决定");
+                    INVALID_STATUS, "本项目的责任与费用意见不完整，请重新确认后再发起相关业主表决");
         }
         GovernanceBasis governanceBasis = null;
         List<AllocationRoom> allocationRooms;
         if (ownerDecisionRoute) {
             if (project.status() != Status.AUTHORIZED || plan.status() != PlanStatus.AUTHORIZATION_FROZEN) {
                 throw new RepairWorkOrderApplicationException(
-                        INVALID_STATUS, "需先冻结相关业主决定提案并完成有效相关业主决定，不能锁定实施方案");
+                        INVALID_STATUS, "请先提交实施方案并完成相关业主表决，再确认最终实施方案");
             }
             governanceBasis = governanceRepository.findActiveGovernanceBasis(
                             projectId, planId, actor.tenantId())
                     .orElseThrow(() -> new RepairWorkOrderApplicationException(
-                            INVALID_STATUS, "项目缺少与相关业主决定提案对应的有效相关业主决定快照，不能锁定实施方案"));
+                            INVALID_STATUS, "当前实施方案缺少对应的相关业主表决结果，请补齐后再确认"));
             allocationRooms = projectRepository.listAllocationRooms(plan.planId(), actor.tenantId());
             if (allocationRooms.isEmpty()) {
                 throw new RepairWorkOrderApplicationException(
-                        INVALID_STATUS, "相关业主决定提案缺少费用承担房屋快照，不能锁定实施方案");
+                        INVALID_STATUS, "相关业主表决材料缺少费用分摊房屋范围，请补齐后再确认");
             }
         } else {
             if (project.status() != Status.DRAFT || plan.status() != PlanStatus.DRAFT) {
                 throw new RepairWorkOrderApplicationException(
-                        INVALID_STATUS, "当前项目状态不能按直接责任履行路径锁定实施方案 status=" + project.status());
+                        INVALID_STATUS, "当前项目状态不能确认责任方履行方案，请刷新后查看");
             }
             allocationRooms = determination.responsibilityPath() == ResponsibilityPath.SHARED_COMMON_REPAIR
                     ? projectRepository.snapshotAllocationRooms(
@@ -442,7 +442,7 @@ public class RepairProjectService {
                 project, decisionScope, determination, plan, workPoints, allocationRooms, allocationBasis,
                 allocationSnapshotHash))) {
             throw new RepairWorkOrderApplicationException(
-                    INVALID_STATUS, "相关业主决定提案快照与当前不可变事实不一致，不能锁定实施方案");
+                    INVALID_STATUS, "当前实施方案与相关业主表决材料不一致，请核对后再确认");
         }
         List<FundingSlice> fundingSlices = resolveFundingSlices(
                 project, decisionScope, determination, plan, allocationSnapshotHash, actor.tenantId());
@@ -452,7 +452,7 @@ public class RepairProjectService {
                 project, decisionScope, determination, governanceBasis, plan, workPoints,
                 allocationRooms, allocationBasis, fundingSlices);
         if (projectRepository.lockPlan(planId, projectId, actor.tenantId(), snapshotHash, actor.userId()) != 1) {
-            throw new RepairWorkOrderApplicationException(INVALID_STATUS, "实施方案锁定失败，请刷新后重试");
+            throw new RepairWorkOrderApplicationException(INVALID_STATUS, "实施方案确认失败，请刷新后重试");
         }
         projectRepository.supersedeLockedPlans(projectId, actor.tenantId(), planId);
         Status expectedStatus = ownerDecisionRoute ? Status.AUTHORIZED : Status.DRAFT;
@@ -506,7 +506,7 @@ public class RepairProjectService {
             int versionNo,
             UserContext actor) {
         if (draft == null) {
-            throw invalid("plan 必填");
+            throw invalid("实施方案必填");
         }
         // 草稿只保存预算、点位与来源；资金、治理、验收、付款和定商必须由后续可信快照提供。
         PlanNarratives narratives = sanitizeNarratives(draft);
@@ -541,19 +541,19 @@ public class RepairProjectService {
             WorkPointLocation location = validateWorkPointLocation(project, draft);
             for (Long workOrderId : new LinkedHashSet<>(draft.linkedWorkOrderIds())) {
                 if (workOrderId == null) {
-                    throw invalid("workPoints.linkedWorkOrderIds 不能包含空值");
+                    throw invalid("关联报修事项不能包含空项");
                 }
                 linkedWorkOrders.computeIfAbsent(
                         workOrderId, ignored -> validateLinkedWorkOrder(project, decisionScope, workOrderId));
             }
             WorkPoint workPoint = projectRepository.insertWorkPoint(new WorkPoint(
                     null, project.projectId(), plan.planId(), project.tenantId(),
-                    requireText(draft.businessName(), "workPoints.businessName"),
+                    requireText(draft.businessName(), "维修对象名称"),
                     location.buildingId(), location.unitName(), location.locationType(),
                     location.referenceRoomId(), location.commonAreaName(), trim(draft.spaceName()),
                     trim(draft.orientation()), trim(draft.component()), trim(draft.specificPart()),
-                    requireText(draft.symptom(), "workPoints.symptom"), draft.causeStatus(), trim(draft.causeBasis()),
-                    requireText(draft.proposedMeasure(), "workPoints.proposedMeasure"),
+                    requireText(draft.symptom(), "问题现象"), draft.causeStatus(), trim(draft.causeBasis()),
+                    requireText(draft.proposedMeasure(), "建议维修方式"),
                     trim(draft.technicalRequirements()), draft.quantity(), trim(draft.unit()),
                     draft.preliminaryEstimatedAmount(), trim(draft.estimateSource()), sortOrder,
                     false, List.of(), null));
@@ -573,21 +573,21 @@ public class RepairProjectService {
         Set<String> unique = new LinkedHashSet<>();
         for (RepairPlanDraftCommand.AttachmentReference reference : references) {
             if (reference == null || reference.attachmentId() == null || reference.purpose() == null) {
-                throw invalid("实施方案附件引用必须包含 attachmentId 和 purpose");
+                throw invalid("实施方案附件必须包含文件和材料用途");
             }
             String key = reference.attachmentId() + ":" + reference.purpose();
             if (!unique.add(key)) {
-                throw invalid("实施方案附件引用重复 attachmentId=" + reference.attachmentId());
+                throw invalid("实施方案中存在重复附件");
             }
             projectRepository.findAttachment(reference.attachmentId(), project.projectId(), project.tenantId())
-                    .orElseThrow(() -> notFound("项目附件不存在 attachmentId=" + reference.attachmentId()));
+                    .orElseThrow(() -> notFound("实施方案附件不存在"));
             projectRepository.linkPlanAttachment(plan.planId(),
                     new PlanAttachment(reference.attachmentId(), reference.purpose(), ++sortOrder));
         }
     }
 
     private void validateDraft(RepairProject project, RepairPlanDraftCommand draft) {
-        requirePositive(draft.budgetTotal(), "budgetTotal");
+        requirePositive(draft.budgetTotal(), "实施方案预算");
         if (draft.workPoints().isEmpty()) {
             throw invalid("实施方案至少包含一个维修点位");
         }
@@ -600,16 +600,16 @@ public class RepairProjectService {
     private void validateWorkPoints(List<RepairPlanDraftCommand.WorkPointDraft> workPoints) {
         for (RepairPlanDraftCommand.WorkPointDraft workPoint : workPoints) {
             if (workPoint == null) {
-                throw invalid("workPoints 不能包含空值");
+                throw invalid("维修点位不能包含空项");
             }
-            requireText(workPoint.businessName(), "workPoints.businessName");
-            requireText(workPoint.symptom(), "workPoints.symptom");
-            requireText(workPoint.proposedMeasure(), "workPoints.proposedMeasure");
+            requireText(workPoint.businessName(), "维修对象名称");
+            requireText(workPoint.symptom(), "问题现象");
+            requireText(workPoint.proposedMeasure(), "建议维修方式");
             if (workPoint.locationType() == null) {
-                throw invalid("workPoints.locationType 必填");
+                throw invalid("请选择维修点位的位置类型");
             }
             if (workPoint.causeStatus() == null) {
-                throw invalid("workPoints.causeStatus 必填");
+                throw invalid("请选择问题原因的确认状态");
             }
             if (workPoint.causeStatus() == WorkPointCauseStatus.CONFIRMED
                     && trim(workPoint.causeBasis()) == null) {
@@ -619,13 +619,13 @@ public class RepairProjectService {
                 throw invalid("维修点位数量和单位必须同时填写或同时留空");
             }
             if (workPoint.quantity() != null) {
-                requirePositive(workPoint.quantity(), "workPoints.quantity");
+                requirePositive(workPoint.quantity(), "维修数量");
             }
             if ((workPoint.preliminaryEstimatedAmount() == null) != (trim(workPoint.estimateSource()) == null)) {
                 throw invalid("点位初步估算金额和估算来源必须同时填写或同时留空");
             }
             if (workPoint.preliminaryEstimatedAmount() != null) {
-                requireNonNegative(workPoint.preliminaryEstimatedAmount(), "workPoints.preliminaryEstimatedAmount");
+                requireNonNegative(workPoint.preliminaryEstimatedAmount(), "点位初步估算金额");
             }
         }
     }
@@ -637,18 +637,18 @@ public class RepairProjectService {
         if (project.scopeType() == ScopeType.BUILDING || project.scopeType() == ScopeType.BUILDING_UNIT) {
             buildingId = buildingId == null ? project.buildingId() : buildingId;
             if (!project.buildingId().equals(buildingId)) {
-                throw invalid("楼栋维修点位不能使用其他楼栋 buildingId=" + buildingId);
+                throw invalid("楼栋维修点位不能选择其他楼栋");
             }
             if (project.scopeType() == ScopeType.BUILDING_UNIT) {
                 unitName = unitName == null ? project.unitName() : unitName;
                 if (!project.unitName().equals(unitName)) {
-                    throw invalid("单元维修点位不能使用其他单元 unitName=" + unitName);
+                    throw invalid("单元维修点位不能选择其他单元");
                 }
             }
         } else if (buildingId != null && !workOrderRepository.buildingExists(project.tenantId(), buildingId)) {
             throw new RepairWorkOrderApplicationException(
                     RepairWorkOrderApplicationException.Reason.BUILDING_NOT_IN_SCOPE,
-                    "维修点位楼栋不在当前小区 buildingId=" + buildingId);
+                    "维修点位所选楼栋不在当前小区");
         }
         if (draft.locationType() == WorkPointLocationType.REFERENCE_ROOM) {
             if (draft.referenceRoomId() == null || trim(draft.commonAreaName()) != null) {
@@ -656,17 +656,17 @@ public class RepairProjectService {
             }
             if (buildingId == null || !workOrderRepository.roomExists(
                     project.tenantId(), buildingId, draft.referenceRoomId())) {
-                throw invalid("关联房屋不在所选楼栋 roomId=" + draft.referenceRoomId());
+                throw invalid("关联房屋不在所选楼栋");
             }
             return new WorkPointLocation(buildingId, unitName, draft.locationType(), draft.referenceRoomId(), null);
         }
         if (draft.locationType() == WorkPointLocationType.COMMON_AREA) {
             if (draft.referenceRoomId() != null || trim(draft.commonAreaName()) == null) {
-                throw invalid("公区点位必须只填写 commonAreaName，不能伪造房屋编号");
+                throw invalid("公共部位点位必须填写公共部位名称，不能同时关联房屋");
             }
             return new WorkPointLocation(
                     buildingId, unitName, draft.locationType(), null, requireText(
-                            draft.commonAreaName(), "workPoints.commonAreaName"));
+                            draft.commonAreaName(), "公共部位名称"));
         }
         throw invalid("不支持的维修点位位置类型");
     }
@@ -674,7 +674,7 @@ public class RepairProjectService {
     private RepairWorkOrder validateLinkedWorkOrder(
             RepairProject project, DecisionScope decisionScope, Long workOrderId) {
         RepairWorkOrder workOrder = workOrderRepository.findById(workOrderId)
-                .orElseThrow(() -> notFound("关联报修事项不存在 workOrderId=" + workOrderId));
+                .orElseThrow(() -> notFound("关联报修事项不存在（编号：" + workOrderId + "）"));
         if (!project.tenantId().equals(workOrder.tenantId())) {
             throw new RepairWorkOrderApplicationException(FORBIDDEN, "禁止跨小区关联报修事项");
         }
@@ -682,11 +682,11 @@ public class RepairProjectService {
         RepairCaseLifecyclePolicy.Decision decision = caseLifecyclePolicy.assessProjectLink(
                 workOrder, project.workflowType(), project.buildingId());
         if (!decision.allowed()) {
-            throw invalid(decision.reason() + " workOrderId=" + workOrderId);
+            throw invalid(decision.reason() + "（报修事项编号：" + workOrderId + "）");
         }
         if (decisionScope.verificationStatus() == DecisionScopeVerificationStatus.CONFIRMED
                 && !sourceScopeConfirmed(project, workOrder)) {
-            throw invalid("已确认决定范围不能关联尚待核验的来源报修事项 workOrderId=" + workOrderId);
+            throw invalid("已确认决定范围不能关联尚待核验的来源报修事项（编号：" + workOrderId + "）");
         }
         return workOrder;
     }
@@ -706,10 +706,10 @@ public class RepairProjectService {
         Map<Long, RepairWorkOrder> sources = new LinkedHashMap<>();
         for (Long workOrderId : new LinkedHashSet<>(toSourceIds(workOrderIds))) {
             if (workOrderId == null) {
-                throw invalid("workPoints.linkedWorkOrderIds 不能包含空值");
+                throw invalid("关联报修事项不能包含空项");
             }
             RepairWorkOrder source = workOrderRepository.findById(workOrderId)
-                    .orElseThrow(() -> notFound("关联报修事项不存在 workOrderId=" + workOrderId));
+                    .orElseThrow(() -> notFound("关联报修事项不存在（编号：" + workOrderId + "）"));
             if (!project.tenantId().equals(source.tenantId())) {
                 throw new RepairWorkOrderApplicationException(FORBIDDEN, "禁止跨小区关联报修事项");
             }
@@ -742,11 +742,11 @@ public class RepairProjectService {
         boolean expectedCommunity = project.scopeType() == ScopeType.COMMUNITY;
         boolean sourceCommunity = source.publicAreaScope().name().equals("COMMUNITY");
         if (expectedCommunity != sourceCommunity) {
-            throw invalid("来源报修事项不属于当前决定范围 workOrderId=" + workOrderId);
+            throw invalid("来源报修事项不属于当前决定范围（报修事项编号：" + workOrderId + "）");
         }
         if (!expectedCommunity && source.buildingId() != null
                 && !project.buildingId().equals(source.buildingId())) {
-            throw invalid("来源报修事项不属于当前决定范围 workOrderId=" + workOrderId);
+            throw invalid("来源报修事项不属于当前决定范围（报修事项编号：" + workOrderId + "）");
         }
     }
 
@@ -779,7 +779,7 @@ public class RepairProjectService {
                     RepairWorkOrderStatus.PROJECT_LINKED, false, true, false);
             if (workOrderRepository.update(linked) != 1) {
                 throw new RepairWorkOrderApplicationException(
-                        INVALID_STATUS, "报修事项状态已变化，请刷新后重新关联 workOrderId=" + workOrder.workOrderId());
+                        INVALID_STATUS, "报修事项状态已变化，请刷新后重新关联（编号：" + workOrder.workOrderId() + "）");
             }
             workOrderRepository.insertEvent(new RepairWorkOrderEvent(
                     null,
@@ -812,18 +812,18 @@ public class RepairProjectService {
 
     private void validateBuilding(Long tenantId, ScopeType scopeType, Long buildingId) {
         if (scopeType == null) {
-            throw invalid("scopeType 必填");
+            throw invalid("请选择项目范围");
         }
         if (buildingId != null && !workOrderRepository.buildingExists(tenantId, buildingId)) {
             throw new RepairWorkOrderApplicationException(
                     RepairWorkOrderApplicationException.Reason.BUILDING_NOT_IN_SCOPE,
-                    "楼栋不在当前小区 buildingId=" + buildingId);
+                    "所选楼栋不在当前小区");
         }
     }
 
     private void validateScopeShape(ScopeType scopeType, Long buildingId, String unitName) {
         if (scopeType == null) {
-            throw invalid("scopeType 必填");
+            throw invalid("请选择项目范围");
         }
         if (scopeType == ScopeType.COMMUNITY) {
             if (buildingId != null || unitName != null) {
@@ -835,7 +835,7 @@ public class RepairProjectService {
             throw invalid("楼栋或单元共有范围必须选择楼栋");
         }
         if (scopeType == ScopeType.BUILDING_UNIT && unitName == null) {
-            throw invalid("单元共有范围必须填写 unitName");
+            throw invalid("单元共有范围必须填写单元名称");
         }
     }
 
@@ -847,7 +847,7 @@ public class RepairProjectService {
         }
         if (project.status() != Status.DRAFT) {
             throw new RepairWorkOrderApplicationException(
-                    INVALID_STATUS, "当前项目状态不能" + actionLabel + " status=" + project.status());
+                    INVALID_STATUS, "当前办理进度不能" + actionLabel + "，请刷新后查看");
         }
     }
 
@@ -856,16 +856,16 @@ public class RepairProjectService {
                 .filter(plan -> plan.status() == PlanStatus.DRAFT)
                 .findFirst()
                 .orElseThrow(() -> new RepairWorkOrderApplicationException(
-                        INVALID_STATUS, "项目没有可提交工程责任初判的草稿实施方案"));
+                        INVALID_STATUS, "项目没有可填写责任与费用初步意见的实施方案草稿"));
     }
 
     private DecisionScope requireConfirmedDecisionScope(Long projectId, Long tenantId, String actionLabel) {
         DecisionScope decisionScope = projectRepository.findDecisionScope(projectId, tenantId)
                 .orElseThrow(() -> new RepairWorkOrderApplicationException(
-                        INVALID_STATUS, "项目缺少唯一决定范围快照，不能" + actionLabel));
+                        INVALID_STATUS, "项目缺少已确认的维修范围，不能" + actionLabel));
         if (decisionScope.verificationStatus() != DecisionScopeVerificationStatus.CONFIRMED) {
             throw new RepairWorkOrderApplicationException(
-                    INVALID_STATUS, "决定范围尚待核验，不能" + actionLabel);
+                    INVALID_STATUS, "维修范围尚待核对，不能" + actionLabel);
         }
         return decisionScope;
     }
@@ -875,7 +875,7 @@ public class RepairProjectService {
         return projectRepository.findCurrentResponsibilityDetermination(projectId, tenantId)
                 .filter(candidate -> candidate.status() == ResponsibilityDeterminationStatus.CONFIRMED)
                 .orElseThrow(() -> new RepairWorkOrderApplicationException(
-                        INVALID_STATUS, "工程责任或资金承担初判尚待确认，不能" + actionLabel));
+                        INVALID_STATUS, "责任与费用初步意见尚待业委会确认，不能" + actionLabel));
     }
 
     private List<WorkPoint> requireWorkPoints(Long planId, Long tenantId, String actionLabel) {
@@ -905,7 +905,7 @@ public class RepairProjectService {
             DecisionScope decisionScope) {
         if (determination.responsibilityPath() == null || determination.fundingSourceType() == null
                 || determination.executionAuthorityType() == null) {
-            throw invalid("责任路径、资金承担和服务端派生执行状态均为必填项");
+            throw invalid("维修责任、费用来源和后续办理方式不完整");
         }
         switch (determination.responsibilityPath()) {
             case PROPERTY_SERVICE_CONTRACT -> {
@@ -928,14 +928,14 @@ public class RepairProjectService {
                         FundingSourceType.SPECIAL_MAINTENANCE_LEDGER,
                         FundingSourceType.PUBLIC_REVENUE_LEDGER,
                         FundingSourceType.OWNER_SELF_FUNDING).contains(determination.fundingSourceType())) {
-                    throw invalid("共有维修不能使用当前责任路径不支持的资金承担类型");
+                    throw invalid("共有部位维修只能选择专项维修资金或业主自筹作为拟用费用来源");
                 }
                 if (determination.executionAuthorityType() != ExecutionAuthorityType.OWNER_DECISION) {
                     throw invalid("共有维修只能进入取得相关业主决定的流程");
                 }
                 if (determination.fundingSourceType() == FundingSourceType.PUBLIC_REVENUE_LEDGER
                         && decisionScope.scopeType() != ScopeType.COMMUNITY) {
-                    throw invalid("公共收益资金承担路径只支持全体共用范围，不能作为楼栋维修资金替代");
+                    throw invalid("公共收益只适用于全小区共用范围，不能替代楼栋维修费用");
                 }
             }
         }
@@ -947,7 +947,7 @@ public class RepairProjectService {
      */
     private ExecutionAuthorityType deriveExecutionAuthority(ResponsibilityPath responsibilityPath) {
         if (responsibilityPath == null) {
-            throw invalid("responsibilityPath 必填");
+            throw invalid("请选择本次维修由谁负责");
         }
         return switch (responsibilityPath) {
             case PROPERTY_SERVICE_CONTRACT -> ExecutionAuthorityType.CONTRACTUAL_EXECUTION;
@@ -964,7 +964,7 @@ public class RepairProjectService {
             String responsiblePartyLabel) {
         if (determination.fundingSourceType() != expectedFundingSource
                 || determination.executionAuthorityType() != expectedExecutionAuthority) {
-            throw invalid(responsiblePartyLabel + "必须使用与责任依据相匹配的资金承担和后续执行路径");
+            throw invalid(responsiblePartyLabel + "的费用来源和办理方式与责任材料不一致");
         }
         if (trim(determination.responsiblePartyName()) == null) {
             throw invalid(responsiblePartyLabel + "名称必填");
@@ -979,11 +979,11 @@ public class RepairProjectService {
             PlanVersion plan, Long tenantId, List<AllocationRoom> allocationRooms) {
         if (allocationRooms.isEmpty()) {
             throw new RepairWorkOrderApplicationException(
-                    INVALID_STATUS, "已核验产权名册中没有决定范围对应的费用承担房屋，不能锁定实施方案");
+                    INVALID_STATUS, "产权名册中没有本次维修对应的费用分摊房屋，请先核对维修范围");
         }
         AllocationBasis basis = projectRepository.findAllocationSnapshotBasis(plan.planId(), tenantId)
                 .orElseThrow(() -> new RepairWorkOrderApplicationException(
-                        INVALID_STATUS, "费用承担房屋快照缺少汇总依据，不能锁定实施方案"));
+                        INVALID_STATUS, "费用分摊房屋缺少汇总依据，请先补齐后再确认实施方案"));
         long roomCount = allocationRooms.stream().map(AllocationRoom::roomId).distinct().count();
         long ownerCount = allocationRooms.stream().map(AllocationRoom::ownerUid).distinct().count();
         BigDecimal totalArea = allocationRooms.stream()
@@ -993,7 +993,7 @@ public class RepairProjectService {
                 || basis.ownerCount() != ownerCount
                 || basis.totalBuildArea().compareTo(totalArea) != 0) {
             throw new RepairWorkOrderApplicationException(
-                    INVALID_STATUS, "费用承担房屋快照与汇总依据不一致，不能锁定实施方案");
+                    INVALID_STATUS, "费用分摊房屋与汇总结果不一致，请核对后再确认实施方案");
         }
         return basis;
     }
@@ -1029,7 +1029,7 @@ public class RepairProjectService {
                 return current;
             }
             throw new RepairWorkOrderApplicationException(
-                    INVALID_STATUS, "项目资金切片与当前工程责任初判不一致，不能锁定实施方案");
+                    INVALID_STATUS, "项目已有费用来源记录与当前责任与费用意见不一致，请核对后再确认");
         }
         if (determination.fundingSourceType() == FundingSourceType.SPECIAL_MAINTENANCE_LEDGER) {
             return List.of(resolveSpecialMaintenanceFundingSlice(
@@ -1037,11 +1037,11 @@ public class RepairProjectService {
         }
         if (determination.fundingSourceType() == FundingSourceType.PUBLIC_REVENUE_LEDGER) {
             throw new RepairWorkOrderApplicationException(
-                    INVALID_STATUS, "公共收益账簿尚未接入可信余额与授权快照，不能锁定实施方案");
+                    INVALID_STATUS, "当前尚无法核对公共收益可用余额和使用依据，请先补齐财务记录");
         }
         if (determination.fundingSourceType() == FundingSourceType.OWNER_SELF_FUNDING) {
             throw new RepairWorkOrderApplicationException(
-                    INVALID_STATUS, "业主自筹资金归集或托管账簿尚未接入可信快照，不能锁定实施方案");
+                    INVALID_STATUS, "当前尚未登记业主自筹资金的归集或托管记录，请补齐后再确认实施方案");
         }
         FundingSlice fundingSlice = projectRepository.insertFundingSlice(new FundingSlice(
                 null, determination.determinationId(), decisionScope.decisionScopeId(), project.projectId(), tenantId,
@@ -1061,12 +1061,12 @@ public class RepairProjectService {
             PlanVersion plan,
             String allocationSnapshotHash,
             Long tenantId) {
-        Account account = requireSpecialMaintenanceAccount(decisionScope, plan, tenantId, "锁定实施方案");
+        Account account = requireSpecialMaintenanceAccount(decisionScope, plan, tenantId, "确认实施方案");
         String scopeLabel = decisionScope.scopeType() == ScopeType.COMMUNITY ? "全小区" : "楼栋";
-        String ledgerReference = "专项维修资金账户账簿快照（" + scopeLabel
+        String ledgerReference = "专项维修资金账户记录（" + scopeLabel
                 + "范围，账户版本 " + account.version()
                 + "，总余额 " + account.totalBalance().toPlainString()
-                + "，已冻结 " + account.frozenBalance().toPlainString()
+                + "，已占用 " + account.frozenBalance().toPlainString()
                 + "，可用余额 " + account.availableBalance().toPlainString() + "）";
         return projectRepository.insertFundingSlice(new FundingSlice(
                 null, determination.determinationId(), decisionScope.decisionScopeId(), project.projectId(), tenantId,
@@ -1084,7 +1084,7 @@ public class RepairProjectService {
         if (decisionScope.scopeType() == ScopeType.BUILDING_UNIT) {
             throw new RepairWorkOrderApplicationException(
                     INVALID_STATUS,
-                    "已确认专项维修资金路径尚未接入可核验的单元账户标识，不能" + actionLabel);
+                    "当前单元尚未登记可用于本项目的专项维修资金账户，请先核对账户后再" + actionLabel);
         }
         AccountScope accountScope = decisionScope.scopeType() == ScopeType.COMMUNITY
                 ? AccountScope.COMMUNITY
@@ -1096,7 +1096,7 @@ public class RepairProjectService {
                         tenantId, accountScope, referenceId)
                 .orElseThrow(() -> new RepairWorkOrderApplicationException(
                         INVALID_STATUS,
-                        "已确认专项维修资金路径缺少对应的可信账簿账户，不能" + actionLabel));
+                        "当前维修范围尚未登记可用于本项目的专项维修资金账户，请先核对账户后再" + actionLabel));
         if (account.availableBalance().compareTo(plan.budgetTotal()) < 0) {
             throw new RepairWorkOrderApplicationException(
                     INVALID_STATUS, "专项维修资金账户可用余额不足，不能" + actionLabel);
@@ -1134,14 +1134,14 @@ public class RepairProjectService {
                         || slice.approvedAmount().signum() <= 0
                         || slice.verifiedAt() == null)) {
             throw new RepairWorkOrderApplicationException(
-                    INVALID_STATUS, "可信资金切片、费用承担范围或账簿快照不完整，不能锁定实施方案");
+                    INVALID_STATUS, "费用来源、分摊范围或账户记录不完整，请补齐后再确认实施方案");
         }
         BigDecimal totalFundingAmount = fundingSlices.stream()
                 .map(FundingSlice::approvedAmount)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
         if (totalFundingAmount.compareTo(budgetTotal) != 0) {
             throw new RepairWorkOrderApplicationException(
-                    INVALID_STATUS, "可信资金切片金额与锁定方案预算不一致，不能锁定实施方案");
+                    INVALID_STATUS, "已确认的费用金额与实施方案预算不一致，请核对后再确认实施方案");
         }
     }
 
@@ -1164,7 +1164,7 @@ public class RepairProjectService {
                         .thenComparing(room -> Objects.toString(room.unitName(), ""))
                         .thenComparing(AllocationRoom::roomId))
                 .toList());
-        return sha256(snapshot, "维修费用承担范围快照哈希生成失败");
+        return sha256(snapshot, "维修费用分摊范围校验失败");
     }
 
     /**
@@ -1198,7 +1198,7 @@ public class RepairProjectService {
                         .thenComparing(AllocationRoom::roomId))
                 .toList());
         snapshot.put("allocationSnapshotHash", allocationSnapshotHash);
-        return sha256(snapshot, "相关业主决定提案快照哈希生成失败");
+        return sha256(snapshot, "相关业主表决材料校验失败");
     }
 
     private String snapshotHash(
@@ -1230,7 +1230,7 @@ public class RepairProjectService {
                 .toList());
         snapshot.put("fundingSlices", fundingSlices.stream()
                 .sorted(Comparator.comparing(FundingSlice::fundingSliceId)).toList());
-        return sha256(snapshot, "维修实施方案快照哈希生成失败");
+        return sha256(snapshot, "维修实施方案校验失败");
     }
 
     private String sha256(Map<String, Object> snapshot, String failureMessage) {
@@ -1316,7 +1316,7 @@ public class RepairProjectService {
 
     private RepairProject loadProjectForUpdate(Long projectId, Long tenantId) {
         if (projectId == null) {
-            throw invalid("projectId 必填");
+            throw invalid("维修工程项目编号缺失");
         }
         return projectRepository.findProjectForUpdate(projectId, tenantId)
                 .orElseThrow(() -> notFound("维修工程项目不存在"));
@@ -1335,7 +1335,7 @@ public class RepairProjectService {
         UserContext actor = requireActor();
         if (!actor.hasPermission("repair:workorder:governance")) {
             throw new RepairWorkOrderApplicationException(
-                    FORBIDDEN, "当前工作身份无权确认工程责任与资金承担初判");
+                    FORBIDDEN, "当前工作身份无权确认责任与费用初步意见");
         }
         return actor;
     }
@@ -1345,7 +1345,7 @@ public class RepairProjectService {
         if (!PROPERTY_RESPONSIBILITY_PROPOSER_ROLES.contains(actor.roleKey())
                 || !actor.hasPermission("repair:workorder:manage")) {
             throw new RepairWorkOrderApplicationException(
-                    FORBIDDEN, "仅物业可基于勘验、合同或保修依据提出工程责任初判");
+                    FORBIDDEN, "仅物业可根据勘验、合同或保修材料填写责任与费用初步意见");
         }
         return actor;
     }
@@ -1364,7 +1364,7 @@ public class RepairProjectService {
     }
 
     private PlanNarratives sanitizeNarratives(RepairPlanDraftCommand draft) {
-        SanitizedRichText planDescription = requireRichText(draft.planDescription(), "planDescription");
+        SanitizedRichText planDescription = requireRichText(draft.planDescription(), "问题与维修方案");
         return new PlanNarratives(planDescription.html(), planDescription.narrativeImageIds());
     }
 

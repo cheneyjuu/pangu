@@ -235,7 +235,7 @@ public class RepairProjectSourcingService {
     public Details selectQuote(Long projectId, SelectQuote command) {
         UserContext actor = support.requireActor();
         if (!actor.isSysUser() || actor.userId() == null) {
-            throw support.forbidden("仅管理端业委会确认人可确认中选供应商");
+            throw support.forbidden("仅管理端业委会确认人可确认施工单位");
         }
         RepairProjectApplicationSupport.Context projectContext = support.loadForUpdate(
                 projectId, actor.tenantId(), Status.AUTHORIZED);
@@ -245,34 +245,34 @@ public class RepairProjectSourcingService {
             throw support.conflict(authorization.blockingReason());
         }
         if (!authorization.currentActorMayConfirm()) {
-            throw support.forbidden("仅当前在任且拥有治理权限的业委会主任或副主任可以确认中选供应商");
+            throw support.forbidden("仅当前在任且拥有治理权限的业委会主任或副主任可以确认施工单位");
         }
         if (command == null || command.quoteId() == null || command.selectionEvidenceAttachmentId() == null) {
-            throw support.invalid("quoteId 和 selectionEvidenceAttachmentId 均为必填项");
+            throw support.invalid("请选择报价并上传施工单位选择记录");
         }
         if (sourcingRepository.findCurrentSelection(
                 projectId, projectContext.plan().planId(), actor.tenantId()).isPresent()) {
-            throw support.conflict("当前锁定方案已存在经过授权确认的中选供应商，不能重复确认");
+            throw support.conflict("当前实施方案已确认施工单位，不能重复办理");
         }
         Quote quote = sourcingRepository.findQuote(
                         command.quoteId(), projectId, projectContext.plan().planId(), actor.tenantId())
-                .orElseThrow(() -> support.notFound("中选报价不存在或不属于当前锁定方案"));
+                .orElseThrow(() -> support.notFound("所选报价不存在或不属于当前实施方案"));
         if (quote.quoteStatus() != RepairSupplierQuoteStatus.ACTIVE
                 || !quote.confirmationStatus().confirmedForContract()) {
-            throw support.invalid("中选报价必须是当前有效且已经确认的报价原件");
+            throw support.invalid("所选报价必须是当前有效且已经确认的报价原件");
         }
         if (!workOrderRepository.supplierVerified(actor.tenantId(), quote.supplierDeptId())) {
-            throw support.invalid("中选供应商必须是当前小区已核验的企业主体");
+            throw support.invalid("所选施工单位必须是当前小区已核验的企业主体");
         }
         if (quote.quoteAmount().compareTo(authorization.approvedBudgetAmount()) > 0) {
-            throw support.invalid("中选报价超过已通过的审价金额");
+            throw support.invalid("所选报价超过表决通过的预算金额");
         }
         Attachment selectionEvidence = support.attachment(
-                projectContext, command.selectionEvidenceAttachmentId(), "评审或定商记录");
+                projectContext, command.selectionEvidenceAttachmentId(), "施工单位选择记录");
         if (!isSelectionEvidenceDocument(selectionEvidence.contentType())) {
-            throw support.invalid("评审或定商记录必须是图片、PDF 或办公文档");
+            throw support.invalid("施工单位选择记录必须是图片、PDF 或办公文档");
         }
-        String rationale = requireText(command.selectionRationale(), "中选说明");
+        String rationale = requireText(command.selectionRationale(), "选择说明");
         boolean frameworkRelationValid = validateFrameworkRelation(
                 authorization, command.frameworkRelationId(), quote, actor.tenantId());
         int invitationCount = sourcingRepository.countInitialInvitedSuppliers(
@@ -423,37 +423,37 @@ public class RepairProjectSourcingService {
                 && determination.status() == ResponsibilityDeterminationStatus.CONFIRMED
                 && determination.responsibilityPath() != ResponsibilityPath.SHARED_COMMON_REPAIR) {
             return unsupported("本工程已确认由" + directResponsibilityLabel(determination.responsibilityPath())
-                    + "承担，不适用业主侧供应商定商；应按已确认责任依据另行执行");
+                    + "承担，应按相应合同、保修或责任材料办理，无需由业主另行确定施工单位");
         }
         if (project.workflowType() != RepairWorkflowType.BUILDING_REPAIR) {
-            return unsupported("全小区维修尚未接入与楼栋流程等价的施工单位选择授权快照，不能最终定商");
+            return unsupported("该类型项目暂不支持在线确定施工单位，请按现行线下程序办理并归档材料");
         }
         if (project.activePlanId() == null || !project.activePlanId().equals(plan.planId())
                 || plan.status() != PlanStatus.LOCKED) {
-            return pending("当前项目没有有效的锁定实施方案，不能最终定商");
+            return pending("请先完成责任与费用确认、实施方案公示和相关业主表决，再确定施工单位");
         }
         if (!authorizationStageReached(project.status())) {
-            return pending("当前项目尚未完成有效决定、审价、业委会确认和用印授权，不能最终定商");
+            return pending("相关业主表决和业委会确认尚未完成，请完成后再确定施工单位");
         }
         BuildingProcess process = governanceRepository.findBuildingProcess(
                         project.projectId(), plan.planId(), project.tenantId())
                 .orElse(null);
         if (process == null || process.status() != BuildingProcessStatus.AUTHORIZED) {
-            return pending("楼栋维修流程尚未完成用印授权，不能最终定商");
+            return pending("相关业主表决和业委会确认尚未完成，请完成后再确定施工单位");
         }
         if (process.officialDocumentAttachmentId() == null || process.sealUsageId() == null
                 || process.reviewedAmount() == null || process.reviewedAmount().compareTo(BigDecimal.ZERO) <= 0
                 || !"APPROVED".equals(process.priceReviewConclusion())
                 || process.approvedByUserId() == null
                 || !FINAL_SELECTION_POSITIONS.contains(process.approverPosition())) {
-            return pending("楼栋维修流程缺少有效的正式文件、审价、审批事实或用印事实，不能最终定商");
+            return pending("表决结果、审价或盖章文件尚未齐全，请补齐后再确定施工单位");
         }
         DecisionPolicySnapshot policy = governanceRepository.findPolicySnapshot(
                         process.policySnapshotId(), project.tenantId())
                 .orElse(null);
         if (policy == null || !project.projectId().equals(policy.projectId())
                 || !plan.planId().equals(policy.planId()) || blank(policy.ruleHash())) {
-            return pending("楼栋维修流程缺少可核验的议事规则快照，不能最终定商");
+            return pending("本项目采用的议事规则记录不完整，请补齐后再确定施工单位");
         }
         BuildingDecision decision = governanceRepository.findBuildingDecision(
                         process.decisionId(), project.tenantId())
@@ -461,7 +461,7 @@ public class RepairProjectSourcingService {
         if (decision == null || !project.projectId().equals(decision.projectId())
                 || !plan.planId().equals(decision.planId())
                 || !GovernanceResult.PASSED.name().equals(decision.result())) {
-            return pending("楼栋维修决定未形成通过结果，不能最终定商");
+            return pending("相关业主表决尚未通过，不能确定施工单位");
         }
         GovernanceBasis basis = governanceRepository.findActiveGovernanceBasis(
                         project.projectId(), plan.planId(), project.tenantId())
@@ -469,7 +469,7 @@ public class RepairProjectSourcingService {
         if (basis == null || !"BUILDING_REPAIR_DECISION".equals(basis.basisType())
                 || !"BUILDING_PROCESS".equals(basis.referenceType())
                 || !process.processId().equals(basis.referenceId()) || blank(basis.snapshotHash())) {
-            return pending("楼栋维修未形成匹配当前流程的不可变授权依据，不能最终定商");
+            return pending("当前实施方案与表决材料尚未完成对应核对，请完成后再确定施工单位");
         }
         String snapshotIssue = selectionAuthorizationSnapshotIssue(basis);
         if (snapshotIssue != null) {
@@ -490,7 +490,7 @@ public class RepairProjectSourcingService {
             case PROPERTY_SERVICE_CONTRACT -> "物业服务合同责任方";
             case DEVELOPER_WARRANTY -> "建设单位保修责任方";
             case LIABLE_PARTY -> "责任人或第三方";
-            case SHARED_COMMON_REPAIR -> throw new IllegalArgumentException("共有维修不属于直接责任路径");
+            case SHARED_COMMON_REPAIR -> throw new IllegalArgumentException("共有部位维修不适用责任方直接履行");
         };
     }
 
@@ -504,32 +504,32 @@ public class RepairProjectSourcingService {
         RepairSupplierSelectionMethod method = basis.approvedSupplierSelectionMethod();
         SupplierSelectionEvaluationRule rule = basis.approvedSupplierEvaluationRule();
         if (method == null || rule == null) {
-            return "用印授权文件未固化施工单位选择方式和评审规则，不能最终定商";
+            return "盖章文件未明确施工单位选择方式和报价选择规则，请补充后再办理";
         }
         Integer invited = basis.minimumInvitedSupplierCount();
         Integer quotes = basis.minimumValidQuoteCount();
         if ((invited != null && invited <= 0) || (quotes != null && quotes <= 0)
                 || (invited != null && quotes != null && quotes > invited)) {
-            return "用印授权文件中的施工单位选择数量门槛不合法，不能最终定商";
+            return "盖章文件中的邀请单位数或报价数量填写有误，请核对后再办理";
         }
         if (method == RepairSupplierSelectionMethod.COMPETITIVE_QUOTATION) {
             if (rule != SupplierSelectionEvaluationRule.LOWEST_COMPLIANT_QUOTE
                     && rule != SupplierSelectionEvaluationRule.COMPREHENSIVE_EVALUATION) {
-                return "竞争性报价授权未使用有效评审规则，不能最终定商";
+                return "询价项目的报价选择规则不完整，请核对盖章文件";
             }
             if (!blank(basis.nonCompetitiveSelectionBasis())) {
-                return "竞争性报价授权混入非竞争定商依据，不能最终定商";
+                return "本项目采用询价方式，不应同时填写直接委托依据，请核对盖章文件";
             }
             return null;
         }
         if (rule != SupplierSelectionEvaluationRule.AUTHORIZED_DIRECT_SELECTION) {
-            return "非竞争定商授权未使用授权直接选择规则，不能最终定商";
+            return "直接委托项目的施工单位选择规则填写有误，请核对盖章文件";
         }
         if (blank(basis.nonCompetitiveSelectionBasis())) {
-            return "非竞争定商授权缺少明确依据，不能最终定商";
+            return "直接委托项目缺少书面依据，请补充后再办理";
         }
         if (invited != null || quotes != null) {
-            return "非竞争定商授权不应携带虚构的询价数量门槛，不能最终定商";
+            return "直接委托项目不应填写询价数量要求，请核对盖章文件";
         }
         return null;
     }
@@ -565,12 +565,12 @@ public class RepairProjectSourcingService {
             Long tenantId) {
         if (authorization.approvedSelectionMethod() != RepairSupplierSelectionMethod.FRAMEWORK_SUPPLIER) {
             if (frameworkRelationId != null) {
-                throw support.invalid("非框架定商不得提交 frameworkRelationId");
+                throw support.invalid("当前施工单位选择方式不适用长期合作单位关系");
             }
             return false;
         }
         if (frameworkRelationId == null) {
-            throw support.invalid("框架供应商定商必须从有效框架关系中选择 frameworkRelationId");
+            throw support.invalid("请选择本小区当前有效的长期合作单位关系");
         }
         boolean eligible = workOrderRepository.listActiveFrameworkRelations(tenantId, null).stream()
                 .filter(relation -> relation.serviceCategory() == null)
@@ -578,7 +578,7 @@ public class RepairProjectSourcingService {
                         && quote.supplierDeptId().equals(relation.supplierDeptId()));
         if (!eligible || !workOrderRepository.frameworkRelationActive(
                 frameworkRelationId, tenantId, quote.supplierDeptId(), null)) {
-            throw support.invalid("所选框架关系无效、已失效或不属于中选供应商");
+            throw support.invalid("所选长期合作关系已失效，或不属于当前施工单位");
         }
         return true;
     }
@@ -589,7 +589,7 @@ public class RepairProjectSourcingService {
                 .filter(candidate -> candidate.confirmationStatus().confirmedForContract())
                 .anyMatch(candidate -> candidate.quoteAmount().compareTo(selectedQuote.quoteAmount()) < 0);
         if (lowerQuoteExists) {
-            throw support.invalid("最低合格报价规则下不能确认高于现存有效已确认报价的中选供应商");
+            throw support.invalid("当前采用最低合格报价规则，请先说明或处理金额更低的合格报价");
         }
     }
 
@@ -649,7 +649,7 @@ public class RepairProjectSourcingService {
         LinkedHashSet<Long> result = new LinkedHashSet<>();
         for (Long value : values) {
             if (value == null) {
-                throw support.invalid("supplierDeptIds 不能包含空值");
+                throw support.invalid("施工单位列表不能包含空项");
             }
             result.add(value);
         }
@@ -663,7 +663,7 @@ public class RepairProjectSourcingService {
                     ? RepairQuoteConfirmationStatus.PENDING_SUPPLIER_CONFIRMATION
                     : RepairQuoteConfirmationStatus.valueOf(value);
         } catch (IllegalArgumentException ex) {
-            throw support.invalid("confirmationStatus 不合法");
+            throw support.invalid("报价确认状态不正确");
         }
         if (status != RepairQuoteConfirmationStatus.PENDING_SUPPLIER_CONFIRMATION
                 && status != RepairQuoteConfirmationStatus.OFFLINE_EVIDENCE_VERIFIED) {

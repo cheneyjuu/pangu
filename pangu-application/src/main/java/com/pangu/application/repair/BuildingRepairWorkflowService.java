@@ -91,7 +91,7 @@ public class BuildingRepairWorkflowService {
     public BuildingProcessDetails startDecision(Long projectId, StartBuildingRepairDecisionCommand command) {
         UserContext actor = requireRole(PROPERTY_ROLES, "仅物业可发起楼栋维修征询");
         if (command == null || command.expectedProjectVersion() == null) {
-            throw invalid("expectedProjectVersion 必填");
+            throw invalid("项目版本信息缺失，请刷新后重试");
         }
         RepairProject project = loadProjectForUpdate(projectId, actor.tenantId());
         boolean authorizationProposal = requireBuildingProjectForDecisionStart(project);
@@ -106,11 +106,11 @@ public class BuildingRepairWorkflowService {
         }
         List<AllocationRoom> allocation = projectRepository.listAllocationRooms(plan.planId(), project.tenantId());
         if (allocation.isEmpty()) {
-            throw conflict("实施方案没有费用承担房屋快照");
+            throw conflict("实施方案没有费用分摊房屋范围");
         }
         AllocationBasis allocationBasis = projectRepository.findAllocationSnapshotBasis(
                         plan.planId(), project.tenantId())
-                .orElseThrow(() -> conflict("实施方案没有可读取的费用承担范围快照"));
+                .orElseThrow(() -> conflict("实施方案没有可读取的费用分摊范围"));
         String scopeLabel = allocationBasis.scopeLabel() + " · 费用承担范围内业主";
         RepairLocalDecisionChannel decisionChannel = decisionChannel(project.tenantId());
         DecisionPolicySnapshot policy = governanceRepository.insertPolicySnapshot(new DecisionPolicySnapshot(
@@ -151,7 +151,7 @@ public class BuildingRepairWorkflowService {
             Long projectId, CompleteBuildingRepairDecisionCommand command) {
         UserContext actor = requireRole(PROPERTY_ROLES, "仅物业可核验楼栋维修接龙");
         if (command == null || command.expectedProcessVersion() == null) {
-            throw invalid("expectedProcessVersion 必填");
+            throw invalid("办理记录版本信息缺失，请刷新后重试");
         }
         RepairProject project = loadProjectForUpdate(projectId, actor.tenantId());
         boolean authorizationProposal = requireBuildingProjectInAuthorization(project);
@@ -194,7 +194,7 @@ public class BuildingRepairWorkflowService {
             Long projectId, SubmitBuildingRepairOfficialDocumentCommand command) {
         UserContext actor = requireRole(PROPERTY_ROLES, "仅物业可提交楼栋维修正式报审文件");
         if (command == null || command.expectedProcessVersion() == null || command.attachmentId() == null) {
-            throw invalid("expectedProcessVersion 和 attachmentId 均为必填项");
+            throw invalid("办理记录版本和正式文件均为必填项，请刷新后重试");
         }
         RepairProject project = loadProjectForUpdate(projectId, actor.tenantId());
         requireBuildingProjectInAuthorization(project);
@@ -215,23 +215,23 @@ public class BuildingRepairWorkflowService {
     public BuildingProcessDetails reviewPrice(Long projectId, ReviewBuildingRepairPriceCommand command) {
         UserContext actor = requireRole(COMMITTEE_REVIEW_ROLES, "仅业委会可审查楼栋维修价格");
         if (command == null || command.expectedProcessVersion() == null) {
-            throw invalid("expectedProcessVersion 必填");
+            throw invalid("办理记录版本信息缺失，请刷新后重试");
         }
         RepairProject project = loadProjectForUpdate(projectId, actor.tenantId());
         boolean authorizationProposal = requireBuildingProjectInAuthorization(project);
         PlanVersion plan = activeAuthorizationPlan(project);
         BuildingProcess process = activeProcessForUpdate(project, plan);
         requireProcess(process, BuildingProcessStatus.OFFICIAL_DOCUMENT_READY, command.expectedProcessVersion());
-        String reviewMode = requireAllowed(command.reviewMode(), "reviewMode", REVIEW_MODES);
-        String conclusion = requireAllowed(command.conclusion(), "conclusion", REVIEW_CONCLUSIONS);
+        String reviewMode = requireAllowed(command.reviewMode(), "审价方式", REVIEW_MODES);
+        String conclusion = requireAllowed(command.conclusion(), "审价结论", REVIEW_CONCLUSIONS);
         if (command.reviewedAmount() == null || command.reviewedAmount().compareTo(BigDecimal.ZERO) <= 0) {
-            throw invalid("reviewedAmount 必须大于 0");
+            throw invalid("审价金额必须大于 0");
         }
         if (command.reviewedAmount().compareTo(plan.budgetTotal()) > 0) {
-            throw invalid("审价金额超过授权提案预算，必须先形成新方案并重新履行楼栋决定");
+            throw invalid("审价金额超过相关业主表决通过的预算，必须调整实施方案并重新表决");
         }
         if (plan.priceReviewRequired() && "NOT_REQUIRED".equals(reviewMode)) {
-            throw invalid("授权提案要求审价，不能标记为无需审价");
+            throw invalid("相关业主表决通过的实施方案要求审价，不能标记为无需审价");
         }
         if (!"NOT_REQUIRED".equals(reviewMode)) {
             if (command.reportAttachmentId() == null) {
@@ -266,7 +266,7 @@ public class BuildingRepairWorkflowService {
     public BuildingProcessDetails approve(Long projectId, ApproveBuildingRepairCommand command) {
         UserContext actor = requireActor();
         if (command == null || command.expectedProcessVersion() == null) {
-            throw invalid("expectedProcessVersion 必填");
+            throw invalid("办理记录版本信息缺失，请刷新后重试");
         }
         RepairProject project = loadProjectForUpdate(projectId, actor.tenantId());
         requireBuildingProjectInAuthorization(project);
@@ -297,7 +297,7 @@ public class BuildingRepairWorkflowService {
         }
         if (command == null || command.expectedProcessVersion() == null || command.sealedAttachmentId() == null
                 || command.supplierSelectionAuthorization() == null) {
-            throw invalid("expectedProcessVersion、sealedAttachmentId 和施工单位选择授权快照均为必填项");
+            throw invalid("办理记录版本、盖章文件和施工单位选择方式均为必填项");
         }
         RepairProject project = loadProjectForUpdate(projectId, actor.tenantId());
         boolean authorizationProposal = requireBuildingProjectInAuthorization(project);
@@ -308,7 +308,7 @@ public class BuildingRepairWorkflowService {
                 command.supplierSelectionAuthorization());
         DecisionPolicySnapshot policy = governanceRepository.findPolicySnapshot(
                         process.policySnapshotId(), project.tenantId())
-                .orElseThrow(() -> notFound("楼栋维修规则快照不存在"));
+                .orElseThrow(() -> notFound("本项目采用的小区备案规则不存在"));
         BuildingDecision decision = governanceRepository.findBuildingDecision(
                         process.decisionId(), project.tenantId())
                 .orElseThrow(() -> notFound("楼栋维修决定不存在"));
@@ -421,7 +421,7 @@ public class BuildingRepairWorkflowService {
             BuildingDecision decision,
             CompleteBuildingRepairDecisionCommand command) {
         if (command.evidenceAttachmentId() != null || command.confirmedResult() != null) {
-            throw invalid("C端在线表决由系统票仓自动结算，不接收微信截图或人工结果");
+            throw invalid("小程序在线表决由系统自动计票，不接收微信截图或人工结果");
         }
         List<DecisionEntry> entries = governanceRepository.listDecisionEntries(
                 decision.decisionId(), project.tenantId());
@@ -481,7 +481,7 @@ public class BuildingRepairWorkflowService {
             RepairProject project, BuildingProcess process, boolean includeChoices) {
         DecisionPolicySnapshot policy = governanceRepository.findPolicySnapshot(
                         process.policySnapshotId(), project.tenantId())
-                .orElseThrow(() -> notFound("楼栋维修规则快照不存在"));
+                .orElseThrow(() -> notFound("本项目采用的小区备案规则不存在"));
         BuildingDecision decision = governanceRepository.findBuildingDecision(
                         process.decisionId(), project.tenantId())
                 .orElseThrow(() -> notFound("楼栋维修决定不存在"));
@@ -519,7 +519,7 @@ public class BuildingRepairWorkflowService {
 
     private void requireProcess(BuildingProcess process, BuildingProcessStatus status, Integer expectedVersion) {
         if (process.status() != status) {
-            throw conflict("当前楼栋维修流程状态不允许该动作 status=" + process.status());
+            throw conflict("当前办理进度不允许该操作，请刷新后查看");
         }
         if (!process.processVersion().equals(expectedVersion)) {
             throw conflict("楼栋维修流程版本已变化，请刷新后重试");
@@ -534,7 +534,7 @@ public class BuildingRepairWorkflowService {
         return projectRepository.listPlans(project.projectId(), project.tenantId()).stream()
                 .filter(plan -> plan.planId().equals(project.activePlanId()) && plan.status() == expectedPlanStatus)
                 .findFirst()
-                .orElseThrow(() -> conflict("项目没有有效的授权提案或历史锁定实施方案"));
+                .orElseThrow(() -> conflict("项目没有可办理相关业主表决的实施方案"));
     }
 
     private Attachment attachment(
@@ -581,20 +581,20 @@ public class BuildingRepairWorkflowService {
         if (authorization.selectionMethod() == RepairSupplierSelectionMethod.COMPETITIVE_QUOTATION) {
             if (authorization.evaluationRule() != SupplierSelectionEvaluationRule.LOWEST_COMPLIANT_QUOTE
                     && authorization.evaluationRule() != SupplierSelectionEvaluationRule.COMPREHENSIVE_EVALUATION) {
-                throw invalid("竞争性报价授权必须明确最低合格报价或综合评审规则");
+                throw invalid("询价项目必须明确采用最低合格报价或综合比较规则");
             }
             if (nonCompetitiveBasis != null) {
-                throw invalid("竞争性报价授权不得填写非竞争定商依据");
+                throw invalid("询价项目不能同时填写直接委托依据");
             }
         } else if (NON_COMPETITIVE_SELECTION_METHODS.contains(authorization.selectionMethod())) {
             if (authorization.evaluationRule() != SupplierSelectionEvaluationRule.AUTHORIZED_DIRECT_SELECTION) {
-                throw invalid("框架、直接或紧急定商必须使用授权直接选择规则");
+                throw invalid("框架协议、直接委托或紧急维修必须采用直接选择规则");
             }
             if (nonCompetitiveBasis == null) {
-                throw invalid("非竞争定商必须填写授权文件中的明确依据");
+                throw invalid("直接委托或紧急维修必须填写书面依据");
             }
             if (invited != null || quotes != null) {
-                throw invalid("非竞争定商授权不得伪造最低邀价或报价数量门槛");
+                throw invalid("直接委托或紧急维修不应填写询价单位数和报价数量");
             }
         } else {
             throw invalid("施工单位选择方式不合法");
@@ -616,7 +616,7 @@ public class BuildingRepairWorkflowService {
         if (project.status() == Status.PLAN_LOCKED) {
             return false;
         }
-        throw conflict("当前项目状态不允许发起楼栋维修征询 status=" + project.status());
+        throw conflict("当前办理进度不能发起相关业主表决，请刷新后查看");
     }
 
     private boolean requireBuildingProjectInAuthorization(RepairProject project) {
@@ -629,7 +629,7 @@ public class BuildingRepairWorkflowService {
         if (project.status() == Status.GOVERNANCE_IN_PROGRESS) {
             return false;
         }
-        throw conflict("当前项目状态不允许该授权动作 status=" + project.status());
+        throw conflict("当前办理进度不允许该操作，请刷新后查看");
     }
 
     private String authorizationProposalSnapshotHash(PlanVersion plan) {
@@ -640,7 +640,7 @@ public class BuildingRepairWorkflowService {
         if (plan.snapshotHash() != null) {
             return plan.snapshotHash();
         }
-        throw conflict("项目缺少授权提案或历史锁定快照");
+        throw conflict("项目没有可办理相关业主表决的实施方案");
     }
 
     private RepairProject loadProjectForUpdate(Long projectId, Long tenantId) {

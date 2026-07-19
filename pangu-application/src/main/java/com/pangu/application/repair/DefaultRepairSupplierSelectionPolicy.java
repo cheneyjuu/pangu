@@ -12,18 +12,18 @@ public class DefaultRepairSupplierSelectionPolicy implements RepairSupplierSelec
     @Override
     public Decision evaluate(Input input) {
         if (input == null || input.method() == null || input.evaluationRule() == null) {
-            return Decision.reject("施工单位选择授权快照不完整");
+            return Decision.reject("表决通过的施工单位选择方式或报价选择规则不完整");
         }
         if (!input.selectionEvidencePresent()) {
-            return Decision.reject("必须归档评审记录、比价表或定商记录原件");
+            return Decision.reject("请上传比价表、评审记录或施工单位选择记录");
         }
         if (input.minimumInvitedSupplierCount() != null
                 && input.invitationCount() < input.minimumInvitedSupplierCount()) {
-            return Decision.reject("有效授权要求的最低邀请供应商数量尚未达到");
+            return Decision.reject("实施方案要求邀请的施工单位数量尚未达到");
         }
         if (input.minimumValidQuoteCount() != null
                 && input.validQuoteCount() < input.minimumValidQuoteCount()) {
-            return Decision.reject("有效授权要求的最低有效报价数量尚未达到");
+            return Decision.reject("实施方案要求取得的报价数量尚未达到");
         }
         if (input.method() == RepairSupplierSelectionMethod.COMPETITIVE_QUOTATION) {
             if (input.evaluationRule() != SupplierSelectionEvaluationRule.LOWEST_COMPLIANT_QUOTE
@@ -31,22 +31,22 @@ public class DefaultRepairSupplierSelectionPolicy implements RepairSupplierSelec
                 return Decision.reject("竞争性报价必须使用最低合格报价或综合评审规则");
             }
             if (!blank(input.nonCompetitiveSelectionBasis())) {
-                return Decision.reject("竞争性报价授权不得携带非竞争定商依据");
+                return Decision.reject("询价项目不应同时填写直接委托依据");
             }
             if (input.evaluationRule() == SupplierSelectionEvaluationRule.COMPREHENSIVE_EVALUATION
                     && blank(input.selectionRationale())) {
-                return Decision.reject("综合评审必须填写中选说明");
+                return Decision.reject("综合评审必须填写施工单位选择说明");
             }
             return Decision.allow();
         }
         if (input.evaluationRule() != SupplierSelectionEvaluationRule.AUTHORIZED_DIRECT_SELECTION) {
-            return Decision.reject("非竞争定商必须使用授权直接选择规则");
+            return Decision.reject("直接委托项目必须使用直接选择规则");
         }
         if (blank(input.nonCompetitiveSelectionBasis())) {
-            return Decision.reject("非竞争定商缺少授权文件中的明确依据");
+            return Decision.reject("直接委托项目缺少盖章文件中的明确依据");
         }
         if (blank(input.selectionRationale())) {
-            return Decision.reject("授权直接选择必须填写具体中选说明");
+            return Decision.reject("直接选择施工单位时必须填写选择说明");
         }
         if (input.method() == RepairSupplierSelectionMethod.FRAMEWORK_SUPPLIER
                 && !input.frameworkRelationValid()) {

@@ -211,6 +211,8 @@ class RepairProjectSourcingFlowTest {
                         .header("Authorization", bearer(propertyToken)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.selectionAuthorization.status", is("PENDING_AUTHORIZATION")))
+                .andExpect(jsonPath("$.data.selectionAuthorization.blockingReason", is(
+                        "请先完成责任与费用确认、实施方案公示和相关业主表决，再确定施工单位")))
                 .andExpect(jsonPath("$.data.selectionAuthorization.currentActorMayConfirm", is(false)))
                 .andExpect(jsonPath("$.data.selection", is(nullValue())));
     }
@@ -321,7 +323,7 @@ class RepairProjectSourcingFlowTest {
                                 "selectionRationale", "已完成资料核验，但授权快照要求的邀请数量尚未达到。",
                                 "selectionEvidenceAttachmentId", insufficientEvidenceId))))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.msg", is("有效授权要求的最低邀请供应商数量尚未达到")));
+                .andExpect(jsonPath("$.msg", is("实施方案要求邀请的施工单位数量尚未达到")));
 
         AuthorizedSelectionFixture competitiveFixture = createCommitteeApprovedFixture();
         long lowSupplier = registerVerifiedSupplier();
@@ -357,7 +359,7 @@ class RepairProjectSourcingFlowTest {
                                 "selectionRationale", "错误地尝试确认高于当前最低合格报价的供应商。",
                                 "selectionEvidenceAttachmentId", selectionEvidenceId))))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.msg", is("最低合格报价规则下不能确认高于现存有效已确认报价的中选供应商")));
+                .andExpect(jsonPath("$.msg", is("当前采用最低合格报价规则，请先说明或处理金额更低的合格报价")));
 
         JsonNode selection = data(postOk(
                 sourcingPath(competitiveFixture.projectId(), "/selection"), committeeDirectorToken, Map.of(
