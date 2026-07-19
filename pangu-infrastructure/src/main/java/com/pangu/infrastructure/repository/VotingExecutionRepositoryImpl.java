@@ -191,6 +191,19 @@ public class VotingExecutionRepositoryImpl implements VotingExecutionRepository 
     }
 
     @Override
+    public Optional<VotingBallotRecord> findActiveBallot(Long subjectId,
+                                                         Long electorateItemId,
+                                                         Long tenantId) {
+        return Optional.ofNullable(mapper.selectActiveBallot(subjectId, electorateItemId, tenantId))
+                .map(row -> new VotingBallotRecord(
+                        row.getBallotId(), row.getPackageId(), row.getSubjectId(), row.getVoteId(),
+                        row.getElectorateItemId(), row.getTenantId(), row.getRepresentativeOpid(),
+                        row.getRepresentativeUid(), VoteChannel.fromDbValue(row.getVoteChannel()),
+                        row.getPackageHash(), row.getBallotFileHash(), row.getSignatureHash(),
+                        row.getRecordedByUserId(), row.getCastAt()));
+    }
+
+    @Override
     public void insertAudit(Long packageId,
                             Long tenantId,
                             String eventType,

@@ -12,9 +12,14 @@ import com.pangu.domain.model.assembly.OwnersAssemblyRuleSnapshot;
 import com.pangu.domain.model.assembly.OwnersAssemblySession;
 import com.pangu.domain.model.asset.OwnerPropertyVotingView;
 import com.pangu.domain.model.voting.VotingSubject;
+import com.pangu.domain.model.voting.PaperBallot;
+import com.pangu.domain.model.voting.PaperVotingDelivery;
+import com.pangu.domain.model.voting.VotingExecutionPackage;
 import com.pangu.domain.repository.OwnerPropertyVotingRepository;
 import com.pangu.domain.repository.OwnersAssemblyMaterialStorage;
 import com.pangu.domain.repository.OwnersAssemblyRepository;
+import com.pangu.domain.repository.PaperVotingRepository;
+import com.pangu.domain.repository.VotingExecutionRepository;
 import com.pangu.domain.repository.VotingSubjectRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -24,6 +29,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
 import static com.pangu.application.assembly.OwnersAssemblyApplicationException.Reason.FORBIDDEN;
@@ -48,6 +54,8 @@ public class OwnerAssemblyDisclosureService {
     private final OwnersAssemblyRepository ownersAssemblyRepository;
     private final VotingSubjectRepository votingSubjectRepository;
     private final OwnerPropertyVotingRepository ownerPropertyVotingRepository;
+    private final VotingExecutionRepository votingExecutionRepository;
+    private final PaperVotingRepository paperVotingRepository;
     private final OwnersAssemblyMaterialStorage materialStorage;
     private final UserContextHolder userContextHolder;
 
@@ -112,7 +120,7 @@ public class OwnerAssemblyDisclosureService {
             throw notVisible();
         }
         return new VisibleAssembly(owner, ballotPackage, session, snapshot, materials, subjects,
-                ownerProperties.stream().anyMatch(OwnerPropertyVotingView::isValidForVoting));
+                ownerProperties.stream().filter(OwnerPropertyVotingView::isValidForVoting).toList());
     }
 
     private OwnerAssemblyDisclosure toDisclosure(VisibleAssembly visible) {
@@ -128,6 +136,7 @@ public class OwnerAssemblyDisclosureService {
                 .toList();
         Instant participatedAt = ownersAssemblyRepository.findOwnerParticipationAt(
                 ballotPackage.packageId(), visible.owner().tenantId(), visible.owner().uid()).orElse(null);
+        OwnerAssemblyDisclosure.Participation participation = participationOf(visible, participatedAt);
         return new OwnerAssemblyDisclosure(
                 ballotPackage.packageId(),
                 visible.session().title(),
@@ -159,7 +168,83 @@ public class OwnerAssemblyDisclosureService {
                 ballotPackage.voteStartAt(),
                 ballotPackage.voteEndAt(),
                 paperVotingInstruction(configuration),
-                new OwnerAssemblyDisclosure.Participation(visible.eligible(), participatedAt != null, participatedAt));
+                participation);
+    }
+
+    private OwnerAssemblyDisclosure.Participation participationOf(VisibleAssembly visible, Instant participatedAt) {
+        int eligiblePropertyCount = visible.eligibleProperties().size();
+        int expectedDecisionCount = eligiblePropertyCount * visible.subjects().size();
+        if (eligiblePropertyCount == 0) {
+            return new OwnerAssemblyDisclosure.Participation(
+                    false, false, null, 0, 0, 0,
+                    new OwnerAssemblyDisclosure.PaperProgress("NOT_APPLICABLE", "NOT_APPLICABLE"));
+        }
+        VotingExecutionPackage executionPackage = votingExecutionRepository
+                .findPackageBySubjectId(visible.subjects().getFirst().getSubjectId())
+                .filter(candidate -> candidate.getBusinessType()
+                        == VotingExecutionPackage.BusinessType.OWNERS_ASSEMBLY)
+                .filter(candidate -> visible.ballotPackage().packageId().equals(candidate.getBusinessReferenceId()))
+                .orElseThrow(this::notVisible);
+        Set<Long> eligibleOpids = visible.eligibleProperties().stream()
+                .map(OwnerPropertyVotingView::opid)
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+        int countedDecisionCount = visible.eligibleProperties().stream()
+                .map(property -> votingExecutionRepository.findElectorateItem(
+                        executionPackage.getPackageId(), visible.owner().tenantId(), property.opid()))
+                .flatMap(Optional::stream)
+                .mapToInt(electorate -> (int) visible.subjects().stream()
+                        .filter(subject -> votingExecutionRepository.findActiveBallot(
+                                subject.getSubjectId(), electorate.snapshotItemId(), visible.owner().tenantId())
+                                .isPresent())
+                        .count())
+                .sum();
+        String deliveryStatus = aggregateDeliveryStatus(
+                paperVotingRepository.listDeliveries(executionPackage.getPackageId(), visible.owner().tenantId())
+                        .stream()
+                        .filter(delivery -> eligibleOpids.contains(delivery.opid()))
+                        .toList());
+        String ballotStatus = aggregateBallotStatus(
+                paperVotingRepository.listBallots(executionPackage.getPackageId(), visible.owner().tenantId())
+                        .stream()
+                        .filter(ballot -> eligibleOpids.contains(ballot.opid()))
+                        .toList());
+        return new OwnerAssemblyDisclosure.Participation(
+                true,
+                countedDecisionCount > 0,
+                participatedAt,
+                eligiblePropertyCount,
+                expectedDecisionCount,
+                countedDecisionCount,
+                new OwnerAssemblyDisclosure.PaperProgress(deliveryStatus, ballotStatus));
+    }
+
+    private String aggregateDeliveryStatus(List<PaperVotingDelivery> deliveries) {
+        if (deliveries.stream().anyMatch(delivery -> delivery.status() == PaperVotingDelivery.Status.CONFIRMED)) {
+            return "CONFIRMED";
+        }
+        if (deliveries.stream().anyMatch(delivery -> delivery.status() == PaperVotingDelivery.Status.PENDING_REVIEW)) {
+            return "PENDING_REVIEW";
+        }
+        if (!deliveries.isEmpty()) {
+            return "REJECTED";
+        }
+        return "NOT_REGISTERED";
+    }
+
+    private String aggregateBallotStatus(List<PaperBallot> ballots) {
+        if (ballots.stream().anyMatch(ballot -> ballot.status() == PaperBallot.Status.COMPLETED)) {
+            return "COMPLETED";
+        }
+        if (ballots.stream().anyMatch(ballot -> ballot.status() == PaperBallot.Status.IN_ENTRY)) {
+            return "IN_ENTRY";
+        }
+        if (ballots.stream().anyMatch(ballot -> ballot.status() == PaperBallot.Status.RECEIVED)) {
+            return "RECEIVED";
+        }
+        if (!ballots.isEmpty()) {
+            return "VOIDED";
+        }
+        return "NOT_RECEIVED";
     }
 
     private void validateLockedPublicMaterials(OwnersAssemblyPackage ballotPackage,
@@ -245,7 +330,7 @@ public class OwnerAssemblyDisclosureService {
             OwnersAssemblyRuleSnapshot ruleSnapshot,
             List<OwnersAssemblyMaterial> materials,
             List<VotingSubject> subjects,
-            boolean eligible
+            List<OwnerPropertyVotingView> eligibleProperties
     ) {
     }
 }

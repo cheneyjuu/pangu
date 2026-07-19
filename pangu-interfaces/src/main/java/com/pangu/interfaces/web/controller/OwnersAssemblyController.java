@@ -4,29 +4,38 @@ package com.pangu.interfaces.web.controller;
 import com.pangu.application.assembly.OwnersAssemblyApplicationException;
 import com.pangu.application.assembly.OwnersAssemblyApplicationService;
 import com.pangu.application.assembly.OwnersAssemblyWorkspace;
-import com.pangu.application.assembly.command.CastAssemblyPaperVoteWithMaterialCommand;
 import com.pangu.application.assembly.command.ConfirmAssemblyArrangementCommand;
 import com.pangu.application.assembly.command.CreateAssemblySubjectDraftCommand;
 import com.pangu.application.assembly.command.CreateOwnersAssemblySessionCommand;
 import com.pangu.application.assembly.command.RecordAssemblyDeliveryWithMaterialCommand;
+import com.pangu.application.assembly.command.RegisterAssemblyPaperBallotCommand;
+import com.pangu.application.assembly.command.ReviewAssemblyPaperBallotEntryCommand;
+import com.pangu.application.assembly.command.ReviewAssemblyPaperDeliveryCommand;
+import com.pangu.application.assembly.command.SubmitAssemblyPaperBallotEntryCommand;
 import com.pangu.application.assembly.command.UploadOwnersAssemblyMaterialCommand;
+import com.pangu.application.assembly.command.VoidAssemblyPaperBallotCommand;
+import com.pangu.application.voting.PaperVotingService;
 import com.pangu.domain.model.assembly.OwnersAssemblyMaterial.MaterialType;
 import com.pangu.domain.model.assembly.OwnersAssemblyPackage;
 import com.pangu.domain.model.assembly.OwnersAssemblySession;
-import com.pangu.domain.model.voting.VotingBallotRecord;
-import com.pangu.domain.model.voting.VotingDeliveryRecord;
 import com.pangu.interfaces.security.SecurityUtils;
-import com.pangu.interfaces.web.controller.dto.assembly.CastAssemblyPaperVoteWithMaterialRequest;
 import com.pangu.interfaces.web.controller.dto.assembly.ConfirmAssemblyArrangementRequest;
 import com.pangu.interfaces.web.controller.dto.assembly.CreateAssemblySubjectDraftRequest;
 import com.pangu.interfaces.web.controller.dto.assembly.CreateOwnersAssemblySessionRequest;
 import com.pangu.interfaces.web.controller.dto.assembly.OwnersAssemblyArrangementResponse;
-import com.pangu.interfaces.web.controller.dto.assembly.OwnersAssemblyDeliveryResponse;
 import com.pangu.interfaces.web.controller.dto.assembly.OwnersAssemblyFormalSubjectResponse;
 import com.pangu.interfaces.web.controller.dto.assembly.OwnersAssemblyMaterialResponse;
+import com.pangu.interfaces.web.controller.dto.assembly.PaperBallotEntryResponse;
+import com.pangu.interfaces.web.controller.dto.assembly.PaperBallotResponse;
+import com.pangu.interfaces.web.controller.dto.assembly.PaperBallotReviewResponse;
+import com.pangu.interfaces.web.controller.dto.assembly.PaperVotingDeliveryResponse;
+import com.pangu.interfaces.web.controller.dto.assembly.PaperVotingWorkbenchResponse;
+import com.pangu.interfaces.web.controller.dto.assembly.RegisterAssemblyPaperBallotRequest;
+import com.pangu.interfaces.web.controller.dto.assembly.ReviewPaperVotingRecordRequest;
+import com.pangu.interfaces.web.controller.dto.assembly.SubmitAssemblyPaperBallotEntryRequest;
+import com.pangu.interfaces.web.controller.dto.assembly.VoidAssemblyPaperBallotRequest;
 import com.pangu.interfaces.web.controller.dto.assembly.OwnersAssemblySessionResponse;
 import com.pangu.interfaces.web.controller.dto.assembly.OwnersAssemblySubjectDraftResponse;
-import com.pangu.interfaces.web.controller.dto.assembly.OwnersAssemblyVoteResponse;
 import com.pangu.interfaces.web.controller.dto.assembly.OwnersAssemblyRuleSnapshotResponse;
 import com.pangu.interfaces.web.controller.dto.assembly.RecordAssemblyDeliveryWithMaterialRequest;
 import com.pangu.interfaces.web.controller.dto.assembly.OwnersAssemblyWorkspaceResponse;
@@ -47,6 +56,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.time.Instant;
 import java.util.List;
 
 import static com.pangu.application.assembly.OwnersAssemblyApplicationException.Reason.FORBIDDEN;
@@ -158,35 +168,119 @@ public class OwnersAssemblyController extends BaseController {
 
     @PostMapping("/owners-assemblies/{sessionId}/paper-deliveries")
     @PreAuthorize("hasAuthority('voting:subject:audit')")
-    public ResponseEntity<Result<OwnersAssemblyDeliveryResponse>> recordPaperDelivery(
+    public ResponseEntity<Result<PaperVotingDeliveryResponse>> recordPaperDelivery(
             @PathVariable("sessionId") Long sessionId,
             @Valid @RequestBody RecordAssemblyDeliveryWithMaterialRequest request) {
-        VotingDeliveryRecord delivery = service.recordPaperDelivery(new RecordAssemblyDeliveryWithMaterialCommand(
+        var delivery = service.recordPaperDelivery(new RecordAssemblyDeliveryWithMaterialCommand(
                 sessionId,
                 requireTenantId(),
                 request.opid(),
+                request.recipientName(),
                 request.deliveryMethod(),
                 request.evidenceMaterialId(),
-                requireUserId()));
+                requireUserId(),
+                request.deliveredAt()));
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(success("纸质选票送达记录已保存", OwnersAssemblyDeliveryResponse.from(delivery)));
+                .body(success("纸质材料送达情况已登记，等待核对", PaperVotingDeliveryResponse.from(delivery)));
     }
 
-    @PostMapping("/owners-assemblies/{sessionId}/paper-votes")
+    @PostMapping("/owners-assemblies/{sessionId}/paper-deliveries/{paperDeliveryId}/review")
     @PreAuthorize("hasAuthority('voting:subject:audit')")
-    public ResponseEntity<Result<OwnersAssemblyVoteResponse>> castPaperVoteWithMaterial(
+    public Result<PaperVotingDeliveryResponse> reviewPaperDelivery(
             @PathVariable("sessionId") Long sessionId,
-            @Valid @RequestBody CastAssemblyPaperVoteWithMaterialRequest request) {
-        VotingBallotRecord vote = service.castPaperVoteWithMaterial(new CastAssemblyPaperVoteWithMaterialCommand(
+            @PathVariable("paperDeliveryId") Long paperDeliveryId,
+            @Valid @RequestBody ReviewPaperVotingRecordRequest request) {
+        var delivery = service.reviewPaperDelivery(new ReviewAssemblyPaperDeliveryCommand(
+                sessionId,
+                paperDeliveryId,
+                requireTenantId(),
+                request.decision(),
+                request.reviewNote(),
+                requireUserId(),
+                Instant.now()));
+        return success("纸质材料送达情况已核对", PaperVotingDeliveryResponse.from(delivery));
+    }
+
+    @PostMapping("/owners-assemblies/{sessionId}/paper-ballots")
+    @PreAuthorize("hasAuthority('voting:subject:audit')")
+    public ResponseEntity<Result<PaperBallotResponse>> registerPaperBallot(
+            @PathVariable("sessionId") Long sessionId,
+            @Valid @RequestBody RegisterAssemblyPaperBallotRequest request) {
+        var ballot = service.registerPaperBallot(new RegisterAssemblyPaperBallotCommand(
                 sessionId,
                 requireTenantId(),
-                request.subjectId(),
                 request.opid(),
-                request.choice(),
+                request.ballotNumber(),
                 request.ballotMaterialId(),
-                requireUserId()));
+                requireUserId(),
+                request.receivedAt()));
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(success("纸质选票已录入", OwnersAssemblyVoteResponse.from(vote)));
+                .body(success("纸质表决票已登记，等待录入", PaperBallotResponse.from(ballot)));
+    }
+
+    @PostMapping("/owners-assemblies/{sessionId}/paper-ballots/{paperBallotId}/void")
+    @PreAuthorize("hasAuthority('voting:subject:audit')")
+    public Result<PaperBallotResponse> voidPaperBallot(
+            @PathVariable("sessionId") Long sessionId,
+            @PathVariable("paperBallotId") Long paperBallotId,
+            @Valid @RequestBody VoidAssemblyPaperBallotRequest request) {
+        var ballot = service.voidPaperBallot(new VoidAssemblyPaperBallotCommand(
+                sessionId,
+                paperBallotId,
+                requireTenantId(),
+                request.reason(),
+                requireUserId(),
+                Instant.now()));
+        return success("纸质表决票登记已作废并保留记录", PaperBallotResponse.from(ballot));
+    }
+
+    @PostMapping("/owners-assemblies/{sessionId}/paper-ballots/{paperBallotId}/entries")
+    @PreAuthorize("hasAuthority('voting:subject:audit')")
+    public ResponseEntity<Result<PaperBallotEntryResponse>> submitPaperBallotEntry(
+            @PathVariable("sessionId") Long sessionId,
+            @PathVariable("paperBallotId") Long paperBallotId,
+            @Valid @RequestBody SubmitAssemblyPaperBallotEntryRequest request) {
+        var items = toPaperBallotItems(request);
+        var entry = service.submitPaperBallotEntry(new SubmitAssemblyPaperBallotEntryCommand(
+                sessionId,
+                paperBallotId,
+                requireTenantId(),
+                items,
+                requireUserId(),
+                Instant.now()));
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(success("纸质表决票录入已提交，等待另一名工作人员核对",
+                        PaperBallotEntryResponse.from(entry)));
+    }
+
+    @PostMapping("/owners-assemblies/{sessionId}/paper-ballots/{paperBallotId}/entries/{entryId}/review")
+    @PreAuthorize("hasAuthority('voting:subject:audit')")
+    public Result<PaperBallotReviewResponse> reviewPaperBallotEntry(
+            @PathVariable("sessionId") Long sessionId,
+            @PathVariable("paperBallotId") Long paperBallotId,
+            @PathVariable("entryId") Long entryId,
+            @Valid @RequestBody ReviewPaperVotingRecordRequest request) {
+        PaperVotingService.BallotReviewResult result = service.reviewPaperBallotEntry(
+                new ReviewAssemblyPaperBallotEntryCommand(
+                        sessionId,
+                        paperBallotId,
+                        entryId,
+                        requireTenantId(),
+                        request.decision(),
+                        request.reviewNote(),
+                        requireUserId(),
+                        Instant.now()));
+        return success(request.decision() == PaperVotingService.ReviewDecision.CONFIRM
+                        ? "纸质表决票已核对并完成处理" : "纸质表决票录入已退回",
+                PaperBallotReviewResponse.from(result));
+    }
+
+    @GetMapping("/owners-assemblies/{sessionId}/paper-workbench")
+    @PreAuthorize("hasAuthority('voting:subject:audit')")
+    public Result<PaperVotingWorkbenchResponse> paperVotingWorkbench(
+            @PathVariable("sessionId") Long sessionId) {
+        return success(PaperVotingWorkbenchResponse.from(
+                service.getPaperVotingWorkbench(sessionId, requireTenantId())));
     }
 
     private Long requireTenantId() {
@@ -211,6 +305,16 @@ public class OwnersAssemblyController extends BaseController {
         } catch (IllegalArgumentException ex) {
             throw new OwnersAssemblyApplicationException(
                     OwnersAssemblyApplicationException.Reason.PARAM_INVALID, "不支持的办理材料类型", ex);
+        }
+    }
+
+    private List<com.pangu.domain.model.voting.PaperBallotEntry.Item> toPaperBallotItems(
+            SubmitAssemblyPaperBallotEntryRequest request) {
+        try {
+            return request.toDomainItems();
+        } catch (IllegalArgumentException ex) {
+            throw new OwnersAssemblyApplicationException(
+                    OwnersAssemblyApplicationException.Reason.PARAM_INVALID, ex.getMessage(), ex);
         }
     }
 

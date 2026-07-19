@@ -48,6 +48,8 @@ public interface VotingExecutionRepository {
 
     VotingBallotRecord insertBallot(VotingBallotRecord ballot);
 
+    Optional<VotingBallotRecord> findActiveBallot(Long subjectId, Long electorateItemId, Long tenantId);
+
     void insertAudit(Long packageId,
                      Long tenantId,
                      String eventType,

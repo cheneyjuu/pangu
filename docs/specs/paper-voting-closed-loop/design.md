@@ -2,7 +2,7 @@
 
 > 业务关联：把纸质送达和纸票原件转换为可核验的统一送达及有效票事实。
 >
-> 状态：实施中（2026-07-19）
+> 状态：后端能力完成，三端页面纳入改造计划切片八（2026-07-19）
 >
 > 需求依据：[requirements.md](requirements.md)
 
@@ -38,7 +38,7 @@
 
 - 表决包、专有部分、票号、锁定模板摘要；
 - 纸票原件材料编号及摘要、回收时间和经办人；
-- `RECEIVED / IN_ENTRY / NEEDS_RESOLUTION / COMPLETED / VOIDED`。
+- `RECEIVED / IN_ENTRY / COMPLETED / VOIDED`。
 
 票号在表决包内唯一，原件材料在表决包内只能登记一次。
 
@@ -87,7 +87,7 @@
 - `submitEntry`：保存一版不可变录入；
 - `reviewEntry`：由不同人员确认或退回；确认后触发逐事项最终处理；
 - `finalizeReadyItems`：逐事项调用统一内核形成有效票，或记录无效/重复结果；
-- `getWorkbench`：返回业务可读的待办和历史记录，不返回第二人尚不应看到的第一份选择。
+- `getWorkbench`：只向具有复核权限的管理端身份返回业务可读的待办、原始录入和历史记录；业主端只返回本人汇总进度，不返回任何选择。
 
 纸票最终解释与统一有效票写入分两个明确事务阶段：先提交不可变复核结论，再尝试写统一票。若并发唯一约束发现已有有效票，单独事务把该纸票事项标记为重复，避免回滚或覆盖原有效票。
 
@@ -98,6 +98,7 @@
 - `POST /owners-assemblies/{sessionId}/paper-deliveries`：登记送达；
 - `POST /owners-assemblies/{sessionId}/paper-deliveries/{deliveryId}/review`：核对送达；
 - `POST /owners-assemblies/{sessionId}/paper-ballots`：登记回收纸票；
+- `POST /owners-assemblies/{sessionId}/paper-ballots/{ballotId}/void`：作废尚未录入的错误登记并保留原因；
 - `POST /owners-assemblies/{sessionId}/paper-ballots/{ballotId}/entries`：提交一版录入；
 - `POST /owners-assemblies/{sessionId}/paper-ballots/{ballotId}/entries/{entryId}/review`：确认或退回录入；
 - `GET /owners-assemblies/{sessionId}/paper-workbench`：查询送达和纸票工作台。

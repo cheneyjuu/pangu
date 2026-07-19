@@ -85,7 +85,18 @@ public record OwnerAssemblyDisclosure(
     public record Participation(
             boolean eligible,
             boolean participated,
-            Instant participatedAt
+            Instant participatedAt,
+            int eligiblePropertyCount,
+            int expectedDecisionCount,
+            int countedDecisionCount,
+            PaperProgress paper
+    ) {
+    }
+
+    /** 纸质办理只返回本人汇总进度，不返回票面选择、原件或其他业主信息。 */
+    public record PaperProgress(
+            String deliveryStatus,
+            String ballotStatus
     ) {
     }
 }

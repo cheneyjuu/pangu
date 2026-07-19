@@ -13,6 +13,8 @@ public class VotingBallotRecordRow {
     private Long voteId;
     private Long electorateItemId;
     private Long tenantId;
+    private Long representativeOpid;
+    private Long representativeUid;
     private Integer voteChannel;
     private String packageHash;
     private String ballotFileHash;

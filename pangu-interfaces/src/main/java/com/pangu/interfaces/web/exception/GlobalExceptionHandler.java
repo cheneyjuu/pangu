@@ -26,6 +26,7 @@ import org.springframework.security.core.AuthenticationException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.util.stream.Collectors;
 
@@ -389,6 +390,20 @@ public class GlobalExceptionHandler {
         return Result.fail(
                 errorCode.getCode(),
                 ex.getMessage() != null ? ex.getMessage() : errorCode.getMessage(),
+                null,
+                errorCode.getErrorType(),
+                errorCode.isNeedRetry());
+    }
+
+    /** 未映射的 API 或静态资源返回 404，不能被未知异常兜底误报为系统故障。 */
+    @ExceptionHandler(NoResourceFoundException.class)
+    public Result<Object> handleNoResourceFoundException(NoResourceFoundException ex,
+                                                          HttpServletResponse response) {
+        CommonErrorCode errorCode = CommonErrorCode.NOT_FOUND;
+        response.setStatus(errorCode.getHttpStatus());
+        return Result.fail(
+                errorCode.getCode(),
+                "请求的资源不存在",
                 null,
                 errorCode.getErrorType(),
                 errorCode.isNeedRetry());

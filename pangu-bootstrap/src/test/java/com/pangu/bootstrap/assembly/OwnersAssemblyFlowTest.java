@@ -48,6 +48,8 @@ class OwnersAssemblyFlowTest {
     private static final long USER_PROPERTY_MANAGER = 800201L;
     private static final long ACCOUNT_DIRECTOR = 999811L;
     private static final long USER_DIRECTOR = 800101L;
+    private static final long ACCOUNT_COMMITTEE_MEMBER = 999813L;
+    private static final long USER_COMMITTEE_MEMBER = 800103L;
     private static final long ACCOUNT_OWNER = 999913L;
     private static final long USER_OWNER = 70002L;
     private static final String ASSEMBLY_TITLE_PREFIX = "IT-业主大会-";
@@ -94,6 +96,29 @@ class OwnersAssemblyFlowTest {
                 WHERE subject.title LIKE ?
                 """, Long.class, ASSEMBLY_TITLE_PREFIX + "%");
         for (Long executionPackageId : executionPackageIds) {
+            jdbcTemplate.update("""
+                    DELETE FROM t_paper_ballot_outcome
+                    WHERE paper_ballot_id IN (
+                        SELECT paper_ballot_id FROM t_paper_ballot WHERE package_id = ?
+                    )
+                    """, executionPackageId);
+            jdbcTemplate.update("""
+                    DELETE FROM t_paper_ballot_entry_item
+                    WHERE entry_id IN (
+                        SELECT entry_id FROM t_paper_ballot_entry
+                        WHERE paper_ballot_id IN (
+                            SELECT paper_ballot_id FROM t_paper_ballot WHERE package_id = ?
+                        )
+                    )
+                    """, executionPackageId);
+            jdbcTemplate.update("""
+                    DELETE FROM t_paper_ballot_entry
+                    WHERE paper_ballot_id IN (
+                        SELECT paper_ballot_id FROM t_paper_ballot WHERE package_id = ?
+                    )
+                    """, executionPackageId);
+            jdbcTemplate.update("DELETE FROM t_paper_ballot WHERE package_id = ?", executionPackageId);
+            jdbcTemplate.update("DELETE FROM t_paper_voting_delivery WHERE package_id = ?", executionPackageId);
             jdbcTemplate.update("DELETE FROM t_voting_ballot_record WHERE package_id = ?", executionPackageId);
             jdbcTemplate.update("DELETE FROM t_voting_delivery_record WHERE package_id = ?", executionPackageId);
             jdbcTemplate.update("DELETE FROM t_voting_package_subject WHERE package_id = ?", executionPackageId);
@@ -292,9 +317,10 @@ class OwnersAssemblyFlowTest {
     }
 
     @Test
-    void paperDeliveryAndBallotUseUnifiedFrozenRosterLedger() throws Exception {
+    void paperDeliveryAndBallotRequireReviewBeforeEnteringUnifiedLedger() throws Exception {
         String propertyToken = token(ACCOUNT_PROPERTY_MANAGER, USER_PROPERTY_MANAGER);
         String directorToken = token(ACCOUNT_DIRECTOR, USER_DIRECTOR);
+        String committeeToken = token(ACCOUNT_COMMITTEE_MEMBER, USER_COMMITTEE_MEMBER);
         activateRule(propertyToken, directorToken, "2026-IT-unified-ledger-" + System.nanoTime(), 0, 0, 0);
         long sessionId = prepareFormalArrangement(directorToken);
         Instant voteStartAt = Instant.now().minus(1, ChronoUnit.MINUTES);
@@ -324,27 +350,81 @@ class OwnersAssemblyFlowTest {
         long ballotMaterialId = uploadMaterial(
                 directorToken, sessionId, "PAPER_BALLOT", "回收选票.pdf", "application/pdf", "vote");
 
-        mockMvc.perform(post("/api/v1/owners-assemblies/" + sessionId + "/paper-deliveries")
+        String registeredDelivery = mockMvc.perform(post("/api/v1/owners-assemblies/" + sessionId + "/paper-deliveries")
                         .header("Authorization", "Bearer " + directorToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(Map.of(
                                 "opid", 9,
+                                "recipientName", "验收业主",
                                 "deliveryMethod", "DOOR_TO_DOOR",
+                                "deliveredAt", Instant.now().minus(5, ChronoUnit.MINUTES).toString(),
                                 "evidenceMaterialId", deliveryEvidenceId))))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.data.uid", is((int) USER_OWNER)))
-                .andExpect(jsonPath("$.data.deliveryChannel", is("PAPER")));
-        mockMvc.perform(post("/api/v1/owners-assemblies/" + sessionId + "/paper-votes")
+                .andExpect(jsonPath("$.data.opid", is(9)))
+                .andExpect(jsonPath("$.data.status", is("PENDING_REVIEW")))
+                .andReturn().getResponse().getContentAsString();
+        long paperDeliveryId = objectMapper.readTree(registeredDelivery).path("data").path("paperDeliveryId").asLong();
+
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM t_voting_delivery_record delivery
+                JOIN t_voting_execution_package execution_package
+                  ON execution_package.package_id = delivery.package_id
+                WHERE execution_package.business_type = 'OWNERS_ASSEMBLY'
+                  AND execution_package.business_reference_id = ?
+                """, Long.class, legacyPackageId)).isZero();
+
+        mockMvc.perform(post("/api/v1/owners-assemblies/" + sessionId
+                        + "/paper-deliveries/" + paperDeliveryId + "/review")
+                        .header("Authorization", "Bearer " + directorToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("decision", "CONFIRM"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status", is("CONFIRMED")))
+                .andExpect(jsonPath("$.data.unifiedDeliveryId").isNumber());
+
+        String registeredBallot = mockMvc.perform(post("/api/v1/owners-assemblies/" + sessionId + "/paper-ballots")
                         .header("Authorization", "Bearer " + directorToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(Map.of(
-                                "subjectId", subjectId,
+                                "ballotNumber", "P-001",
                                 "opid", 9,
-                                "choice", "SUPPORT",
+                                "receivedAt", Instant.now().toString(),
                                 "ballotMaterialId", ballotMaterialId))))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.data.assemblyVoteId").isNumber())
-                .andExpect(jsonPath("$.data.valid", is(true)));
+                .andExpect(jsonPath("$.data.status", is("RECEIVED")))
+                .andReturn().getResponse().getContentAsString();
+        long paperBallotId = objectMapper.readTree(registeredBallot).path("data").path("paperBallotId").asLong();
+
+        String entered = mockMvc.perform(post("/api/v1/owners-assemblies/" + sessionId
+                        + "/paper-ballots/" + paperBallotId + "/entries")
+                        .header("Authorization", "Bearer " + directorToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "items", List.of(Map.of(
+                                        "subjectId", subjectId,
+                                        "determination", "VALID",
+                                        "choice", "SUPPORT"))))))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.status", is("PENDING_REVIEW")))
+                .andReturn().getResponse().getContentAsString();
+        long entryId = objectMapper.readTree(entered).path("data").path("entryId").asLong();
+
+        mockMvc.perform(post("/api/v1/owners-assemblies/" + sessionId
+                        + "/paper-ballots/" + paperBallotId + "/entries/" + entryId + "/review")
+                        .header("Authorization", "Bearer " + directorToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("decision", "CONFIRM"))))
+                .andExpect(status().isBadRequest());
+
+        mockMvc.perform(post("/api/v1/owners-assemblies/" + sessionId
+                        + "/paper-ballots/" + paperBallotId + "/entries/" + entryId + "/review")
+                        .header("Authorization", "Bearer " + committeeToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("decision", "CONFIRM"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status", is("COMPLETED")))
+                .andExpect(jsonPath("$.data.outcomes[0].status", is("COUNTED")))
+                .andExpect(jsonPath("$.data.outcomes[0].unifiedBallotId").isNumber());
 
         assertThat(jdbcTemplate.queryForObject("""
                 SELECT COUNT(*) FROM t_voting_delivery_record delivery
@@ -360,6 +440,114 @@ class OwnersAssemblyFlowTest {
                 WHERE execution_package.business_type = 'OWNERS_ASSEMBLY'
                   AND execution_package.business_reference_id = ?
                 """, Long.class, legacyPackageId)).isEqualTo(1L);
+
+        long invalidMaterialId = uploadMaterial(
+                directorToken, sessionId, "PAPER_BALLOT", "无效选票.pdf", "application/pdf", "invalid-vote");
+        long invalidBallotId = registerPaperBallot(
+                directorToken, sessionId, "P-002", invalidMaterialId);
+        long invalidEntryId = submitPaperBallotEntry(
+                directorToken, sessionId, invalidBallotId, List.of(Map.of(
+                        "subjectId", subjectId,
+                        "determination", "INVALID",
+                        "invalidReasonCode", "BLANK")));
+        mockMvc.perform(post("/api/v1/owners-assemblies/" + sessionId
+                        + "/paper-ballots/" + invalidBallotId + "/entries/" + invalidEntryId + "/review")
+                        .header("Authorization", "Bearer " + committeeToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("decision", "CONFIRM"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status", is("COMPLETED")))
+                .andExpect(jsonPath("$.data.outcomes[0].status", is("INVALID")))
+                .andExpect(jsonPath("$.data.outcomes[0].unifiedBallotId").doesNotExist());
+
+        long correctedMaterialId = uploadMaterial(
+                directorToken, sessionId, "PAPER_BALLOT", "退回修订选票.pdf", "application/pdf", "corrected-vote");
+        long correctedBallotId = registerPaperBallot(
+                directorToken, sessionId, "P-003", correctedMaterialId);
+        long rejectedEntryId = submitPaperBallotEntry(
+                directorToken, sessionId, correctedBallotId, List.of(Map.of(
+                        "subjectId", subjectId,
+                        "determination", "VALID",
+                        "choice", "AGAINST")));
+        mockMvc.perform(post("/api/v1/owners-assemblies/" + sessionId
+                        + "/paper-ballots/" + correctedBallotId + "/entries/" + rejectedEntryId + "/review")
+                        .header("Authorization", "Bearer " + committeeToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "decision", "REJECT",
+                                "reviewNote", "票面勾选与录入不一致"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.entry.status", is("REJECTED")))
+                .andExpect(jsonPath("$.data.outcomes.length()", is(0)));
+
+        long correctedEntryId = submitPaperBallotEntry(
+                directorToken, sessionId, correctedBallotId, List.of(Map.of(
+                        "subjectId", subjectId,
+                        "determination", "VALID",
+                        "choice", "AGAINST")));
+        mockMvc.perform(post("/api/v1/owners-assemblies/" + sessionId
+                        + "/paper-ballots/" + correctedBallotId + "/entries/" + correctedEntryId + "/review")
+                        .header("Authorization", "Bearer " + committeeToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("decision", "CONFIRM"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status", is("COMPLETED")))
+                .andExpect(jsonPath("$.data.entry.versionNumber", is(2)))
+                .andExpect(jsonPath("$.data.outcomes[0].status", is("DUPLICATE")))
+                .andExpect(jsonPath("$.data.outcomes[0].conflictingBallotId").isNumber());
+
+        mockMvc.perform(post("/api/v1/owners-assemblies/" + sessionId
+                        + "/paper-ballots/" + correctedBallotId + "/entries/" + correctedEntryId + "/review")
+                        .header("Authorization", "Bearer " + committeeToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("decision", "CONFIRM"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status", is("COMPLETED")))
+                .andExpect(jsonPath("$.data.outcomes[0].status", is("DUPLICATE")));
+
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM t_voting_ballot_record ballot
+                JOIN t_voting_execution_package execution_package
+                  ON execution_package.package_id = ballot.package_id
+                WHERE execution_package.business_type = 'OWNERS_ASSEMBLY'
+                  AND execution_package.business_reference_id = ?
+                """, Long.class, legacyPackageId)).isEqualTo(1L);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_paper_ballot_entry WHERE paper_ballot_id = ?",
+                Long.class, correctedBallotId)).isEqualTo(2L);
+
+        long voidMaterialId = uploadMaterial(
+                directorToken, sessionId, "PAPER_BALLOT", "登记错误选票.pdf", "application/pdf", "void-vote");
+        long voidBallotId = registerPaperBallot(directorToken, sessionId, "P-004", voidMaterialId);
+        mockMvc.perform(post("/api/v1/owners-assemblies/" + sessionId
+                        + "/paper-ballots/" + voidBallotId + "/void")
+                        .header("Authorization", "Bearer " + directorToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("reason", "专有部分对应错误，作废后重新登记"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status", is("VOIDED")))
+                .andExpect(jsonPath("$.data.voidReason", is("专有部分对应错误，作废后重新登记")));
+        mockMvc.perform(post("/api/v1/owners-assemblies/" + sessionId
+                        + "/paper-ballots/" + voidBallotId + "/entries")
+                        .header("Authorization", "Bearer " + directorToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("items", List.of(Map.of(
+                                "subjectId", subjectId,
+                                "determination", "VALID",
+                                "choice", "SUPPORT"))))))
+                .andExpect(status().isConflict());
+
+        mockMvc.perform(get("/api/v1/owners-assemblies/" + sessionId + "/paper-workbench")
+                        .header("Authorization", "Bearer " + committeeToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.deliveries.length()", is(1)))
+                .andExpect(jsonPath("$.data.ballots.length()", is(4)));
+        mockMvc.perform(post("/api/v1/owners-assemblies/" + sessionId + "/paper-votes")
+                        .header("Authorization", "Bearer " + directorToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isNotFound());
+
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM t_owners_assembly_delivery WHERE package_id = ?",
                 Long.class, legacyPackageId)).isZero();
@@ -370,7 +558,12 @@ class OwnersAssemblyFlowTest {
         mockMvc.perform(get("/api/v1/me/owners-assembly-disclosures/" + legacyPackageId)
                         .header("Authorization", "Bearer " + ownerToken()))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.participation.participated", is(true)));
+                .andExpect(jsonPath("$.data.participation.participated", is(true)))
+                .andExpect(jsonPath("$.data.participation.countedDecisionCount", is(1)))
+                .andExpect(jsonPath("$.data.participation.paper.deliveryStatus", is("CONFIRMED")))
+                .andExpect(jsonPath("$.data.participation.paper.ballotStatus", is("COMPLETED")))
+                .andExpect(jsonPath("$.data.participation.paper.choice").doesNotExist())
+                .andExpect(jsonPath("$.data.subjects[0].choice").doesNotExist());
     }
 
     @Test
@@ -545,6 +738,37 @@ class OwnersAssemblyFlowTest {
                 .andExpect(status().isCreated())
                 .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
         return objectMapper.readTree(response).path("data").path("materialId").asLong();
+    }
+
+    private long registerPaperBallot(String token,
+                                     long sessionId,
+                                     String ballotNumber,
+                                     long ballotMaterialId) throws Exception {
+        String response = mockMvc.perform(post("/api/v1/owners-assemblies/" + sessionId + "/paper-ballots")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "ballotNumber", ballotNumber,
+                                "opid", 9,
+                                "receivedAt", Instant.now().toString(),
+                                "ballotMaterialId", ballotMaterialId))))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+        return objectMapper.readTree(response).path("data").path("paperBallotId").asLong();
+    }
+
+    private long submitPaperBallotEntry(String token,
+                                        long sessionId,
+                                        long paperBallotId,
+                                        List<Map<String, Object>> items) throws Exception {
+        String response = mockMvc.perform(post("/api/v1/owners-assemblies/" + sessionId
+                        + "/paper-ballots/" + paperBallotId + "/entries")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("items", items))))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+        return objectMapper.readTree(response).path("data").path("entryId").asLong();
     }
 
     private String token(long accountId, long userId) {

@@ -1,14 +1,19 @@
 // 关联业务：编排业主大会的会前事项、材料归档、公示、表决、送达和计票状态机。
 package com.pangu.application.assembly;
 
-import com.pangu.application.assembly.command.CastAssemblyPaperVoteCommand;
 import com.pangu.application.assembly.command.CreateAssemblySubjectDraftCommand;
 import com.pangu.application.assembly.command.CreateOwnersAssemblySessionCommand;
 import com.pangu.application.assembly.command.ConfirmAssemblyArrangementCommand;
-import com.pangu.application.assembly.command.CastAssemblyPaperVoteWithMaterialCommand;
 import com.pangu.application.assembly.command.RecordAssemblyDeliveryWithMaterialCommand;
+import com.pangu.application.assembly.command.RegisterAssemblyPaperBallotCommand;
+import com.pangu.application.assembly.command.ReviewAssemblyPaperBallotEntryCommand;
+import com.pangu.application.assembly.command.ReviewAssemblyPaperDeliveryCommand;
+import com.pangu.application.assembly.command.SubmitAssemblyPaperBallotEntryCommand;
 import com.pangu.application.assembly.command.UploadOwnersAssemblyMaterialCommand;
+import com.pangu.application.assembly.command.VoidAssemblyPaperBallotCommand;
 import com.pangu.application.support.PayloadHasher;
+import com.pangu.application.voting.PaperVotingException;
+import com.pangu.application.voting.PaperVotingService;
 import com.pangu.application.voting.VotingExecutionService;
 import com.pangu.domain.context.UserContext;
 import com.pangu.domain.context.UserContextHolder;
@@ -22,8 +27,9 @@ import com.pangu.domain.model.assembly.OwnersAssemblySession;
 import com.pangu.domain.model.assembly.OwnersAssemblySubjectDraft;
 import com.pangu.domain.model.voting.SubjectType;
 import com.pangu.domain.model.voting.VoteChannel;
-import com.pangu.domain.model.voting.VotingBallotRecord;
-import com.pangu.domain.model.voting.VotingDeliveryRecord;
+import com.pangu.domain.model.voting.PaperBallot;
+import com.pangu.domain.model.voting.PaperBallotEntry;
+import com.pangu.domain.model.voting.PaperVotingDelivery;
 import com.pangu.domain.model.voting.VotingExecutionPackage;
 import com.pangu.domain.model.voting.VotingScope;
 import com.pangu.domain.model.voting.VotingDecisionRule;
@@ -95,6 +101,7 @@ public class OwnersAssemblyApplicationService {
     private final CommitteePositionRepository committeePositionRepository;
     private final VotingSubjectRepository votingSubjectRepository;
     private final VotingExecutionService votingExecutionService;
+    private final PaperVotingService paperVotingService;
     private final UserContextHolder userContextHolder;
 
     @Transactional
@@ -475,84 +482,127 @@ public class OwnersAssemblyApplicationService {
         return openVoting(arrangement.packageId(), tenantId);
     }
 
-    @Transactional
-    public VotingDeliveryRecord recordPaperDelivery(RecordAssemblyDeliveryWithMaterialCommand command) {
+    public PaperVotingDelivery recordPaperDelivery(RecordAssemblyDeliveryWithMaterialCommand command) {
         requireSysContext(command.tenantId(), command.deliveredByUserId());
         OwnersAssemblySession session = ownersAssemblyRepository.findSession(command.sessionId(), command.tenantId())
                 .orElseThrow(() -> new OwnersAssemblyApplicationException(NOT_FOUND, "业主大会不存在"));
         OwnersAssemblyPackage arrangement = requireLatestArrangement(session.sessionId(), session.tenantId());
+        OwnersAssemblyRuleSnapshot ruleSnapshot = requireRuleSnapshot(arrangement);
+        requireChannelAllowed(arrangement, CHANNEL_PAPER);
+        if (command.deliveryMethod() == null
+                || !ruleSnapshot.configuration().validDeliveryMethods().contains(command.deliveryMethod())) {
+            throw new OwnersAssemblyApplicationException(
+                    PARAM_INVALID, "送达方式不在本次业主大会冻结议事规则认可范围内");
+        }
         OwnersAssemblyMaterial evidence = requireMaterial(
                 command.evidenceMaterialId(), session, MaterialType.DELIVERY_EVIDENCE);
-        return recordPaperDelivery(
-                arrangement.packageId(),
-                session.tenantId(),
-                command.opid(),
-                command.deliveryMethod(),
-                evidence.contentSha256(),
-                command.deliveredByUserId());
+        VotingExecutionPackage executionPackage = requireExecutionPackage(
+                arrangement, ownersAssemblyRepository.listSubjectIds(arrangement.packageId(), arrangement.tenantId()));
+        try {
+            return paperVotingService.registerDelivery(new PaperVotingService.RegisterDeliveryCommand(
+                    executionPackage.getPackageId(), session.tenantId(), command.opid(), command.recipientName(),
+                    command.deliveryMethod().name(), "OWNERS_ASSEMBLY_MATERIAL", evidence.materialId(),
+                    evidence.contentSha256(), command.deliveredByUserId(), command.deliveredAt()));
+        } catch (PaperVotingException ex) {
+            throw translatePaperVotingFailure(ex);
+        }
     }
 
-    @Transactional
-    public VotingBallotRecord castPaperVoteWithMaterial(CastAssemblyPaperVoteWithMaterialCommand command) {
+    public PaperVotingDelivery reviewPaperDelivery(ReviewAssemblyPaperDeliveryCommand command) {
+        requireSysContext(command.tenantId(), command.reviewedByUserId());
+        OwnersAssemblySession session = ownersAssemblyRepository.findSession(command.sessionId(), command.tenantId())
+                .orElseThrow(() -> new OwnersAssemblyApplicationException(NOT_FOUND, "业主大会不存在"));
+        OwnersAssemblyPackage arrangement = requireLatestArrangement(session.sessionId(), session.tenantId());
+        VotingExecutionPackage executionPackage = requireExecutionPackage(
+                arrangement, ownersAssemblyRepository.listSubjectIds(arrangement.packageId(), arrangement.tenantId()));
+        try {
+            return paperVotingService.reviewDelivery(new PaperVotingService.ReviewDeliveryCommand(
+                    executionPackage.getPackageId(), command.paperDeliveryId(), command.tenantId(),
+                    command.decision(), command.reviewNote(), command.reviewedByUserId(), command.reviewedAt()));
+        } catch (PaperVotingException ex) {
+            throw translatePaperVotingFailure(ex);
+        }
+    }
+
+    public PaperBallot registerPaperBallot(RegisterAssemblyPaperBallotCommand command) {
+        requireSysContext(command.tenantId(), command.receivedByUserId());
+        OwnersAssemblySession session = ownersAssemblyRepository.findSession(command.sessionId(), command.tenantId())
+                .orElseThrow(() -> new OwnersAssemblyApplicationException(NOT_FOUND, "业主大会不存在"));
+        OwnersAssemblyPackage arrangement = requireLatestArrangement(session.sessionId(), session.tenantId());
+        requireChannelAllowed(arrangement, CHANNEL_PAPER);
+        OwnersAssemblyMaterial ballot = requireMaterial(command.ballotMaterialId(), session, MaterialType.PAPER_BALLOT);
+        VotingExecutionPackage executionPackage = requireExecutionPackage(
+                arrangement, ownersAssemblyRepository.listSubjectIds(arrangement.packageId(), arrangement.tenantId()));
+        try {
+            return paperVotingService.registerBallot(new PaperVotingService.RegisterBallotCommand(
+                    executionPackage.getPackageId(), command.tenantId(), command.opid(), command.ballotNumber(),
+                    arrangement.ballotTemplateHash(), "OWNERS_ASSEMBLY_MATERIAL", ballot.materialId(),
+                    ballot.contentSha256(), command.receivedByUserId(), command.receivedAt()));
+        } catch (PaperVotingException ex) {
+            throw translatePaperVotingFailure(ex);
+        }
+    }
+
+    public PaperBallot voidPaperBallot(VoidAssemblyPaperBallotCommand command) {
+        requireSysContext(command.tenantId(), command.voidedByUserId());
+        OwnersAssemblySession session = ownersAssemblyRepository.findSession(command.sessionId(), command.tenantId())
+                .orElseThrow(() -> new OwnersAssemblyApplicationException(NOT_FOUND, "业主大会不存在"));
+        OwnersAssemblyPackage arrangement = requireLatestArrangement(session.sessionId(), session.tenantId());
+        VotingExecutionPackage executionPackage = requireExecutionPackage(
+                arrangement, ownersAssemblyRepository.listSubjectIds(arrangement.packageId(), arrangement.tenantId()));
+        try {
+            return paperVotingService.voidBallot(new PaperVotingService.VoidBallotCommand(
+                    executionPackage.getPackageId(), command.paperBallotId(), command.tenantId(),
+                    command.reason(), command.voidedByUserId(), command.voidedAt()));
+        } catch (PaperVotingException ex) {
+            throw translatePaperVotingFailure(ex);
+        }
+    }
+
+    public PaperBallotEntry submitPaperBallotEntry(SubmitAssemblyPaperBallotEntryCommand command) {
         requireSysContext(command.tenantId(), command.enteredByUserId());
         OwnersAssemblySession session = ownersAssemblyRepository.findSession(command.sessionId(), command.tenantId())
                 .orElseThrow(() -> new OwnersAssemblyApplicationException(NOT_FOUND, "业主大会不存在"));
         OwnersAssemblyPackage arrangement = requireLatestArrangement(session.sessionId(), session.tenantId());
-        OwnersAssemblyMaterial ballot = requireMaterial(command.ballotMaterialId(), session, MaterialType.PAPER_BALLOT);
-        return castPaperVote(new CastAssemblyPaperVoteCommand(
-                arrangement.packageId(),
-                command.subjectId(),
-                session.tenantId(),
-                command.opid(),
-                command.choice(),
-                ballot.contentSha256(),
-                command.enteredByUserId()));
-    }
-
-    /**
-     * 纸质选票送达只能从本会次已归档的凭证触发，且送达方式必须来自冻结规则，不能由接口传入任意字符串。
-     */
-    private VotingDeliveryRecord recordPaperDelivery(Long packageId,
-                                                      Long tenantId,
-                                                      Long opid,
-                                                      OwnersAssemblyRuleConfiguration.DeliveryMethod deliveryMethod,
-                                                      String evidenceHash,
-                                                      Long deliveredByUserId) {
-        OwnersAssemblyPackage ballotPackage = loadDeliveryPackage(packageId, tenantId);
-        OwnersAssemblyRuleSnapshot ruleSnapshot = requireRuleSnapshot(ballotPackage);
-        requireChannelAllowed(ballotPackage, CHANNEL_PAPER);
-        if (deliveryMethod == null || !ruleSnapshot.configuration().validDeliveryMethods().contains(deliveryMethod)) {
-            throw new OwnersAssemblyApplicationException(
-                    PARAM_INVALID, "送达方式不在本次业主大会冻结议事规则认可范围内");
-        }
         VotingExecutionPackage executionPackage = requireExecutionPackage(
-                ballotPackage, ownersAssemblyRepository.listSubjectIds(packageId, tenantId));
+                arrangement, ownersAssemblyRepository.listSubjectIds(arrangement.packageId(), arrangement.tenantId()));
         try {
-            return votingExecutionService.recordDelivery(new VotingExecutionService.RecordDeliveryCommand(
-                    executionPackage.getPackageId(), tenantId, opid, VoteChannel.PAPER,
-                    deliveryMethod.name(), requireText(evidenceHash, "evidenceHash"),
-                    deliveredByUserId, Instant.now()));
-        } catch (VotingExecutionService.VotingExecutionException ex) {
-            throw translateExecutionFailure(ex);
+            return paperVotingService.submitEntry(new PaperVotingService.SubmitEntryCommand(
+                    executionPackage.getPackageId(), command.paperBallotId(), command.tenantId(),
+                    arrangement.ballotTemplateHash(), command.items(), command.enteredByUserId(), command.enteredAt()));
+        } catch (PaperVotingException ex) {
+            throw translatePaperVotingFailure(ex);
         }
     }
 
-    private VotingBallotRecord castPaperVote(CastAssemblyPaperVoteCommand command) {
-        requireSysContext(command.tenantId(), command.enteredByUserId());
-        OwnersAssemblyPackage ballotPackage = loadVotingPackage(command.packageId(), command.tenantId());
-        requireChannelAllowed(ballotPackage, CHANNEL_PAPER);
-        validateSubjectInPackage(ballotPackage, command.subjectId());
+    public PaperVotingService.BallotReviewResult reviewPaperBallotEntry(
+            ReviewAssemblyPaperBallotEntryCommand command) {
+        requireSysContext(command.tenantId(), command.reviewedByUserId());
+        OwnersAssemblySession session = ownersAssemblyRepository.findSession(command.sessionId(), command.tenantId())
+                .orElseThrow(() -> new OwnersAssemblyApplicationException(NOT_FOUND, "业主大会不存在"));
+        OwnersAssemblyPackage arrangement = requireLatestArrangement(session.sessionId(), session.tenantId());
         VotingExecutionPackage executionPackage = requireExecutionPackage(
-                ballotPackage, ownersAssemblyRepository.listSubjectIds(
-                        ballotPackage.packageId(), ballotPackage.tenantId()));
+                arrangement, ownersAssemblyRepository.listSubjectIds(arrangement.packageId(), arrangement.tenantId()));
         try {
-            return votingExecutionService.castRecord(new VotingExecutionService.CastBallotCommand(
-                    executionPackage.getPackageId(), command.subjectId(), command.tenantId(),
-                    command.opid(), null, command.choice(), VoteChannel.PAPER,
-                    requireText(command.ballotFileHash(), "ballotFileHash"), null,
-                    command.enteredByUserId(), Instant.now()));
-        } catch (VotingExecutionService.VotingExecutionException ex) {
-            throw translateExecutionFailure(ex);
+            return paperVotingService.reviewEntry(new PaperVotingService.ReviewEntryCommand(
+                    executionPackage.getPackageId(), command.paperBallotId(), command.entryId(), command.tenantId(),
+                    command.decision(), command.reviewNote(), command.reviewedByUserId(), command.reviewedAt()));
+        } catch (PaperVotingException ex) {
+            throw translatePaperVotingFailure(ex);
+        }
+    }
+
+    public PaperVotingService.Workbench getPaperVotingWorkbench(Long sessionId, Long tenantId) {
+        requireSysContext(tenantId, null);
+        OwnersAssemblySession session = ownersAssemblyRepository.findSession(sessionId, tenantId)
+                .orElseThrow(() -> new OwnersAssemblyApplicationException(NOT_FOUND, "业主大会不存在"));
+        OwnersAssemblyPackage arrangement = requireLatestArrangement(session.sessionId(), session.tenantId());
+        VotingExecutionPackage executionPackage = requireExecutionPackage(
+                arrangement, ownersAssemblyRepository.listSubjectIds(arrangement.packageId(), arrangement.tenantId()));
+        try {
+            return paperVotingService.getWorkbench(executionPackage.getPackageId(), tenantId);
+        } catch (PaperVotingException ex) {
+            throw translatePaperVotingFailure(ex);
         }
     }
 
@@ -946,6 +996,17 @@ public class OwnersAssemblyApplicationService {
             case DELIVERY_REQUIRED -> DELIVERY_REQUIRED;
             case CONCURRENT_MODIFICATION -> CONCURRENT_MODIFICATION;
             case INVALID_COMMAND -> PARAM_INVALID;
+        };
+        return new OwnersAssemblyApplicationException(reason, failure.getMessage(), failure);
+    }
+
+    private OwnersAssemblyApplicationException translatePaperVotingFailure(PaperVotingException failure) {
+        OwnersAssemblyApplicationException.Reason reason = switch (failure.getReason()) {
+            case NOT_FOUND -> NOT_FOUND;
+            case INVALID_STATUS -> INVALID_STATUS;
+            case INVALID_ARGUMENT -> PARAM_INVALID;
+            case DUPLICATE -> VOTE_ALREADY_CAST;
+            case CONCURRENT_MODIFICATION -> CONCURRENT_MODIFICATION;
         };
         return new OwnersAssemblyApplicationException(reason, failure.getMessage(), failure);
     }

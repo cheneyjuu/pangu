@@ -1,0 +1,338 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 关联业务：持久化纸质表决的送达核对、纸票回收、录入复核和最终逐事项结果。 -->
+<mapper namespace="com.pangu.infrastructure.persistence.mapper.PaperVotingMapper">
+
+    <resultMap id="DeliveryMap" type="com.pangu.infrastructure.persistence.entity.PaperVotingDeliveryRow">
+        <id property="paperDeliveryId" column="paper_delivery_id"/>
+        <result property="packageId" column="package_id"/>
+        <result property="electorateItemId" column="electorate_item_id"/>
+        <result property="tenantId" column="tenant_id"/>
+        <result property="opid" column="representative_opid"/>
+        <result property="recipientName" column="recipient_name"/>
+        <result property="deliveryMethod" column="delivery_method"/>
+        <result property="evidenceSourceType" column="evidence_source_type"/>
+        <result property="evidenceSourceId" column="evidence_source_id"/>
+        <result property="evidenceHash" column="evidence_hash"/>
+        <result property="deliveredByUserId" column="delivered_by_user_id"/>
+        <result property="deliveredAt" column="delivered_at"/>
+        <result property="status" column="status"/>
+        <result property="reviewedByUserId" column="reviewed_by_user_id"/>
+        <result property="reviewedAt" column="reviewed_at"/>
+        <result property="reviewNote" column="review_note"/>
+        <result property="unifiedDeliveryId" column="unified_delivery_id"/>
+        <result property="createTime" column="create_time"/>
+        <result property="updateTime" column="update_time"/>
+        <result property="version" column="version"/>
+    </resultMap>
+
+    <resultMap id="BallotMap" type="com.pangu.infrastructure.persistence.entity.PaperBallotRow">
+        <id property="paperBallotId" column="paper_ballot_id"/>
+        <result property="packageId" column="package_id"/>
+        <result property="electorateItemId" column="electorate_item_id"/>
+        <result property="tenantId" column="tenant_id"/>
+        <result property="opid" column="representative_opid"/>
+        <result property="ballotNumber" column="ballot_number"/>
+        <result property="templateHash" column="template_hash"/>
+        <result property="materialSourceType" column="material_source_type"/>
+        <result property="materialSourceId" column="material_source_id"/>
+        <result property="materialHash" column="material_hash"/>
+        <result property="receivedByUserId" column="received_by_user_id"/>
+        <result property="receivedAt" column="received_at"/>
+        <result property="status" column="status"/>
+        <result property="voidedByUserId" column="voided_by_user_id"/>
+        <result property="voidedAt" column="voided_at"/>
+        <result property="voidReason" column="void_reason"/>
+        <result property="createTime" column="create_time"/>
+        <result property="updateTime" column="update_time"/>
+        <result property="version" column="version"/>
+    </resultMap>
+
+    <resultMap id="EntryMap" type="com.pangu.infrastructure.persistence.entity.PaperBallotEntryRow">
+        <id property="entryId" column="entry_id"/>
+        <result property="paperBallotId" column="paper_ballot_id"/>
+        <result property="tenantId" column="tenant_id"/>
+        <result property="versionNumber" column="version_number"/>
+        <result property="status" column="status"/>
+        <result property="enteredByUserId" column="entered_by_user_id"/>
+        <result property="enteredAt" column="entered_at"/>
+        <result property="reviewedByUserId" column="reviewed_by_user_id"/>
+        <result property="reviewedAt" column="reviewed_at"/>
+        <result property="reviewNote" column="review_note"/>
+    </resultMap>
+
+    <resultMap id="EntryItemMap" type="com.pangu.infrastructure.persistence.entity.PaperBallotEntryItemRow">
+        <id property="entryItemId" column="entry_item_id"/>
+        <result property="entryId" column="entry_id"/>
+        <result property="subjectId" column="subject_id"/>
+        <result property="determination" column="determination"/>
+        <result property="choice" column="choice"/>
+        <result property="invalidReasonCode" column="invalid_reason_code"/>
+        <result property="invalidReasonDescription" column="invalid_reason_description"/>
+    </resultMap>
+
+    <resultMap id="OutcomeMap" type="com.pangu.infrastructure.persistence.entity.PaperBallotOutcomeRow">
+        <id property="outcomeId" column="outcome_id"/>
+        <result property="paperBallotId" column="paper_ballot_id"/>
+        <result property="entryId" column="entry_id"/>
+        <result property="subjectId" column="subject_id"/>
+        <result property="status" column="status"/>
+        <result property="unifiedBallotId" column="unified_ballot_id"/>
+        <result property="conflictingBallotId" column="conflicting_ballot_id"/>
+        <result property="reason" column="reason"/>
+        <result property="finalizedAt" column="finalized_at"/>
+    </resultMap>
+
+    <sql id="DeliveryColumns">
+        delivery.paper_delivery_id, delivery.package_id, delivery.electorate_item_id, delivery.tenant_id,
+        electorate.representative_opid, delivery.recipient_name, delivery.delivery_method,
+        delivery.evidence_source_type, delivery.evidence_source_id, delivery.evidence_hash,
+        delivery.delivered_by_user_id, delivery.delivered_at, delivery.status,
+        delivery.reviewed_by_user_id, delivery.reviewed_at, delivery.review_note,
+        delivery.unified_delivery_id, delivery.create_time, delivery.update_time, delivery.version
+    </sql>
+
+    <sql id="BallotColumns">
+        ballot.paper_ballot_id, ballot.package_id, ballot.electorate_item_id, ballot.tenant_id,
+        electorate.representative_opid, ballot.ballot_number, ballot.template_hash,
+        ballot.material_source_type, ballot.material_source_id, ballot.material_hash,
+        ballot.received_by_user_id, ballot.received_at, ballot.status,
+        ballot.voided_by_user_id, ballot.voided_at, ballot.void_reason,
+        ballot.create_time, ballot.update_time, ballot.version
+    </sql>
+
+    <insert id="insertDelivery" useGeneratedKeys="true" keyProperty="paperDeliveryId">
+        INSERT INTO t_paper_voting_delivery (
+            package_id, electorate_item_id, tenant_id, recipient_name, delivery_method,
+            evidence_source_type, evidence_source_id, evidence_hash,
+            delivered_by_user_id, delivered_at, status
+        ) VALUES (
+            #{packageId}, #{electorateItemId}, #{tenantId}, #{recipientName}, #{deliveryMethod},
+            #{evidenceSourceType}, #{evidenceSourceId}, #{evidenceHash},
+            #{deliveredByUserId}, #{deliveredAt}, #{status}
+        )
+    </insert>
+
+    <select id="selectDelivery" resultMap="DeliveryMap">
+        SELECT <include refid="DeliveryColumns"/>
+        FROM t_paper_voting_delivery delivery
+        JOIN t_voting_electorate_item_snapshot electorate
+          ON electorate.snapshot_item_id = delivery.electorate_item_id
+        WHERE delivery.paper_delivery_id = #{paperDeliveryId}
+          AND delivery.package_id = #{packageId}
+          AND delivery.tenant_id = #{tenantId}
+    </select>
+
+    <select id="selectDeliveryForUpdate" resultMap="DeliveryMap">
+        SELECT <include refid="DeliveryColumns"/>
+        FROM t_paper_voting_delivery delivery
+        JOIN t_voting_electorate_item_snapshot electorate
+          ON electorate.snapshot_item_id = delivery.electorate_item_id
+        WHERE delivery.paper_delivery_id = #{paperDeliveryId}
+          AND delivery.package_id = #{packageId}
+          AND delivery.tenant_id = #{tenantId}
+        FOR UPDATE OF delivery
+    </select>
+
+    <update id="confirmDelivery">
+        UPDATE t_paper_voting_delivery
+        SET status = 'CONFIRMED', reviewed_by_user_id = #{reviewedByUserId},
+            reviewed_at = #{reviewedAt}, unified_delivery_id = #{unifiedDeliveryId},
+            update_time = CURRENT_TIMESTAMP, version = version + 1
+        WHERE paper_delivery_id = #{paperDeliveryId}
+          AND tenant_id = #{tenantId}
+          AND status = 'PENDING_REVIEW'
+          AND version = #{expectedVersion}
+    </update>
+
+    <update id="rejectDelivery">
+        UPDATE t_paper_voting_delivery
+        SET status = 'REJECTED', reviewed_by_user_id = #{reviewedByUserId},
+            reviewed_at = #{reviewedAt}, review_note = #{reviewNote},
+            update_time = CURRENT_TIMESTAMP, version = version + 1
+        WHERE paper_delivery_id = #{paperDeliveryId}
+          AND tenant_id = #{tenantId}
+          AND status = 'PENDING_REVIEW'
+          AND version = #{expectedVersion}
+    </update>
+
+    <insert id="insertBallot" useGeneratedKeys="true" keyProperty="paperBallotId">
+        INSERT INTO t_paper_ballot (
+            package_id, electorate_item_id, tenant_id, ballot_number, template_hash,
+            material_source_type, material_source_id, material_hash,
+            received_by_user_id, received_at, status
+        ) VALUES (
+            #{packageId}, #{electorateItemId}, #{tenantId}, #{ballotNumber}, #{templateHash},
+            #{materialSourceType}, #{materialSourceId}, #{materialHash},
+            #{receivedByUserId}, #{receivedAt}, #{status}
+        )
+    </insert>
+
+    <select id="selectBallot" resultMap="BallotMap">
+        SELECT <include refid="BallotColumns"/>
+        FROM t_paper_ballot ballot
+        JOIN t_voting_electorate_item_snapshot electorate
+          ON electorate.snapshot_item_id = ballot.electorate_item_id
+        WHERE ballot.paper_ballot_id = #{paperBallotId}
+          AND ballot.package_id = #{packageId}
+          AND ballot.tenant_id = #{tenantId}
+    </select>
+
+    <select id="selectBallotForUpdate" resultMap="BallotMap">
+        SELECT <include refid="BallotColumns"/>
+        FROM t_paper_ballot ballot
+        JOIN t_voting_electorate_item_snapshot electorate
+          ON electorate.snapshot_item_id = ballot.electorate_item_id
+        WHERE ballot.paper_ballot_id = #{paperBallotId}
+          AND ballot.package_id = #{packageId}
+          AND ballot.tenant_id = #{tenantId}
+        FOR UPDATE OF ballot
+    </select>
+
+    <insert id="insertEntry" useGeneratedKeys="true" keyProperty="entryId">
+        INSERT INTO t_paper_ballot_entry (
+            paper_ballot_id, tenant_id, version_number, status, entered_by_user_id, entered_at
+        ) VALUES (
+            #{paperBallotId}, #{tenantId}, #{versionNumber}, #{status}, #{enteredByUserId}, #{enteredAt}
+        )
+    </insert>
+
+    <insert id="insertEntryItems">
+        INSERT INTO t_paper_ballot_entry_item (
+            entry_id, subject_id, determination, choice,
+            invalid_reason_code, invalid_reason_description
+        ) VALUES
+        <foreach collection="items" item="item" separator=",">
+            (#{entryId}, #{item.subjectId}, #{item.determination}, #{item.choice},
+             #{item.invalidReasonCode}, #{item.invalidReasonDescription})
+        </foreach>
+    </insert>
+
+    <select id="selectEntry" resultMap="EntryMap">
+        SELECT entry_id, paper_ballot_id, tenant_id, version_number, status,
+               entered_by_user_id, entered_at, reviewed_by_user_id, reviewed_at, review_note
+        FROM t_paper_ballot_entry
+        WHERE entry_id = #{entryId}
+          AND paper_ballot_id = #{paperBallotId}
+          AND tenant_id = #{tenantId}
+    </select>
+
+    <select id="selectEntryForUpdate" resultMap="EntryMap">
+        SELECT entry_id, paper_ballot_id, tenant_id, version_number, status,
+               entered_by_user_id, entered_at, reviewed_by_user_id, reviewed_at, review_note
+        FROM t_paper_ballot_entry
+        WHERE entry_id = #{entryId}
+          AND paper_ballot_id = #{paperBallotId}
+          AND tenant_id = #{tenantId}
+        FOR UPDATE
+    </select>
+
+    <select id="selectLatestEntry" resultMap="EntryMap">
+        SELECT entry_id, paper_ballot_id, tenant_id, version_number, status,
+               entered_by_user_id, entered_at, reviewed_by_user_id, reviewed_at, review_note
+        FROM t_paper_ballot_entry
+        WHERE paper_ballot_id = #{paperBallotId} AND tenant_id = #{tenantId}
+        ORDER BY version_number DESC
+        LIMIT 1
+    </select>
+
+    <select id="selectEntryItems" resultMap="EntryItemMap">
+        SELECT entry_item_id, entry_id, subject_id, determination, choice,
+               invalid_reason_code, invalid_reason_description
+        FROM t_paper_ballot_entry_item
+        WHERE entry_id = #{entryId}
+        ORDER BY subject_id
+    </select>
+
+    <select id="selectNextEntryVersion" resultType="int">
+        SELECT COALESCE(MAX(version_number), 0) + 1
+        FROM t_paper_ballot_entry
+        WHERE paper_ballot_id = #{paperBallotId} AND tenant_id = #{tenantId}
+    </select>
+
+    <update id="confirmEntry">
+        UPDATE t_paper_ballot_entry
+        SET status = 'CONFIRMED', reviewed_by_user_id = #{reviewedByUserId},
+            reviewed_at = #{reviewedAt}
+        WHERE entry_id = #{entryId}
+          AND tenant_id = #{tenantId}
+          AND status = 'PENDING_REVIEW'
+          AND entered_by_user_id &lt;&gt; #{reviewedByUserId}
+    </update>
+
+    <update id="rejectEntry">
+        UPDATE t_paper_ballot_entry
+        SET status = 'REJECTED', reviewed_by_user_id = #{reviewedByUserId},
+            reviewed_at = #{reviewedAt}, review_note = #{reviewNote}
+        WHERE entry_id = #{entryId}
+          AND tenant_id = #{tenantId}
+          AND status = 'PENDING_REVIEW'
+          AND entered_by_user_id &lt;&gt; #{reviewedByUserId}
+    </update>
+
+    <insert id="insertOutcome" useGeneratedKeys="true" keyProperty="outcomeId">
+        INSERT INTO t_paper_ballot_outcome (
+            paper_ballot_id, entry_id, subject_id, status, unified_ballot_id,
+            conflicting_ballot_id, reason, finalized_at
+        ) VALUES (
+            #{paperBallotId}, #{entryId}, #{subjectId}, #{status}, #{unifiedBallotId},
+            #{conflictingBallotId}, #{reason}, #{finalizedAt}
+        )
+        ON CONFLICT (paper_ballot_id, subject_id) DO NOTHING
+    </insert>
+
+    <select id="selectOutcomes" resultMap="OutcomeMap">
+        SELECT outcome.outcome_id, outcome.paper_ballot_id, outcome.entry_id, outcome.subject_id, outcome.status,
+               outcome.unified_ballot_id, outcome.conflicting_ballot_id, outcome.reason, outcome.finalized_at
+        FROM t_paper_ballot_outcome outcome
+        JOIN t_paper_ballot ballot ON ballot.paper_ballot_id = outcome.paper_ballot_id
+        WHERE outcome.paper_ballot_id = #{paperBallotId} AND ballot.tenant_id = #{tenantId}
+        ORDER BY outcome.subject_id
+    </select>
+
+    <update id="markBallotInEntry">
+        UPDATE t_paper_ballot
+        SET status = 'IN_ENTRY', update_time = CURRENT_TIMESTAMP, version = version + 1
+        WHERE paper_ballot_id = #{paperBallotId}
+          AND tenant_id = #{tenantId}
+          AND status IN ('RECEIVED', 'IN_ENTRY')
+          AND version = #{expectedVersion}
+    </update>
+
+    <update id="markBallotCompleted">
+        UPDATE t_paper_ballot
+        SET status = 'COMPLETED', update_time = CURRENT_TIMESTAMP, version = version + 1
+        WHERE paper_ballot_id = #{paperBallotId}
+          AND tenant_id = #{tenantId}
+          AND status = 'IN_ENTRY'
+    </update>
+
+    <update id="voidBallot">
+        UPDATE t_paper_ballot
+        SET status = 'VOIDED', voided_by_user_id = #{voidedByUserId},
+            voided_at = #{voidedAt}, void_reason = #{voidReason},
+            update_time = CURRENT_TIMESTAMP, version = version + 1
+        WHERE paper_ballot_id = #{paperBallotId}
+          AND tenant_id = #{tenantId}
+          AND status = 'RECEIVED'
+          AND version = #{expectedVersion}
+    </update>
+
+    <select id="selectDeliveries" resultMap="DeliveryMap">
+        SELECT <include refid="DeliveryColumns"/>
+        FROM t_paper_voting_delivery delivery
+        JOIN t_voting_electorate_item_snapshot electorate
+          ON electorate.snapshot_item_id = delivery.electorate_item_id
+        WHERE delivery.package_id = #{packageId} AND delivery.tenant_id = #{tenantId}
+        ORDER BY delivery.delivered_at DESC, delivery.paper_delivery_id DESC
+    </select>
+
+    <select id="selectBallots" resultMap="BallotMap">
+        SELECT <include refid="BallotColumns"/>
+        FROM t_paper_ballot ballot
+        JOIN t_voting_electorate_item_snapshot electorate
+          ON electorate.snapshot_item_id = ballot.electorate_item_id
+        WHERE ballot.package_id = #{packageId} AND ballot.tenant_id = #{tenantId}
+        ORDER BY ballot.received_at DESC, ballot.paper_ballot_id DESC
+    </select>
+</mapper>

@@ -3,12 +3,16 @@ package com.pangu.application.assembly.command;
 
 import com.pangu.domain.model.assembly.OwnersAssemblyRuleConfiguration;
 
+import java.time.Instant;
+
 public record RecordAssemblyDeliveryWithMaterialCommand(
         Long sessionId,
         Long tenantId,
         Long opid,
+        String recipientName,
         OwnersAssemblyRuleConfiguration.DeliveryMethod deliveryMethod,
         Long evidenceMaterialId,
-        Long deliveredByUserId
+        Long deliveredByUserId,
+        Instant deliveredAt
 ) {
 }

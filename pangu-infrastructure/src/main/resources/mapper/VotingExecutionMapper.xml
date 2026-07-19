@@ -246,6 +246,30 @@
         )
     </insert>
 
+    <select id="selectActiveBallot" resultType="com.pangu.infrastructure.persistence.entity.VotingBallotRecordRow">
+        SELECT ballot.ballot_id AS ballotId,
+               ballot.package_id AS packageId,
+               ballot.subject_id AS subjectId,
+               ballot.vote_id AS voteId,
+               ballot.electorate_item_id AS electorateItemId,
+               ballot.tenant_id AS tenantId,
+               electorate.representative_opid AS representativeOpid,
+               electorate.representative_uid AS representativeUid,
+               ballot.vote_channel AS voteChannel,
+               ballot.package_hash AS packageHash,
+               ballot.ballot_file_hash AS ballotFileHash,
+               ballot.signature_hash AS signatureHash,
+               ballot.recorded_by_user_id AS recordedByUserId,
+               ballot.cast_at AS castAt
+        FROM t_voting_ballot_record ballot
+        JOIN t_voting_electorate_item_snapshot electorate
+          ON electorate.snapshot_item_id = ballot.electorate_item_id
+        WHERE ballot.subject_id = #{subjectId}
+          AND ballot.electorate_item_id = #{electorateItemId}
+          AND ballot.tenant_id = #{tenantId}
+          AND ballot.valid_flag = 1
+    </select>
+
     <insert id="insertAudit">
         INSERT INTO t_voting_execution_audit (
             package_id, tenant_id, event_type, from_status, to_status,

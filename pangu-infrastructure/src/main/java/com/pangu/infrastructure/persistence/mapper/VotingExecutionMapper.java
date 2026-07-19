@@ -63,6 +63,10 @@ public interface VotingExecutionMapper {
 
     int insertBallot(VotingBallotRecordRow row);
 
+    VotingBallotRecordRow selectActiveBallot(@Param("subjectId") Long subjectId,
+                                              @Param("electorateItemId") Long electorateItemId,
+                                              @Param("tenantId") Long tenantId);
+
     int insertAudit(@Param("packageId") Long packageId,
                     @Param("tenantId") Long tenantId,
                     @Param("eventType") String eventType,
