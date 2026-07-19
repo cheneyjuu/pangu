@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 关联业务：持久化维修授权提案与统一表决包的唯一关联，并按冻结名册投影业主任务。 -->
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pangu.infrastructure.persistence.mapper.RepairProjectVotingMapper">
+
+    <sql id="columns">
+        link_id, project_id, plan_id, tenant_id, subject_id, execution_package_id,
+        rule_id, rule_configuration_hash, collection_mode, status, result,
+        prepared_by_user_id, prepared_at, opened_by_user_id, opened_at,
+        settled_by_user_id, settled_at, version
+    </sql>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="linkId" keyColumn="link_id">
+        INSERT INTO t_repair_project_voting (
+            project_id, plan_id, tenant_id, subject_id, execution_package_id,
+            rule_id, rule_configuration_hash, collection_mode, status,
+            prepared_by_user_id, prepared_at, version
+        ) VALUES (
+            #{projectId}, #{planId}, #{tenantId}, #{subjectId}, #{executionPackageId},
+            #{ruleId}, #{ruleConfigurationHash}, #{collectionMode}, #{status},
+            #{preparedByUserId}, #{preparedAt}, #{version}
+        )
+    </insert>
+
+    <select id="find" resultType="com.pangu.infrastructure.persistence.entity.RepairProjectVotingRow">
+        SELECT <include refid="columns"/>
+        FROM t_repair_project_voting
+        WHERE project_id = #{projectId} AND plan_id = #{planId} AND tenant_id = #{tenantId}
+    </select>
+
+    <select id="findForUpdate" resultType="com.pangu.infrastructure.persistence.entity.RepairProjectVotingRow">
+        SELECT <include refid="columns"/>
+        FROM t_repair_project_voting
+        WHERE project_id = #{projectId} AND plan_id = #{planId} AND tenant_id = #{tenantId}
+        FOR UPDATE
+    </select>
+
+    <update id="markVoting">
+        UPDATE t_repair_project_voting
+        SET status = 'VOTING', opened_by_user_id = #{openedByUserId}, opened_at = #{openedAt},
+            version = version + 1, update_time = CURRENT_TIMESTAMP
+        WHERE link_id = #{linkId} AND tenant_id = #{tenantId}
+          AND status = 'PREPARED' AND version = #{expectedVersion}
+    </update>
+
+    <update id="settle">
+        UPDATE t_repair_project_voting
+        SET status = 'SETTLED', result = #{result}, settled_by_user_id = #{settledByUserId},
+            settled_at = #{settledAt}, version = version + 1, update_time = CURRENT_TIMESTAMP
+        WHERE link_id = #{linkId} AND tenant_id = #{tenantId}
+          AND status = 'VOTING' AND version = #{expectedVersion}
+    </update>
+
+    <select id="listOwnerTasks"
+            resultType="com.pangu.infrastructure.persistence.entity.RepairProjectVotingOwnerTaskRow">
+        SELECT link.project_id, link.plan_id, project.project_no, project.project_name,
+               link.subject_id, link.execution_package_id,
+               electorate.representative_opid AS opid, electorate.room_id,
+               link.collection_mode, link.status, link.result,
+               package.package_hash, package.vote_start_at, package.vote_end_at
+        FROM t_repair_project_voting link
+        JOIN t_repair_project project
+          ON project.project_id = link.project_id AND project.tenant_id = link.tenant_id
+        JOIN t_voting_execution_package package
+          ON package.package_id = link.execution_package_id AND package.tenant_id = link.tenant_id
+        JOIN t_voting_electorate_item_snapshot electorate
+          ON electorate.snapshot_id = package.electorate_snapshot_id
+         AND electorate.representative_uid = #{ownerUid}
+        WHERE link.tenant_id = #{tenantId}
+          AND link.status &lt;&gt; 'VOIDED'
+        ORDER BY package.vote_start_at DESC, link.link_id DESC, electorate.room_id
+    </select>
+</mapper>
