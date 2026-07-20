@@ -16,6 +16,7 @@ import com.pangu.application.owner.PropertyBindingApplicationException;
 import com.pangu.application.repair.RepairWorkOrderApplicationException;
 import com.pangu.application.repair.SupplierActivationApplicationException;
 import com.pangu.application.voting.VotingApplicationException;
+import com.pangu.application.voting.VotingProxyAuthorizationException;
 import com.pangu.application.waiver.WaiverApplicationException;
 import com.pangu.interfaces.web.controller.Result;
 import jakarta.servlet.http.HttpServletResponse;
@@ -48,6 +49,25 @@ import java.util.stream.Collectors;
 public class GlobalExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+
+    @ExceptionHandler(VotingProxyAuthorizationException.class)
+    public Result<Object> handleVotingProxyAuthorizationException(
+            VotingProxyAuthorizationException ex, HttpServletResponse response) {
+        VotingProxyAuthorizationErrorCode errorCode = switch (ex.getReason()) {
+            case FORBIDDEN -> VotingProxyAuthorizationErrorCode.FORBIDDEN;
+            case NOT_FOUND -> VotingProxyAuthorizationErrorCode.NOT_FOUND;
+            case INVALID_ARGUMENT -> VotingProxyAuthorizationErrorCode.INVALID_ARGUMENT;
+            case INVALID_STATUS -> VotingProxyAuthorizationErrorCode.INVALID_STATUS;
+            case DUPLICATE -> VotingProxyAuthorizationErrorCode.DUPLICATE;
+            case CONCURRENT_MODIFICATION -> VotingProxyAuthorizationErrorCode.CONCURRENT_MODIFICATION;
+            case STORAGE_UNAVAILABLE -> VotingProxyAuthorizationErrorCode.STORAGE_UNAVAILABLE;
+        };
+        response.setStatus(errorCode.getHttpStatus());
+        log.info("Voting proxy authorization exception reason={} code={} msg={}",
+                ex.getReason(), errorCode.getCode(), ex.getMessage());
+        return Result.fail(errorCode.getCode(), ex.getMessage(), null,
+                errorCode.getErrorType(), errorCode.isNeedRetry());
+    }
 
     @ExceptionHandler(AppException.class)
     public Result<Object> handleAppException(AppException ex, HttpServletResponse response) {

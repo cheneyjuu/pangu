@@ -9,6 +9,7 @@ import java.time.Instant;
 public record RegisterAssemblyPaperBallotRequest(
         @NotBlank String ballotNumber,
         @NotNull Long opid,
+        Long proxyAuthorizationId,
         @NotNull Instant receivedAt,
         @NotNull Long ballotMaterialId
 ) {

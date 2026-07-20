@@ -10,6 +10,7 @@ public record PaperVotingDelivery(
         Long electorateItemId,
         Long tenantId,
         Long opid,
+        Long proxyAuthorizationId,
         String recipientName,
         String deliveryMethod,
         String evidenceSourceType,

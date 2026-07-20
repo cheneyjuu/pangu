@@ -10,6 +10,7 @@ import java.time.Instant;
 
 public record RecordRepairVotingDeliveryRequest(
         @NotNull Long opid,
+        Long proxyAuthorizationId,
         @NotBlank String recipientName,
         @NotNull OwnersAssemblyRuleConfiguration.DeliveryMethod deliveryMethod,
         @NotNull Long evidenceAttachmentId,
@@ -17,6 +18,6 @@ public record RecordRepairVotingDeliveryRequest(
 ) {
     public RepairProjectVotingChannelService.RecordDeliveryCommand toCommand() {
         return new RepairProjectVotingChannelService.RecordDeliveryCommand(
-                opid, recipientName, deliveryMethod, evidenceAttachmentId, deliveredAt);
+                opid, proxyAuthorizationId, recipientName, deliveryMethod, evidenceAttachmentId, deliveredAt);
     }
 }

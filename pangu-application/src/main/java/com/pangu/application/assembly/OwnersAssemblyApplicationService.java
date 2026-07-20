@@ -146,24 +146,23 @@ public class OwnersAssemblyApplicationService {
         OwnersAssemblyRule activeRule = ownersAssemblyRuleRepository.findActive(tenantId)
                 .orElseThrow(() -> new OwnersAssemblyApplicationException(
                         INVALID_STATUS, "当前小区尚无已确认生效的业主大会议事规则"));
-        try {
-            FormalVotingRulePolicy.PreparationOptions options =
-                    formalVotingRulePolicy.preparationOptions(activeRule, Instant.now());
-            OwnersAssemblyRuleConfiguration configuration = activeRule.configuration();
-            return new PreparationOptions(
-                    activeRule.ruleName(),
-                    activeRule.ruleVersion(),
-                    activeRule.effectiveDate(),
-                    options.allowedModes().stream().map(this::preparationModeOf).toList(),
-                    options.earliestVoteStartAt(),
-                    configuration.planPublicityDays(),
-                    configuration.meetingNoticeDays(),
-                    configuration.resultAnnouncementDays(),
-                    options.validDeliveryMethods(),
-                    options.paperBallotSealRequired());
-        } catch (FormalVotingRulePolicy.UnsupportedRuleException ex) {
-            throw new OwnersAssemblyApplicationException(INVALID_STATUS, ex.getMessage(), ex);
-        }
+        FormalVotingRulePolicy.PreparationOptions options =
+                formalVotingRulePolicy.preparationOptions(activeRule, Instant.now());
+        OwnersAssemblyRuleConfiguration configuration = activeRule.configuration();
+        return new PreparationOptions(
+                activeRule.ruleName(),
+                activeRule.ruleVersion(),
+                activeRule.effectiveDate(),
+                options.ready(),
+                options.blockingItems(),
+                options.allowedModes().stream().map(this::preparationModeOf).toList(),
+                options.earliestVoteStartAt(),
+                configuration.planPublicityDays(),
+                configuration.meetingNoticeDays(),
+                configuration.resultAnnouncementDays(),
+                options.validDeliveryMethods(),
+                options.paperBallotSealRequired(),
+                options.proxyVotingPolicy());
     }
 
     @Transactional(readOnly = true)
@@ -561,7 +560,8 @@ public class OwnersAssemblyApplicationService {
                 arrangement, ownersAssemblyRepository.listSubjectIds(arrangement.packageId(), arrangement.tenantId()));
         try {
             return paperVotingService.registerDelivery(new PaperVotingService.RegisterDeliveryCommand(
-                    executionPackage.getPackageId(), session.tenantId(), command.opid(), command.recipientName(),
+                    executionPackage.getPackageId(), session.tenantId(), command.opid(),
+                    command.proxyAuthorizationId(), command.recipientName(),
                     command.deliveryMethod().name(), "OWNERS_ASSEMBLY_MATERIAL", evidence.materialId(),
                     evidence.contentSha256(), command.deliveredByUserId(), command.deliveredAt()));
         } catch (PaperVotingException ex) {
@@ -596,7 +596,8 @@ public class OwnersAssemblyApplicationService {
                 arrangement, ownersAssemblyRepository.listSubjectIds(arrangement.packageId(), arrangement.tenantId()));
         try {
             return paperVotingService.registerBallot(new PaperVotingService.RegisterBallotCommand(
-                    executionPackage.getPackageId(), command.tenantId(), command.opid(), command.ballotNumber(),
+                    executionPackage.getPackageId(), command.tenantId(), command.opid(),
+                    command.proxyAuthorizationId(), command.ballotNumber(),
                     arrangement.ballotTemplateHash(), "OWNERS_ASSEMBLY_MATERIAL", ballot.materialId(),
                     ballot.contentSha256(), command.receivedByUserId(), command.receivedAt()));
         } catch (PaperVotingException ex) {
@@ -833,10 +834,8 @@ public class OwnersAssemblyApplicationService {
             throw new OwnersAssemblyApplicationException(
                     INVALID_STATUS, "冻结议事规则未明确未反馈表决票的认定方式");
         }
-        if (configuration.proxyVotingPolicy()
-                != OwnersAssemblyRuleConfiguration.ProxyVotingPolicy.NOT_ALLOWED) {
-            throw new OwnersAssemblyApplicationException(
-                    INVALID_STATUS, "当前系统尚未建模代理授权、核验与存证，不能按允许委托的规则办理");
+        if (configuration.proxyVotingPolicy() == null) {
+            throw new OwnersAssemblyApplicationException(INVALID_STATUS, "冻结议事规则未明确是否允许书面委托");
         }
         if (configuration.validDeliveryMethods() == null || configuration.validDeliveryMethods().isEmpty()) {
             throw new OwnersAssemblyApplicationException(INVALID_STATUS, "冻结议事规则未明确有效送达方式");
@@ -1329,15 +1328,19 @@ public class OwnersAssemblyApplicationService {
             String ruleName,
             String ruleVersion,
             LocalDate effectiveDate,
+            boolean ready,
+            List<FormalVotingRulePolicy.ReadinessIssue> blockingItems,
             List<String> allowedPreparationModes,
             Instant earliestVoteStartAt,
             Integer planPublicityDays,
             Integer meetingNoticeDays,
             Integer resultAnnouncementDays,
             Set<OwnersAssemblyRuleConfiguration.DeliveryMethod> validDeliveryMethods,
-            Boolean paperBallotSealRequired
+            Boolean paperBallotSealRequired,
+            OwnersAssemblyRuleConfiguration.ProxyVotingPolicy proxyVotingPolicy
     ) {
         public PreparationOptions {
+            blockingItems = blockingItems == null ? List.of() : List.copyOf(blockingItems);
             allowedPreparationModes = allowedPreparationModes == null
                     ? List.of() : List.copyOf(allowedPreparationModes);
             validDeliveryMethods = validDeliveryMethods == null

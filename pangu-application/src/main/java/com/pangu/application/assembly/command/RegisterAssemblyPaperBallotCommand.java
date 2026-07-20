@@ -7,6 +7,7 @@ public record RegisterAssemblyPaperBallotCommand(
         Long sessionId,
         Long tenantId,
         Long opid,
+        Long proxyAuthorizationId,
         String ballotNumber,
         Long ballotMaterialId,
         Long receivedByUserId,

@@ -10,6 +10,7 @@ public record PaperBallot(
         Long electorateItemId,
         Long tenantId,
         Long opid,
+        Long proxyAuthorizationId,
         String ballotNumber,
         String templateHash,
         String materialSourceType,

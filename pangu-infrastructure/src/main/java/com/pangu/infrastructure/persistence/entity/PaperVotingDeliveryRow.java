@@ -12,6 +12,7 @@ public class PaperVotingDeliveryRow {
     private Long electorateItemId;
     private Long tenantId;
     private Long opid;
+    private Long proxyAuthorizationId;
     private String recipientName;
     private String deliveryMethod;
     private String evidenceSourceType;

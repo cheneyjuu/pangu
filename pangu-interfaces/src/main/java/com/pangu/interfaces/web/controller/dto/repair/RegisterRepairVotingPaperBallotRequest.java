@@ -9,12 +9,13 @@ import java.time.Instant;
 
 public record RegisterRepairVotingPaperBallotRequest(
         @NotNull Long opid,
+        Long proxyAuthorizationId,
         @NotBlank String ballotNumber,
         @NotNull Long attachmentId,
         @NotNull Instant receivedAt
 ) {
     public RepairProjectVotingChannelService.RegisterBallotCommand toCommand() {
         return new RepairProjectVotingChannelService.RegisterBallotCommand(
-                opid, ballotNumber, attachmentId, receivedAt);
+                opid, proxyAuthorizationId, ballotNumber, attachmentId, receivedAt);
     }
 }

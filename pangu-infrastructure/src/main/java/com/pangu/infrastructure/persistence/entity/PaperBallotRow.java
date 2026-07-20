@@ -12,6 +12,7 @@ public class PaperBallotRow {
     private Long electorateItemId;
     private Long tenantId;
     private Long opid;
+    private Long proxyAuthorizationId;
     private String ballotNumber;
     private String templateHash;
     private String materialSourceType;

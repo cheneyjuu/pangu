@@ -67,6 +67,7 @@ public class RepairProjectVotingChannelService {
         try {
             return paperVotingService.registerDelivery(new PaperVotingService.RegisterDeliveryCommand(
                     context.executionPackage().getPackageId(), context.project().tenantId(), command.opid(),
+                    command.proxyAuthorizationId(),
                     requireText(command.recipientName(), "签收人"), command.deliveryMethod().name(),
                     "REPAIR_PROJECT_ATTACHMENT", evidence.attachmentId(), evidence.sha256(),
                     context.actor().userId(), command.deliveredAt()));
@@ -101,6 +102,7 @@ public class RepairProjectVotingChannelService {
         try {
             return paperVotingService.registerBallot(new PaperVotingService.RegisterBallotCommand(
                     context.executionPackage().getPackageId(), context.project().tenantId(), command.opid(),
+                    command.proxyAuthorizationId(),
                     requireText(command.ballotNumber(), "选票编号"), requireTemplateHash(context),
                     "REPAIR_PROJECT_ATTACHMENT", ballot.attachmentId(), ballot.sha256(),
                     context.actor().userId(), command.receivedAt()));
@@ -305,6 +307,7 @@ public class RepairProjectVotingChannelService {
 
     public record RecordDeliveryCommand(
             Long opid,
+            Long proxyAuthorizationId,
             String recipientName,
             OwnersAssemblyRuleConfiguration.DeliveryMethod deliveryMethod,
             Long evidenceAttachmentId,
@@ -314,6 +317,7 @@ public class RepairProjectVotingChannelService {
 
     public record RegisterBallotCommand(
             Long opid,
+            Long proxyAuthorizationId,
             String ballotNumber,
             Long attachmentId,
             Instant receivedAt

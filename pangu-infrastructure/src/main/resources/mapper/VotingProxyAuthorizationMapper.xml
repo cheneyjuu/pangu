@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 关联业务：持久化书面委托原件、代理人身份、异人核验和撤销审计事实。 -->
+<mapper namespace="com.pangu.infrastructure.persistence.mapper.VotingProxyAuthorizationMapper">
+
+    <resultMap id="AuthorizationMap"
+               type="com.pangu.infrastructure.persistence.entity.VotingProxyAuthorizationRow">
+        <id property="authorizationId" column="authorization_id"/>
+        <result property="packageId" column="package_id"/>
+        <result property="electorateItemId" column="electorate_item_id"/>
+        <result property="tenantId" column="tenant_id"/>
+        <result property="principalOpid" column="principal_opid"/>
+        <result property="principalUid" column="principal_uid"/>
+        <result property="agentName" column="agent_name_cipher"
+                typeHandler="com.pangu.infrastructure.persistence.handler.Sm4EncryptTypeHandler"/>
+        <result property="agentIdentityDocumentType" column="agent_identity_document_type"/>
+        <result property="agentIdentityNumber" column="agent_identity_number_cipher"
+                typeHandler="com.pangu.infrastructure.persistence.handler.Sm4EncryptTypeHandler"/>
+        <result property="validFrom" column="valid_from"/>
+        <result property="validUntil" column="valid_until"/>
+        <result property="documentObjectKey" column="document_object_key"/>
+        <result property="originalFileName" column="original_file_name"/>
+        <result property="contentType" column="content_type"/>
+        <result property="fileSize" column="file_size"/>
+        <result property="etag" column="etag"/>
+        <result property="contentSha256" column="content_sha256"/>
+        <result property="authorizationHash" column="authorization_hash"/>
+        <result property="status" column="status"/>
+        <result property="registeredByUserId" column="registered_by_user_id"/>
+        <result property="registeredAt" column="registered_at"/>
+        <result property="reviewedByUserId" column="reviewed_by_user_id"/>
+        <result property="reviewedAt" column="reviewed_at"/>
+        <result property="reviewNote" column="review_note"/>
+        <result property="revokedByUserId" column="revoked_by_user_id"/>
+        <result property="revokedAt" column="revoked_at"/>
+        <result property="revokeReason" column="revoke_reason"/>
+        <result property="version" column="version"/>
+    </resultMap>
+
+    <sql id="Columns">
+        authorization_id, package_id, electorate_item_id, tenant_id, principal_opid, principal_uid,
+        agent_name_cipher, agent_identity_document_type, agent_identity_number_cipher,
+        valid_from, valid_until, document_object_key, original_file_name, content_type, file_size,
+        etag, content_sha256, authorization_hash, status, registered_by_user_id, registered_at,
+        reviewed_by_user_id, reviewed_at, review_note, revoked_by_user_id, revoked_at,
+        revoke_reason, version
+    </sql>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="authorizationId">
+        INSERT INTO t_voting_proxy_authorization (
+            package_id, electorate_item_id, tenant_id, principal_opid, principal_uid,
+            agent_name_cipher, agent_identity_document_type, agent_identity_number_cipher,
+            valid_from, valid_until, document_object_key, original_file_name, content_type, file_size,
+            etag, content_sha256, authorization_hash, status, registered_by_user_id, registered_at
+        ) VALUES (
+            #{packageId}, #{electorateItemId}, #{tenantId}, #{principalOpid}, #{principalUid},
+            #{agentName,typeHandler=com.pangu.infrastructure.persistence.handler.Sm4EncryptTypeHandler},
+            #{agentIdentityDocumentType},
+            #{agentIdentityNumber,typeHandler=com.pangu.infrastructure.persistence.handler.Sm4EncryptTypeHandler},
+            #{validFrom}, #{validUntil}, #{documentObjectKey}, #{originalFileName}, #{contentType}, #{fileSize},
+            #{etag}, #{contentSha256}, #{authorizationHash}, #{status}, #{registeredByUserId}, #{registeredAt}
+        )
+    </insert>
+
+    <select id="selectById" resultMap="AuthorizationMap">
+        SELECT <include refid="Columns"/>
+        FROM t_voting_proxy_authorization
+        WHERE authorization_id = #{authorizationId}
+          AND package_id = #{packageId}
+          AND tenant_id = #{tenantId}
+    </select>
+
+    <select id="selectByIdForUpdate" resultMap="AuthorizationMap">
+        SELECT <include refid="Columns"/>
+        FROM t_voting_proxy_authorization
+        WHERE authorization_id = #{authorizationId}
+          AND package_id = #{packageId}
+          AND tenant_id = #{tenantId}
+        FOR UPDATE
+    </select>
+
+    <select id="selectByPackage" resultMap="AuthorizationMap">
+        SELECT <include refid="Columns"/>
+        FROM t_voting_proxy_authorization
+        WHERE package_id = #{packageId} AND tenant_id = #{tenantId}
+        ORDER BY registered_at DESC, authorization_id DESC
+    </select>
+
+    <update id="confirm">
+        UPDATE t_voting_proxy_authorization
+        SET status = 'CONFIRMED', reviewed_by_user_id = #{reviewedByUserId},
+            reviewed_at = #{reviewedAt}, review_note = #{reviewNote}, version = version + 1
+        WHERE authorization_id = #{authorizationId}
+          AND tenant_id = #{tenantId}
+          AND status = 'PENDING_REVIEW'
+          AND registered_by_user_id &lt;&gt; #{reviewedByUserId}
+          AND version = #{expectedVersion}
+    </update>
+
+    <update id="reject">
+        UPDATE t_voting_proxy_authorization
+        SET status = 'REJECTED', reviewed_by_user_id = #{reviewedByUserId},
+            reviewed_at = #{reviewedAt}, review_note = #{reviewNote}, version = version + 1
+        WHERE authorization_id = #{authorizationId}
+          AND tenant_id = #{tenantId}
+          AND status = 'PENDING_REVIEW'
+          AND registered_by_user_id &lt;&gt; #{reviewedByUserId}
+          AND version = #{expectedVersion}
+    </update>
+
+    <update id="revoke">
+        UPDATE t_voting_proxy_authorization
+        SET status = 'REVOKED', revoked_by_user_id = #{revokedByUserId},
+            revoked_at = #{revokedAt}, revoke_reason = #{revokeReason}, version = version + 1
+        WHERE authorization_id = #{authorizationId}
+          AND tenant_id = #{tenantId}
+          AND status = 'CONFIRMED'
+          AND version = #{expectedVersion}
+          AND NOT EXISTS (
+              SELECT 1 FROM t_paper_ballot ballot
+              WHERE ballot.proxy_authorization_id = #{authorizationId}
+          )
+    </update>
+
+    <select id="isUsedByPaperRecord" resultType="boolean">
+        SELECT EXISTS (
+            SELECT 1 FROM t_paper_ballot
+            WHERE proxy_authorization_id = #{authorizationId} AND tenant_id = #{tenantId}
+        )
+    </select>
+</mapper>

@@ -10,6 +10,7 @@ import com.pangu.domain.model.voting.VoteChannel;
 import com.pangu.domain.model.voting.VotingDeliveryRecord;
 import com.pangu.domain.model.voting.VotingElectorateSnapshot;
 import com.pangu.domain.model.voting.VotingExecutionPackage;
+import com.pangu.domain.model.voting.VotingProxyAuthorization;
 import com.pangu.domain.repository.PaperVotingRepository;
 import com.pangu.domain.repository.OnlineVotingRepository;
 import com.pangu.domain.repository.VotingExecutionRepository;
@@ -39,6 +40,7 @@ public class PaperVotingStateService {
     private final OnlineVotingRepository onlineVotingRepository;
     private final VotingExecutionRepository votingExecutionRepository;
     private final VotingExecutionService votingExecutionService;
+    private final VotingProxyAuthorizationService proxyAuthorizationService;
 
     @Transactional
     public PaperVotingDelivery registerDelivery(PaperVotingService.RegisterDeliveryCommand command) {
@@ -46,14 +48,19 @@ public class PaperVotingStateService {
         VotingExecutionPackage ballotPackage = requirePaperPackage(command.packageId(), command.tenantId(), false);
         VotingElectorateSnapshot.Item electorate = requireElectorateItem(
                 command.packageId(), command.tenantId(), command.opid());
-        OnlinePaperAssistanceRequest assistance = requirePaperRoute(ballotPackage, electorate);
         Instant deliveredAt = requireInstant(command.deliveredAt(), "送达时间");
         if (!deliveredAt.isBefore(ballotPackage.getVoteEndAt())) {
             throw new PaperVotingException(INVALID_ARGUMENT, "送达时间必须早于本次表决截止时间");
         }
+        VotingProxyAuthorization proxyAuthorization = requireProxyAuthorization(
+                command.packageId(), command.tenantId(), electorate.representativeOpid(),
+                command.proxyAuthorizationId(), deliveredAt);
+        OnlinePaperAssistanceRequest assistance = proxyAuthorization == null
+                ? requirePaperRoute(ballotPackage, electorate) : null;
         PaperVotingDelivery delivery = new PaperVotingDelivery(
                 null, command.packageId(), electorate.snapshotItemId(), command.tenantId(),
-                electorate.representativeOpid(), requireText(command.recipientName(), "接收人"),
+                electorate.representativeOpid(), command.proxyAuthorizationId(),
+                requireText(command.recipientName(), "接收人"),
                 requireText(command.deliveryMethod(), "送达方式"),
                 requireText(command.evidenceSourceType(), "送达证据来源"),
                 requirePositive(command.evidenceSourceId(), "送达证据材料"),
@@ -126,14 +133,20 @@ public class PaperVotingStateService {
         VotingExecutionPackage ballotPackage = requirePaperPackage(command.packageId(), command.tenantId(), true);
         VotingElectorateSnapshot.Item electorate = requireElectorateItem(
                 command.packageId(), command.tenantId(), command.opid());
-        requirePaperBallotRoute(ballotPackage, electorate);
         Instant receivedAt = requireInstant(command.receivedAt(), "回收时间");
         if (receivedAt.isBefore(ballotPackage.getVoteStartAt()) || !receivedAt.isBefore(ballotPackage.getVoteEndAt())) {
             throw new PaperVotingException(INVALID_ARGUMENT, "纸票回收时间必须在本次表决时间内");
         }
+        VotingProxyAuthorization proxyAuthorization = requireProxyAuthorization(
+                command.packageId(), command.tenantId(), electorate.representativeOpid(),
+                command.proxyAuthorizationId(), receivedAt);
+        if (proxyAuthorization == null) {
+            requirePaperBallotRoute(ballotPackage, electorate);
+        }
         PaperBallot ballot = new PaperBallot(
                 null, command.packageId(), electorate.snapshotItemId(), command.tenantId(),
-                electorate.representativeOpid(), requireText(command.ballotNumber(), "表决票编号"),
+                electorate.representativeOpid(), command.proxyAuthorizationId(),
+                requireText(command.ballotNumber(), "表决票编号"),
                 requireSha256(command.templateHash(), "纸质表决票模板摘要"),
                 requireText(command.materialSourceType(), "纸票原件来源"),
                 requirePositive(command.materialSourceId(), "纸票原件材料"),
@@ -310,6 +323,23 @@ public class PaperVotingStateService {
     private VotingElectorateSnapshot.Item requireElectorateItem(Long packageId, Long tenantId, Long opid) {
         return votingExecutionRepository.findElectorateItem(packageId, tenantId, opid)
                 .orElseThrow(() -> new PaperVotingException(NOT_FOUND, "该专有部分不在本次冻结表决人名册中"));
+    }
+
+    private VotingProxyAuthorization requireProxyAuthorization(
+            Long packageId, Long tenantId, Long opid, Long authorizationId, Instant handledAt) {
+        try {
+            return proxyAuthorizationService.requireUsableForPaperRecord(
+                    packageId, tenantId, opid, authorizationId, handledAt);
+        } catch (VotingProxyAuthorizationException ex) {
+            PaperVotingException.Reason reason = switch (ex.getReason()) {
+                case NOT_FOUND -> NOT_FOUND;
+                case INVALID_ARGUMENT -> INVALID_ARGUMENT;
+                case DUPLICATE -> DUPLICATE;
+                case CONCURRENT_MODIFICATION -> CONCURRENT_MODIFICATION;
+                case FORBIDDEN, INVALID_STATUS, STORAGE_UNAVAILABLE -> INVALID_STATUS;
+            };
+            throw new PaperVotingException(reason, ex.getMessage(), ex);
+        }
     }
 
     /** 互联网为主的表决只为已经提出请求的专有部分办理纸质送达。 */

@@ -6,6 +6,7 @@ import com.pangu.domain.model.assembly.OwnersAssemblyRule;
 import com.pangu.domain.model.assembly.OwnersAssemblyRuleConfiguration;
 import com.pangu.domain.model.voting.VotingExecutionPackage;
 import com.pangu.domain.model.voting.VotingThreshold;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -14,6 +15,7 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
@@ -65,12 +67,65 @@ class FormalVotingRulePolicyTest {
         assertDoesNotThrow(() -> policy.preparationOptions(rule, Instant.now()));
     }
 
+    @Test
+    @DisplayName("Given规则允许书面委托 When检查正式表决准备条件 Then书面委托不会成为延迟阻断项")
+    void writtenAuthorizationRuleIsExecutableInsteadOfBecomingALateProjectBlocker() {
+        OwnersAssemblyRule rule = activeRule(
+                Set.of(OwnersAssemblyRuleConfiguration.MeetingForm.WRITTEN_CONSULTATION),
+                OwnersAssemblyRuleConfiguration.VotingChannelPolicy.PAPER_ONLY,
+                OwnersAssemblyRuleConfiguration.DuplicateVotePolicy.NOT_APPLICABLE,
+                OwnersAssemblyRuleConfiguration.NonResponsePolicy.NOT_PARTICIPATED,
+                OwnersAssemblyRuleConfiguration.ProxyVotingPolicy.WRITTEN_AUTHORIZATION_REQUIRED);
+
+        FormalVotingRulePolicy.PreparationOptions options = policy.preparationOptions(rule, Instant.now());
+
+        assertTrue(options.ready());
+        assertTrue(options.blockingItems().isEmpty());
+        assertEquals(Set.of(VotingExecutionPackage.CollectionMode.PAPER), options.allowedModes());
+    }
+
+    @Test
+    @DisplayName("Given生效规则存在多项缺失 When检查正式表决准备条件 Then一次返回全部待补事项")
+    void preparationAssessmentReportsAllSharedRuleProblemsAtOnce() {
+        OwnersAssemblyRule rule = activeRule(new OwnersAssemblyRuleConfiguration(
+                Set.of(OwnersAssemblyRuleConfiguration.MeetingForm.WRITTEN_CONSULTATION),
+                -1,
+                null,
+                Set.of(),
+                null,
+                null,
+                OwnersAssemblyRuleConfiguration.VotingChannelPolicy.PAPER_ONLY,
+                false,
+                true,
+                OwnersAssemblyRuleConfiguration.DuplicateVotePolicy.NOT_APPLICABLE,
+                Map.of(),
+                3,
+                Map.of()));
+
+        FormalVotingRulePolicy.PreparationOptions options = policy.preparationOptions(rule, Instant.now());
+
+        assertTrue(!options.ready());
+        assertTrue(options.allowedModes().isEmpty());
+        assertEquals(Set.of(
+                        "INVALID_PUBLICITY_PERIOD",
+                        "MISSING_NOTICE_PERIOD",
+                        "MISSING_DELIVERY_METHOD",
+                        "MISSING_NON_RESPONSE_POLICY",
+                        "MISSING_PROXY_POLICY",
+                        "MISSING_GENERAL_COUNTING_RULE",
+                        "MISSING_MAJOR_COUNTING_RULE"),
+                options.blockingItems().stream()
+                        .map(FormalVotingRulePolicy.ReadinessIssue::code)
+                        .collect(java.util.stream.Collectors.toSet()));
+    }
+
     private OwnersAssemblyRule activeRule(
             Set<OwnersAssemblyRuleConfiguration.MeetingForm> forms,
             OwnersAssemblyRuleConfiguration.VotingChannelPolicy channelPolicy,
             OwnersAssemblyRuleConfiguration.DuplicateVotePolicy duplicateVotePolicy) {
         return activeRule(forms, channelPolicy, duplicateVotePolicy,
-                OwnersAssemblyRuleConfiguration.NonResponsePolicy.NOT_PARTICIPATED);
+                OwnersAssemblyRuleConfiguration.NonResponsePolicy.NOT_PARTICIPATED,
+                OwnersAssemblyRuleConfiguration.ProxyVotingPolicy.NOT_ALLOWED);
     }
 
     private OwnersAssemblyRule activeRule(
@@ -78,6 +133,16 @@ class FormalVotingRulePolicyTest {
             OwnersAssemblyRuleConfiguration.VotingChannelPolicy channelPolicy,
             OwnersAssemblyRuleConfiguration.DuplicateVotePolicy duplicateVotePolicy,
             OwnersAssemblyRuleConfiguration.NonResponsePolicy nonResponsePolicy) {
+        return activeRule(forms, channelPolicy, duplicateVotePolicy, nonResponsePolicy,
+                OwnersAssemblyRuleConfiguration.ProxyVotingPolicy.NOT_ALLOWED);
+    }
+
+    private OwnersAssemblyRule activeRule(
+            Set<OwnersAssemblyRuleConfiguration.MeetingForm> forms,
+            OwnersAssemblyRuleConfiguration.VotingChannelPolicy channelPolicy,
+            OwnersAssemblyRuleConfiguration.DuplicateVotePolicy duplicateVotePolicy,
+            OwnersAssemblyRuleConfiguration.NonResponsePolicy nonResponsePolicy,
+            OwnersAssemblyRuleConfiguration.ProxyVotingPolicy proxyVotingPolicy) {
         VotingThreshold threshold = new VotingThreshold(1, 2, VotingThreshold.Comparison.GREATER_THAN);
         OwnersAssemblyRuleConfiguration.CountingRule countingRule =
                 new OwnersAssemblyRuleConfiguration.CountingRule(
@@ -88,7 +153,7 @@ class FormalVotingRulePolicyTest {
                 0,
                 Set.of(OwnersAssemblyRuleConfiguration.DeliveryMethod.DOOR_TO_DOOR),
                 nonResponsePolicy,
-                OwnersAssemblyRuleConfiguration.ProxyVotingPolicy.NOT_ALLOWED,
+                proxyVotingPolicy,
                 channelPolicy,
                 true,
                 true,
@@ -98,6 +163,10 @@ class FormalVotingRulePolicyTest {
                         OwnersAssemblyRuleConfiguration.DecisionType.MAJOR, countingRule),
                 3,
                 Map.of());
+        return activeRule(configuration);
+    }
+
+    private OwnersAssemblyRule activeRule(OwnersAssemblyRuleConfiguration configuration) {
         OwnersAssemblyRule rule = mock(OwnersAssemblyRule.class);
         when(rule.status()).thenReturn(OwnersAssemblyRule.Status.ACTIVE);
         when(rule.effectiveDate()).thenReturn(LocalDate.now());

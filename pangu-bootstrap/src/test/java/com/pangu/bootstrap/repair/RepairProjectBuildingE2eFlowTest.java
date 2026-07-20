@@ -8,6 +8,7 @@ import com.pangu.domain.repository.RepairEvidenceObjectStorage;
 import com.pangu.interfaces.security.JwtTokenProvider;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -170,7 +171,9 @@ class RepairProjectBuildingE2eFlowTest {
     }
 
     @Test
-    void surveyedBuildingRepairRunsFromReferenceQuoteToAuthorizedSupplierSelection() throws Exception {
+    @DisplayName("Given规则允许书面委托 When维修方案采用线上线下表决 Then代理纸票和业主线上票共同完成授权")
+    void givenWrittenProxyRule_whenRepairUsesMixedVoting_thenCompleteAuthorizationAndSupplierSelection()
+            throws Exception {
         activateMixedOwnersAssemblyRule();
         long sourceWorkOrderId = createSurveyedBuildingWorkOrder();
         createdFundingAccountId = seedBuildingMaintenanceAccount(PLAN_BUDGET);
@@ -239,7 +242,10 @@ class RepairProjectBuildingE2eFlowTest {
         mockMvc.perform(get("/api/v1/admin/repair-projects/" + projectId + "/voting/preparation-options")
                         .header("Authorization", bearer(propertyManagerToken)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.paperBallotSealRequired", is(true)));
+                .andExpect(jsonPath("$.data.ready", is(true)))
+                .andExpect(jsonPath("$.data.blockingItems.length()", is(0)))
+                .andExpect(jsonPath("$.data.paperBallotSealRequired", is(true)))
+                .andExpect(jsonPath("$.data.proxyVotingPolicy", is("WRITTEN_AUTHORIZATION_REQUIRED")));
 
         long ballotTemplateAttachmentId = uploadProjectAttachment(
                 projectId, committeeDirectorToken, "相关业主表决票模板.pdf", "ballot-template");
@@ -275,6 +281,11 @@ class RepairProjectBuildingE2eFlowTest {
                 ORDER BY electorate.snapshot_item_id
                 """, executionPackageId);
         assertTrue(voters.size() >= 2);
+        long firstOpid = ((Number) voters.getFirst().get("opid")).longValue();
+        long proxyAuthorizationId = registerConfirmedProxyAuthorization(executionPackageId, firstOpid);
+        long revokedAuthorizationId = registerConfirmedProxyAuthorization(
+                executionPackageId, ((Number) voters.get(1).get("opid")).longValue());
+        revokeUnusedProxyAuthorization(executionPackageId, revokedAuthorizationId);
         for (int index = 0; index < voters.size(); index++) {
             Map<String, Object> voter = voters.get(index);
             long ownerUid = ((Number) voter.get("owner_uid")).longValue();
@@ -283,7 +294,7 @@ class RepairProjectBuildingE2eFlowTest {
             originalOwnerAuthLevels.putIfAbsent(ownerUid, ((Number) voter.get("auth_level")).intValue());
             jdbcTemplate.update("UPDATE c_user SET auth_level = 3 WHERE uid = ?", ownerUid);
             if (index == 0) {
-                recordPaperBallot(projectId, opid, subjectId);
+                recordPaperBallot(projectId, opid, subjectId, proxyAuthorizationId);
                 continue;
             }
             String ownerToken = jwtTokenProvider.generateToken(ownerAccountId, "C_USER", ownerUid, TENANT);
@@ -421,7 +432,7 @@ class RepairProjectBuildingE2eFlowTest {
         configuration.put("meetingNoticeDays", 0);
         configuration.put("validDeliveryMethods", List.of("ELECTRONIC", "DOOR_TO_DOOR"));
         configuration.put("nonResponsePolicy", "NOT_PARTICIPATED");
-        configuration.put("proxyVotingPolicy", "NOT_ALLOWED");
+        configuration.put("proxyVotingPolicy", "WRITTEN_AUTHORIZATION_REQUIRED");
         configuration.put("votingChannelPolicy", "PAPER_AND_ONLINE");
         configuration.put("onlineIdentityVerificationRequired", true);
         configuration.put("paperBallotSealRequired", true);
@@ -548,15 +559,89 @@ class RepairProjectBuildingE2eFlowTest {
                 .andExpect(status().isCreated());
     }
 
-    /** 纸票录入与复核使用不同管理人员，复核完成后必须立即进入统一有效票台账。 */
-    private void recordPaperBallot(long projectId, long opid, long subjectId) throws Exception {
+    /** 书面委托由一人登记、另一人核对，授权范围始终绑定原业主房屋。 */
+    private long registerConfirmedProxyAuthorization(long packageId, long opid) throws Exception {
+        Instant packageVoteStartAt = jdbcTemplate.queryForObject(
+                "SELECT vote_start_at FROM t_voting_execution_package WHERE package_id = ?",
+                Instant.class, packageId);
+        Instant packageVoteEndAt = jdbcTemplate.queryForObject(
+                "SELECT vote_end_at FROM t_voting_execution_package WHERE package_id = ?",
+                Instant.class, packageId);
+        MockMultipartFile file = new MockMultipartFile(
+                "file", "业主书面委托书.pdf", MediaType.APPLICATION_PDF_VALUE,
+                ("%PDF-1.4 written-proxy-e2e-" + opid).getBytes(StandardCharsets.UTF_8));
+        String response = mockMvc.perform(multipart(
+                        "/api/v1/admin/voting-packages/" + packageId + "/proxy-authorizations")
+                        .file(file)
+                        .param("principalOpid", String.valueOf(opid))
+                        .param("agentName", "测试代理人")
+                        .param("agentIdentityDocumentType", "CHINESE_RESIDENT_ID")
+                        .param("agentIdentityNumber", "310101199001011234")
+                        .param("validFrom", packageVoteStartAt.toString())
+                        .param("validUntil", packageVoteEndAt.toString())
+                        .header("Authorization", bearer(committeeDirectorToken)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.status", is("PENDING_REVIEW")))
+                .andExpect(jsonPath("$.data.agentIdentityNumberMasked", is("****1234")))
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+        long authorizationId = objectMapper.readTree(response).path("data").path("authorizationId").asLong();
+        mockMvc.perform(post(
+                        "/api/v1/admin/voting-packages/" + packageId + "/proxy-authorizations/"
+                                + authorizationId + "/review")
+                        .header("Authorization", bearer(committeeDirectorToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "decision", "CONFIRM",
+                                "reviewNote", "登记人尝试核对自己的登记。"))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.msg", is("书面委托登记人不能核对自己的登记")));
+        postData(
+                "/api/v1/admin/voting-packages/" + packageId + "/proxy-authorizations/"
+                        + authorizationId + "/review",
+                committeeMemberToken, Map.of(
+                        "decision", "CONFIRM",
+                        "reviewNote", "已核对委托人签名、代理人身份证件和委托有效期。"));
+        assertEquals("CONFIRMED", jdbcTemplate.queryForObject(
+                "SELECT status FROM t_voting_proxy_authorization WHERE authorization_id = ?",
+                String.class, authorizationId));
+        assertEquals(2, jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM t_voting_execution_audit
+                WHERE package_id = ?
+                  AND event_type IN ('PROXY_AUTHORIZATION_REGISTERED', 'PROXY_AUTHORIZATION_CONFIRMED')
+                  AND detail ->> 'authorizationId' = ?
+                """, Integer.class, packageId, String.valueOf(authorizationId)));
+        return authorizationId;
+    }
+
+    /** 尚未用于送达或收票的书面委托可以撤销，撤销后只保留审计记录。 */
+    private void revokeUnusedProxyAuthorization(long packageId, long authorizationId) throws Exception {
+        JsonNode revoked = postData(
+                "/api/v1/admin/voting-packages/" + packageId + "/proxy-authorizations/"
+                        + authorizationId + "/revoke",
+                committeeDirectorToken, Map.of("reason", "业主改为本人在线表决。"));
+        assertEquals("REVOKED", revoked.path("status").asText());
+        assertEquals("REVOKED", jdbcTemplate.queryForObject(
+                "SELECT status FROM t_voting_proxy_authorization WHERE authorization_id = ?",
+                String.class, authorizationId));
+        assertEquals(1, jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM t_voting_execution_audit
+                WHERE package_id = ? AND event_type = 'PROXY_AUTHORIZATION_REVOKED'
+                """, Integer.class, packageId));
+    }
+
+    /** 代理纸票仍归入委托业主房屋，纸票录入和复核继续由不同工作人员完成。 */
+    private void recordPaperBallot(
+            long projectId, long opid, long subjectId, long proxyAuthorizationId) throws Exception {
         long deliveryAttachmentId = uploadProjectAttachment(
                 projectId, committeeDirectorToken, "纸质材料送达凭证.pdf", "paper-delivery");
         JsonNode delivery = postData(
                 "/api/v1/admin/repair-projects/" + projectId + "/voting/paper-deliveries",
                 committeeDirectorToken, Map.of(
                         "opid", opid,
-                        "recipientName", "测试业主",
+                        "proxyAuthorizationId", proxyAuthorizationId,
+                        "recipientName", "测试代理人",
                         "deliveryMethod", "DOOR_TO_DOOR",
                         "evidenceAttachmentId", deliveryAttachmentId,
                         "deliveredAt", Instant.now().toString()));
@@ -573,6 +658,7 @@ class RepairProjectBuildingE2eFlowTest {
                 "/api/v1/admin/repair-projects/" + projectId + "/voting/paper-ballots",
                 committeeDirectorToken, Map.of(
                         "opid", opid,
+                        "proxyAuthorizationId", proxyAuthorizationId,
                         "ballotNumber", "REPAIR-E2E-PAPER-" + projectId + "-" + opid,
                         "attachmentId", ballotAttachmentId,
                         "receivedAt", Instant.now().toString()));
@@ -592,6 +678,9 @@ class RepairProjectBuildingE2eFlowTest {
                         "decision", "CONFIRM",
                         "reviewNote", "第二名工作人员已核对纸质表决票录入。"));
         assertEquals("COUNTED", reviewed.path("outcomes").get(0).path("status").asText());
+        assertEquals(proxyAuthorizationId, jdbcTemplate.queryForObject(
+                "SELECT proxy_authorization_id FROM t_paper_ballot WHERE paper_ballot_id = ?",
+                Long.class, ballotId));
     }
 
     /** 删除本用例产生的统一表决证据；真实生产记录不存在此类回收路径。 */
@@ -638,6 +727,7 @@ class RepairProjectBuildingE2eFlowTest {
                     """, packageId);
             jdbcTemplate.update("DELETE FROM t_paper_ballot WHERE package_id = ?", packageId);
             jdbcTemplate.update("DELETE FROM t_paper_voting_delivery WHERE package_id = ?", packageId);
+            jdbcTemplate.update("DELETE FROM t_voting_proxy_authorization WHERE package_id = ?", packageId);
             jdbcTemplate.update("DELETE FROM t_voting_ballot_record WHERE package_id = ?", packageId);
             for (Long subjectId : subjectIds) {
                 jdbcTemplate.update("DELETE FROM t_vote_item WHERE subject_id = ?", subjectId);

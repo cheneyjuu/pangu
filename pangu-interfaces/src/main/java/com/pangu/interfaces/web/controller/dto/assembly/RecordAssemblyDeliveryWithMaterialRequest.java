@@ -9,6 +9,7 @@ import java.time.Instant;
 
 public record RecordAssemblyDeliveryWithMaterialRequest(
         @NotNull Long opid,
+        Long proxyAuthorizationId,
         @NotBlank String recipientName,
         @NotNull OwnersAssemblyRuleConfiguration.DeliveryMethod deliveryMethod,
         @NotNull Long evidenceMaterialId,

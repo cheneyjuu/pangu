@@ -180,15 +180,11 @@ public class RepairProjectVotingService {
         requireFrozenPlan(project);
         OwnersAssemblyRule rule = ruleRepository.findActive(project.tenantId())
                 .orElseThrow(() -> conflict("本小区尚未启用可用于维修事项的议事规则"));
-        FormalVotingRulePolicy.PreparationOptions options;
-        try {
-            options = rulePolicy.preparationOptions(rule, Instant.now());
-        } catch (FormalVotingRulePolicy.UnsupportedRuleException ex) {
-            throw conflict(ex.getMessage(), ex);
-        }
+        FormalVotingRulePolicy.PreparationOptions options = rulePolicy.preparationOptions(rule, Instant.now());
         return new PreparationOptions(
-                rule.ruleName(), rule.ruleVersion(), options.allowedModes(), options.earliestVoteStartAt(),
-                options.validDeliveryMethods(), options.paperBallotSealRequired());
+                rule.ruleName(), rule.ruleVersion(), options.ready(), options.blockingItems(),
+                options.allowedModes(), options.earliestVoteStartAt(), options.validDeliveryMethods(),
+                options.paperBallotSealRequired(), options.proxyVotingPolicy());
     }
 
     /** 到达开始时间后开启同一表决包，不能通过创建第二场表决绕过公示或通知期限。 */
@@ -397,7 +393,8 @@ public class RepairProjectVotingService {
         VotingDecisionResultProjector.View result = resultRepository.findBySubjectId(subject.getSubjectId())
                 .map(votingDecisionResultProjector::project)
                 .orElse(null);
-        return new Details(project, plan, link, subject, executionPackage, rule.ruleName(), rule.ruleVersion(), result);
+        return new Details(project, plan, link, subject, executionPackage, rule.ruleName(), rule.ruleVersion(),
+                rule.configuration().proxyVotingPolicy(), result);
     }
 
     private PlanVersion requireFrozenPlan(RepairProject project) {
@@ -538,11 +535,17 @@ public class RepairProjectVotingService {
     public record PreparationOptions(
             String ruleName,
             String ruleVersion,
+            boolean ready,
+            List<FormalVotingRulePolicy.ReadinessIssue> blockingItems,
             Set<VotingExecutionPackage.CollectionMode> allowedModes,
             Instant earliestVoteStartAt,
             Set<com.pangu.domain.model.assembly.OwnersAssemblyRuleConfiguration.DeliveryMethod> validDeliveryMethods,
-            Boolean paperBallotSealRequired
+            Boolean paperBallotSealRequired,
+            com.pangu.domain.model.assembly.OwnersAssemblyRuleConfiguration.ProxyVotingPolicy proxyVotingPolicy
     ) {
+        public PreparationOptions {
+            blockingItems = blockingItems == null ? List.of() : List.copyOf(blockingItems);
+        }
     }
 
     public record TransitionCommand(Long expectedLinkVersion) {
@@ -556,6 +559,7 @@ public class RepairProjectVotingService {
             VotingExecutionPackage executionPackage,
             String ruleName,
             String ruleVersion,
+            com.pangu.domain.model.assembly.OwnersAssemblyRuleConfiguration.ProxyVotingPolicy proxyVotingPolicy,
             VotingDecisionResultProjector.View result
     ) {
     }

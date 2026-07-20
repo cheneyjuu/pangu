@@ -9,6 +9,7 @@
         <result property="electorateItemId" column="electorate_item_id"/>
         <result property="tenantId" column="tenant_id"/>
         <result property="opid" column="representative_opid"/>
+        <result property="proxyAuthorizationId" column="proxy_authorization_id"/>
         <result property="recipientName" column="recipient_name"/>
         <result property="deliveryMethod" column="delivery_method"/>
         <result property="evidenceSourceType" column="evidence_source_type"/>
@@ -32,6 +33,7 @@
         <result property="electorateItemId" column="electorate_item_id"/>
         <result property="tenantId" column="tenant_id"/>
         <result property="opid" column="representative_opid"/>
+        <result property="proxyAuthorizationId" column="proxy_authorization_id"/>
         <result property="ballotNumber" column="ballot_number"/>
         <result property="templateHash" column="template_hash"/>
         <result property="materialSourceType" column="material_source_type"/>
@@ -85,7 +87,8 @@
 
     <sql id="DeliveryColumns">
         delivery.paper_delivery_id, delivery.package_id, delivery.electorate_item_id, delivery.tenant_id,
-        electorate.representative_opid, delivery.recipient_name, delivery.delivery_method,
+        electorate.representative_opid, delivery.proxy_authorization_id,
+        delivery.recipient_name, delivery.delivery_method,
         delivery.evidence_source_type, delivery.evidence_source_id, delivery.evidence_hash,
         delivery.delivered_by_user_id, delivery.delivered_at, delivery.status,
         delivery.reviewed_by_user_id, delivery.reviewed_at, delivery.review_note,
@@ -94,7 +97,8 @@
 
     <sql id="BallotColumns">
         ballot.paper_ballot_id, ballot.package_id, ballot.electorate_item_id, ballot.tenant_id,
-        electorate.representative_opid, ballot.ballot_number, ballot.template_hash,
+        electorate.representative_opid, ballot.proxy_authorization_id,
+        ballot.ballot_number, ballot.template_hash,
         ballot.material_source_type, ballot.material_source_id, ballot.material_hash,
         ballot.received_by_user_id, ballot.received_at, ballot.status,
         ballot.voided_by_user_id, ballot.voided_at, ballot.void_reason,
@@ -103,11 +107,11 @@
 
     <insert id="insertDelivery" useGeneratedKeys="true" keyProperty="paperDeliveryId">
         INSERT INTO t_paper_voting_delivery (
-            package_id, electorate_item_id, tenant_id, recipient_name, delivery_method,
+            package_id, electorate_item_id, tenant_id, proxy_authorization_id, recipient_name, delivery_method,
             evidence_source_type, evidence_source_id, evidence_hash,
             delivered_by_user_id, delivered_at, status
         ) VALUES (
-            #{packageId}, #{electorateItemId}, #{tenantId}, #{recipientName}, #{deliveryMethod},
+            #{packageId}, #{electorateItemId}, #{tenantId}, #{proxyAuthorizationId}, #{recipientName}, #{deliveryMethod},
             #{evidenceSourceType}, #{evidenceSourceId}, #{evidenceHash},
             #{deliveredByUserId}, #{deliveredAt}, #{status}
         )
@@ -158,11 +162,11 @@
 
     <insert id="insertBallot" useGeneratedKeys="true" keyProperty="paperBallotId">
         INSERT INTO t_paper_ballot (
-            package_id, electorate_item_id, tenant_id, ballot_number, template_hash,
+            package_id, electorate_item_id, tenant_id, proxy_authorization_id, ballot_number, template_hash,
             material_source_type, material_source_id, material_hash,
             received_by_user_id, received_at, status
         ) VALUES (
-            #{packageId}, #{electorateItemId}, #{tenantId}, #{ballotNumber}, #{templateHash},
+            #{packageId}, #{electorateItemId}, #{tenantId}, #{proxyAuthorizationId}, #{ballotNumber}, #{templateHash},
             #{materialSourceType}, #{materialSourceId}, #{materialHash},
             #{receivedByUserId}, #{receivedAt}, #{status}
         )

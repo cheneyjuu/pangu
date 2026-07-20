@@ -9,6 +9,7 @@ public record RecordAssemblyDeliveryWithMaterialCommand(
         Long sessionId,
         Long tenantId,
         Long opid,
+        Long proxyAuthorizationId,
         String recipientName,
         OwnersAssemblyRuleConfiguration.DeliveryMethod deliveryMethod,
         Long evidenceMaterialId,

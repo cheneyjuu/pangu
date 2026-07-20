@@ -178,6 +178,7 @@ public class PaperVotingRepositoryImpl implements PaperVotingRepository {
         row.setPackageId(domain.packageId());
         row.setElectorateItemId(domain.electorateItemId());
         row.setTenantId(domain.tenantId());
+        row.setProxyAuthorizationId(domain.proxyAuthorizationId());
         row.setRecipientName(domain.recipientName());
         row.setDeliveryMethod(domain.deliveryMethod());
         row.setEvidenceSourceType(domain.evidenceSourceType());
@@ -192,8 +193,9 @@ public class PaperVotingRepositoryImpl implements PaperVotingRepository {
     private PaperVotingDelivery toDomain(PaperVotingDeliveryRow row) {
         return new PaperVotingDelivery(
                 row.getPaperDeliveryId(), row.getPackageId(), row.getElectorateItemId(), row.getTenantId(),
-                row.getOpid(), row.getRecipientName(), row.getDeliveryMethod(), row.getEvidenceSourceType(),
-                row.getEvidenceSourceId(), row.getEvidenceHash(), row.getDeliveredByUserId(), row.getDeliveredAt(),
+                row.getOpid(), row.getProxyAuthorizationId(), row.getRecipientName(), row.getDeliveryMethod(),
+                row.getEvidenceSourceType(), row.getEvidenceSourceId(), row.getEvidenceHash(),
+                row.getDeliveredByUserId(), row.getDeliveredAt(),
                 PaperVotingDelivery.Status.valueOf(row.getStatus()), row.getReviewedByUserId(), row.getReviewedAt(),
                 row.getReviewNote(), row.getUnifiedDeliveryId(), row.getCreateTime(), row.getUpdateTime(), row.getVersion());
     }
@@ -204,6 +206,7 @@ public class PaperVotingRepositoryImpl implements PaperVotingRepository {
         row.setPackageId(domain.packageId());
         row.setElectorateItemId(domain.electorateItemId());
         row.setTenantId(domain.tenantId());
+        row.setProxyAuthorizationId(domain.proxyAuthorizationId());
         row.setBallotNumber(domain.ballotNumber());
         row.setTemplateHash(domain.templateHash());
         row.setMaterialSourceType(domain.materialSourceType());
@@ -218,7 +221,8 @@ public class PaperVotingRepositoryImpl implements PaperVotingRepository {
     private PaperBallot toDomain(PaperBallotRow row) {
         return new PaperBallot(
                 row.getPaperBallotId(), row.getPackageId(), row.getElectorateItemId(), row.getTenantId(), row.getOpid(),
-                row.getBallotNumber(), row.getTemplateHash(), row.getMaterialSourceType(), row.getMaterialSourceId(),
+                row.getProxyAuthorizationId(), row.getBallotNumber(), row.getTemplateHash(),
+                row.getMaterialSourceType(), row.getMaterialSourceId(),
                 row.getMaterialHash(), row.getReceivedByUserId(), row.getReceivedAt(),
                 PaperBallot.Status.valueOf(row.getStatus()), row.getVoidedByUserId(), row.getVoidedAt(),
                 row.getVoidReason(), row.getCreateTime(), row.getUpdateTime(), row.getVersion());

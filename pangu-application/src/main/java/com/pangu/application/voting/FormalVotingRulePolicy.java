@@ -13,8 +13,10 @@ import org.springframework.stereotype.Component;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.EnumSet;
+import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -47,51 +49,136 @@ public class FormalVotingRulePolicy {
      * 返回当前有效规则真正可办理的单次方式，供管理端展示选择范围；客户端不能自行解释规则组合。
      */
     public PreparationOptions preparationOptions(OwnersAssemblyRule rule, Instant preparedAt) {
-        BaseConstraints base = requireBaseConstraints(rule, preparedAt);
+        List<ReadinessIssue> blockingItems = new ArrayList<>();
+        OwnersAssemblyRuleConfiguration configuration = assessBaseConstraints(
+                rule, preparedAt, blockingItems);
+        Instant earliestVoteStartAt = earliestVoteStartAt(configuration, preparedAt);
         EnumSet<VotingExecutionPackage.CollectionMode> supported =
                 EnumSet.noneOf(VotingExecutionPackage.CollectionMode.class);
-        for (VotingExecutionPackage.CollectionMode mode : VotingExecutionPackage.CollectionMode.values()) {
-            try {
-                requireMode(base.configuration(), mode);
-                supported.add(mode);
-            } catch (UnsupportedRuleException ignored) {
-                // 单个方式不受规则支持时只从选择列表移除；共享规则错误已在上方明确阻断。
+        if (blockingItems.isEmpty()) {
+            for (VotingExecutionPackage.CollectionMode mode : VotingExecutionPackage.CollectionMode.values()) {
+                try {
+                    requireMode(configuration, mode);
+                    supported.add(mode);
+                } catch (UnsupportedRuleException ignored) {
+                    // 某种方式不在本小区规则允许范围内，不等同于规则本身不可执行。
+                }
             }
         }
-        if (supported.isEmpty()) {
-            throw new UnsupportedRuleException("当前表决依据没有系统可办理的表决方式");
+        if (supported.isEmpty() && blockingItems.isEmpty()) {
+            blockingItems.add(new ReadinessIssue(
+                    "NO_SUPPORTED_COLLECTION_MODE", "当前表决依据没有系统可办理的表决方式"));
         }
         return new PreparationOptions(
+                blockingItems.isEmpty(),
+                List.copyOf(blockingItems),
                 Collections.unmodifiableSet(supported),
-                base.earliestVoteStartAt(),
-                base.configuration().validDeliveryMethods(),
-                base.configuration().paperBallotSealRequired());
+                earliestVoteStartAt,
+                configuration == null ? Set.of() : configuration.validDeliveryMethods(),
+                configuration == null ? null : configuration.paperBallotSealRequired(),
+                configuration == null ? null : configuration.proxyVotingPolicy());
     }
 
     private BaseConstraints requireBaseConstraints(OwnersAssemblyRule rule, Instant preparedAt) {
+        PreparationOptions options = preparationOptions(rule, preparedAt);
+        if (!options.ready()) {
+            throw new UnsupportedRuleException("当前不能准备正式表决：" + options.blockingItems().stream()
+                    .map(ReadinessIssue::message)
+                    .collect(Collectors.joining("；")));
+        }
+        return new BaseConstraints(rule.configuration(), options.earliestVoteStartAt());
+    }
+
+    /**
+     * 一次性检查共享规则问题，避免修复一个字段后才在业务办理页暴露下一个技术闸门。
+     */
+    private OwnersAssemblyRuleConfiguration assessBaseConstraints(
+            OwnersAssemblyRule rule, Instant preparedAt, List<ReadinessIssue> issues) {
         if (rule == null || rule.status() != OwnersAssemblyRule.Status.ACTIVE) {
-            throw new UnsupportedRuleException("本小区尚无已启用的维修事项表决依据");
+            issues.add(new ReadinessIssue("NO_ACTIVE_RULE", "本小区尚无已启用的维修事项表决依据"));
+            return null;
         }
         if (rule.effectiveDate() == null || rule.effectiveDate().isAfter(LocalDate.now())) {
-            throw new UnsupportedRuleException("本小区当前表决依据尚未生效");
+            issues.add(new ReadinessIssue("RULE_NOT_EFFECTIVE", "本小区当前表决依据尚未生效"));
         }
         if (rule.configurationSha256() == null || !rule.configurationSha256().matches("[0-9a-fA-F]{64}")) {
-            throw new UnsupportedRuleException("当前表决依据缺少可核验的结构化配置摘要");
+            issues.add(new ReadinessIssue(
+                    "MISSING_CONFIGURATION_HASH", "当前表决依据缺少可核验的结构化配置摘要"));
         }
         OwnersAssemblyRuleConfiguration configuration = rule.configuration();
         if (configuration == null) {
-            throw new UnsupportedRuleException("当前表决依据缺少已确认的办理规则");
+            issues.add(new ReadinessIssue("MISSING_CONFIGURATION", "当前表决依据缺少已确认的办理规则"));
+            return null;
         }
-        requireSupportedSharedRules(configuration);
-
-        int publicityDays = requireNonNegative(configuration.planPublicityDays(), "方案公示期限");
-        int noticeDays = requireNonNegative(configuration.meetingNoticeDays(), "会议通知期限");
-        int preparationDays = Math.max(publicityDays, noticeDays);
+        assessSharedRules(configuration, issues);
         if (preparedAt == null) {
-            throw new UnsupportedRuleException("缺少本次表决准备时间");
+            issues.add(new ReadinessIssue("MISSING_PREPARED_AT", "缺少本次表决准备时间"));
         }
-        Instant earliestStartAt = preparedAt.plus(preparationDays, ChronoUnit.DAYS);
-        return new BaseConstraints(configuration, earliestStartAt);
+        return configuration;
+    }
+
+    private Instant earliestVoteStartAt(
+            OwnersAssemblyRuleConfiguration configuration,
+            Instant preparedAt) {
+        if (configuration == null || preparedAt == null
+                || configuration.planPublicityDays() == null || configuration.planPublicityDays() < 0
+                || configuration.meetingNoticeDays() == null || configuration.meetingNoticeDays() < 0) {
+            return null;
+        }
+        int preparationDays = Math.max(
+                configuration.planPublicityDays(), configuration.meetingNoticeDays());
+        return preparedAt.plus(preparationDays, ChronoUnit.DAYS);
+    }
+
+    private void assessSharedRules(
+            OwnersAssemblyRuleConfiguration configuration, List<ReadinessIssue> issues) {
+        assessNonNegative(configuration.planPublicityDays(),
+                "MISSING_PUBLICITY_PERIOD", "INVALID_PUBLICITY_PERIOD", "方案公示期限", issues);
+        assessNonNegative(configuration.meetingNoticeDays(),
+                "MISSING_NOTICE_PERIOD", "INVALID_NOTICE_PERIOD", "会议通知期限", issues);
+        if (configuration.validDeliveryMethods().isEmpty()) {
+            issues.add(new ReadinessIssue("MISSING_DELIVERY_METHOD", "当前表决依据未明确有效送达方式"));
+        }
+        if (configuration.nonResponsePolicy() == null) {
+            issues.add(new ReadinessIssue(
+                    "MISSING_NON_RESPONSE_POLICY", "当前表决依据未明确未反馈表决票的认定方式"));
+        }
+        if (configuration.proxyVotingPolicy() == null) {
+            issues.add(new ReadinessIssue("MISSING_PROXY_POLICY", "当前表决依据未明确是否允许书面委托"));
+        }
+        for (OwnersAssemblyRuleConfiguration.DecisionType decisionType
+                : OwnersAssemblyRuleConfiguration.DecisionType.values()) {
+            OwnersAssemblyRuleConfiguration.CountingRule countingRule =
+                    configuration.countingRules().get(decisionType);
+            String prefix = decisionType == OwnersAssemblyRuleConfiguration.DecisionType.GENERAL
+                    ? "GENERAL" : "MAJOR";
+            if (countingRule == null) {
+                issues.add(new ReadinessIssue(
+                        "MISSING_" + prefix + "_COUNTING_RULE",
+                        "当前表决依据缺少 " + decisionType + " 事项的计票口径"));
+                continue;
+            }
+            try {
+                countingRule.toVotingDecisionRule().requireExecutable();
+            } catch (IllegalStateException ex) {
+                issues.add(new ReadinessIssue(
+                        "INVALID_" + prefix + "_COUNTING_RULE",
+                        "当前表决依据的 " + decisionType + " 事项计票口径不完整"));
+            }
+        }
+    }
+
+    private void assessNonNegative(
+            Integer value,
+            String missingCode,
+            String invalidCode,
+            String label,
+            List<ReadinessIssue> issues) {
+        if (value == null) {
+            issues.add(new ReadinessIssue(missingCode, label + "未在表决依据中明确"));
+        } else if (value < 0) {
+            issues.add(new ReadinessIssue(invalidCode, label + "不能小于 0 天"));
+        }
     }
 
     public VotingSettlementPolicy settlementPolicy(OwnersAssemblyRule rule, SubjectType subjectType) {
@@ -120,26 +207,6 @@ public class FormalVotingRulePolicy {
                 rule.configuration().validDeliveryMethods().stream()
                         .map(Enum::name)
                         .collect(Collectors.toUnmodifiableSet()));
-    }
-
-    private void requireSupportedSharedRules(OwnersAssemblyRuleConfiguration configuration) {
-        if (configuration.validDeliveryMethods().isEmpty()) {
-            throw new UnsupportedRuleException("当前表决依据未明确有效送达方式");
-        }
-        if (configuration.nonResponsePolicy() == null) {
-            throw new UnsupportedRuleException("当前表决依据未明确未反馈表决票的认定方式");
-        }
-        if (configuration.proxyVotingPolicy()
-                != OwnersAssemblyRuleConfiguration.ProxyVotingPolicy.NOT_ALLOWED) {
-            throw new UnsupportedRuleException("当前系统尚未接入书面委托代理的核验和存证，不能发起正式表决");
-        }
-        for (OwnersAssemblyRuleConfiguration.DecisionType decisionType
-                : OwnersAssemblyRuleConfiguration.DecisionType.values()) {
-            if (configuration.countingRules().get(decisionType) == null) {
-                throw new UnsupportedRuleException("当前表决依据缺少 " + decisionType + " 事项的计票口径");
-            }
-            settlementPolicyFromConfiguration(configuration, decisionType);
-        }
     }
 
     private void requireMode(OwnersAssemblyRuleConfiguration configuration,
@@ -218,23 +285,6 @@ public class FormalVotingRulePolicy {
         }
     }
 
-    private void settlementPolicyFromConfiguration(
-            OwnersAssemblyRuleConfiguration configuration,
-            OwnersAssemblyRuleConfiguration.DecisionType decisionType) {
-        try {
-            configuration.countingRules().get(decisionType).toVotingDecisionRule().requireExecutable();
-        } catch (IllegalStateException ex) {
-            throw new UnsupportedRuleException("当前表决依据的 " + decisionType + " 事项计票口径不完整", ex);
-        }
-    }
-
-    private int requireNonNegative(Integer value, String label) {
-        if (value == null || value < 0) {
-            throw new UnsupportedRuleException(label + "未在表决依据中明确");
-        }
-        return value;
-    }
-
     public record ExecutableRule(
             OwnersAssemblyRule rule,
             VotingExecutionPackage.CollectionMode collectionMode,
@@ -243,11 +293,23 @@ public class FormalVotingRulePolicy {
     }
 
     public record PreparationOptions(
+            boolean ready,
+            List<ReadinessIssue> blockingItems,
             Set<VotingExecutionPackage.CollectionMode> allowedModes,
             Instant earliestVoteStartAt,
             Set<OwnersAssemblyRuleConfiguration.DeliveryMethod> validDeliveryMethods,
-            Boolean paperBallotSealRequired
+            Boolean paperBallotSealRequired,
+            OwnersAssemblyRuleConfiguration.ProxyVotingPolicy proxyVotingPolicy
     ) {
+        public PreparationOptions {
+            blockingItems = blockingItems == null ? List.of() : List.copyOf(blockingItems);
+            allowedModes = allowedModes == null ? Set.of() : Set.copyOf(allowedModes);
+            validDeliveryMethods = validDeliveryMethods == null ? Set.of() : Set.copyOf(validDeliveryMethods);
+        }
+    }
+
+    /** 管理端可直接展示的办理前置问题，不暴露异常或内部状态机。 */
+    public record ReadinessIssue(String code, String message) {
     }
 
     private record BaseConstraints(

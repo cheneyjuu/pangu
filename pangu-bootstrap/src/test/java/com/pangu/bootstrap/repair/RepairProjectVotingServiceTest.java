@@ -10,6 +10,7 @@ import com.pangu.application.voting.VotingExecutionService;
 import com.pangu.domain.context.UserContext;
 import com.pangu.domain.context.UserContextHolder;
 import com.pangu.domain.model.assembly.OwnersAssemblyRule;
+import com.pangu.domain.model.assembly.OwnersAssemblyRuleConfiguration;
 import com.pangu.domain.model.repair.RepairProject;
 import com.pangu.domain.model.repair.RepairProjectVoting;
 import com.pangu.domain.model.user.AuthenticationLevel;
@@ -96,6 +97,11 @@ class RepairProjectVotingServiceTest {
         when(rule.ruleName()).thenReturn("小区议事规则");
         when(rule.ruleVersion()).thenReturn("2026-01");
         when(rule.configurationSha256()).thenReturn("b".repeat(64));
+        OwnersAssemblyRuleConfiguration ruleConfiguration =
+                org.mockito.Mockito.mock(OwnersAssemblyRuleConfiguration.class);
+        when(ruleConfiguration.proxyVotingPolicy()).thenReturn(
+                OwnersAssemblyRuleConfiguration.ProxyVotingPolicy.NOT_ALLOWED);
+        when(rule.configuration()).thenReturn(ruleConfiguration);
         startAt = Instant.now().plusSeconds(3600);
         endAt = startAt.plusSeconds(86400);
         when(projectRepository.findProjectForUpdate(101L, 10001L)).thenReturn(Optional.of(project));
