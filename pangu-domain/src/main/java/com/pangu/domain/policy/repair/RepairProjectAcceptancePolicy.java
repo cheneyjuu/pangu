@@ -10,6 +10,8 @@ import com.pangu.domain.model.repair.RepairAcceptancePartyRole;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.ArrayList;
+import java.util.List;
 
 public interface RepairProjectAcceptancePolicy {
 
@@ -22,16 +24,24 @@ public interface RepairProjectAcceptancePolicy {
             if (summary.rectificationCount() > 0) {
                 return RepairAcceptanceDecision.rectificationRequired("已有验收参与方提出整改要求");
             }
+            List<String> unmetConditions = new ArrayList<>();
+            boolean affectedOwnerRequirementPresent = false;
             for (AcceptanceRequirement requirement : policy.requirements()) {
                 if (summary.passedCount(requirement.eligibleRoles()) < requirement.minimumPassingCount()) {
-                    return RepairAcceptanceDecision.incomplete(requirement.businessName() + "尚未达到通过条件");
+                    unmetConditions.add(requirement.businessName() + "尚未达到通过条件");
                 }
                 if (requirement.eligibleRoles().contains(RepairAcceptancePartyRole.AFFECTED_OWNER)) {
-                    RepairAcceptanceDecision ownerDecision = evaluateAffectedOwners(policy, summary);
-                    if (ownerDecision.outcome() != RepairAcceptanceDecision.Outcome.PASSED) {
-                        return ownerDecision;
-                    }
+                    affectedOwnerRequirementPresent = true;
                 }
+            }
+            if (affectedOwnerRequirementPresent) {
+                RepairAcceptanceDecision ownerDecision = evaluateAffectedOwners(policy, summary);
+                if (ownerDecision.outcome() != RepairAcceptanceDecision.Outcome.PASSED) {
+                    unmetConditions.add(ownerDecision.reason());
+                }
+            }
+            if (!unmetConditions.isEmpty()) {
+                return RepairAcceptanceDecision.incomplete(String.join("；", unmetConditions));
             }
             return RepairAcceptanceDecision.passed();
         }

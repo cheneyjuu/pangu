@@ -43,6 +43,17 @@ class RepairProjectPoliciesTest {
     }
 
     @Test
+    void acceptanceReportsEveryUnmetFrozenConditionAtOnce() {
+        RepairAcceptanceDecision decision = acceptance.evaluate(
+                communityPolicy(), communitySummary(false, false, false, false));
+
+        assertEquals(RepairAcceptanceDecision.Outcome.INCOMPLETE, decision.outcome());
+        assertTrue(decision.reason().contains("业委会负责人验收"));
+        assertTrue(decision.reason().contains("验收文件用印"));
+        assertTrue(decision.reason().contains("专业人员共同验收"));
+    }
+
+    @Test
     void buildingAcceptanceUsesLockedMinimumAndApprovalRatio() {
         AcceptancePolicy policy = new AcceptancePolicy(
                 1L, 2L, 3L, 10001L, RepairWorkflowType.BUILDING_REPAIR, "hash",

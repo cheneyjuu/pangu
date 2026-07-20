@@ -574,24 +574,91 @@ class RepairProjectBuildingE2eFlowTest {
         JsonNode ownerAcceptanceTask = getData(
                 "/api/v1/me/repair-projects/" + projectId + "/acceptance", reportingOwnerToken);
         long acceptanceRoomId = ownerAcceptanceTask.path("affectedRoomIds").get(0).asLong();
+        long ownerAcceptanceAttachmentId = uploadOwnerAcceptanceAttachment(
+                projectId, reportingOwnerToken, "业主现场验收照片.pdf", "owner-acceptance");
         JsonNode ownerAcceptance = postData(
                 "/api/v1/me/repair-projects/" + projectId + "/acceptance",
                 reportingOwnerToken, Map.of(
                         "roomId", acceptanceRoomId,
                         "conclusion", "PASSED",
                         "participantName", "受影响业主",
-                        "opinion", "现场查看后确认维修结果符合方案"));
+                        "opinion", "现场查看后确认维修结果符合方案",
+                        "evidenceAttachmentId", ownerAcceptanceAttachmentId));
         assertEquals("PASSED", ownerAcceptance.path("conclusion").asText());
 
+        long rectificationAttachmentId = uploadProjectAttachment(
+                projectId, propertyManagerToken, "第一轮工程验收整改记录.pdf", "acceptance-rectification");
+        JsonNode rectification = postData(
+                "/api/v1/admin/repair-projects/" + projectId + "/acceptance/property-technical",
+                propertyManagerToken, Map.of(
+                        "conclusion", "RECTIFICATION_REQUIRED",
+                        "participantName", "物业项目负责人",
+                        "participantOrganization", "本小区物业服务项目部",
+                        "opinion", "现场发现一处收边不平整，需整改后重新验收",
+                        "evidenceAttachmentId", rectificationAttachmentId));
+        assertEquals("RECTIFICATION_REQUIRED", rectification.path("conclusion").asText());
+
+        JsonNode firstPendingAcceptanceProject = getData(
+                "/api/v1/admin/repair-projects/" + projectId, propertyManagerToken);
+        JsonNode rectificationRound = postData(
+                "/api/v1/admin/repair-projects/" + projectId + "/acceptance/finalization",
+                propertyManagerToken, Map.of(
+                        "expectedProjectVersion", firstPendingAcceptanceProject.path("project").path("version").asInt(),
+                        "resultAttachmentId", rectificationAttachmentId,
+                        "remark", "按第一轮验收意见完成收边整改后重新提交结算和验收"));
+        assertEquals("RECTIFICATION_REQUIRED", rectificationRound.path("status").asText());
+        JsonNode rectifyingProject = getData(
+                "/api/v1/admin/repair-projects/" + projectId, propertyManagerToken);
+        assertEquals("IN_PROGRESS", rectifyingProject.path("project").path("status").asText());
+        assertEquals(1, jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM t_repair_acceptance
+                WHERE project_id = ? AND round_no = 1 AND status = 'RECTIFICATION_REQUIRED'
+                """, Integer.class, projectId));
+
+        long correctedSettlementAttachmentId = uploadProjectAttachment(
+                projectId, supplierToken, "整改后竣工结算单.pdf", "corrected-completion-settlement");
+        JsonNode correctedSettlement = postData(
+                "/api/v1/admin/repair-projects/" + projectId + "/settlement",
+                supplierToken, Map.of(
+                        "settlementAttachmentId", correctedSettlementAttachmentId,
+                        "taxRate", 9,
+                        "items", List.of(Map.of(
+                                "workPointId", workPointId,
+                                "actualQuantity", 1,
+                                "unit", "项",
+                                "actualUnitPrice", 1000,
+                                "varianceReason", "已按第一轮验收意见完成整改并重新确认工程量"))));
+        assertEquals(2, correctedSettlement.path("versionNo").asInt());
+        JsonNode secondVerifiedSettlement = postData(
+                "/api/v1/admin/repair-projects/" + projectId + "/settlement/verification",
+                propertyManagerToken, Map.of(
+                        "expectedProjectVersion", rectifyingProject.path("project").path("version").asInt(),
+                        "approved", true,
+                        "opinion", "整改完成，结算和完工材料重新核验一致"));
+        assertEquals("VERIFIED", secondVerifiedSettlement.path("status").asText());
+
+        JsonNode secondOwnerAcceptanceTask = getData(
+                "/api/v1/me/repair-projects/" + projectId + "/acceptance", reportingOwnerToken);
+        assertEquals(2, secondOwnerAcceptanceTask.path("round").path("roundNo").asInt());
+        long secondOwnerAcceptanceAttachmentId = uploadOwnerAcceptanceAttachment(
+                projectId, reportingOwnerToken, "整改后业主验收照片.pdf", "corrected-owner-acceptance");
+        postData(
+                "/api/v1/me/repair-projects/" + projectId + "/acceptance",
+                reportingOwnerToken, Map.of(
+                        "roomId", acceptanceRoomId,
+                        "conclusion", "PASSED",
+                        "participantName", "受影响业主",
+                        "opinion", "整改后现场复核通过",
+                        "evidenceAttachmentId", secondOwnerAcceptanceAttachmentId));
         long propertyAcceptanceAttachmentId = uploadProjectAttachment(
-                projectId, propertyManagerToken, "物业现场验收记录.pdf", "property-acceptance");
+                projectId, propertyManagerToken, "整改后物业验收记录.pdf", "corrected-property-acceptance");
         JsonNode propertyAcceptance = postData(
                 "/api/v1/admin/repair-projects/" + projectId + "/acceptance/property-technical",
                 propertyManagerToken, Map.of(
                         "conclusion", "PASSED",
                         "participantName", "物业项目负责人",
                         "participantOrganization", "本小区物业服务项目部",
-                        "opinion", "已核对现场、施工记录、材料和竣工结算",
+                        "opinion", "已核对整改结果、施工记录、材料和竣工结算",
                         "evidenceAttachmentId", propertyAcceptanceAttachmentId));
         assertEquals("PASSED", propertyAcceptance.path("conclusion").asText());
 
@@ -617,9 +684,9 @@ class RepairProjectBuildingE2eFlowTest {
                 SELECT COUNT(*) FROM t_repair_execution_record
                 WHERE project_id = ? AND verification_status = 'VERIFIED'
                 """, Integer.class, projectId));
-        assertEquals(1, jdbcTemplate.queryForObject("""
+        assertEquals(2, jdbcTemplate.queryForObject("""
                 SELECT COUNT(*) FROM t_repair_acceptance
-                WHERE project_id = ? AND status = 'PASSED'
+                WHERE project_id = ? AND status IN ('RECTIFICATION_REQUIRED', 'PASSED')
                 """, Integer.class, projectId));
     }
 
@@ -1234,6 +1301,19 @@ class RepairProjectBuildingE2eFlowTest {
         return objectMapper.readTree(response).path("data").path("attachmentId").asLong();
     }
 
+    private long uploadOwnerAcceptanceAttachment(
+            long projectId, String token, String fileName, String content) throws Exception {
+        MockMultipartFile file = new MockMultipartFile(
+                "file", fileName, "application/pdf", content.getBytes(StandardCharsets.UTF_8));
+        String response = mockMvc.perform(multipart(
+                                "/api/v1/me/repair-projects/" + projectId + "/acceptance/attachments")
+                        .file(file)
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+        return objectMapper.readTree(response).path("data").path("attachmentId").asLong();
+    }
+
     private Map<String, Object> authorizationFreezeRequest(
             int expectedVersion, long acceptanceBasisAttachmentId) {
         Map<String, Object> request = new LinkedHashMap<>();
@@ -1260,7 +1340,7 @@ class RepairProjectBuildingE2eFlowTest {
                         "minimumPassingCount", 1, "evidenceRequired", true),
                 Map.of("requirementCode", "AFFECTED_OWNER", "businessName", "受影响业主验收",
                         "eligibleRoles", List.of("AFFECTED_OWNER"),
-                        "minimumPassingCount", 1, "evidenceRequired", false)));
+                        "minimumPassingCount", 1, "evidenceRequired", true)));
         request.put("acceptanceFinalizerRoles", List.of("PROPERTY_TECHNICAL_COSIGNER"));
         request.put("acceptanceBasisAttachmentIds", List.of(acceptanceBasisAttachmentId));
         request.put("acceptanceBasisSummary", "依据工程责任和验收约定，由物业和费用承担房屋业主共同验收");

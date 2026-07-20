@@ -9,6 +9,7 @@ import com.pangu.domain.context.UserContextHolder;
 import com.pangu.domain.model.repair.RepairProject;
 import com.pangu.domain.model.repair.RepairProject.Attachment;
 import com.pangu.domain.model.repair.RepairProject.Status;
+import com.pangu.domain.model.repair.RepairAcceptancePartyRole;
 import com.pangu.domain.model.repair.RepairProjectSourcing.Invitation;
 import com.pangu.domain.repository.RepairEvidenceObjectStorage;
 import com.pangu.domain.repository.RepairProjectExecutionRepository;
@@ -66,6 +67,37 @@ public class RepairProjectAttachmentService {
         RepairProject project = projectRepository.findProject(projectId, tenantId)
                 .orElseThrow(() -> new RepairWorkOrderApplicationException(NOT_FOUND, "维修工程项目不存在"));
         assertProjectAccess(actor, project, true, null);
+        return store(project, actor, command);
+    }
+
+    /** 受影响业主仅可在本人验收任务进行中上传验收证据，不能借此写入其他工程附件。 */
+    @Transactional
+    public Attachment uploadOwnerAcceptanceEvidence(
+            Long projectId, UploadRepairProjectAttachmentCommand command) {
+        UserContext owner = userContextHolder.current();
+        if (owner == null || !owner.isCUser() || owner.accountId() == null
+                || owner.uid() == null || owner.tenantId() == null) {
+            throw new RepairWorkOrderApplicationException(FORBIDDEN, "未识别到当前业主身份");
+        }
+        RepairProject project = projectRepository.findProject(projectId, owner.tenantId())
+                .orElseThrow(() -> new RepairWorkOrderApplicationException(NOT_FOUND, "维修工程项目不存在"));
+        if (project.status() != Status.PENDING_ACCEPTANCE) {
+            throw new RepairWorkOrderApplicationException(FORBIDDEN, "当前工程没有可提交的业主验收任务");
+        }
+        var policy = executionRepository.findAcceptancePolicy(projectId, owner.tenantId())
+                .orElseThrow(() -> new RepairWorkOrderApplicationException(FORBIDDEN, "当前工程没有锁定验收安排"));
+        boolean ownerRequired = policy.requirements().stream()
+                .anyMatch(requirement -> requirement.eligibleRoles()
+                        .contains(RepairAcceptancePartyRole.AFFECTED_OWNER));
+        if (!ownerRequired || executionRepository.listAffectedOwnerRoomIds(
+                policy.policyId(), owner.tenantId(), owner.uid()).isEmpty()) {
+            throw new RepairWorkOrderApplicationException(FORBIDDEN, "当前业主不在本工程验收范围内");
+        }
+        return store(project, owner, command);
+    }
+
+    private Attachment store(
+            RepairProject project, UserContext actor, UploadRepairProjectAttachmentCommand command) {
         if (command == null) {
             throw new RepairWorkOrderApplicationException(PARAM_INVALID, "附件不能为空");
         }
@@ -83,12 +115,18 @@ public class RepairProjectAttachmentService {
         validateStoredObject(objectKey, contentType, content.length, metadata);
         try {
             Attachment attachment = projectRepository.insertAttachment(new Attachment(
-                    null, projectId, project.tenantId(), objectKey, fileName, contentType,
+                    null, project.projectId(), project.tenantId(), objectKey, fileName, contentType,
                     (long) content.length, metadata.etag(), digestHex("SHA-256", content),
                     actor.accountId(), actor.userId(), null));
-            projectRepository.insertEvent(
-                    projectId, project.tenantId(), "PROJECT_ATTACHMENT_UPLOADED",
-                    actor.accountId(), actor.userId(), eventPayload(attachment.attachmentId()));
+            if (actor.isCUser()) {
+                projectRepository.insertOwnerEvent(
+                        project.projectId(), project.tenantId(), "PROJECT_ATTACHMENT_UPLOADED",
+                        actor.accountId(), actor.uid(), eventPayload(attachment.attachmentId()));
+            } else {
+                projectRepository.insertEvent(
+                        project.projectId(), project.tenantId(), "PROJECT_ATTACHMENT_UPLOADED",
+                        actor.accountId(), actor.userId(), eventPayload(attachment.attachmentId()));
+            }
             return attachment;
         } catch (RuntimeException ex) {
             deleteQuietly(objectKey, ex);
