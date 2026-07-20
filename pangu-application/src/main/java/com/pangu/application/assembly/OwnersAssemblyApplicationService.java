@@ -926,36 +926,18 @@ public class OwnersAssemblyApplicationService {
     }
 
     private void validateSupportedChannelRule(OwnersAssemblyRuleConfiguration configuration) {
-        switch (configuration.votingChannelPolicy()) {
-            case PAPER_ONLY -> {
-                if (configuration.duplicateVotePolicy()
-                        != OwnersAssemblyRuleConfiguration.DuplicateVotePolicy.NOT_APPLICABLE) {
-                    throw new OwnersAssemblyApplicationException(
-                            INVALID_STATUS, "纸质单渠道表决的重复投票规则应为不适用");
-                }
-            }
-            case ONLINE_ONLY -> {
-                if (!Boolean.TRUE.equals(configuration.onlineIdentityVerificationRequired())) {
-                    throw new OwnersAssemblyApplicationException(
-                            INVALID_STATUS, "互联网表决必须明确实名身份核验要求");
-                }
-                if (configuration.duplicateVotePolicy()
-                        != OwnersAssemblyRuleConfiguration.DuplicateVotePolicy.NOT_APPLICABLE) {
-                    throw new OwnersAssemblyApplicationException(
-                            INVALID_STATUS, "互联网表决的重复投票规则应为不适用");
-                }
-            }
-            case PAPER_AND_ONLINE -> {
-                if (!Boolean.TRUE.equals(configuration.onlineIdentityVerificationRequired())) {
-                    throw new OwnersAssemblyApplicationException(
-                            INVALID_STATUS, "纸质与线上并行必须明确实名身份核验要求");
-                }
-                if (configuration.duplicateVotePolicy()
-                        != OwnersAssemblyRuleConfiguration.DuplicateVotePolicy.FIRST_VALID_WINS) {
-                    throw new OwnersAssemblyApplicationException(
-                            INVALID_STATUS, "当前纸质与线上并行仅支持先形成的有效票计入，其他冲突规则尚无证据链");
-                }
-            }
+        FormalVotingRulePolicy.ChannelCapability capability =
+                formalVotingRulePolicy.assessChannelCapability(configuration);
+        if (!capability.blockingItems().isEmpty()) {
+            throw new OwnersAssemblyApplicationException(
+                    INVALID_STATUS,
+                    capability.blockingItems().stream()
+                            .map(FormalVotingRulePolicy.ReadinessIssue::message)
+                            .collect(Collectors.joining("；")));
+        }
+        if (capability.allowedModes().isEmpty()) {
+            throw new OwnersAssemblyApplicationException(
+                    INVALID_STATUS, "当前表决依据没有系统可办理的表决方式");
         }
     }
 

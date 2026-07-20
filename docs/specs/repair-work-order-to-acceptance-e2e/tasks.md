@@ -14,10 +14,10 @@
 
 ## 2. 规则能力一致性
 
-- [ ] 先写失败测试：`ONLINE_PREVAILS` 生效规则必须返回混合表决可办理；
-- [ ] 抽取规则启用和运行共用的办理方式能力策略；
+- [x] 先写失败测试：`ONLINE_PREVAILS` 生效规则必须返回混合表决可办理；
+- [x] 抽取规则启用和运行共用的办理方式能力策略；
 - [ ] 规则启用前一次返回全部不支持原因；
-- [ ] 删除 `FormalVotingRulePolicy` 中只接受 `FIRST_VALID_WINS` 的硬编码分支；
+- [x] 删除 `FormalVotingRulePolicy` 中只接受 `FIRST_VALID_WINS` 的硬编码分支；
 - [ ] 验证现有测试规则无需修改即可准备表决。
 
 ## 3. 重复票策略

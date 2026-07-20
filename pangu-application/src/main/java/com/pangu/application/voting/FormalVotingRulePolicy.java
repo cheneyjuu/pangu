@@ -53,22 +53,17 @@ public class FormalVotingRulePolicy {
         OwnersAssemblyRuleConfiguration configuration = assessBaseConstraints(
                 rule, preparedAt, blockingItems);
         Instant earliestVoteStartAt = earliestVoteStartAt(configuration, preparedAt);
-        EnumSet<VotingExecutionPackage.CollectionMode> supported =
-                EnumSet.noneOf(VotingExecutionPackage.CollectionMode.class);
         if (blockingItems.isEmpty()) {
-            for (VotingExecutionPackage.CollectionMode mode : VotingExecutionPackage.CollectionMode.values()) {
-                try {
-                    requireMode(configuration, mode);
-                    supported.add(mode);
-                } catch (UnsupportedRuleException ignored) {
-                    // 某种方式不在本小区规则允许范围内，不等同于规则本身不可执行。
-                }
+            ChannelCapability channelCapability = assessChannelCapability(configuration);
+            blockingItems.addAll(channelCapability.blockingItems());
+            if (channelCapability.allowedModes().isEmpty() && channelCapability.blockingItems().isEmpty()) {
+                blockingItems.add(new ReadinessIssue(
+                        "NO_SUPPORTED_COLLECTION_MODE", "当前表决依据没有系统可办理的表决方式"));
             }
         }
-        if (supported.isEmpty() && blockingItems.isEmpty()) {
-            blockingItems.add(new ReadinessIssue(
-                    "NO_SUPPORTED_COLLECTION_MODE", "当前表决依据没有系统可办理的表决方式"));
-        }
+        Set<VotingExecutionPackage.CollectionMode> supported = blockingItems.isEmpty()
+                ? assessChannelCapability(configuration).allowedModes()
+                : Set.of();
         return new PreparationOptions(
                 blockingItems.isEmpty(),
                 List.copyOf(blockingItems),
@@ -214,75 +209,86 @@ public class FormalVotingRulePolicy {
         if (mode == null) {
             throw new UnsupportedRuleException("请选择本次表决办理方式");
         }
-        switch (mode) {
-            case PAPER -> {
-                requirePair(configuration, OwnersAssemblyRuleConfiguration.MeetingForm.WRITTEN_CONSULTATION,
-                        OwnersAssemblyRuleConfiguration.VotingChannelPolicy.PAPER_ONLY,
-                        "当前表决依据未确认纸质书面征询");
-                requireDuplicatePolicy(configuration, false);
-            }
-            case ONLINE_WITH_PAPER_ASSISTANCE -> {
-                requirePair(configuration, OwnersAssemblyRuleConfiguration.MeetingForm.INTERNET,
-                        OwnersAssemblyRuleConfiguration.VotingChannelPolicy.ONLINE_ONLY,
-                        "当前表决依据未确认互联网表决并为有困难业主提供纸质协助");
-                requireOnlineIdentity(configuration);
-                requireDuplicatePolicy(configuration, false);
-            }
-            case PAPER_AND_ONLINE -> {
-                requirePair(configuration, OwnersAssemblyRuleConfiguration.MeetingForm.ONLINE_AND_OFFLINE,
-                        OwnersAssemblyRuleConfiguration.VotingChannelPolicy.PAPER_AND_ONLINE,
-                        "当前表决依据未明确允许纸质与线上并行");
-                requireOnlineIdentity(configuration);
-                if (configuration.duplicateVotePolicy()
-                        != OwnersAssemblyRuleConfiguration.DuplicateVotePolicy.FIRST_VALID_WINS) {
-                    throw new UnsupportedRuleException("当前纸质与线上并行只支持首张有效票生效");
-                }
-            }
+        ChannelCapability capability = assessChannelCapability(configuration);
+        if (!capability.blockingItems().isEmpty()) {
+            throw new UnsupportedRuleException(capability.blockingItems().stream()
+                    .map(ReadinessIssue::message)
+                    .collect(Collectors.joining("；")));
         }
-    }
-
-    private void requirePair(OwnersAssemblyRuleConfiguration configuration,
-                             OwnersAssemblyRuleConfiguration.MeetingForm meetingForm,
-                             OwnersAssemblyRuleConfiguration.VotingChannelPolicy channelPolicy,
-                             String message) {
-        if (!configuration.allowedMeetingForms().contains(meetingForm)
-                || !allowsChannel(configuration.votingChannelPolicy(), channelPolicy)) {
-            throw new UnsupportedRuleException(message);
+        if (!capability.allowedModes().contains(mode)) {
+            throw new UnsupportedRuleException(switch (mode) {
+                case PAPER -> "当前表决依据未确认纸质书面征询";
+                case ONLINE_WITH_PAPER_ASSISTANCE ->
+                        "当前表决依据未确认互联网表决并为有困难业主提供纸质协助";
+                case PAPER_AND_ONLINE -> "当前表决依据未明确允许纸质与线上并行";
+            });
         }
     }
 
     /**
-     * 规则可同时允许多种会议形式；PAPER_AND_ONLINE 表达规则已经覆盖两类渠道，
-     * 单次表决仍只能从 allowedMeetingForms 中选择一种实际办理方式。
+     * 同一份能力判断同时供规则启用、表决准备和冻结快照复核使用，避免登记成功后才出现新的渠道闸门。
      */
-    private boolean allowsChannel(
-            OwnersAssemblyRuleConfiguration.VotingChannelPolicy configured,
-            OwnersAssemblyRuleConfiguration.VotingChannelPolicy requested) {
-        return configured == requested
-                || configured == OwnersAssemblyRuleConfiguration.VotingChannelPolicy.PAPER_AND_ONLINE
-                && (requested == OwnersAssemblyRuleConfiguration.VotingChannelPolicy.PAPER_ONLY
-                || requested == OwnersAssemblyRuleConfiguration.VotingChannelPolicy.ONLINE_ONLY);
-    }
-
-    private void requireDuplicatePolicy(
-            OwnersAssemblyRuleConfiguration configuration,
-            boolean parallelCollection) {
-        OwnersAssemblyRuleConfiguration.DuplicateVotePolicy expected =
-                configuration.votingChannelPolicy()
-                        == OwnersAssemblyRuleConfiguration.VotingChannelPolicy.PAPER_AND_ONLINE
-                        ? OwnersAssemblyRuleConfiguration.DuplicateVotePolicy.FIRST_VALID_WINS
-                        : OwnersAssemblyRuleConfiguration.DuplicateVotePolicy.NOT_APPLICABLE;
-        if (configuration.duplicateVotePolicy() != expected) {
-            throw new UnsupportedRuleException(parallelCollection
-                    ? "当前纸质与线上并行只支持首张有效票生效"
-                    : "当前规则的重复投票处理与所登记的渠道能力不一致");
+    public ChannelCapability assessChannelCapability(OwnersAssemblyRuleConfiguration configuration) {
+        if (configuration == null) {
+            return new ChannelCapability(Set.of(), List.of(
+                    new ReadinessIssue("MISSING_CHANNEL_CONFIGURATION", "当前表决依据缺少办理方式配置")));
         }
-    }
-
-    private void requireOnlineIdentity(OwnersAssemblyRuleConfiguration configuration) {
-        if (!Boolean.TRUE.equals(configuration.onlineIdentityVerificationRequired())) {
-            throw new UnsupportedRuleException("互联网表决必须启用实名身份和房屋表决权核验");
+        List<ReadinessIssue> issues = new ArrayList<>();
+        EnumSet<VotingExecutionPackage.CollectionMode> allowedModes =
+                EnumSet.noneOf(VotingExecutionPackage.CollectionMode.class);
+        Set<OwnersAssemblyRuleConfiguration.MeetingForm> forms = configuration.allowedMeetingForms();
+        OwnersAssemblyRuleConfiguration.VotingChannelPolicy channelPolicy =
+                configuration.votingChannelPolicy();
+        if (channelPolicy == null) {
+            issues.add(new ReadinessIssue("MISSING_CHANNEL_POLICY", "当前表决依据未明确收票渠道"));
+            return new ChannelCapability(Set.of(), issues);
         }
+        boolean written = forms.contains(OwnersAssemblyRuleConfiguration.MeetingForm.WRITTEN_CONSULTATION);
+        boolean online = forms.contains(OwnersAssemblyRuleConfiguration.MeetingForm.INTERNET);
+        boolean parallel = forms.contains(OwnersAssemblyRuleConfiguration.MeetingForm.ONLINE_AND_OFFLINE);
+        if (written && channelPolicy == OwnersAssemblyRuleConfiguration.VotingChannelPolicy.ONLINE_ONLY
+                || online && channelPolicy == OwnersAssemblyRuleConfiguration.VotingChannelPolicy.PAPER_ONLY
+                || parallel && channelPolicy != OwnersAssemblyRuleConfiguration.VotingChannelPolicy.PAPER_AND_ONLINE
+                || written && online
+                && channelPolicy != OwnersAssemblyRuleConfiguration.VotingChannelPolicy.PAPER_AND_ONLINE) {
+            issues.add(new ReadinessIssue(
+                    "CONFLICTING_COLLECTION_CHANNELS", "规则允许的表决形式与收票渠道约定相互矛盾"));
+        }
+        if ((online || parallel
+                || channelPolicy != OwnersAssemblyRuleConfiguration.VotingChannelPolicy.PAPER_ONLY)
+                && !Boolean.TRUE.equals(configuration.onlineIdentityVerificationRequired())) {
+            issues.add(new ReadinessIssue(
+                    "MISSING_ONLINE_IDENTITY_VERIFICATION", "线上表决必须明确实名身份和房屋表决权核验"));
+        }
+        boolean hybridChannel = channelPolicy
+                == OwnersAssemblyRuleConfiguration.VotingChannelPolicy.PAPER_AND_ONLINE;
+        boolean supportedDuplicatePolicy = configuration.duplicateVotePolicy()
+                == OwnersAssemblyRuleConfiguration.DuplicateVotePolicy.FIRST_VALID_WINS
+                || configuration.duplicateVotePolicy()
+                == OwnersAssemblyRuleConfiguration.DuplicateVotePolicy.ONLINE_PREVAILS
+                || configuration.duplicateVotePolicy()
+                == OwnersAssemblyRuleConfiguration.DuplicateVotePolicy.PAPER_PREVAILS;
+        if (hybridChannel && !supportedDuplicatePolicy) {
+            issues.add(new ReadinessIssue(
+                    "MISSING_DUPLICATE_BALLOT_POLICY", "纸质与线上并行时必须明确重复票处理方式"));
+        } else if (!hybridChannel && configuration.duplicateVotePolicy()
+                != OwnersAssemblyRuleConfiguration.DuplicateVotePolicy.NOT_APPLICABLE) {
+            issues.add(new ReadinessIssue(
+                    "UNEXPECTED_DUPLICATE_BALLOT_POLICY", "单一收票渠道不应设置跨渠道重复票处理方式"));
+        }
+        if (!issues.isEmpty()) {
+            return new ChannelCapability(Set.of(), issues);
+        }
+        if (written && channelPolicy != OwnersAssemblyRuleConfiguration.VotingChannelPolicy.ONLINE_ONLY) {
+            allowedModes.add(VotingExecutionPackage.CollectionMode.PAPER);
+        }
+        if (online && channelPolicy != OwnersAssemblyRuleConfiguration.VotingChannelPolicy.PAPER_ONLY) {
+            allowedModes.add(VotingExecutionPackage.CollectionMode.ONLINE_WITH_PAPER_ASSISTANCE);
+        }
+        if (parallel && hybridChannel) {
+            allowedModes.add(VotingExecutionPackage.CollectionMode.PAPER_AND_ONLINE);
+        }
+        return new ChannelCapability(Collections.unmodifiableSet(allowedModes), List.of());
     }
 
     public record ExecutableRule(
@@ -305,6 +311,17 @@ public class FormalVotingRulePolicy {
             blockingItems = blockingItems == null ? List.of() : List.copyOf(blockingItems);
             allowedModes = allowedModes == null ? Set.of() : Set.copyOf(allowedModes);
             validDeliveryMethods = validDeliveryMethods == null ? Set.of() : Set.copyOf(validDeliveryMethods);
+        }
+    }
+
+    /** 规则配置能够支持的单次实际办理方式及需要一次性补齐的问题。 */
+    public record ChannelCapability(
+            Set<VotingExecutionPackage.CollectionMode> allowedModes,
+            List<ReadinessIssue> blockingItems
+    ) {
+        public ChannelCapability {
+            allowedModes = allowedModes == null ? Set.of() : Set.copyOf(allowedModes);
+            blockingItems = blockingItems == null ? List.of() : List.copyOf(blockingItems);
         }
     }
 

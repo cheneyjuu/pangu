@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.pangu.application.assembly.command.CreateOwnersAssemblyRuleDraftCommand;
 import com.pangu.application.assembly.command.UpdateOwnersAssemblyRuleDraftCommand;
+import com.pangu.application.voting.FormalVotingRulePolicy;
 import com.pangu.domain.context.UserContext;
 import com.pangu.domain.context.UserContextHolder;
 import com.pangu.domain.model.assembly.OwnersAssemblyRule;
@@ -68,6 +69,7 @@ public class OwnersAssemblyRuleService {
     private final CommitteePositionRepository committeePositionRepository;
     private final UserContextHolder userContextHolder;
     private final ObjectMapper objectMapper;
+    private final FormalVotingRulePolicy formalVotingRulePolicy;
 
     @Transactional(readOnly = true)
     public List<OwnersAssemblyRule> list(Long requestedTenantId) {
@@ -381,37 +383,18 @@ public class OwnersAssemblyRuleService {
     }
 
     private void validateVotingChannel(OwnersAssemblyRuleConfiguration configuration) {
-        OwnersAssemblyRuleConfiguration.VotingChannelPolicy channelPolicy = configuration.votingChannelPolicy();
-        boolean written = configuration.allowedMeetingForms()
-                .contains(OwnersAssemblyRuleConfiguration.MeetingForm.WRITTEN_CONSULTATION);
-        boolean internet = configuration.allowedMeetingForms()
-                .contains(OwnersAssemblyRuleConfiguration.MeetingForm.INTERNET);
-        boolean parallel = configuration.allowedMeetingForms()
-                .contains(OwnersAssemblyRuleConfiguration.MeetingForm.ONLINE_AND_OFFLINE);
-        if ((written && channelPolicy == OwnersAssemblyRuleConfiguration.VotingChannelPolicy.ONLINE_ONLY)
-                || (internet && channelPolicy == OwnersAssemblyRuleConfiguration.VotingChannelPolicy.PAPER_ONLY)) {
+        FormalVotingRulePolicy.ChannelCapability capability =
+                formalVotingRulePolicy.assessChannelCapability(configuration);
+        if (!capability.blockingItems().isEmpty()) {
             throw new OwnersAssemblyApplicationException(
-                    PARAM_INVALID, "规则允许的会议形式与表决渠道条款相互矛盾");
+                    PARAM_INVALID,
+                    capability.blockingItems().stream()
+                            .map(FormalVotingRulePolicy.ReadinessIssue::message)
+                            .collect(java.util.stream.Collectors.joining("；")));
         }
-        if ((parallel || written && internet)
-                && channelPolicy != OwnersAssemblyRuleConfiguration.VotingChannelPolicy.PAPER_AND_ONLINE) {
+        if (capability.allowedModes().isEmpty()) {
             throw new OwnersAssemblyApplicationException(
-                    PARAM_INVALID, "规则同时包含纸质与互联网办理时，渠道条款必须完整记录两类渠道");
-        }
-        if (internet || parallel
-                || channelPolicy == OwnersAssemblyRuleConfiguration.VotingChannelPolicy.ONLINE_ONLY
-                || channelPolicy == OwnersAssemblyRuleConfiguration.VotingChannelPolicy.PAPER_AND_ONLINE) {
-            if (!Boolean.TRUE.equals(configuration.onlineIdentityVerificationRequired())) {
-                throw new OwnersAssemblyApplicationException(
-                        PARAM_INVALID, "线上表决必须在规则中明确一户一权身份核验要求");
-            }
-        }
-        boolean hybrid = channelPolicy == OwnersAssemblyRuleConfiguration.VotingChannelPolicy.PAPER_AND_ONLINE;
-        boolean notApplicable = configuration.duplicateVotePolicy()
-                == OwnersAssemblyRuleConfiguration.DuplicateVotePolicy.NOT_APPLICABLE;
-        if (hybrid == notApplicable) {
-            throw new OwnersAssemblyApplicationException(
-                    PARAM_INVALID, hybrid ? "纸电并行表决必须明确重复投票处理规则" : "单一表决渠道的重复投票规则应标记为不适用");
+                    PARAM_INVALID, "当前规则没有系统可办理的表决方式");
         }
     }
 

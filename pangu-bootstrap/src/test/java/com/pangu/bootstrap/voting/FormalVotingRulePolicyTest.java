@@ -46,6 +46,34 @@ class FormalVotingRulePolicyTest {
     }
 
     @Test
+    @DisplayName("Given规则约定线上有效票优先 When检查正式表决准备条件 Then允许纸质与线上并行")
+    void onlinePrevailsRuleAllowsParallelCollection() {
+        OwnersAssemblyRule rule = activeRule(
+                Set.of(OwnersAssemblyRuleConfiguration.MeetingForm.ONLINE_AND_OFFLINE),
+                OwnersAssemblyRuleConfiguration.VotingChannelPolicy.PAPER_AND_ONLINE,
+                OwnersAssemblyRuleConfiguration.DuplicateVotePolicy.ONLINE_PREVAILS);
+
+        FormalVotingRulePolicy.PreparationOptions options = policy.preparationOptions(rule, Instant.now());
+
+        assertTrue(options.ready());
+        assertEquals(Set.of(VotingExecutionPackage.CollectionMode.PAPER_AND_ONLINE), options.allowedModes());
+    }
+
+    @Test
+    @DisplayName("Given规则约定纸质有效票优先 When检查正式表决准备条件 Then允许纸质与线上并行")
+    void paperPrevailsRuleAllowsParallelCollection() {
+        OwnersAssemblyRule rule = activeRule(
+                Set.of(OwnersAssemblyRuleConfiguration.MeetingForm.ONLINE_AND_OFFLINE),
+                OwnersAssemblyRuleConfiguration.VotingChannelPolicy.PAPER_AND_ONLINE,
+                OwnersAssemblyRuleConfiguration.DuplicateVotePolicy.PAPER_PREVAILS);
+
+        FormalVotingRulePolicy.PreparationOptions options = policy.preparationOptions(rule, Instant.now());
+
+        assertTrue(options.ready());
+        assertEquals(Set.of(VotingExecutionPackage.CollectionMode.PAPER_AND_ONLINE), options.allowedModes());
+    }
+
+    @Test
     void selectedModeMustStillAppearInRecordedMeetingForms() {
         OwnersAssemblyRule rule = activeRule(
                 Set.of(OwnersAssemblyRuleConfiguration.MeetingForm.ONLINE_AND_OFFLINE),
