@@ -35,6 +35,9 @@ public interface RepairProjectVotingMapper {
                @Param("settledAt") Instant settledAt,
                @Param("expectedVersion") long expectedVersion);
 
+    List<RepairProjectVotingRow> listReadyForOpen(@Param("now") Instant now,
+                                                  @Param("limit") int limit);
+
     List<RepairProjectVotingOwnerTaskRow> listOwnerTasks(@Param("tenantId") Long tenantId,
                                                          @Param("ownerUid") Long ownerUid);
 }

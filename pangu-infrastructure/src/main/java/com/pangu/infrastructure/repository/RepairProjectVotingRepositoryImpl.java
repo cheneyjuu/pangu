@@ -49,6 +49,11 @@ public class RepairProjectVotingRepositoryImpl implements RepairProjectVotingRep
     }
 
     @Override
+    public List<RepairProjectVoting> listReadyForOpen(Instant now, int limit) {
+        return mapper.listReadyForOpen(now, limit).stream().map(this::toDomain).toList();
+    }
+
+    @Override
     public List<RepairProjectVoting.OwnerTask> listOwnerTasks(Long tenantId, Long ownerUid) {
         return mapper.listOwnerTasks(tenantId, ownerUid).stream().map(this::toDomain).toList();
     }

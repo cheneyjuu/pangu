@@ -128,6 +128,15 @@
           AND vote_start_at IS NOT NULL
           AND vote_start_at &lt;= #{now}
           AND clock_suspended_at IS NULL
+          AND NOT EXISTS (
+              SELECT 1
+              FROM t_voting_package_subject package_subject
+              JOIN t_voting_execution_package package
+                ON package.package_id = package_subject.package_id
+               AND package.tenant_id = package_subject.tenant_id
+              WHERE package_subject.subject_id = t_voting_subject.subject_id
+                AND package.business_type = 'REPAIR_PROJECT'
+          )
         ORDER BY vote_start_at ASC
         LIMIT #{limit}
     </select>

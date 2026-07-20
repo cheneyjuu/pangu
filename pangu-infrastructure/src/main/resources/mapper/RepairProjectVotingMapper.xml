@@ -54,6 +54,35 @@
           AND status = 'VOTING' AND version = #{expectedVersion}
     </update>
 
+    <!-- 维修表决必须由统一表决包和维修关联在同一事务中开启，不能只翻通用议题状态。 -->
+    <select id="listReadyForOpen"
+            resultType="com.pangu.infrastructure.persistence.entity.RepairProjectVotingRow">
+        SELECT link.link_id, link.project_id, link.plan_id, link.tenant_id,
+               link.subject_id, link.execution_package_id,
+               link.rule_id, link.rule_configuration_hash,
+               link.paper_ballot_template_attachment_id, link.paper_ballot_template_hash,
+               link.collection_mode, link.status, link.result,
+               link.prepared_by_user_id, link.prepared_at,
+               link.opened_by_user_id, link.opened_at,
+               link.settled_by_user_id, link.settled_at, link.version
+        FROM t_repair_project_voting link
+        JOIN t_voting_execution_package package
+          ON package.package_id = link.execution_package_id
+         AND package.tenant_id = link.tenant_id
+        JOIN t_voting_subject subject
+          ON subject.subject_id = link.subject_id
+         AND subject.tenant_id = link.tenant_id
+        WHERE link.status = 'PREPARED'
+          AND package.business_type = 'REPAIR_PROJECT'
+          AND package.status = 'FROZEN'
+          AND package.vote_start_at &lt;= #{now}
+          AND package.vote_end_at &gt; #{now}
+          AND subject.status = 2
+          AND subject.clock_suspended_at IS NULL
+        ORDER BY package.vote_start_at, link.link_id
+        LIMIT #{limit}
+    </select>
+
     <select id="listOwnerTasks"
             resultType="com.pangu.infrastructure.persistence.entity.RepairProjectVotingOwnerTaskRow">
         SELECT link.project_id, link.plan_id, project.project_no, project.project_name,

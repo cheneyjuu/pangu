@@ -20,5 +20,8 @@ public interface RepairProjectVotingRepository {
     int settle(Long linkId, Long tenantId, RepairProjectVoting.Result result,
                Long settledByUserId, Instant settledAt, long expectedVersion);
 
+    /** 查询已到开始时间且仍处于准备状态的维修表决，由定时任务逐笔原子开启。 */
+    List<RepairProjectVoting> listReadyForOpen(Instant now, int limit);
+
     List<RepairProjectVoting.OwnerTask> listOwnerTasks(Long tenantId, Long ownerUid);
 }

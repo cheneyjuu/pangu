@@ -3,6 +3,7 @@ package com.pangu.bootstrap.repair;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.pangu.bootstrap.scheduler.RepairProjectVotingOpenScheduler;
 import com.pangu.domain.model.assembly.OwnersAssemblyRuleConfiguration;
 import com.pangu.domain.model.propertyservice.PropertyServiceContractBasis;
 import com.pangu.domain.model.propertyservice.PropertyServiceEnterprise;
@@ -10,6 +11,7 @@ import com.pangu.domain.model.propertyservice.PropertyServiceOrganization;
 import com.pangu.domain.model.propertyservice.PropertyServiceOrganizationStatus;
 import com.pangu.domain.repository.PropertyServiceOrganizationRepository;
 import com.pangu.domain.repository.RepairEvidenceObjectStorage;
+import com.pangu.domain.repository.VotingSubjectRepository;
 import com.pangu.interfaces.security.JwtTokenProvider;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -71,6 +73,8 @@ class RepairProjectBuildingE2eFlowTest {
     @Autowired private ObjectMapper objectMapper;
     @Autowired private JwtTokenProvider jwtTokenProvider;
     @Autowired private JdbcTemplate jdbcTemplate;
+    @Autowired private RepairProjectVotingOpenScheduler repairProjectVotingOpenScheduler;
+    @Autowired private VotingSubjectRepository votingSubjectRepository;
     @Autowired private PropertyServiceOrganizationRepository propertyServiceOrganizationRepository;
     @MockBean private RepairEvidenceObjectStorage objectStorage;
     @MockBean private Clock clock;
@@ -319,12 +323,24 @@ class RepairProjectBuildingE2eFlowTest {
         assertEquals("PREPARED", prepared.path("voting").path("status").asText());
         long executionPackageId = prepared.path("executionPackage").path("packageId").asLong();
         long subjectId = prepared.path("subject").path("subjectId").asLong();
+        JsonNode preparedOwnerVotingTasks = getData(
+                "/api/v1/me/repair-projects/voting-tasks", reportingOwnerToken);
+        assertTrue(java.util.stream.StreamSupport.stream(preparedOwnerVotingTasks.spliterator(), false)
+                .anyMatch(task -> task.path("projectId").asLong() == projectId
+                        && "PREPARED".equals(task.path("status").asText())));
         businessNow.set(voteStartAt.plusSeconds(1));
-        JsonNode opened = postData(
-                "/api/v1/admin/repair-projects/" + projectId + "/voting/open",
-                committeeDirectorToken,
-                Map.of("expectedLinkVersion", prepared.path("voting").path("version").asLong()));
+        assertTrue(votingSubjectRepository.findPublishedReadyForOpen(businessNow.get(), 1000).stream()
+                .noneMatch(subject -> subject.getSubjectId().equals(subjectId)));
+        repairProjectVotingOpenScheduler.tick();
+        JsonNode opened = getData(
+                "/api/v1/admin/repair-projects/" + projectId + "/voting",
+                committeeDirectorToken);
         assertEquals("VOTING", opened.path("voting").path("status").asText());
+        JsonNode ownerVotingTasks = getData(
+                "/api/v1/me/repair-projects/voting-tasks", reportingOwnerToken);
+        assertTrue(java.util.stream.StreamSupport.stream(ownerVotingTasks.spliterator(), false)
+                .anyMatch(task -> task.path("projectId").asLong() == projectId
+                        && "VOTING".equals(task.path("status").asText())));
 
         List<Map<String, Object>> voters = jdbcTemplate.queryForList("""
                 SELECT electorate.representative_uid AS owner_uid,

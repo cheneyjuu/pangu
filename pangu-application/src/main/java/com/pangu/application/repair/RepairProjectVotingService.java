@@ -17,6 +17,7 @@ import com.pangu.domain.model.repair.RepairProject.PlanVersion;
 import com.pangu.domain.model.repair.RepairProject.Status;
 import com.pangu.domain.model.repair.RepairProjectVoting;
 import com.pangu.domain.model.voting.SubjectType;
+import com.pangu.domain.model.voting.SubjectStatus;
 import com.pangu.domain.model.voting.VotingElectorateSnapshot;
 import com.pangu.domain.model.voting.VotingExecutionPackage;
 import com.pangu.domain.model.voting.VotingScope;
@@ -216,6 +217,48 @@ public class RepairProjectVotingService {
                 votingRepository.find(project.projectId(), plan.planId(), project.tenantId()).orElseThrow(),
                 requireSubject(link.subjectId(), project.tenantId()),
                 requireExecutionPackage(link), rule);
+    }
+
+    /**
+     * 到达已确认的开始时间后由系统开启维修表决。
+     *
+     * <p>维修关联、统一表决包和通用议题必须在同一事务中一起进入收票状态，避免通用议题先行
+     * 开启后，C 端仍因维修关联停留在准备状态而看不到可办理表决。</p>
+     */
+    @Transactional
+    public boolean openDue(RepairProjectVoting candidate, Instant now) {
+        Objects.requireNonNull(candidate, "candidate 不能为空");
+        Objects.requireNonNull(now, "now 不能为空");
+        RepairProject project = loadProjectForUpdate(candidate.projectId(), candidate.tenantId());
+        requireAuthorizationInProgress(project);
+        PlanVersion plan = requireFrozenPlan(project);
+        if (!Objects.equals(plan.planId(), candidate.planId())) {
+            throw conflict("待开启表决与当前冻结实施方案不一致");
+        }
+        RepairProjectVoting link = requireLinkForUpdate(project, plan);
+        if (link.status() != RepairProjectVoting.Status.PREPARED) {
+            return false;
+        }
+        if (!Objects.equals(link.linkId(), candidate.linkId())) {
+            throw conflict("待开启表决与当前维修表决关联不一致");
+        }
+        VotingExecutionPackage executionPackage = requireExecutionPackage(link);
+        if (executionPackage.getStatus() != VotingExecutionPackage.Status.FROZEN
+                || now.isBefore(executionPackage.getVoteStartAt())
+                || !now.isBefore(executionPackage.getVoteEndAt())) {
+            return false;
+        }
+        VotingSubject subject = requireSubject(link.subjectId(), project.tenantId());
+        if (subject.getStatus() != SubjectStatus.PUBLISHED) {
+            throw conflict("维修表决事项状态与统一表决包不一致");
+        }
+        votingExecutionService.open(
+                executionPackage.getPackageId(), project.tenantId(), link.preparedByUserId(), now);
+        if (votingRepository.markVoting(
+                link.linkId(), project.tenantId(), link.preparedByUserId(), now, link.version()) != 1) {
+            throw conflict("表决办理状态已变化，请刷新后重试");
+        }
+        return true;
     }
 
     /** 截止收票并自动写入通过或未通过结果，客户端不提交统计数或结果。 */
