@@ -20,6 +20,7 @@ public class VotingExecutionPackageRow {
     private Integer scope;
     private Long scopeReferenceId;
     private String collectionMode;
+    private String duplicateBallotPolicy;
     private String status;
     private Instant voteStartAt;
     private Instant voteEndAt;

@@ -152,6 +152,76 @@ class VotingExecutionFlowTest {
     }
 
     @Test
+    void onlinePrevailsReplacesEarlierPaperBallotAndKeepsAuditChain() {
+        VotingSubject subject = createSubject();
+        VotingExecutionPackage ballotPackage = createPackage(
+                subject, 990000012L, VotingExecutionPackage.DuplicateBallotPolicy.ONLINE_PREVAILS);
+        votingExecutionService.freeze(ballotPackage.getPackageId(), TENANT_ID, ACTOR_USER_ID, Instant.now());
+        votingExecutionService.open(ballotPackage.getPackageId(), TENANT_ID, ACTOR_USER_ID, Instant.now());
+        votingExecutionService.recordDelivery(new RecordDeliveryCommand(
+                ballotPackage.getPackageId(), TENANT_ID, FIRST_OPID, VoteChannel.PAPER,
+                "DOOR_TO_DOOR", SHA_A, ACTOR_USER_ID, Instant.now()));
+        votingExecutionService.recordDelivery(new RecordDeliveryCommand(
+                ballotPackage.getPackageId(), TENANT_ID, FIRST_OPID, VoteChannel.ONLINE,
+                "ELECTRONIC", SHA_B, ACTOR_USER_ID, Instant.now()));
+        var paper = votingExecutionService.castRecord(new CastBallotCommand(
+                ballotPackage.getPackageId(), subject.getSubjectId(), TENANT_ID,
+                FIRST_OPID, FIRST_UID, VoteChoice.SUPPORT, VoteChannel.PAPER,
+                SHA_A, null, ACTOR_USER_ID, Instant.now()));
+
+        var online = votingExecutionService.castRecord(new CastBallotCommand(
+                ballotPackage.getPackageId(), subject.getSubjectId(), TENANT_ID,
+                FIRST_OPID, FIRST_UID, VoteChoice.AGAINST, VoteChannel.ONLINE,
+                null, SHA_B, null, Instant.now()));
+
+        assertThat(online.supersedesBallotId()).isEqualTo(paper.ballotId());
+        assertThat(online.resolutionPolicy())
+                .isEqualTo(VotingExecutionPackage.DuplicateBallotPolicy.ONLINE_PREVAILS);
+        assertThat(votingExecutionRepository.findActiveBallot(
+                subject.getSubjectId(), paper.electorateItemId(), TENANT_ID).orElseThrow().voteChannel())
+                .isEqualTo(VoteChannel.ONLINE);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_voting_ballot_record WHERE package_id = ? AND valid_flag = 0",
+                Long.class, ballotPackage.getPackageId())).isEqualTo(1L);
+        assertThat(votingExecutionRepository.countAudits(
+                ballotPackage.getPackageId(), TENANT_ID, "BALLOT_REPLACED")).isEqualTo(1L);
+    }
+
+    @Test
+    void paperPrevailsReplacesEarlierOnlineBallotAndKeepsAuditChain() {
+        VotingSubject subject = createSubject();
+        VotingExecutionPackage ballotPackage = createPackage(
+                subject, 990000013L, VotingExecutionPackage.DuplicateBallotPolicy.PAPER_PREVAILS);
+        votingExecutionService.freeze(ballotPackage.getPackageId(), TENANT_ID, ACTOR_USER_ID, Instant.now());
+        votingExecutionService.open(ballotPackage.getPackageId(), TENANT_ID, ACTOR_USER_ID, Instant.now());
+        votingExecutionService.recordDelivery(new RecordDeliveryCommand(
+                ballotPackage.getPackageId(), TENANT_ID, FIRST_OPID, VoteChannel.ONLINE,
+                "ELECTRONIC", SHA_A, ACTOR_USER_ID, Instant.now()));
+        votingExecutionService.recordDelivery(new RecordDeliveryCommand(
+                ballotPackage.getPackageId(), TENANT_ID, FIRST_OPID, VoteChannel.PAPER,
+                "DOOR_TO_DOOR", SHA_B, ACTOR_USER_ID, Instant.now()));
+        var online = votingExecutionService.castRecord(new CastBallotCommand(
+                ballotPackage.getPackageId(), subject.getSubjectId(), TENANT_ID,
+                FIRST_OPID, FIRST_UID, VoteChoice.SUPPORT, VoteChannel.ONLINE,
+                null, SHA_A, null, Instant.now()));
+
+        var paper = votingExecutionService.castRecord(new CastBallotCommand(
+                ballotPackage.getPackageId(), subject.getSubjectId(), TENANT_ID,
+                FIRST_OPID, FIRST_UID, VoteChoice.AGAINST, VoteChannel.PAPER,
+                SHA_B, null, ACTOR_USER_ID, Instant.now()));
+
+        assertThat(paper.supersedesBallotId()).isEqualTo(online.ballotId());
+        assertThat(paper.resolutionPolicy())
+                .isEqualTo(VotingExecutionPackage.DuplicateBallotPolicy.PAPER_PREVAILS);
+        assertThat(votingExecutionRepository.findActiveBallot(
+                subject.getSubjectId(), online.electorateItemId(), TENANT_ID).orElseThrow().voteChannel())
+                .isEqualTo(VoteChannel.PAPER);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_vote_item WHERE subject_id = ? AND valid_flag = 1",
+                Long.class, subject.getSubjectId())).isEqualTo(1L);
+    }
+
+    @Test
     void settlementPersistsExecutionPackageAndFrozenRosterTrace() {
         VotingSubject subject = createSubject();
         VotingExecutionPackage ballotPackage = createPackage(subject, 990000003L);
@@ -403,6 +473,7 @@ class VotingExecutionFlowTest {
                 "OWNERS_ASSEMBLY_RULE", planId, SHA_B,
                 VotingScope.REPAIR_ALLOCATION, planId,
                 VotingExecutionPackage.CollectionMode.PAPER,
+                VotingExecutionPackage.DuplicateBallotPolicy.NOT_APPLICABLE,
                 subject.getVoteStartAt(), subject.getVoteEndAt(), ACTOR_USER_ID));
         votingExecutionService.attachSubject(
                 ballotPackage.getPackageId(), TENANT_ID, subject.getSubjectId(), ACTOR_USER_ID);
@@ -463,6 +534,14 @@ class VotingExecutionFlowTest {
     }
 
     private VotingExecutionPackage createPackage(VotingSubject subject, long businessReferenceId) {
+        return createPackage(
+                subject, businessReferenceId, VotingExecutionPackage.DuplicateBallotPolicy.FIRST_VALID_WINS);
+    }
+
+    private VotingExecutionPackage createPackage(
+            VotingSubject subject,
+            long businessReferenceId,
+            VotingExecutionPackage.DuplicateBallotPolicy duplicateBallotPolicy) {
         VotingExecutionPackage ballotPackage = votingExecutionService.create(new CreatePackageCommand(
                 TENANT_ID,
                 VotingExecutionPackage.BusinessType.OWNERS_ASSEMBLY,
@@ -476,6 +555,7 @@ class VotingExecutionFlowTest {
                 VotingScope.BUILDING,
                 BUILDING_ID,
                 VotingExecutionPackage.CollectionMode.PAPER_AND_ONLINE,
+                duplicateBallotPolicy,
                 subject.getVoteStartAt(),
                 subject.getVoteEndAt(),
                 ACTOR_USER_ID));

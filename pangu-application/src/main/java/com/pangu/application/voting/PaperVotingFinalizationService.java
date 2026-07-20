@@ -36,7 +36,7 @@ public class PaperVotingFinalizationService {
             }
             VotingBallotRecord existing = votingExecutionRepository.findActiveBallot(
                     item.subjectId(), ballot.electorateItemId(), ballot.tenantId()).orElse(null);
-            if (existing != null) {
+            if (existing != null && samePaper(ballot, existing)) {
                 stateService.recordOutcome(
                         existingOutcome(ballot, entry, item, existing, reviewedAt),
                         ballot.packageId(), ballot.tenantId());
@@ -68,9 +68,7 @@ public class PaperVotingFinalizationService {
                                                 PaperBallotEntry.Item item,
                                                 VotingBallotRecord existing,
                                                 Instant finalizedAt) {
-        boolean samePaper = existing.voteChannel() == VoteChannel.PAPER
-                && ballot.materialHash().equals(existing.ballotFileHash());
-        if (samePaper) {
+        if (samePaper(ballot, existing)) {
             return new PaperBallotOutcome(
                     null, ballot.paperBallotId(), entry.entryId(), item.subjectId(),
                     PaperBallotOutcome.Status.COUNTED, existing.ballotId(), null, null, finalizedAt);
@@ -79,6 +77,11 @@ public class PaperVotingFinalizationService {
                 null, ballot.paperBallotId(), entry.entryId(), item.subjectId(),
                 PaperBallotOutcome.Status.DUPLICATE, null, existing.ballotId(),
                 "该专有部分对本事项已有有效票，本纸票作为重复材料留存", finalizedAt);
+    }
+
+    private boolean samePaper(PaperBallot ballot, VotingBallotRecord existing) {
+        return existing.voteChannel().paperLike()
+                && ballot.materialHash().equals(existing.ballotFileHash());
     }
 
     private String invalidReason(PaperBallotEntry.Item item) {

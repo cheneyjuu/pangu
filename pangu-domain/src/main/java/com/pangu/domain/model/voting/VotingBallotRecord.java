@@ -18,6 +18,9 @@ public record VotingBallotRecord(
         String ballotFileHash,
         String signatureHash,
         Long recordedByUserId,
-        Instant castAt
+        Instant castAt,
+        Long supersedesBallotId,
+        VotingExecutionPackage.DuplicateBallotPolicy resolutionPolicy,
+        String resolutionReason
 ) {
 }

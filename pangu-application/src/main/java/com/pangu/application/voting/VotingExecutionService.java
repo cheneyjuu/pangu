@@ -21,6 +21,7 @@ import com.pangu.domain.model.voting.VotingSettlementPolicy;
 import com.pangu.domain.model.voting.VotingScope;
 import com.pangu.domain.model.voting.VotingSubject;
 import com.pangu.domain.model.voting.VotingSubjectActions;
+import com.pangu.domain.policy.voting.DuplicateBallotResolutionPolicy;
 import com.pangu.domain.repository.VoteItemRepository;
 import com.pangu.domain.repository.VotingExecutionRepository;
 import com.pangu.domain.repository.VotingSubjectRepository;
@@ -52,6 +53,8 @@ import java.util.stream.Collectors;
 public class VotingExecutionService {
 
     private static final NonResponseVoteResolver NON_RESPONSE_RESOLVER = new NonResponseVoteResolver();
+    private static final DuplicateBallotResolutionPolicy DUPLICATE_BALLOT_POLICY =
+            new DuplicateBallotResolutionPolicy();
 
     private final VotingExecutionRepository executionRepository;
     private final VotingSubjectRepository subjectRepository;
@@ -66,6 +69,7 @@ public class VotingExecutionService {
                 command.proposalSnapshotType(), command.proposalSnapshotId(), command.proposalSnapshotHash(),
                 command.ruleSnapshotType(), command.ruleSnapshotId(), command.ruleSnapshotHash(),
                 command.scope(), command.scopeReferenceId(), command.collectionMode(),
+                command.duplicateBallotPolicy(),
                 command.voteStartAt(), command.voteEndAt(), command.createdByUserId());
         VotingExecutionPackage inserted = executionRepository.insertPackage(ballotPackage);
         executionRepository.insertAudit(
@@ -221,6 +225,8 @@ public class VotingExecutionService {
         }
         VotingElectorateSnapshot.Item item = requireElectorateItem(
                 command.packageId(), command.tenantId(), command.opid());
+        executionRepository.lockElectorateItem(
+                command.packageId(), command.tenantId(), item.snapshotItemId());
         VotingDeliveryRecord delivery = new VotingDeliveryRecord(
                 null, ballotPackage.getPackageId(), item.snapshotItemId(), ballotPackage.getTenantId(),
                 item.representativeOpid(), item.representativeUid(), channel,
@@ -285,6 +291,26 @@ public class VotingExecutionService {
         if (command.voteChannel().paperLike()) {
             requireText(command.ballotFileHash(), "ballotFileHash");
         }
+        VotingBallotRecord existing = executionRepository.findActiveBallot(
+                command.subjectId(), item.snapshotItemId(), command.tenantId()).orElse(null);
+        DuplicateBallotResolutionPolicy.Resolution resolution = null;
+        if (existing != null) {
+            resolution = DUPLICATE_BALLOT_POLICY.resolve(
+                    ballotPackage.getDuplicateBallotPolicy(),
+                    existing.voteChannel(), command.voteChannel());
+            if (resolution.decision()
+                    == DuplicateBallotResolutionPolicy.Decision.KEEP_EXISTING) {
+                throw new VotingExecutionException(
+                        Reason.DUPLICATE_BALLOT,
+                        "本专有部分已有有效票；" + resolution.reason() + "，本次材料已留存但不重复计票");
+            }
+            if (executionRepository.invalidateBallot(
+                    existing.ballotId(), resolution.reason(), castAt) != 1
+                    || voteItemRepository.invalidateVote(existing.voteId(), resolution.reason()) != 1) {
+                throw new VotingExecutionException(
+                        Reason.CONCURRENT_MODIFICATION, "有效票在重复票裁决期间发生变化，请重试");
+            }
+        }
         VoteItem vote = VoteItem.builder()
                 .opid(item.representativeOpid())
                 .uid(item.representativeUid())
@@ -301,7 +327,10 @@ public class VotingExecutionService {
                     item.snapshotItemId(), ballotPackage.getTenantId(), item.representativeOpid(),
                     item.representativeUid(), command.voteChannel(), ballotPackage.getPackageHash(),
                     trim(command.ballotFileHash()), trim(command.signatureHash()),
-                    command.recordedByUserId(), castAt));
+                    command.recordedByUserId(), castAt,
+                    existing == null ? null : existing.ballotId(),
+                    existing == null ? null : ballotPackage.getDuplicateBallotPolicy(),
+                    resolution == null ? null : resolution.reason()));
         } catch (VoteItemRepository.DuplicateVoteException | DataIntegrityViolationException ex) {
             throw new VotingExecutionException(
                     Reason.DUPLICATE_BALLOT, "该专有部分对本事项已有有效票，不能跨渠道重复提交", ex);
@@ -313,6 +342,18 @@ public class VotingExecutionService {
                 "{\"subjectId\":" + command.subjectId() + ",\"opid\":" + item.representativeOpid()
                         + ",\"channel\":\"" + command.voteChannel().name() + "\",\"voteId\":" + voteId + "}",
                 castAt);
+        if (existing != null) {
+            executionRepository.insertAudit(
+                    ballotPackage.getPackageId(), ballotPackage.getTenantId(), "BALLOT_REPLACED",
+                    ballotPackage.getStatus().name(), ballotPackage.getStatus().name(),
+                    command.recordedByUserId(),
+                    "{\"subjectId\":" + command.subjectId()
+                            + ",\"opid\":" + item.representativeOpid()
+                            + ",\"previousBallotId\":" + existing.ballotId()
+                            + ",\"currentBallotId\":" + insertedBallot.ballotId()
+                            + ",\"policy\":\"" + ballotPackage.getDuplicateBallotPolicy().name() + "\"}",
+                    castAt);
+        }
         return insertedBallot;
     }
 
@@ -595,6 +636,7 @@ public class VotingExecutionService {
                 ballotPackage.getScope().name(),
                 ballotPackage.getScopeReferenceId() == null ? "" : ballotPackage.getScopeReferenceId().toString(),
                 ballotPackage.getCollectionMode().name(),
+                ballotPackage.getDuplicateBallotPolicy().name(),
                 ballotPackage.getVoteStartAt().toString(),
                 ballotPackage.getVoteEndAt().toString(),
                 subjectIds.stream().sorted().toList().toString(),
@@ -718,6 +760,7 @@ public class VotingExecutionService {
             VotingScope scope,
             Long scopeReferenceId,
             VotingExecutionPackage.CollectionMode collectionMode,
+            VotingExecutionPackage.DuplicateBallotPolicy duplicateBallotPolicy,
             Instant voteStartAt,
             Instant voteEndAt,
             Long createdByUserId

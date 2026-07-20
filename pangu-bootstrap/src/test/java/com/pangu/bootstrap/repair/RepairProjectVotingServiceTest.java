@@ -185,7 +185,9 @@ class RepairProjectVotingServiceTest {
                 "REPAIR_AUTHORIZATION_PROPOSAL", 201L, "a".repeat(64),
                 "OWNERS_ASSEMBLY_RULE_VERSION", 301L, "b".repeat(64),
                 com.pangu.domain.model.voting.VotingScope.REPAIR_ALLOCATION, 201L,
-                VotingExecutionPackage.CollectionMode.PAPER, startAt, endAt, 800101L);
+                VotingExecutionPackage.CollectionMode.PAPER,
+                VotingExecutionPackage.DuplicateBallotPolicy.NOT_APPLICABLE,
+                startAt, endAt, 800101L);
         executionPackage.assignId(packageId);
         return executionPackage;
     }

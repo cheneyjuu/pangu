@@ -30,6 +30,7 @@ class VotingExecutionPackageTest {
                 VotingScope.COMMUNITY,
                 null,
                 VotingExecutionPackage.CollectionMode.PAPER,
+                VotingExecutionPackage.DuplicateBallotPolicy.NOT_APPLICABLE,
                 START,
                 END,
                 6001L));
@@ -67,6 +68,7 @@ class VotingExecutionPackageTest {
                 VotingScope.COMMUNITY,
                 null,
                 VotingExecutionPackage.CollectionMode.ONLINE_WITH_PAPER_ASSISTANCE,
+                VotingExecutionPackage.DuplicateBallotPolicy.NOT_APPLICABLE,
                 START,
                 END,
                 6001L);
@@ -89,6 +91,7 @@ class VotingExecutionPackageTest {
                 VotingScope.COMMUNITY,
                 null,
                 VotingExecutionPackage.CollectionMode.PAPER,
+                VotingExecutionPackage.DuplicateBallotPolicy.NOT_APPLICABLE,
                 START,
                 END,
                 6001L);

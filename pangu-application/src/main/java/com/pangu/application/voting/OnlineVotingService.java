@@ -390,7 +390,9 @@ public class OnlineVotingService {
         if (assistance != null && assistance.status() != OnlinePaperAssistanceRequest.Status.WITHDRAWN) {
             throw new OnlineVotingException(INVALID_STATUS, "本专有部分已申请纸质办理，请按纸质表决票完成");
         }
-        if (hasActiveBallot(ballotPackage, electorate)) {
+        if (ballotPackage.getCollectionMode()
+                != VotingExecutionPackage.CollectionMode.PAPER_AND_ONLINE
+                && hasActiveBallot(ballotPackage, electorate)) {
             throw new OnlineVotingException(ALREADY_SUBMITTED, "本专有部分已经通过纸质或线上方式完成表决");
         }
     }

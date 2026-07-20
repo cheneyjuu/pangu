@@ -25,6 +25,14 @@ public final class VotingExecutionPackage {
         PAPER_AND_ONLINE
     }
 
+    /** 本次冻结的跨渠道重复票处理方式；与收票方式是两个独立维度。 */
+    public enum DuplicateBallotPolicy {
+        NOT_APPLICABLE,
+        FIRST_VALID_WINS,
+        PAPER_PREVAILS,
+        ONLINE_PREVAILS
+    }
+
     public enum Status {
         DRAFT,
         FROZEN,
@@ -47,6 +55,7 @@ public final class VotingExecutionPackage {
     private final VotingScope scope;
     private final Long scopeReferenceId;
     private final CollectionMode collectionMode;
+    private final DuplicateBallotPolicy duplicateBallotPolicy;
     private Status status;
     private final Instant voteStartAt;
     private final Instant voteEndAt;
@@ -70,6 +79,7 @@ public final class VotingExecutionPackage {
                                    VotingScope scope,
                                    Long scopeReferenceId,
                                    CollectionMode collectionMode,
+                                   DuplicateBallotPolicy duplicateBallotPolicy,
                                    Status status,
                                    Instant voteStartAt,
                                    Instant voteEndAt,
@@ -92,6 +102,7 @@ public final class VotingExecutionPackage {
         this.scope = scope;
         this.scopeReferenceId = scopeReferenceId;
         this.collectionMode = collectionMode;
+        this.duplicateBallotPolicy = duplicateBallotPolicy;
         this.status = status;
         this.voteStartAt = voteStartAt;
         this.voteEndAt = voteEndAt;
@@ -115,6 +126,7 @@ public final class VotingExecutionPackage {
                                                 VotingScope scope,
                                                 Long scopeReferenceId,
                                                 CollectionMode collectionMode,
+                                                DuplicateBallotPolicy duplicateBallotPolicy,
                                                 Instant voteStartAt,
                                                 Instant voteEndAt,
                                                 Long createdByUserId) {
@@ -136,6 +148,7 @@ public final class VotingExecutionPackage {
             throw new IllegalArgumentException("UNIT 决定范围尚未建模");
         }
         Objects.requireNonNull(collectionMode, "collectionMode 不能为空");
+        requireCompatibleDuplicatePolicy(collectionMode, duplicateBallotPolicy);
         Objects.requireNonNull(voteStartAt, "voteStartAt 不能为空");
         Objects.requireNonNull(voteEndAt, "voteEndAt 不能为空");
         if (!voteEndAt.isAfter(voteStartAt)) {
@@ -156,6 +169,7 @@ public final class VotingExecutionPackage {
                 scope,
                 scopeReferenceId,
                 collectionMode,
+                duplicateBallotPolicy,
                 Status.DRAFT,
                 voteStartAt,
                 voteEndAt,
@@ -181,6 +195,7 @@ public final class VotingExecutionPackage {
                                                   VotingScope scope,
                                                   Long scopeReferenceId,
                                                   CollectionMode collectionMode,
+                                                  DuplicateBallotPolicy duplicateBallotPolicy,
                                                   Status status,
                                                   Instant voteStartAt,
                                                   Instant voteEndAt,
@@ -195,7 +210,7 @@ public final class VotingExecutionPackage {
                 packageId, tenantId, businessType, businessReferenceId,
                 proposalSnapshotType, proposalSnapshotId, proposalSnapshotHash,
                 ruleSnapshotType, ruleSnapshotId, ruleSnapshotHash,
-                scope, scopeReferenceId, collectionMode, status,
+                scope, scopeReferenceId, collectionMode, duplicateBallotPolicy, status,
                 voteStartAt, voteEndAt, packageHash, electorateSnapshotId,
                 createdByUserId, frozenByUserId, frozenAt, version);
     }
@@ -285,6 +300,18 @@ public final class VotingExecutionPackage {
         return normalized;
     }
 
+    private static void requireCompatibleDuplicatePolicy(
+            CollectionMode collectionMode, DuplicateBallotPolicy duplicateBallotPolicy) {
+        Objects.requireNonNull(duplicateBallotPolicy, "duplicateBallotPolicy 不能为空");
+        if (collectionMode == CollectionMode.PAPER_AND_ONLINE) {
+            if (duplicateBallotPolicy == DuplicateBallotPolicy.NOT_APPLICABLE) {
+                throw new IllegalArgumentException("纸质与线上并行必须冻结重复票处理方式");
+            }
+        } else if (duplicateBallotPolicy != DuplicateBallotPolicy.NOT_APPLICABLE) {
+            throw new IllegalArgumentException("非并行收票不应设置跨渠道重复票处理方式");
+        }
+    }
+
     public Long getPackageId() { return packageId; }
     public Long getTenantId() { return tenantId; }
     public BusinessType getBusinessType() { return businessType; }
@@ -298,6 +325,7 @@ public final class VotingExecutionPackage {
     public VotingScope getScope() { return scope; }
     public Long getScopeReferenceId() { return scopeReferenceId; }
     public CollectionMode getCollectionMode() { return collectionMode; }
+    public DuplicateBallotPolicy getDuplicateBallotPolicy() { return duplicateBallotPolicy; }
     public Status getStatus() { return status; }
     public Instant getVoteStartAt() { return voteStartAt; }
     public Instant getVoteEndAt() { return voteEndAt; }

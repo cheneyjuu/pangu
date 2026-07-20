@@ -204,6 +204,18 @@ public class FormalVotingRulePolicy {
                         .collect(Collectors.toUnmodifiableSet()));
     }
 
+    /** 将已核对的规则配置转换为表决包冻结值，客户端不能单独提交重复票策略。 */
+    public VotingExecutionPackage.DuplicateBallotPolicy duplicateBallotPolicy(
+            OwnersAssemblyRuleConfiguration configuration,
+            VotingExecutionPackage.CollectionMode collectionMode) {
+        requireMode(configuration, collectionMode);
+        if (collectionMode != VotingExecutionPackage.CollectionMode.PAPER_AND_ONLINE) {
+            return VotingExecutionPackage.DuplicateBallotPolicy.NOT_APPLICABLE;
+        }
+        return VotingExecutionPackage.DuplicateBallotPolicy.valueOf(
+                configuration.duplicateVotePolicy().name());
+    }
+
     private void requireMode(OwnersAssemblyRuleConfiguration configuration,
                              VotingExecutionPackage.CollectionMode mode) {
         if (mode == null) {

@@ -367,6 +367,9 @@ public class OwnersAssemblyApplicationService {
                         executionScope,
                         executionScopeReferenceId,
                         collectionModeOf(session, ruleSnapshot.configuration()),
+                        formalVotingRulePolicy.duplicateBallotPolicy(
+                                ruleSnapshot.configuration(),
+                                collectionModeOf(session, ruleSnapshot.configuration())),
                         arrangement.voteStartAt(),
                         arrangement.voteEndAt(),
                         actor.userId()));

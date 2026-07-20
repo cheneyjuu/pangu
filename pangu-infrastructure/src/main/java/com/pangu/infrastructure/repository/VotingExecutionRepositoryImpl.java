@@ -125,6 +125,13 @@ public class VotingExecutionRepositoryImpl implements VotingExecutionRepository 
     }
 
     @Override
+    public void lockElectorateItem(Long packageId, Long tenantId, Long electorateItemId) {
+        if (mapper.lockElectorateItem(packageId, tenantId, electorateItemId) == null) {
+            throw new IllegalStateException("冻结表决人名册项不存在 electorateItemId=" + electorateItemId);
+        }
+    }
+
+    @Override
     public int updatePackage(VotingExecutionPackage ballotPackage) {
         return mapper.updatePackage(toRow(ballotPackage));
     }
@@ -211,12 +218,16 @@ public class VotingExecutionRepositoryImpl implements VotingExecutionRepository 
         row.setSignatureHash(ballot.signatureHash());
         row.setRecordedByUserId(ballot.recordedByUserId());
         row.setCastAt(ballot.castAt());
+        row.setSupersedesBallotId(ballot.supersedesBallotId());
+        row.setResolutionPolicy(ballot.resolutionPolicy() == null ? null : ballot.resolutionPolicy().name());
+        row.setResolutionReason(ballot.resolutionReason());
         mapper.insertBallot(row);
         return new VotingBallotRecord(
                 row.getBallotId(), ballot.packageId(), ballot.subjectId(), ballot.voteId(),
                 ballot.electorateItemId(), ballot.tenantId(), ballot.opid(), ballot.uid(),
                 ballot.voteChannel(), ballot.packageHash(), ballot.ballotFileHash(),
-                ballot.signatureHash(), ballot.recordedByUserId(), ballot.castAt());
+                ballot.signatureHash(), ballot.recordedByUserId(), ballot.castAt(),
+                ballot.supersedesBallotId(), ballot.resolutionPolicy(), ballot.resolutionReason());
     }
 
     @Override
@@ -229,7 +240,15 @@ public class VotingExecutionRepositoryImpl implements VotingExecutionRepository 
                         row.getElectorateItemId(), row.getTenantId(), row.getRepresentativeOpid(),
                         row.getRepresentativeUid(), VoteChannel.fromDbValue(row.getVoteChannel()),
                         row.getPackageHash(), row.getBallotFileHash(), row.getSignatureHash(),
-                        row.getRecordedByUserId(), row.getCastAt()));
+                        row.getRecordedByUserId(), row.getCastAt(), row.getSupersedesBallotId(),
+                        row.getResolutionPolicy() == null ? null
+                                : VotingExecutionPackage.DuplicateBallotPolicy.valueOf(row.getResolutionPolicy()),
+                        row.getResolutionReason()));
+    }
+
+    @Override
+    public int invalidateBallot(Long ballotId, String invalidReason, java.time.Instant invalidatedAt) {
+        return mapper.invalidateBallot(ballotId, invalidReason, invalidatedAt);
     }
 
     @Override
@@ -288,6 +307,7 @@ public class VotingExecutionRepositoryImpl implements VotingExecutionRepository 
         row.setScope(domain.getScope().getDbValue());
         row.setScopeReferenceId(domain.getScopeReferenceId());
         row.setCollectionMode(domain.getCollectionMode().name());
+        row.setDuplicateBallotPolicy(domain.getDuplicateBallotPolicy().name());
         row.setStatus(domain.getStatus().name());
         row.setVoteStartAt(domain.getVoteStartAt());
         row.setVoteEndAt(domain.getVoteEndAt());
@@ -306,7 +326,10 @@ public class VotingExecutionRepositoryImpl implements VotingExecutionRepository 
                 row.getElectorateItemId(), row.getTenantId(), row.getRepresentativeOpid(),
                 row.getRepresentativeUid(), VoteChannel.fromDbValue(row.getVoteChannel()),
                 row.getPackageHash(), row.getBallotFileHash(), row.getSignatureHash(),
-                row.getRecordedByUserId(), row.getCastAt());
+                row.getRecordedByUserId(), row.getCastAt(), row.getSupersedesBallotId(),
+                row.getResolutionPolicy() == null ? null
+                        : VotingExecutionPackage.DuplicateBallotPolicy.valueOf(row.getResolutionPolicy()),
+                row.getResolutionReason());
     }
 
     private VotingNonResponseDerivationRow toRow(VotingNonResponseDerivation domain) {
@@ -346,6 +369,7 @@ public class VotingExecutionRepositoryImpl implements VotingExecutionRepository 
                 row.getProposalSnapshotHash(), row.getRuleSnapshotType(), row.getRuleSnapshotId(),
                 row.getRuleSnapshotHash(), VotingScope.fromDbValue(row.getScope()), row.getScopeReferenceId(),
                 VotingExecutionPackage.CollectionMode.valueOf(row.getCollectionMode()),
+                VotingExecutionPackage.DuplicateBallotPolicy.valueOf(row.getDuplicateBallotPolicy()),
                 VotingExecutionPackage.Status.valueOf(row.getStatus()), row.getVoteStartAt(), row.getVoteEndAt(),
                 row.getPackageHash(), row.getElectorateSnapshotId(), row.getCreatedByUserId(),
                 row.getFrozenByUserId(), row.getFrozenAt(), row.getVersion());

@@ -57,6 +57,10 @@ public interface VotingExecutionMapper {
                                                        @Param("tenantId") Long tenantId,
                                                        @Param("opid") Long opid);
 
+    Long lockElectorateItem(@Param("packageId") Long packageId,
+                            @Param("tenantId") Long tenantId,
+                            @Param("electorateItemId") Long electorateItemId);
+
     int updatePackage(VotingExecutionPackageRow row);
 
     int insertDelivery(VotingDeliveryRecordRow row);
@@ -74,6 +78,10 @@ public interface VotingExecutionMapper {
     VotingBallotRecordRow selectActiveBallot(@Param("subjectId") Long subjectId,
                                               @Param("electorateItemId") Long electorateItemId,
                                               @Param("tenantId") Long tenantId);
+
+    int invalidateBallot(@Param("ballotId") Long ballotId,
+                         @Param("invalidReason") String invalidReason,
+                         @Param("invalidatedAt") Instant invalidatedAt);
 
     List<VotingBallotRecordRow> selectActiveBallots(@Param("subjectId") Long subjectId,
                                                      @Param("tenantId") Long tenantId);

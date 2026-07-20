@@ -43,6 +43,9 @@ public interface VotingExecutionRepository {
 
     Optional<VotingElectorateSnapshot.Item> findElectorateItem(Long packageId, Long tenantId, Long opid);
 
+    /** 串行化同一表决包、同一专有部分的跨渠道收票，避免数据库到达顺序替代冻结规则。 */
+    void lockElectorateItem(Long packageId, Long tenantId, Long electorateItemId);
+
     /** 使用聚合当前状态按 version 乐观更新，并由数据库将 version 加一。 */
     int updatePackage(VotingExecutionPackage ballotPackage);
 
@@ -60,6 +63,8 @@ public interface VotingExecutionRepository {
     VotingBallotRecord insertBallot(VotingBallotRecord ballot);
 
     Optional<VotingBallotRecord> findActiveBallot(Long subjectId, Long electorateItemId, Long tenantId);
+
+    int invalidateBallot(Long ballotId, String invalidReason, Instant invalidatedAt);
 
     /** 一次读取事项全部有效票据，避免按名册逐户查询。 */
     List<VotingBallotRecord> listActiveBallots(Long subjectId, Long tenantId);

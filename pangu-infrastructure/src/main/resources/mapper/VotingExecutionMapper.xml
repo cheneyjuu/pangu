@@ -18,6 +18,7 @@
         <result property="scope" column="scope"/>
         <result property="scopeReferenceId" column="scope_reference_id"/>
         <result property="collectionMode" column="collection_mode"/>
+        <result property="duplicateBallotPolicy" column="duplicate_ballot_policy"/>
         <result property="status" column="status"/>
         <result property="voteStartAt" column="vote_start_at"/>
         <result property="voteEndAt" column="vote_end_at"/>
@@ -70,13 +71,13 @@
             tenant_id, business_type, business_reference_id,
             proposal_snapshot_type, proposal_snapshot_id, proposal_snapshot_hash,
             rule_snapshot_type, rule_snapshot_id, rule_snapshot_hash,
-            scope, scope_reference_id, collection_mode, status,
+            scope, scope_reference_id, collection_mode, duplicate_ballot_policy, status,
             vote_start_at, vote_end_at, created_by_user_id, version
         ) VALUES (
             #{tenantId}, #{businessType}, #{businessReferenceId},
             #{proposalSnapshotType}, #{proposalSnapshotId}, #{proposalSnapshotHash},
             #{ruleSnapshotType}, #{ruleSnapshotId}, #{ruleSnapshotHash},
-            #{scope}, #{scopeReferenceId}, #{collectionMode}, #{status},
+            #{scope}, #{scopeReferenceId}, #{collectionMode}, #{duplicateBallotPolicy}, #{status},
             #{voteStartAt}, #{voteEndAt}, #{createdByUserId}, #{version}
         )
     </insert>
@@ -85,7 +86,7 @@
         package_id, tenant_id, business_type, business_reference_id,
         proposal_snapshot_type, proposal_snapshot_id, proposal_snapshot_hash,
         rule_snapshot_type, rule_snapshot_id, rule_snapshot_hash,
-        scope, scope_reference_id, collection_mode, status,
+        scope, scope_reference_id, collection_mode, duplicate_ballot_policy, status,
         vote_start_at, vote_end_at, package_hash, electorate_snapshot_id,
         created_by_user_id, frozen_by_user_id, frozen_at, version
     </sql>
@@ -107,7 +108,7 @@
         SELECT p.package_id, p.tenant_id, p.business_type, p.business_reference_id,
                p.proposal_snapshot_type, p.proposal_snapshot_id, p.proposal_snapshot_hash,
                p.rule_snapshot_type, p.rule_snapshot_id, p.rule_snapshot_hash,
-               p.scope, p.scope_reference_id, p.collection_mode, p.status,
+               p.scope, p.scope_reference_id, p.collection_mode, p.duplicate_ballot_policy, p.status,
                p.vote_start_at, p.vote_end_at, p.package_hash, p.electorate_snapshot_id,
                p.created_by_user_id, p.frozen_by_user_id, p.frozen_at, p.version
         FROM t_voting_package_subject ps
@@ -223,6 +224,17 @@
           AND i.representative_opid = #{opid}
     </select>
 
+    <select id="lockElectorateItem" resultType="long">
+        SELECT i.snapshot_item_id
+        FROM t_voting_execution_package p
+        INNER JOIN t_voting_electorate_item_snapshot i
+                ON i.snapshot_id = p.electorate_snapshot_id
+        WHERE p.package_id = #{packageId}
+          AND p.tenant_id = #{tenantId}
+          AND i.snapshot_item_id = #{electorateItemId}
+        FOR UPDATE
+    </select>
+
     <update id="updatePackage">
         UPDATE t_voting_execution_package
         SET status = #{status},
@@ -282,11 +294,13 @@
         INSERT INTO t_voting_ballot_record (
             package_id, subject_id, vote_id, electorate_item_id, tenant_id,
             vote_channel, package_hash, ballot_file_hash, signature_hash,
-            recorded_by_user_id, cast_at
+            recorded_by_user_id, cast_at, supersedes_ballot_id,
+            resolution_policy, resolution_reason
         ) VALUES (
             #{packageId}, #{subjectId}, #{voteId}, #{electorateItemId}, #{tenantId},
             #{voteChannel}, #{packageHash}, #{ballotFileHash}, #{signatureHash},
-            #{recordedByUserId}, #{castAt}
+            #{recordedByUserId}, #{castAt}, #{supersedesBallotId},
+            #{resolutionPolicy}, #{resolutionReason}
         )
     </insert>
 
@@ -304,7 +318,10 @@
                ballot.ballot_file_hash AS ballotFileHash,
                ballot.signature_hash AS signatureHash,
                ballot.recorded_by_user_id AS recordedByUserId,
-               ballot.cast_at AS castAt
+               ballot.cast_at AS castAt,
+               ballot.supersedes_ballot_id AS supersedesBallotId,
+               ballot.resolution_policy AS resolutionPolicy,
+               ballot.resolution_reason AS resolutionReason
         FROM t_voting_ballot_record ballot
         JOIN t_voting_electorate_item_snapshot electorate
           ON electorate.snapshot_item_id = ballot.electorate_item_id
@@ -313,6 +330,15 @@
           AND ballot.tenant_id = #{tenantId}
           AND ballot.valid_flag = 1
     </select>
+
+    <update id="invalidateBallot">
+        UPDATE t_voting_ballot_record
+        SET valid_flag = 0,
+            invalid_reason = #{invalidReason},
+            invalidated_at = #{invalidatedAt}
+        WHERE ballot_id = #{ballotId}
+          AND valid_flag = 1
+    </update>
 
     <select id="selectActiveBallots" resultType="com.pangu.infrastructure.persistence.entity.VotingBallotRecordRow">
         SELECT ballot.ballot_id AS ballotId,
@@ -328,7 +354,10 @@
                ballot.ballot_file_hash AS ballotFileHash,
                ballot.signature_hash AS signatureHash,
                ballot.recorded_by_user_id AS recordedByUserId,
-               ballot.cast_at AS castAt
+               ballot.cast_at AS castAt,
+               ballot.supersedes_ballot_id AS supersedesBallotId,
+               ballot.resolution_policy AS resolutionPolicy,
+               ballot.resolution_reason AS resolutionReason
         FROM t_voting_ballot_record ballot
         JOIN t_voting_electorate_item_snapshot electorate
           ON electorate.snapshot_item_id = ballot.electorate_item_id

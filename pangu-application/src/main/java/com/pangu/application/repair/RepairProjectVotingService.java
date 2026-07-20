@@ -137,6 +137,7 @@ public class RepairProjectVotingService {
                         "REPAIR_AUTHORIZATION_PROPOSAL", plan.planId(), votingSourceHash,
                         "OWNERS_ASSEMBLY_RULE_VERSION", rule.ruleId(), rule.configurationSha256(),
                         VotingScope.REPAIR_ALLOCATION, plan.planId(), command.collectionMode(),
+                        rulePolicy.duplicateBallotPolicy(rule.configuration(), command.collectionMode()),
                         command.voteStartAt(), command.voteEndAt(), actor.userId()));
         votingExecutionService.attachSubject(
                 executionPackage.getPackageId(), project.tenantId(), insertedSubject.getSubjectId(), actor.userId());

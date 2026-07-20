@@ -21,4 +21,7 @@ public class VotingBallotRecordRow {
     private String signatureHash;
     private Long recordedByUserId;
     private Instant castAt;
+    private Long supersedesBallotId;
+    private String resolutionPolicy;
+    private String resolutionReason;
 }
