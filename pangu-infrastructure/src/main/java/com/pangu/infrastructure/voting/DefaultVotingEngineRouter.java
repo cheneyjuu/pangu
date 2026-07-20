@@ -1,7 +1,9 @@
+// 关联业务：按事项类型路由表决结算，并保留实际票与规则认定票的来源。
 package com.pangu.infrastructure.voting;
 
 import com.pangu.domain.model.voting.AbstractVotingEngine;
 import com.pangu.domain.model.voting.Denominator;
+import com.pangu.domain.model.voting.CountedVote;
 import com.pangu.domain.model.voting.ElectionSubject;
 import com.pangu.domain.model.voting.ElectionVotingEngine;
 import com.pangu.domain.model.voting.GeneralDecisionEngine;
@@ -80,6 +82,25 @@ public class DefaultVotingEngineRouter implements VotingEngineRouter {
             case MAJOR -> ((AbstractVotingEngine<VotingSubject, VotingResult<VotingSubject>>)
                     (AbstractVotingEngine<?, ?>) majorDecisionEngine).settle(
                             subject, validVotes, denom, settlementPolicy.decisionRule());
+            case ELECTION -> throw new UnsupportedSubjectTypeException(
+                    "业主大会议事规则快照不能用于业委会选举事项");
+        };
+    }
+
+    @Override
+    public VotingResult<? extends VotingSubject> settleCounted(VotingSubject subject,
+                                                                List<CountedVote> countedVotes,
+                                                                Denominator denom,
+                                                                VotingSettlementPolicy settlementPolicy) {
+        if (settlementPolicy == null) {
+            throw new IllegalArgumentException("正式分源计票必须提供冻结规则");
+        }
+        settlementPolicy.requireExecutable();
+        return switch (subject.getSubjectType()) {
+            case GENERAL -> generalDecisionEngine.settleCounted(
+                    subject, countedVotes, denom, settlementPolicy.decisionRule());
+            case MAJOR -> majorDecisionEngine.settleCounted(
+                    subject, countedVotes, denom, settlementPolicy.decisionRule());
             case ELECTION -> throw new UnsupportedSubjectTypeException(
                     "业主大会议事规则快照不能用于业委会选举事项");
         };

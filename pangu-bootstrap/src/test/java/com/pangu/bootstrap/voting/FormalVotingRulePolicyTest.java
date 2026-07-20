@@ -55,18 +55,14 @@ class FormalVotingRulePolicyTest {
     }
 
     @Test
-    void unsupportedNonResponsePolicyNamesTheRecordedRuleInsteadOfShowingTechnicalLanguage() {
+    void allRecordedNonResponsePoliciesCanPrepareFormalVoting() {
         OwnersAssemblyRule rule = activeRule(
                 Set.of(OwnersAssemblyRuleConfiguration.MeetingForm.INTERNET),
                 OwnersAssemblyRuleConfiguration.VotingChannelPolicy.ONLINE_ONLY,
                 OwnersAssemblyRuleConfiguration.DuplicateVotePolicy.NOT_APPLICABLE,
                 OwnersAssemblyRuleConfiguration.NonResponsePolicy.FOLLOW_MAJORITY);
 
-        var exception = assertThrows(FormalVotingRulePolicy.UnsupportedRuleException.class,
-                () -> policy.preparationOptions(rule, Instant.now()));
-
-        assertTrue(exception.getMessage().contains("未反馈按多数意见认定"));
-        assertTrue(exception.getMessage().contains("请业委会根据议事规则原件核对"));
+        assertDoesNotThrow(() -> policy.preparationOptions(rule, Instant.now()));
     }
 
     private OwnersAssemblyRule activeRule(

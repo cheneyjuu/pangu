@@ -40,6 +40,7 @@ import com.pangu.domain.model.voting.VotingExecutionPackage;
 import com.pangu.domain.model.voting.VotingScope;
 import com.pangu.domain.model.voting.VotingDecisionRule;
 import com.pangu.domain.model.voting.VotingSettlementPolicy;
+import com.pangu.domain.model.voting.VotingNonResponsePolicy;
 import com.pangu.domain.model.voting.VotingSubject;
 import com.pangu.domain.model.voting.VotingSubjectActions;
 import com.pangu.domain.repository.CommitteePositionRepository;
@@ -66,6 +67,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import static com.pangu.application.assembly.OwnersAssemblyApplicationException.Reason.CONCURRENT_MODIFICATION;
 import static com.pangu.application.assembly.OwnersAssemblyApplicationException.Reason.DELIVERY_REQUIRED;
@@ -707,7 +709,7 @@ public class OwnersAssemblyApplicationService {
                         view.participatingArea(), view.participatingOwnerCount(),
                         view.supportArea(), view.supportOwnerCount(),
                         view.againstArea(), view.againstOwnerCount(),
-                        view.abstainArea(), view.abstainOwnerCount()))
+                        view.abstainArea(), view.abstainOwnerCount(), view.nonResponse()))
                 .orElse(null);
         return new OwnersAssemblyWorkspace.FormalSubject(
                 subject.getSubjectId(), subject.getSubjectType(), subject.getTitle(), subject.getContent(),
@@ -827,10 +829,9 @@ public class OwnersAssemblyApplicationService {
             throw new OwnersAssemblyApplicationException(INVALID_STATUS, "冻结议事规则未明确有效的结果公示期限");
         }
         validateSupportedChannelRule(configuration);
-        if (configuration.nonResponsePolicy()
-                != OwnersAssemblyRuleConfiguration.NonResponsePolicy.NOT_PARTICIPATED) {
+        if (configuration.nonResponsePolicy() == null) {
             throw new OwnersAssemblyApplicationException(
-                    INVALID_STATUS, "当前系统仅支持未表态不计入参与；其他未表态规则尚无可审计计票模型");
+                    INVALID_STATUS, "冻结议事规则未明确未反馈表决票的认定方式");
         }
         if (configuration.proxyVotingPolicy()
                 != OwnersAssemblyRuleConfiguration.ProxyVotingPolicy.NOT_ALLOWED) {
@@ -1002,7 +1003,12 @@ public class OwnersAssemblyApplicationService {
         return new VotingSettlementPolicy(
                 decisionRule,
                 ruleSnapshot.ruleSnapshotId(),
-                ruleSnapshot.configurationSha256());
+                ruleSnapshot.configurationSha256(),
+                VotingNonResponsePolicy.valueOf(
+                        ruleSnapshot.configuration().nonResponsePolicy().name()),
+                ruleSnapshot.configuration().validDeliveryMethods().stream()
+                        .map(Enum::name)
+                        .collect(Collectors.toUnmodifiableSet()));
     }
 
     private void requirePreparing(OwnersAssemblySession session) {

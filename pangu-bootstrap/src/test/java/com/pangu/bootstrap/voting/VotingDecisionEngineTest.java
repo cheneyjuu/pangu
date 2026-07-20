@@ -114,4 +114,34 @@ public class VotingDecisionEngineTest {
         assertTrue(resultFail.isQuorumSatisfied());
         assertFalse(resultFail.isPassed(), "5票赞成/8票参与，未达到3/4比例，应当判定通过失败");
     }
+
+    @Test
+    void countedVotesExposeActualAndDeemedTalliesWithoutChangingCombinedResult() {
+        VotingSubject subject = VotingSubject.builder()
+                .subjectId(5001L)
+                .tenantId(9001L)
+                .title("未反馈票分源结算")
+                .build();
+        List<CountedVote> votes = List.of(
+                CountedVote.actual(new VoteItem(
+                        1L, 11L, 5001L, new BigDecimal("60"), VoteChoice.SUPPORT)),
+                CountedVote.actual(new VoteItem(
+                        2L, 12L, 5001L, new BigDecimal("40"), VoteChoice.AGAINST)),
+                CountedVote.deemed(
+                        3L, 13L, new BigDecimal("50"), VoteChoice.SUPPORT, "a".repeat(64)));
+
+        VotingResult<VotingSubject> result = generalDecisionEngine.settleCounted(
+                subject, votes, denom(new BigDecimal("150"), 3L),
+                new VotingDecisionRule(
+                        new VotingThreshold(1, 2, VotingThreshold.Comparison.AT_LEAST),
+                        new VotingThreshold(1, 2, VotingThreshold.Comparison.AT_LEAST),
+                        new VotingThreshold(1, 2, VotingThreshold.Comparison.GREATER_THAN),
+                        new VotingThreshold(1, 2, VotingThreshold.Comparison.GREATER_THAN)));
+
+        assertEquals(2L, result.getSupportOwnerCount());
+        assertEquals(1L, result.getActualTally().supportOwnerCount());
+        assertEquals(1L, result.getDeemedTally().supportOwnerCount());
+        assertEquals(new BigDecimal("100"), result.getActualTally().participatingArea());
+        assertEquals(new BigDecimal("50"), result.getDeemedTally().participatingArea());
+    }
 }

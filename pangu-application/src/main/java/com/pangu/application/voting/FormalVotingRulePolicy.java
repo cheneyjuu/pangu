@@ -7,6 +7,7 @@ import com.pangu.domain.model.voting.SubjectType;
 import com.pangu.domain.model.voting.VotingDecisionRule;
 import com.pangu.domain.model.voting.VotingExecutionPackage;
 import com.pangu.domain.model.voting.VotingSettlementPolicy;
+import com.pangu.domain.model.voting.VotingNonResponsePolicy;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
@@ -15,6 +16,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.Collections;
 import java.util.EnumSet;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * 正式表决规则闸门。
@@ -110,19 +112,22 @@ public class FormalVotingRulePolicy {
         } catch (IllegalStateException ex) {
             throw new UnsupportedRuleException("当前表决依据的 " + decisionType + " 事项计票口径不完整", ex);
         }
-        return new VotingSettlementPolicy(decisionRule, rule.ruleId(), rule.configurationSha256());
+        return new VotingSettlementPolicy(
+                decisionRule,
+                rule.ruleId(),
+                rule.configurationSha256(),
+                VotingNonResponsePolicy.valueOf(rule.configuration().nonResponsePolicy().name()),
+                rule.configuration().validDeliveryMethods().stream()
+                        .map(Enum::name)
+                        .collect(Collectors.toUnmodifiableSet()));
     }
 
     private void requireSupportedSharedRules(OwnersAssemblyRuleConfiguration configuration) {
         if (configuration.validDeliveryMethods().isEmpty()) {
             throw new UnsupportedRuleException("当前表决依据未明确有效送达方式");
         }
-        if (configuration.nonResponsePolicy()
-                != OwnersAssemblyRuleConfiguration.NonResponsePolicy.NOT_PARTICIPATED) {
-            throw new UnsupportedRuleException("本小区当前表决依据约定“"
-                    + nonResponsePolicyLabel(configuration.nonResponsePolicy())
-                    + "”，该认定方式暂不能在系统内办理。请业委会根据议事规则原件核对已登记内容；"
-                    + "确认无误后需等待该方式开通，不能为继续办理改写规则");
+        if (configuration.nonResponsePolicy() == null) {
+            throw new UnsupportedRuleException("当前表决依据未明确未反馈表决票的认定方式");
         }
         if (configuration.proxyVotingPolicy()
                 != OwnersAssemblyRuleConfiguration.ProxyVotingPolicy.NOT_ALLOWED) {
@@ -135,14 +140,6 @@ public class FormalVotingRulePolicy {
             }
             settlementPolicyFromConfiguration(configuration, decisionType);
         }
-    }
-
-    private String nonResponsePolicyLabel(OwnersAssemblyRuleConfiguration.NonResponsePolicy policy) {
-        return switch (policy) {
-            case NOT_PARTICIPATED -> "未反馈不计入参与";
-            case FOLLOW_MAJORITY -> "未反馈按多数意见认定";
-            case ABSTAIN -> "未反馈认定为弃权";
-        };
     }
 
     private void requireMode(OwnersAssemblyRuleConfiguration configuration,

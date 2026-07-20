@@ -258,6 +258,26 @@
         )
     </select>
 
+    <select id="selectDeliveries" resultType="com.pangu.infrastructure.persistence.entity.VotingDeliveryRecordRow">
+        SELECT delivery.delivery_id AS deliveryId,
+               delivery.package_id AS packageId,
+               delivery.electorate_item_id AS electorateItemId,
+               delivery.tenant_id AS tenantId,
+               delivery.delivery_channel AS deliveryChannel,
+               delivery.delivery_method AS deliveryMethod,
+               delivery.evidence_hash AS evidenceHash,
+               delivery.delivered_by_user_id AS deliveredByUserId,
+               delivery.delivered_at AS deliveredAt,
+               electorate.representative_opid AS representativeOpid,
+               electorate.representative_uid AS representativeUid
+        FROM t_voting_delivery_record delivery
+        JOIN t_voting_electorate_item_snapshot electorate
+          ON electorate.snapshot_item_id = delivery.electorate_item_id
+        WHERE delivery.package_id = #{packageId}
+          AND delivery.tenant_id = #{tenantId}
+        ORDER BY delivery.delivery_id
+    </select>
+
     <insert id="insertBallot" useGeneratedKeys="true" keyProperty="ballotId" keyColumn="ballot_id">
         INSERT INTO t_voting_ballot_record (
             package_id, subject_id, vote_id, electorate_item_id, tenant_id,
@@ -292,6 +312,68 @@
           AND ballot.electorate_item_id = #{electorateItemId}
           AND ballot.tenant_id = #{tenantId}
           AND ballot.valid_flag = 1
+    </select>
+
+    <select id="selectActiveBallots" resultType="com.pangu.infrastructure.persistence.entity.VotingBallotRecordRow">
+        SELECT ballot.ballot_id AS ballotId,
+               ballot.package_id AS packageId,
+               ballot.subject_id AS subjectId,
+               ballot.vote_id AS voteId,
+               ballot.electorate_item_id AS electorateItemId,
+               ballot.tenant_id AS tenantId,
+               electorate.representative_opid AS representativeOpid,
+               electorate.representative_uid AS representativeUid,
+               ballot.vote_channel AS voteChannel,
+               ballot.package_hash AS packageHash,
+               ballot.ballot_file_hash AS ballotFileHash,
+               ballot.signature_hash AS signatureHash,
+               ballot.recorded_by_user_id AS recordedByUserId,
+               ballot.cast_at AS castAt
+        FROM t_voting_ballot_record ballot
+        JOIN t_voting_electorate_item_snapshot electorate
+          ON electorate.snapshot_item_id = ballot.electorate_item_id
+        WHERE ballot.subject_id = #{subjectId}
+          AND ballot.tenant_id = #{tenantId}
+          AND ballot.valid_flag = 1
+        ORDER BY ballot.ballot_id
+    </select>
+
+    <insert id="insertNonResponseDerivations">
+        INSERT INTO t_voting_non_response_derivation (
+            package_id, subject_id, electorate_item_id, tenant_id,
+            representative_opid, representative_uid, certified_area,
+            non_response_policy, derived_choice, delivery_evidence_hash,
+            rule_snapshot_hash, reason_code, row_hash, derived_at
+        ) VALUES
+        <foreach collection="rows" item="row" separator=",">
+            (#{row.packageId}, #{row.subjectId}, #{row.electorateItemId}, #{row.tenantId},
+             #{row.representativeOpid}, #{row.representativeUid}, #{row.certifiedArea},
+             #{row.nonResponsePolicy}, #{row.derivedChoice}, #{row.deliveryEvidenceHash},
+             #{row.ruleSnapshotHash}, #{row.reasonCode}, #{row.rowHash}, #{row.derivedAt})
+        </foreach>
+    </insert>
+
+    <select id="selectNonResponseDerivations"
+            resultType="com.pangu.infrastructure.persistence.entity.VotingNonResponseDerivationRow">
+        SELECT derivation_id AS derivationId,
+               package_id AS packageId,
+               subject_id AS subjectId,
+               electorate_item_id AS electorateItemId,
+               tenant_id AS tenantId,
+               representative_opid AS representativeOpid,
+               representative_uid AS representativeUid,
+               certified_area AS certifiedArea,
+               non_response_policy AS nonResponsePolicy,
+               derived_choice AS derivedChoice,
+               delivery_evidence_hash AS deliveryEvidenceHash,
+               rule_snapshot_hash AS ruleSnapshotHash,
+               reason_code AS reasonCode,
+               row_hash AS rowHash,
+               derived_at AS derivedAt
+        FROM t_voting_non_response_derivation
+        WHERE subject_id = #{subjectId}
+          AND tenant_id = #{tenantId}
+        ORDER BY electorate_item_id
     </select>
 
     <select id="countAudits" resultType="long">

@@ -16,4 +16,6 @@ public class VotingDeliveryRecordRow {
     private String evidenceHash;
     private Long deliveredByUserId;
     private Instant deliveredAt;
+    private Long representativeOpid;
+    private Long representativeUid;
 }

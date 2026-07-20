@@ -31,6 +31,12 @@ public interface VotingEngineRouter {
                                                   Denominator denom,
                                                   VotingSettlementPolicy settlementPolicy);
 
+    /** 以分源票项执行正式表决结算，认定票不得退化为持久化的实际票。 */
+    VotingResult<? extends VotingSubject> settleCounted(VotingSubject subject,
+                                                         List<CountedVote> countedVotes,
+                                                         Denominator denom,
+                                                         VotingSettlementPolicy settlementPolicy);
+
     /**
      * 议题类型未注册引擎时抛出（如 ELECTION 引擎需 ElectionSubject 加载链路尚未接入）。
      */

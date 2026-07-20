@@ -81,7 +81,7 @@ public class OnlineVotingService {
                     new VotingExecutionService.RecordDeliveryCommand(
                             ballotPackage.getPackageId(), ballotPackage.getTenantId(),
                             electorate.representativeOpid(), VoteChannel.ONLINE,
-                            "OWNER_ONLINE_ACKNOWLEDGEMENT", acknowledgementHash, null, acknowledgedAt));
+                            "ELECTRONIC", acknowledgementHash, null, acknowledgedAt));
             return onlineVotingRepository.insertAcknowledgement(new OnlineVotingAcknowledgement(
                     null, ballotPackage.getPackageId(), electorate.snapshotItemId(), ballotPackage.getTenantId(),
                     owner.accountId(), owner.uid(), electorate.representativeOpid(), ballotPackage.getPackageHash(),

@@ -33,7 +33,8 @@ public class VotingDecisionResultProjector {
                 snapshot.participatingArea(), snapshot.participatingOwnerCount(),
                 decimal(payload, "supportArea"), integer(payload, "supportOwnerCount"),
                 decimal(payload, "againstArea"), integer(payload, "againstOwnerCount"),
-                decimal(payload, "abstainArea"), integer(payload, "abstainOwnerCount"));
+                decimal(payload, "abstainArea"), integer(payload, "abstainOwnerCount"),
+                nonResponseSummary(payload));
     }
 
     private JsonNode parsePayload(String payload) {
@@ -68,6 +69,46 @@ public class VotingDecisionResultProjector {
         return value.longValue();
     }
 
+    private NonResponseSummary nonResponseSummary(JsonNode payload) {
+        String policy = text(payload, "nonResponsePolicy");
+        if (policy == null) {
+            return null;
+        }
+        return new NonResponseSummary(
+                policy,
+                valueOrZero(integer(payload, "nonResponseEligibleOwnerCount")),
+                zeroIfMissing(decimal(payload, "nonResponseEligibleArea")),
+                text(payload, "majorityChoice"),
+                text(payload, "nonResponseDerivationHash"),
+                sourceTally(payload, "actual"),
+                sourceTally(payload, "deemed"));
+    }
+
+    private SourceTally sourceTally(JsonNode payload, String prefix) {
+        return new SourceTally(
+                zeroIfMissing(decimal(payload, prefix + "ParticipatingArea")),
+                valueOrZero(integer(payload, prefix + "ParticipatingOwnerCount")),
+                zeroIfMissing(decimal(payload, prefix + "SupportArea")),
+                valueOrZero(integer(payload, prefix + "SupportOwnerCount")),
+                zeroIfMissing(decimal(payload, prefix + "AgainstArea")),
+                valueOrZero(integer(payload, prefix + "AgainstOwnerCount")),
+                zeroIfMissing(decimal(payload, prefix + "AbstainArea")),
+                valueOrZero(integer(payload, prefix + "AbstainOwnerCount")));
+    }
+
+    private String text(JsonNode payload, String field) {
+        JsonNode value = payload.get(field);
+        return value == null || value.isNull() || !value.isValueNode() ? null : value.asText();
+    }
+
+    private long valueOrZero(Long value) {
+        return value == null ? 0L : value;
+    }
+
+    private BigDecimal zeroIfMissing(BigDecimal value) {
+        return value == null ? BigDecimal.ZERO : value;
+    }
+
     public record View(
             boolean quorumSatisfied,
             boolean passed,
@@ -80,7 +121,32 @@ public class VotingDecisionResultProjector {
             BigDecimal againstArea,
             Long againstOwnerCount,
             BigDecimal abstainArea,
-            Long abstainOwnerCount
+            Long abstainOwnerCount,
+            NonResponseSummary nonResponse
+    ) {
+    }
+
+    /** 公开的分源汇总；不含房屋、业主身份或逐户认定选项。 */
+    public record NonResponseSummary(
+            String policy,
+            long eligibleOwnerCount,
+            BigDecimal eligibleArea,
+            String majorityChoice,
+            String derivationAggregateHash,
+            SourceTally actual,
+            SourceTally deemed
+    ) {
+    }
+
+    public record SourceTally(
+            BigDecimal participatingArea,
+            long participatingOwnerCount,
+            BigDecimal supportArea,
+            long supportOwnerCount,
+            BigDecimal againstArea,
+            long againstOwnerCount,
+            BigDecimal abstainArea,
+            long abstainOwnerCount
     ) {
     }
 }

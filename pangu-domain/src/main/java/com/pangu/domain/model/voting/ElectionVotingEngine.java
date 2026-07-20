@@ -28,7 +28,7 @@ public class ElectionVotingEngine extends AbstractVotingEngine<ElectionSubject, 
     }
 
     @Override
-    protected ElectionVotingResult calculateResult(ElectionSubject subject, List<VoteItem> validVotes,
+    protected ElectionVotingResult calculateResult(ElectionSubject subject, List<CountedVote> validVotes,
                                                     BigDecimal totalArea, long totalOwnerCount,
                                                     BigDecimal participatingArea, long participatingOwnerCount,
                                                     boolean quorumSatisfied,
@@ -38,13 +38,13 @@ public class ElectionVotingEngine extends AbstractVotingEngine<ElectionSubject, 
 
         if (quorumSatisfied && participatingOwnerCount > 0 && participatingArea.compareTo(BigDecimal.ZERO) > 0) {
             for (Candidate candidate : subject.getCandidates()) {
-                List<VoteItem> supportVotes = validVotes.stream()
-                        .filter(vote -> candidate.getCandidateId().equals(vote.getTargetId())
-                                && vote.getChoice() == VoteChoice.SUPPORT)
+                List<CountedVote> supportVotes = validVotes.stream()
+                        .filter(vote -> candidate.getCandidateId().equals(vote.targetId())
+                                && vote.choice() == VoteChoice.SUPPORT)
                         .toList();
 
                 BigDecimal supportArea = supportVotes.stream()
-                        .map(VoteItem::getPropertyArea)
+                        .map(CountedVote::propertyArea)
                         .reduce(BigDecimal.ZERO, BigDecimal::add);
 
                 long supportOwnerCount = supportVotes.size();

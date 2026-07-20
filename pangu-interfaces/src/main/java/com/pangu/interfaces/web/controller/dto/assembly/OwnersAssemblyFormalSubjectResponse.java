@@ -2,6 +2,7 @@
 package com.pangu.interfaces.web.controller.dto.assembly;
 
 import com.pangu.application.assembly.OwnersAssemblyWorkspace;
+import com.pangu.application.voting.VotingDecisionResultProjector;
 
 import java.math.BigDecimal;
 
@@ -31,7 +32,8 @@ public record OwnersAssemblyFormalSubjectResponse(
             BigDecimal againstArea,
             Long againstOwnerCount,
             BigDecimal abstainArea,
-            Long abstainOwnerCount
+            Long abstainOwnerCount,
+            VotingDecisionResultProjector.NonResponseSummary nonResponse
     ) {
         private static Result from(OwnersAssemblyWorkspace.Result result) {
             return result == null ? null : new Result(
@@ -39,7 +41,7 @@ public record OwnersAssemblyFormalSubjectResponse(
                     result.participatingArea(), result.participatingOwnerCount(),
                     result.supportArea(), result.supportOwnerCount(),
                     result.againstArea(), result.againstOwnerCount(),
-                    result.abstainArea(), result.abstainOwnerCount());
+                    result.abstainArea(), result.abstainOwnerCount(), result.nonResponse());
         }
     }
 }

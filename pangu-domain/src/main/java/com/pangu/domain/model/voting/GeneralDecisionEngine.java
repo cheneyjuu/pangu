@@ -21,7 +21,7 @@ public class GeneralDecisionEngine extends AbstractVotingEngine<VotingSubject, V
     }
 
     @Override
-    protected VotingResult<VotingSubject> calculateResult(VotingSubject subject, List<VoteItem> validVotes, 
+    protected VotingResult<VotingSubject> calculateResult(VotingSubject subject, List<CountedVote> validVotes,
                                                           BigDecimal totalArea, long totalOwnerCount, 
                                                           BigDecimal participatingArea, long participatingOwnerCount, 
                                                           boolean quorumSatisfied,

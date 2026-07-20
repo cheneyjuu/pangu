@@ -45,11 +45,22 @@ public abstract class AbstractVotingEngine<S extends VotingSubject, R extends Vo
                           List<VoteItem> validVotes,
                           Denominator denom,
                           VotingDecisionRule decisionRule) {
+        if (validVotes == null) {
+            throw new IllegalArgumentException("validVotes must not be null");
+        }
+        return settleCounted(subject, validVotes.stream().map(CountedVote::actual).toList(), denom, decisionRule);
+    }
+
+    /** 以明确区分实际票和未反馈认定票的计票输入结算。 */
+    public final R settleCounted(S subject,
+                                 List<CountedVote> countedVotes,
+                                 Denominator denom,
+                                 VotingDecisionRule decisionRule) {
         if (subject == null) {
             throw new IllegalArgumentException("subject must not be null");
         }
-        if (validVotes == null) {
-            throw new IllegalArgumentException("validVotes must not be null");
+        if (countedVotes == null) {
+            throw new IllegalArgumentException("countedVotes must not be null");
         }
         if (denom == null) {
             throw new IllegalArgumentException("denominator must not be null");
@@ -66,11 +77,11 @@ public abstract class AbstractVotingEngine<S extends VotingSubject, R extends Vo
         Set<String> uniqueUidAndOpid = new HashSet<>();
         BigDecimal participatingArea = BigDecimal.ZERO;
 
-        for (VoteItem vote : validVotes) {
-            if (uniqueUidAndOpid.add(vote.getUid() + "-" + vote.getOpid())) {
-                participatingArea = participatingArea.add(vote.getPropertyArea());
+        for (CountedVote vote : countedVotes) {
+            if (uniqueUidAndOpid.add(vote.uid() + "-" + vote.opid())) {
+                participatingArea = participatingArea.add(vote.propertyArea());
             }
-            uniqueUids.add(vote.getUid());
+            uniqueUids.add(vote.uid());
         }
 
         long participatingOwnerCount = uniqueUids.size();
@@ -80,8 +91,11 @@ public abstract class AbstractVotingEngine<S extends VotingSubject, R extends Vo
                 participatingArea, totalArea, participatingOwnerCount, totalOwnerCount, decisionRule);
 
         // 3. 委派子类策略
-        return calculateResult(subject, validVotes, totalArea, totalOwnerCount,
+        R result = calculateResult(subject, countedVotes, totalArea, totalOwnerCount,
                 participatingArea, participatingOwnerCount, quorumSatisfied, decisionRule);
+        result.setActualTally(tallyOrigin(countedVotes, CountedVote.Origin.ACTUAL_BALLOT));
+        result.setDeemedTally(tallyOrigin(countedVotes, CountedVote.Origin.DEEMED_NON_RESPONSE));
+        return result;
     }
 
     private boolean checkQuorum(BigDecimal participatingArea, BigDecimal totalArea,
@@ -101,7 +115,7 @@ public abstract class AbstractVotingEngine<S extends VotingSubject, R extends Vo
     /**
      * 子类策略：双过半 / 双 3/4 / 差额选举多阶排序。
      */
-    protected abstract R calculateResult(S subject, List<VoteItem> validVotes,
+    protected abstract R calculateResult(S subject, List<CountedVote> countedVotes,
                                          BigDecimal totalArea, long totalOwnerCount,
                                          BigDecimal participatingArea, long participatingOwnerCount,
                                          boolean quorumSatisfied,
@@ -113,22 +127,43 @@ public abstract class AbstractVotingEngine<S extends VotingSubject, R extends Vo
      * <p>同一自然人拥有多个专有部分时，面积分别计入、人数只计一人；同一专有部分的异常重复行
      * 只计一次，避免选项汇总和参与汇总采用不同口径。
      */
-    protected final ChoiceTally tallyChoice(List<VoteItem> votes, VoteChoice choice) {
+    protected final ChoiceTally tallyChoice(List<CountedVote> votes, VoteChoice choice) {
         Set<Long> ownerUids = new HashSet<>();
         Set<String> ownerProperties = new HashSet<>();
         BigDecimal area = BigDecimal.ZERO;
-        for (VoteItem vote : votes) {
-            if (vote.getChoice() != choice) {
+        for (CountedVote vote : votes) {
+            if (vote.choice() != choice) {
                 continue;
             }
-            if (ownerProperties.add(vote.getUid() + "-" + vote.getOpid())) {
-                area = area.add(vote.getPropertyArea());
+            if (ownerProperties.add(vote.uid() + "-" + vote.opid())) {
+                area = area.add(vote.propertyArea());
             }
-            ownerUids.add(vote.getUid());
+            ownerUids.add(vote.uid());
         }
         return new ChoiceTally(area, ownerUids.size());
     }
 
     protected record ChoiceTally(BigDecimal area, long ownerCount) {
+    }
+
+    private VoteTallyBreakdown tallyOrigin(List<CountedVote> votes, CountedVote.Origin origin) {
+        List<CountedVote> sourceVotes = votes.stream().filter(vote -> vote.origin() == origin).toList();
+        Set<Long> ownerUids = new HashSet<>();
+        Set<String> ownerProperties = new HashSet<>();
+        BigDecimal participatingArea = BigDecimal.ZERO;
+        for (CountedVote vote : sourceVotes) {
+            if (ownerProperties.add(vote.uid() + "-" + vote.opid())) {
+                participatingArea = participatingArea.add(vote.propertyArea());
+            }
+            ownerUids.add(vote.uid());
+        }
+        ChoiceTally support = tallyChoice(sourceVotes, VoteChoice.SUPPORT);
+        ChoiceTally against = tallyChoice(sourceVotes, VoteChoice.AGAINST);
+        ChoiceTally abstain = tallyChoice(sourceVotes, VoteChoice.ABSTAIN);
+        return new VoteTallyBreakdown(
+                participatingArea, ownerUids.size(),
+                support.area(), support.ownerCount(),
+                against.area(), against.ownerCount(),
+                abstain.area(), abstain.ownerCount());
     }
 }

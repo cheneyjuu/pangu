@@ -12,10 +12,15 @@ import com.pangu.domain.model.voting.SubjectType;
 import com.pangu.domain.model.voting.VoteChannel;
 import com.pangu.domain.model.voting.VoteChoice;
 import com.pangu.domain.model.voting.VotingExecutionPackage;
+import com.pangu.domain.model.voting.VotingDecisionRule;
+import com.pangu.domain.model.voting.VotingNonResponsePolicy;
+import com.pangu.domain.model.voting.VotingSettlementPolicy;
+import com.pangu.domain.model.voting.VotingThreshold;
 import com.pangu.domain.model.voting.VotingScope;
 import com.pangu.domain.model.voting.VotingSubject;
 import com.pangu.domain.model.voting.VotingSubjectActions;
 import com.pangu.domain.repository.VotingSubjectRepository;
+import com.pangu.domain.repository.VotingExecutionRepository;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -28,6 +33,7 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -53,6 +59,7 @@ class VotingExecutionFlowTest {
     @Autowired private VotingExecutionService votingExecutionService;
     @Autowired private VoteSubmissionService voteSubmissionService;
     @Autowired private VotingSubjectRepository votingSubjectRepository;
+    @Autowired private VotingExecutionRepository votingExecutionRepository;
     @Autowired private JdbcTemplate jdbcTemplate;
 
     private int originalAccountStatus;
@@ -71,6 +78,7 @@ class VotingExecutionFlowTest {
         jdbcTemplate.update(
                 "UPDATE c_owner_property SET account_status = ?, build_area = ? WHERE opid = ?",
                 originalAccountStatus, originalOwnerArea, FIRST_OPID);
+        jdbcTemplate.update("DELETE FROM t_voting_non_response_derivation WHERE subject_id IN (SELECT subject_id FROM t_voting_subject WHERE title LIKE ?)", TITLE_PREFIX + "%");
         jdbcTemplate.update("DELETE FROM t_voting_result WHERE subject_id IN (SELECT subject_id FROM t_voting_subject WHERE title LIKE ?)", TITLE_PREFIX + "%");
         jdbcTemplate.update("DELETE FROM t_voting_ballot_record WHERE package_id IN (SELECT package_id FROM t_voting_execution_package WHERE business_reference_id >= 990000000)");
         jdbcTemplate.update("DELETE FROM t_voting_delivery_record WHERE package_id IN (SELECT package_id FROM t_voting_execution_package WHERE business_reference_id >= 990000000)");
@@ -166,6 +174,161 @@ class VotingExecutionFlowTest {
         assertThat(trace.get("proposal_snapshot_hash")).isEqualTo(SHA_A);
         assertThat(trace.get("rule_snapshot_hash")).isEqualTo(SHA_B);
         assertThat(trace.get("execution_package_hash")).isEqualTo(frozen.getPackageHash());
+    }
+
+    @Test
+    void followMajorityCountsOnlyEffectivelyDeliveredNonRespondersAndPersistsSeparateEvidence() {
+        VotingSubject subject = createSubject();
+        VotingExecutionPackage ballotPackage = createPackage(subject, 990000007L);
+        VotingExecutionPackage frozen = votingExecutionService.freeze(
+                ballotPackage.getPackageId(), TENANT_ID, ACTOR_USER_ID, Instant.now());
+        votingExecutionService.open(ballotPackage.getPackageId(), TENANT_ID, ACTOR_USER_ID, Instant.now());
+        var electorate = votingExecutionService.findElectorateSnapshot(
+                frozen.getPackageId(), TENANT_ID).orElseThrow().items();
+        assertThat(electorate).hasSize(2);
+        for (var item : electorate) {
+            votingExecutionService.recordDelivery(new RecordDeliveryCommand(
+                    frozen.getPackageId(), TENANT_ID, item.representativeOpid(), VoteChannel.PAPER,
+                    "DOOR_TO_DOOR", PayloadHash.forItem(item.snapshotItemId()),
+                    ACTOR_USER_ID, Instant.now()));
+        }
+        var actual = electorate.getFirst();
+        votingExecutionService.cast(new CastBallotCommand(
+                frozen.getPackageId(), subject.getSubjectId(), TENANT_ID,
+                actual.representativeOpid(), actual.representativeUid(), VoteChoice.SUPPORT,
+                VoteChannel.PAPER, SHA_A, null, ACTOR_USER_ID, Instant.now()));
+
+        votingExecutionService.closeAndSettle(
+                frozen.getPackageId(), TENANT_ID, ACTOR_USER_ID,
+                subject.getVoteEndAt().plusSeconds(1),
+                ignored -> settlementPolicy(VotingNonResponsePolicy.FOLLOW_MAJORITY));
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_vote_item WHERE subject_id = ?",
+                Long.class, subject.getSubjectId())).isEqualTo(1L);
+        assertThat(votingExecutionRepository.listNonResponseDerivations(
+                subject.getSubjectId(), TENANT_ID)).singleElement().satisfies(derivation -> {
+                    assertThat(derivation.policy()).isEqualTo(VotingNonResponsePolicy.FOLLOW_MAJORITY);
+                    assertThat(derivation.derivedChoice()).isEqualTo(VoteChoice.SUPPORT);
+                    assertThat(derivation.deliveryEvidenceHash()).matches("[0-9a-f]{64}");
+                    assertThat(derivation.rowHash()).matches("[0-9a-f]{64}");
+                });
+        Map<String, Object> totals = jdbcTemplate.queryForMap("""
+                SELECT participating_owner_count,
+                       result_payload ->> 'actualParticipatingOwnerCount' AS actual_count,
+                       result_payload ->> 'deemedParticipatingOwnerCount' AS deemed_count,
+                       result_payload ->> 'nonResponseEligibleOwnerCount' AS eligible_count,
+                       result_payload ->> 'majorityChoice' AS majority_choice,
+                       result_payload ->> 'nonResponseDerivationHash' AS derivation_hash
+                FROM t_voting_result WHERE subject_id = ?
+                """, subject.getSubjectId());
+        // 测试名册的两个专有部分由同一自然人代表，人数按 uid 去重，面积仍分别计入。
+        assertThat(totals.get("participating_owner_count")).isEqualTo(1L);
+        assertThat(totals.get("actual_count")).isEqualTo("1");
+        assertThat(totals.get("deemed_count")).isEqualTo("1");
+        assertThat(totals.get("eligible_count")).isEqualTo("1");
+        assertThat(totals.get("majority_choice")).isEqualTo("SUPPORT");
+        assertThat(totals.get("derivation_hash")).asString().matches("[0-9a-f]{64}");
+    }
+
+    @Test
+    void abstainCanDeriveDeliveredNonResponseWithoutAnyActualVote() {
+        VotingSubject subject = createSubject();
+        VotingExecutionPackage ballotPackage = createPackage(subject, 990000008L);
+        VotingExecutionPackage frozen = votingExecutionService.freeze(
+                ballotPackage.getPackageId(), TENANT_ID, ACTOR_USER_ID, Instant.now());
+        votingExecutionService.open(ballotPackage.getPackageId(), TENANT_ID, ACTOR_USER_ID, Instant.now());
+        var electorate = votingExecutionService.findElectorateSnapshot(
+                frozen.getPackageId(), TENANT_ID).orElseThrow().items();
+        for (var item : electorate) {
+            votingExecutionService.recordDelivery(new RecordDeliveryCommand(
+                    frozen.getPackageId(), TENANT_ID, item.representativeOpid(), VoteChannel.PAPER,
+                    "DOOR_TO_DOOR", PayloadHash.forItem(item.snapshotItemId()),
+                    ACTOR_USER_ID, Instant.now()));
+        }
+
+        votingExecutionService.closeAndSettle(
+                frozen.getPackageId(), TENANT_ID, ACTOR_USER_ID,
+                subject.getVoteEndAt().plusSeconds(1),
+                ignored -> settlementPolicy(VotingNonResponsePolicy.ABSTAIN));
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_voting_non_response_derivation WHERE subject_id = ? AND derived_choice = 3",
+                Long.class, subject.getSubjectId())).isEqualTo(2L);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT participating_owner_count FROM t_voting_result WHERE subject_id = ?",
+                Long.class, subject.getSubjectId())).isEqualTo(1L);
+    }
+
+    @Test
+    void nonResponseEligibilityIgnoresDeliveryMethodNotRecognizedByFrozenRule() {
+        VotingSubject subject = createSubject();
+        VotingExecutionPackage ballotPackage = createPackage(subject, 990000010L);
+        VotingExecutionPackage frozen = votingExecutionService.freeze(
+                ballotPackage.getPackageId(), TENANT_ID, ACTOR_USER_ID, Instant.now());
+        votingExecutionService.open(ballotPackage.getPackageId(), TENANT_ID, ACTOR_USER_ID, Instant.now());
+        var first = votingExecutionService.findElectorateSnapshot(
+                frozen.getPackageId(), TENANT_ID).orElseThrow().items().getFirst();
+        votingExecutionService.recordDelivery(new RecordDeliveryCommand(
+                frozen.getPackageId(), TENANT_ID, first.representativeOpid(), VoteChannel.PAPER,
+                "PUBLIC_NOTICE_BOARD", SHA_A, ACTOR_USER_ID, Instant.now()));
+
+        votingExecutionService.closeAndSettle(
+                frozen.getPackageId(), TENANT_ID, ACTOR_USER_ID,
+                subject.getVoteEndAt().plusSeconds(1),
+                ignored -> settlementPolicy(VotingNonResponsePolicy.ABSTAIN));
+
+        assertThat(votingExecutionRepository.listNonResponseDerivations(
+                subject.getSubjectId(), TENANT_ID)).isEmpty();
+        Map<String, Object> result = jdbcTemplate.queryForMap("""
+                SELECT result_payload ->> 'nonResponseEligibleOwnerCount' AS eligible_count,
+                       result_payload ->> 'deemedParticipatingOwnerCount' AS deemed_count
+                FROM t_voting_result WHERE subject_id = ?
+                """, subject.getSubjectId());
+        assertThat(result.get("eligible_count")).isEqualTo("0");
+        assertThat(result.get("deemed_count")).isEqualTo("0");
+    }
+
+    @Test
+    void deliveryCannotBeBackfilledAfterVotingDeadline() {
+        VotingSubject subject = createSubject();
+        VotingExecutionPackage ballotPackage = createPackage(subject, 990000011L);
+        VotingExecutionPackage frozen = votingExecutionService.freeze(
+                ballotPackage.getPackageId(), TENANT_ID, ACTOR_USER_ID, Instant.now());
+        votingExecutionService.open(ballotPackage.getPackageId(), TENANT_ID, ACTOR_USER_ID, Instant.now());
+        var first = votingExecutionService.findElectorateSnapshot(
+                frozen.getPackageId(), TENANT_ID).orElseThrow().items().getFirst();
+
+        assertThatThrownBy(() -> votingExecutionService.recordDelivery(new RecordDeliveryCommand(
+                frozen.getPackageId(), TENANT_ID, first.representativeOpid(), VoteChannel.PAPER,
+                "DOOR_TO_DOOR", SHA_A, ACTOR_USER_ID, subject.getVoteEndAt())))
+                .isInstanceOf(VotingExecutionService.VotingExecutionException.class)
+                .hasMessageContaining("截止后不能补记送达");
+    }
+
+    @Test
+    void followMajorityFailureRollsBackClosedStatusAndDerivations() {
+        VotingSubject subject = createSubject();
+        VotingExecutionPackage ballotPackage = createPackage(subject, 990000009L);
+        VotingExecutionPackage frozen = votingExecutionService.freeze(
+                ballotPackage.getPackageId(), TENANT_ID, ACTOR_USER_ID, Instant.now());
+        votingExecutionService.open(ballotPackage.getPackageId(), TENANT_ID, ACTOR_USER_ID, Instant.now());
+        var first = votingExecutionService.findElectorateSnapshot(
+                frozen.getPackageId(), TENANT_ID).orElseThrow().items().getFirst();
+        votingExecutionService.recordDelivery(new RecordDeliveryCommand(
+                frozen.getPackageId(), TENANT_ID, first.representativeOpid(), VoteChannel.PAPER,
+                "DOOR_TO_DOOR", SHA_A, ACTOR_USER_ID, Instant.now()));
+
+        assertThatThrownBy(() -> votingExecutionService.closeAndSettle(
+                frozen.getPackageId(), TENANT_ID, ACTOR_USER_ID,
+                subject.getVoteEndAt().plusSeconds(1),
+                ignored -> settlementPolicy(VotingNonResponsePolicy.FOLLOW_MAJORITY)))
+                .isInstanceOf(VotingExecutionService.VotingExecutionException.class)
+                .hasMessageContaining("没有实际有效票");
+        assertThat(votingExecutionService.findPackageBySubjectId(subject.getSubjectId()).orElseThrow().getStatus())
+                .isEqualTo(VotingExecutionPackage.Status.VOTING);
+        assertThat(votingExecutionRepository.listNonResponseDerivations(
+                subject.getSubjectId(), TENANT_ID)).isEmpty();
     }
 
     @Test
@@ -319,5 +482,24 @@ class VotingExecutionFlowTest {
         votingExecutionService.attachSubject(
                 ballotPackage.getPackageId(), TENANT_ID, subject.getSubjectId(), ACTOR_USER_ID);
         return ballotPackage;
+    }
+
+    private VotingSettlementPolicy settlementPolicy(VotingNonResponsePolicy nonResponsePolicy) {
+        VotingThreshold participation = new VotingThreshold(
+                1, 2, VotingThreshold.Comparison.AT_LEAST);
+        VotingThreshold approval = new VotingThreshold(
+                1, 2, VotingThreshold.Comparison.GREATER_THAN);
+        return new VotingSettlementPolicy(
+                new VotingDecisionRule(participation, participation, approval, approval),
+                99001L, SHA_B, nonResponsePolicy, Set.of("DOOR_TO_DOOR", "ELECTRONIC"));
+    }
+
+    private static final class PayloadHash {
+        private PayloadHash() {
+        }
+
+        private static String forItem(Long itemId) {
+            return com.pangu.application.support.PayloadHasher.sha256Hex("delivery-" + itemId);
+        }
     }
 }

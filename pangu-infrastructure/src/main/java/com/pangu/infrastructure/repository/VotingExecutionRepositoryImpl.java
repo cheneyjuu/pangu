@@ -10,6 +10,9 @@ import com.pangu.domain.model.voting.VotingDeliveryRecord;
 import com.pangu.domain.model.voting.VotingElectorateSnapshot;
 import com.pangu.domain.model.voting.VotingExecutionPackage;
 import com.pangu.domain.model.voting.VotingScope;
+import com.pangu.domain.model.voting.VotingNonResponseDerivation;
+import com.pangu.domain.model.voting.VotingNonResponsePolicy;
+import com.pangu.domain.model.voting.VoteChoice;
 import com.pangu.domain.repository.VotingExecutionRepository;
 import com.pangu.infrastructure.persistence.entity.DenominatorItemRow;
 import com.pangu.infrastructure.persistence.entity.DenominatorSnapshotRow;
@@ -19,6 +22,7 @@ import com.pangu.infrastructure.persistence.entity.VotingElectorateCandidateRow;
 import com.pangu.infrastructure.persistence.entity.VotingElectorateItemRow;
 import com.pangu.infrastructure.persistence.entity.VotingElectorateSnapshotRow;
 import com.pangu.infrastructure.persistence.entity.VotingExecutionPackageRow;
+import com.pangu.infrastructure.persistence.entity.VotingNonResponseDerivationRow;
 import com.pangu.infrastructure.persistence.mapper.VotingDenominatorSnapshotMapper;
 import com.pangu.infrastructure.persistence.mapper.VotingExecutionMapper;
 import lombok.RequiredArgsConstructor;
@@ -183,6 +187,17 @@ public class VotingExecutionRepositoryImpl implements VotingExecutionRepository 
     }
 
     @Override
+    public List<VotingDeliveryRecord> listDeliveries(Long packageId, Long tenantId) {
+        return mapper.selectDeliveries(packageId, tenantId).stream()
+                .map(row -> new VotingDeliveryRecord(
+                        row.getDeliveryId(), row.getPackageId(), row.getElectorateItemId(), row.getTenantId(),
+                        row.getRepresentativeOpid(), row.getRepresentativeUid(),
+                        VoteChannel.fromDbValue(row.getDeliveryChannel()), row.getDeliveryMethod(),
+                        row.getEvidenceHash(), row.getDeliveredByUserId(), row.getDeliveredAt()))
+                .toList();
+    }
+
+    @Override
     public VotingBallotRecord insertBallot(VotingBallotRecord ballot) {
         VotingBallotRecordRow row = new VotingBallotRecordRow();
         row.setPackageId(ballot.packageId());
@@ -215,6 +230,28 @@ public class VotingExecutionRepositoryImpl implements VotingExecutionRepository 
                         row.getRepresentativeUid(), VoteChannel.fromDbValue(row.getVoteChannel()),
                         row.getPackageHash(), row.getBallotFileHash(), row.getSignatureHash(),
                         row.getRecordedByUserId(), row.getCastAt()));
+    }
+
+    @Override
+    public List<VotingBallotRecord> listActiveBallots(Long subjectId, Long tenantId) {
+        return mapper.selectActiveBallots(subjectId, tenantId).stream()
+                .map(this::toBallotRecord)
+                .toList();
+    }
+
+    @Override
+    public void insertNonResponseDerivations(List<VotingNonResponseDerivation> derivations) {
+        if (derivations == null || derivations.isEmpty()) {
+            return;
+        }
+        mapper.insertNonResponseDerivations(derivations.stream().map(this::toRow).toList());
+    }
+
+    @Override
+    public List<VotingNonResponseDerivation> listNonResponseDerivations(Long subjectId, Long tenantId) {
+        return mapper.selectNonResponseDerivations(subjectId, tenantId).stream()
+                .map(this::toDomain)
+                .toList();
     }
 
     @Override
@@ -261,6 +298,44 @@ public class VotingExecutionRepositoryImpl implements VotingExecutionRepository 
         row.setFrozenAt(domain.getFrozenAt());
         row.setVersion(domain.getVersion());
         return row;
+    }
+
+    private VotingBallotRecord toBallotRecord(VotingBallotRecordRow row) {
+        return new VotingBallotRecord(
+                row.getBallotId(), row.getPackageId(), row.getSubjectId(), row.getVoteId(),
+                row.getElectorateItemId(), row.getTenantId(), row.getRepresentativeOpid(),
+                row.getRepresentativeUid(), VoteChannel.fromDbValue(row.getVoteChannel()),
+                row.getPackageHash(), row.getBallotFileHash(), row.getSignatureHash(),
+                row.getRecordedByUserId(), row.getCastAt());
+    }
+
+    private VotingNonResponseDerivationRow toRow(VotingNonResponseDerivation domain) {
+        VotingNonResponseDerivationRow row = new VotingNonResponseDerivationRow();
+        row.setDerivationId(domain.derivationId());
+        row.setPackageId(domain.packageId());
+        row.setSubjectId(domain.subjectId());
+        row.setElectorateItemId(domain.electorateItemId());
+        row.setTenantId(domain.tenantId());
+        row.setRepresentativeOpid(domain.opid());
+        row.setRepresentativeUid(domain.uid());
+        row.setCertifiedArea(domain.propertyArea());
+        row.setNonResponsePolicy(domain.policy().name());
+        row.setDerivedChoice(domain.derivedChoice().getDbValue());
+        row.setDeliveryEvidenceHash(domain.deliveryEvidenceHash());
+        row.setRuleSnapshotHash(domain.ruleSnapshotHash());
+        row.setReasonCode(domain.reasonCode());
+        row.setRowHash(domain.rowHash());
+        row.setDerivedAt(domain.derivedAt());
+        return row;
+    }
+
+    private VotingNonResponseDerivation toDomain(VotingNonResponseDerivationRow row) {
+        return new VotingNonResponseDerivation(
+                row.getDerivationId(), row.getPackageId(), row.getSubjectId(), row.getElectorateItemId(),
+                row.getTenantId(), row.getRepresentativeOpid(), row.getRepresentativeUid(),
+                row.getCertifiedArea(), VotingNonResponsePolicy.valueOf(row.getNonResponsePolicy()),
+                VoteChoice.fromDbValue(row.getDerivedChoice()), row.getDeliveryEvidenceHash(),
+                row.getRuleSnapshotHash(), row.getReasonCode(), row.getRowHash(), row.getDerivedAt());
     }
 
     private VotingExecutionPackage toDomain(VotingExecutionPackageRow row) {

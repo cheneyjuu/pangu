@@ -374,7 +374,7 @@ public class OwnerAssemblyDisclosureService {
                 view.participatingArea(), view.participatingOwnerCount(),
                 view.supportArea(), view.supportOwnerCount(),
                 view.againstArea(), view.againstOwnerCount(),
-                view.abstainArea(), view.abstainOwnerCount());
+                view.abstainArea(), view.abstainOwnerCount(), view.nonResponse());
     }
 
     private String nonResponseLabel(OwnersAssemblyRuleConfiguration.NonResponsePolicy policy) {

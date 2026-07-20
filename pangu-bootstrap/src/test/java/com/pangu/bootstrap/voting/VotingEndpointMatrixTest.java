@@ -1,3 +1,4 @@
+// 关联业务：验证表决事项办理、监督和未反馈认定审计接口的角色权限边界。
 package com.pangu.bootstrap.voting;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -178,6 +179,22 @@ public class VotingEndpointMatrixTest {
                         .header("Authorization", "Bearer " + sysToken(ACC_COMM, USR_COMM)))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code", is(40910)));
+    }
+
+    @Test
+    public void gridOperatorNonResponseAudit_passesPreAuth_thenNotFound_404() throws Exception {
+        mockMvc.perform(get("/api/v1/voting-subjects/99999/non-response-derivations")
+                        .header("Authorization", "Bearer " + sysToken(ACC_GRID, USR_GRID)))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code", is(40910)));
+    }
+
+    @Test
+    public void cUserNonResponseAudit_forbidden_403() throws Exception {
+        mockMvc.perform(get("/api/v1/voting-subjects/99999/non-response-derivations")
+                        .header("Authorization", "Bearer " + cToken(ACC_LISI, UID_LISI)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code", is(403)));
     }
 
     @Test

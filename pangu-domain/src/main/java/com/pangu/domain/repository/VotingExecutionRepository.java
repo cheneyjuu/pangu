@@ -6,6 +6,7 @@ import com.pangu.domain.model.voting.VotingBallotRecord;
 import com.pangu.domain.model.voting.VotingDeliveryRecord;
 import com.pangu.domain.model.voting.VotingElectorateSnapshot;
 import com.pangu.domain.model.voting.VotingExecutionPackage;
+import com.pangu.domain.model.voting.VotingNonResponseDerivation;
 import com.pangu.domain.model.voting.VotingScope;
 
 import java.time.Instant;
@@ -53,9 +54,21 @@ public interface VotingExecutionRepository {
 
     boolean deliveryExists(Long packageId, Long tenantId, Long electorateItemId, VoteChannel channel);
 
+    /** 结算时读取本次冻结名册的全部有效送达证据，按送达主键稳定排序。 */
+    List<VotingDeliveryRecord> listDeliveries(Long packageId, Long tenantId);
+
     VotingBallotRecord insertBallot(VotingBallotRecord ballot);
 
     Optional<VotingBallotRecord> findActiveBallot(Long subjectId, Long electorateItemId, Long tenantId);
+
+    /** 一次读取事项全部有效票据，避免按名册逐户查询。 */
+    List<VotingBallotRecord> listActiveBallots(Long subjectId, Long tenantId);
+
+    /** 原子写入一事项的不可变未反馈认定记录。 */
+    void insertNonResponseDerivations(List<VotingNonResponseDerivation> derivations);
+
+    /** 审计读取一事项的未反馈认定记录，不包含实际票。 */
+    List<VotingNonResponseDerivation> listNonResponseDerivations(Long subjectId, Long tenantId);
 
     long countAudits(Long packageId, Long tenantId, String eventType);
 

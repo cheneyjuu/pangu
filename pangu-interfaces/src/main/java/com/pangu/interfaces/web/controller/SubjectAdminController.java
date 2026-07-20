@@ -1,3 +1,4 @@
+// 关联业务：提供管理端表决事项全周期办理、进度监督和计票审计入口。
 package com.pangu.interfaces.web.controller;
 
 import com.pangu.application.handover.TenantTermLockService;
@@ -6,6 +7,7 @@ import com.pangu.application.voting.ProposalReviewService;
 import com.pangu.application.voting.VoteMonitorQueryService;
 import com.pangu.application.voting.VotingApplicationException;
 import com.pangu.application.voting.VotingMobilizationService;
+import com.pangu.application.voting.VotingNonResponseAuditService;
 import com.pangu.application.voting.VotingReminderDeliveryQueryService;
 import com.pangu.application.voting.VotingProgressQueryService;
 import com.pangu.application.voting.command.CancelSubjectCommand;
@@ -37,6 +39,7 @@ import com.pangu.interfaces.web.controller.dto.voting.VoteDetailResponse;
 import com.pangu.interfaces.web.controller.dto.voting.VoteMonitorResponse;
 import com.pangu.interfaces.web.controller.dto.voting.VotingMobilizationPermissionResponse;
 import com.pangu.interfaces.web.controller.dto.voting.VotingMobilizationReminderResponse;
+import com.pangu.interfaces.web.controller.dto.voting.VotingNonResponseDerivationResponse;
 import com.pangu.interfaces.web.controller.dto.voting.VotingReminderDeliveryStatusResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -84,6 +87,7 @@ public class SubjectAdminController extends BaseController {
     private final VoteMonitorQueryService voteMonitorQueryService;
     private final VotingMobilizationService votingMobilizationService;
     private final VotingReminderDeliveryQueryService reminderDeliveryQueryService;
+    private final VotingNonResponseAuditService votingNonResponseAuditService;
 
     /** 立项：DRAFT 写入。 */
     @PostMapping("/voting-subjects")
@@ -307,6 +311,18 @@ public class SubjectAdminController extends BaseController {
         Page<VoteDetailQueryRepository.VoteDetailRow> result =
                 votingProgressQueryService.pageVoteDetails(subjectId, requireTenantId(), page, size);
         return success(PageResponse.from(result, VoteDetailResponse::from));
+    }
+
+    /**
+     * 结算后查看未反馈票逐户认定依据。该列表与实际票分开，只对审计角色开放。
+     */
+    @GetMapping("/voting-subjects/{subjectId}/non-response-derivations")
+    @PreAuthorize("hasAuthority('voting:subject:audit')")
+    public Result<List<VotingNonResponseDerivationResponse>> nonResponseDerivations(
+            @PathVariable("subjectId") Long subjectId) {
+        return success(votingNonResponseAuditService.list(subjectId).stream()
+                .map(VotingNonResponseDerivationResponse::from)
+                .toList());
     }
 
     private Long requireUserId() {

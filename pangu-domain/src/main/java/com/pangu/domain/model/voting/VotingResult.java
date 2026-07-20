@@ -59,6 +59,27 @@ public class VotingResult<S extends VotingSubject> {
     /** 弃权票对应的总人数 */
     private Long abstainOwnerCount;
 
+    /** 实际有效票汇总，不包含系统依据规则形成的认定票。 */
+    private VoteTallyBreakdown actualTally;
+
+    /** 未反馈认定票汇总；未产生认定票时为全零。 */
+    private VoteTallyBreakdown deemedTally;
+
+    /** 本次结算使用的未反馈认定方式；非正式规则结算时为空。 */
+    private VotingNonResponsePolicy nonResponsePolicy;
+
+    /** 有效送达且截止无有效票的唯一表决代表数量。 */
+    private Long nonResponseEligibleOwnerCount;
+
+    /** 有效送达且截止无有效票的专有部分面积。 */
+    private BigDecimal nonResponseEligibleArea;
+
+    /** “按多数意见认定”时由实际票确定的唯一多数选项。 */
+    private VoteChoice majorityChoice;
+
+    /** 逐条未反馈认定记录的稳定聚合摘要。 */
+    private String nonResponseDerivationHash;
+
     /**
      * 获取参与投票的面积占比
      */

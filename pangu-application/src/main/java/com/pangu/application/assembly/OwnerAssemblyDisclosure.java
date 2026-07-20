@@ -1,6 +1,7 @@
 // 关联业务：定义 C 端业主可查看的业主大会公示、办理方式和本人参与状态，不含任何表决选择。
 package com.pangu.application.assembly;
 
+import com.pangu.application.voting.VotingDecisionResultProjector;
 import com.pangu.domain.model.assembly.OwnersAssemblyRuleConfiguration;
 import com.pangu.domain.model.voting.SubjectType;
 
@@ -84,7 +85,8 @@ public record OwnerAssemblyDisclosure(
             java.math.BigDecimal againstArea,
             Long againstOwnerCount,
             java.math.BigDecimal abstainArea,
-            Long abstainOwnerCount
+            Long abstainOwnerCount,
+            VotingDecisionResultProjector.NonResponseSummary nonResponse
     ) {
     }
 

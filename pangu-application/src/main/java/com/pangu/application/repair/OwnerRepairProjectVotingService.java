@@ -222,7 +222,7 @@ public class OwnerRepairProjectVotingService {
                 view.participatingArea(), view.participatingOwnerCount(),
                 view.supportArea(), view.supportOwnerCount(),
                 view.againstArea(), view.againstOwnerCount(),
-                view.abstainArea(), view.abstainOwnerCount());
+                view.abstainArea(), view.abstainOwnerCount(), view.nonResponse());
     }
 
     public record Disclosure(
@@ -279,7 +279,8 @@ public class OwnerRepairProjectVotingService {
             java.math.BigDecimal againstArea,
             Long againstOwnerCount,
             java.math.BigDecimal abstainArea,
-            Long abstainOwnerCount
+            Long abstainOwnerCount,
+            VotingDecisionResultProjector.NonResponseSummary nonResponse
     ) {
     }
 

@@ -8,11 +8,15 @@ import com.pangu.domain.model.voting.SubjectType;
 import com.pangu.domain.model.voting.VoteChannel;
 import com.pangu.domain.model.voting.VoteChoice;
 import com.pangu.domain.model.voting.VoteItem;
+import com.pangu.domain.model.voting.CountedVote;
+import com.pangu.domain.model.voting.NonResponseVoteResolver;
 import com.pangu.domain.model.voting.VotingBallotRecord;
 import com.pangu.domain.model.voting.VotingDeliveryRecord;
 import com.pangu.domain.model.voting.VotingElectorateSnapshot;
 import com.pangu.domain.model.voting.VotingExecutionPackage;
 import com.pangu.domain.model.voting.VotingExecutionTrace;
+import com.pangu.domain.model.voting.VotingNonResponseDerivation;
+import com.pangu.domain.model.voting.VotingNonResponseSettlement;
 import com.pangu.domain.model.voting.VotingSettlementPolicy;
 import com.pangu.domain.model.voting.VotingScope;
 import com.pangu.domain.model.voting.VotingSubject;
@@ -34,6 +38,8 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * 正式表决执行内核。
@@ -44,6 +50,8 @@ import java.util.Objects;
 @Service
 @RequiredArgsConstructor
 public class VotingExecutionService {
+
+    private static final NonResponseVoteResolver NON_RESPONSE_RESOLVER = new NonResponseVoteResolver();
 
     private final VotingExecutionRepository executionRepository;
     private final VotingSubjectRepository subjectRepository;
@@ -206,6 +214,11 @@ public class VotingExecutionService {
         }
         VoteChannel channel = normalizeDeliveryChannel(command.deliveryChannel());
         requireChannelAllowed(ballotPackage, channel);
+        Instant deliveredAt = requireInstant(command.deliveredAt(), "deliveredAt");
+        if (!deliveredAt.isBefore(ballotPackage.getVoteEndAt())) {
+            throw new VotingExecutionException(
+                    Reason.INVALID_STATUS, "表决截止后不能补记送达并据此认定未反馈票");
+        }
         VotingElectorateSnapshot.Item item = requireElectorateItem(
                 command.packageId(), command.tenantId(), command.opid());
         VotingDeliveryRecord delivery = new VotingDeliveryRecord(
@@ -213,7 +226,7 @@ public class VotingExecutionService {
                 item.representativeOpid(), item.representativeUid(), channel,
                 requireText(command.deliveryMethod(), "deliveryMethod"),
                 requireText(command.evidenceHash(), "evidenceHash"),
-                command.deliveredByUserId(), requireInstant(command.deliveredAt(), "deliveredAt"));
+                command.deliveredByUserId(), deliveredAt);
         try {
             VotingDeliveryRecord inserted = executionRepository.insertDelivery(delivery);
             executionRepository.insertAudit(
@@ -349,10 +362,14 @@ public class VotingExecutionService {
             VotingSubject subject = requireSubject(subjectId, tenantId);
             VotingSettlementPolicy policy = settlementPolicyProvider == null
                     ? null : settlementPolicyProvider.forSubject(subject);
+            VotingNonResponseSettlement nonResponseSettlement = policy == null
+                    ? null : prepareNonResponseSettlement(
+                            ballotPackage, subject, snapshot, policy, actorUserId, now);
             votingApplicationService.settle(
                     new SettleSubjectCommand(subjectId, ballotPackage.getBusinessType().name()),
                     policy,
-                    trace);
+                    trace,
+                    nonResponseSettlement);
         }
 
         VotingExecutionPackage closed = requirePackageForUpdate(packageId, tenantId);
@@ -362,6 +379,121 @@ public class VotingExecutionService {
                 packageId, tenantId, "PACKAGE_SETTLED", VotingExecutionPackage.Status.CLOSED.name(),
                 VotingExecutionPackage.Status.SETTLED.name(), actorUserId, null, now);
         return requirePackage(packageId, tenantId);
+    }
+
+    /**
+     * 以冻结名册、有效送达和截止时有效票生成逐事项未反馈认定记录。
+     *
+     * <p>该方法与关闭、结算共享事务；多数意见不确定或证据链不一致时，表决包状态、认定记录和
+     * 结果全部回滚，不能留下“已经截止但没有结果”的半成品。
+     */
+    private VotingNonResponseSettlement prepareNonResponseSettlement(
+            VotingExecutionPackage ballotPackage,
+            VotingSubject subject,
+            VotingElectorateSnapshot snapshot,
+            VotingSettlementPolicy policy,
+            Long actorUserId,
+            Instant settledAt) {
+        policy.requireExecutable();
+        List<VoteItem> actualVoteItems = voteItemRepository.findValidVotes(subject.getSubjectId());
+        List<VotingBallotRecord> activeBallots = executionRepository.listActiveBallots(
+                subject.getSubjectId(), ballotPackage.getTenantId());
+        if (actualVoteItems.size() != activeBallots.size()) {
+            throw new VotingExecutionException(
+                    "有效票与正式票据台账数量不一致，不能形成可审计计票结果");
+        }
+
+        Set<Long> votedElectorateItems = activeBallots.stream()
+                .map(VotingBallotRecord::electorateItemId)
+                .collect(Collectors.toSet());
+        Map<Long, List<VotingDeliveryRecord>> deliveriesByItem = executionRepository
+                .listDeliveries(ballotPackage.getPackageId(), ballotPackage.getTenantId()).stream()
+                // 只有冻结规则承认且在截止时间前完成的送达，才能触发未反馈认定。
+                .filter(delivery -> policy.validDeliveryMethods().contains(delivery.deliveryMethod()))
+                .filter(delivery -> delivery.deliveredAt().isBefore(ballotPackage.getVoteEndAt()))
+                .collect(Collectors.groupingBy(
+                        VotingDeliveryRecord::electorateItemId,
+                        LinkedHashMap::new,
+                        Collectors.toList()));
+
+        List<NonResponseVoteResolver.EligibleNonResponse> eligible = snapshot.items().stream()
+                .filter(item -> !votedElectorateItems.contains(item.snapshotItemId()))
+                .filter(item -> deliveriesByItem.containsKey(item.snapshotItemId()))
+                .map(item -> new NonResponseVoteResolver.EligibleNonResponse(
+                        item.snapshotItemId(), item.representativeOpid(), item.representativeUid(),
+                        item.certifiedArea(), deliveryEvidenceHash(deliveriesByItem.get(item.snapshotItemId()))))
+                .toList();
+
+        List<CountedVote> actualVotes = actualVoteItems.stream().map(CountedVote::actual).toList();
+        NonResponseVoteResolver.Resolution resolution;
+        try {
+            resolution = NON_RESPONSE_RESOLVER.resolve(policy.nonResponsePolicy(), actualVotes, eligible);
+        } catch (NonResponseVoteResolver.IndeterminateMajorityException ex) {
+            throw new VotingExecutionException(
+                    Reason.INVALID_COMMAND,
+                    ex.getMessage() + "；请核对实际票和本小区议事规则后再办理",
+                    ex);
+        }
+
+        VoteChoice derivedChoice = resolution.deemedVotes().isEmpty()
+                ? null : resolution.deemedVotes().getFirst().choice();
+        List<VotingNonResponseDerivation> derivations = new ArrayList<>();
+        if (derivedChoice != null) {
+            for (NonResponseVoteResolver.EligibleNonResponse item : eligible) {
+                String reasonCode = policy.nonResponsePolicy().name()
+                        + "_EFFECTIVE_DELIVERY_NO_VALID_BALLOT_AT_DEADLINE";
+                String rowHash = PayloadHasher.sha256Hex(String.join("|",
+                        ballotPackage.getPackageId().toString(), subject.getSubjectId().toString(),
+                        item.electorateItemId().toString(), ballotPackage.getTenantId().toString(),
+                        item.opid().toString(), item.uid().toString(), canonical(item.propertyArea()),
+                        policy.nonResponsePolicy().name(), derivedChoice.name(), item.sourceReference(),
+                        ballotPackage.getRuleSnapshotHash(), reasonCode, settledAt.toString()));
+                derivations.add(new VotingNonResponseDerivation(
+                        null, ballotPackage.getPackageId(), subject.getSubjectId(), item.electorateItemId(),
+                        ballotPackage.getTenantId(), item.opid(), item.uid(), item.propertyArea(),
+                        policy.nonResponsePolicy(), derivedChoice, item.sourceReference(),
+                        ballotPackage.getRuleSnapshotHash(), reasonCode, rowHash, settledAt));
+            }
+            executionRepository.insertNonResponseDerivations(derivations);
+        }
+
+        String aggregateHash = PayloadHasher.sha256Hex(derivations.stream()
+                .map(VotingNonResponseDerivation::rowHash)
+                .sorted()
+                .collect(Collectors.joining("|")));
+        long eligibleOwnerCount = eligible.stream()
+                .map(NonResponseVoteResolver.EligibleNonResponse::uid)
+                .distinct()
+                .count();
+        BigDecimal eligibleArea = eligible.stream()
+                .map(NonResponseVoteResolver.EligibleNonResponse::propertyArea)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        executionRepository.insertAudit(
+                ballotPackage.getPackageId(), ballotPackage.getTenantId(), "NON_RESPONSE_DERIVED",
+                VotingExecutionPackage.Status.CLOSED.name(), VotingExecutionPackage.Status.CLOSED.name(),
+                actorUserId,
+                "{\"subjectId\":" + subject.getSubjectId()
+                        + ",\"policy\":\"" + policy.nonResponsePolicy().name()
+                        + "\",\"eligibleOwnerCount\":" + eligibleOwnerCount
+                        + ",\"derivationCount\":" + derivations.size()
+                        + ",\"aggregateHash\":\"" + aggregateHash + "\"}",
+                settledAt);
+        return new VotingNonResponseSettlement(
+                policy.nonResponsePolicy(), eligibleOwnerCount, eligibleArea,
+                resolution.majorityChoice(), aggregateHash, derivations);
+    }
+
+    private String deliveryEvidenceHash(List<VotingDeliveryRecord> deliveries) {
+        String canonicalEvidence = deliveries.stream()
+                .sorted(Comparator.comparing(VotingDeliveryRecord::deliveryId))
+                .map(delivery -> String.join("|",
+                        delivery.deliveryId().toString(),
+                        delivery.deliveryChannel().name(),
+                        delivery.deliveryMethod(),
+                        delivery.evidenceHash(),
+                        delivery.deliveredAt().toString()))
+                .collect(Collectors.joining("||"));
+        return PayloadHasher.sha256Hex(canonicalEvidence);
     }
 
     public java.util.Optional<VotingExecutionPackage> findPackageBySubjectId(Long subjectId) {

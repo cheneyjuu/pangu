@@ -7,6 +7,7 @@ import com.pangu.infrastructure.persistence.entity.VotingElectorateCandidateRow;
 import com.pangu.infrastructure.persistence.entity.VotingElectorateItemRow;
 import com.pangu.infrastructure.persistence.entity.VotingElectorateSnapshotRow;
 import com.pangu.infrastructure.persistence.entity.VotingExecutionPackageRow;
+import com.pangu.infrastructure.persistence.entity.VotingNonResponseDerivationRow;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
@@ -65,11 +66,24 @@ public interface VotingExecutionMapper {
                            @Param("electorateItemId") Long electorateItemId,
                            @Param("deliveryChannel") int deliveryChannel);
 
+    List<VotingDeliveryRecordRow> selectDeliveries(@Param("packageId") Long packageId,
+                                                    @Param("tenantId") Long tenantId);
+
     int insertBallot(VotingBallotRecordRow row);
 
     VotingBallotRecordRow selectActiveBallot(@Param("subjectId") Long subjectId,
                                               @Param("electorateItemId") Long electorateItemId,
                                               @Param("tenantId") Long tenantId);
+
+    List<VotingBallotRecordRow> selectActiveBallots(@Param("subjectId") Long subjectId,
+                                                     @Param("tenantId") Long tenantId);
+
+    int insertNonResponseDerivations(
+            @Param("rows") List<VotingNonResponseDerivationRow> rows);
+
+    List<VotingNonResponseDerivationRow> selectNonResponseDerivations(
+            @Param("subjectId") Long subjectId,
+            @Param("tenantId") Long tenantId);
 
     long countAudits(@Param("packageId") Long packageId,
                      @Param("tenantId") Long tenantId,

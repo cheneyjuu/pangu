@@ -40,6 +40,31 @@ class VotingDecisionResultProjectorTest {
         assertNull(result.supportOwnerCount());
         assertNull(result.againstArea());
         assertNull(result.abstainArea());
+        assertNull(result.nonResponse());
+    }
+
+    @Test
+    void projectsActualAndDeemedTotalsWithoutExposingPerOwnerChoices() {
+        VotingDecisionResultProjector.View result = projector.project(snapshot(
+                "{\"supportArea\":\"100.00\",\"supportOwnerCount\":2,"
+                        + "\"againstArea\":\"0\",\"againstOwnerCount\":0,"
+                        + "\"abstainArea\":\"0\",\"abstainOwnerCount\":0,"
+                        + "\"nonResponsePolicy\":\"FOLLOW_MAJORITY\","
+                        + "\"nonResponseEligibleOwnerCount\":1,\"nonResponseEligibleArea\":\"40.00\","
+                        + "\"majorityChoice\":\"SUPPORT\",\"nonResponseDerivationHash\":\"abc\","
+                        + "\"actualParticipatingArea\":\"60.00\",\"actualParticipatingOwnerCount\":1,"
+                        + "\"actualSupportArea\":\"60.00\",\"actualSupportOwnerCount\":1,"
+                        + "\"actualAgainstArea\":\"0\",\"actualAgainstOwnerCount\":0,"
+                        + "\"actualAbstainArea\":\"0\",\"actualAbstainOwnerCount\":0,"
+                        + "\"deemedParticipatingArea\":\"40.00\",\"deemedParticipatingOwnerCount\":1,"
+                        + "\"deemedSupportArea\":\"40.00\",\"deemedSupportOwnerCount\":1,"
+                        + "\"deemedAgainstArea\":\"0\",\"deemedAgainstOwnerCount\":0,"
+                        + "\"deemedAbstainArea\":\"0\",\"deemedAbstainOwnerCount\":0}"));
+
+        assertEquals("FOLLOW_MAJORITY", result.nonResponse().policy());
+        assertEquals("SUPPORT", result.nonResponse().majorityChoice());
+        assertEquals(new BigDecimal("60.00"), result.nonResponse().actual().supportArea());
+        assertEquals(new BigDecimal("40.00"), result.nonResponse().deemed().supportArea());
     }
 
     private VotingResultRepository.Snapshot snapshot(String resultPayloadJson) {

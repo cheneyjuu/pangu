@@ -13,6 +13,9 @@ import com.pangu.domain.model.voting.RatioCheckTrigger;
 import com.pangu.domain.model.voting.SubjectStatus;
 import com.pangu.domain.model.voting.SubjectType;
 import com.pangu.domain.model.voting.VoteItem;
+import com.pangu.domain.model.voting.CountedVote;
+import com.pangu.domain.model.voting.VoteTallyBreakdown;
+import com.pangu.domain.model.voting.VotingNonResponseSettlement;
 import com.pangu.domain.model.voting.VotingDenominatorResolver;
 import com.pangu.domain.model.voting.VotingEngineRouter;
 import com.pangu.domain.model.voting.VotingExecutionTrace;
@@ -98,8 +101,23 @@ public class VotingApplicationService {
     public VotingResultRepository.Snapshot settle(SettleSubjectCommand cmd,
                                                    VotingSettlementPolicy settlementPolicy,
                                                    VotingExecutionTrace executionTrace) {
+        return settle(cmd, settlementPolicy, executionTrace, null);
+    }
+
+    /**
+     * 以逐条未反馈认定记录参与结算；认定票只作为分源计票输入，不写入实际票仓储。
+     */
+    @Transactional
+    public VotingResultRepository.Snapshot settle(SettleSubjectCommand cmd,
+                                                   VotingSettlementPolicy settlementPolicy,
+                                                   VotingExecutionTrace executionTrace,
+                                                   VotingNonResponseSettlement nonResponseSettlement) {
         if (settlementPolicy != null) {
             settlementPolicy.requireExecutable();
+        }
+        if (nonResponseSettlement != null && (settlementPolicy == null
+                || nonResponseSettlement.policy() != settlementPolicy.nonResponsePolicy())) {
+            throw new IllegalArgumentException("未反馈认定结果与冻结结算规则不一致");
         }
         // 1. 行锁 + 幂等校验
         VotingSubject subject = subjectRepository.findByIdForUpdate(cmd.subjectId())
@@ -141,9 +159,21 @@ public class VotingApplicationService {
         // 5. 引擎结算（按议题类型路由）
         VotingResult<? extends VotingSubject> result;
         try {
-            result = settlementPolicy == null
-                    ? engineRouter.settle(subject, votes, denom)
-                    : engineRouter.settle(subject, votes, denom, settlementPolicy);
+            if (nonResponseSettlement == null) {
+                result = settlementPolicy == null
+                        ? engineRouter.settle(subject, votes, denom)
+                        : engineRouter.settle(subject, votes, denom, settlementPolicy);
+            } else {
+                List<CountedVote> countedVotes = new java.util.ArrayList<>(
+                        votes.stream().map(CountedVote::actual).toList());
+                countedVotes.addAll(nonResponseSettlement.deemedVotes());
+                result = engineRouter.settleCounted(subject, countedVotes, denom, settlementPolicy);
+                result.setNonResponsePolicy(nonResponseSettlement.policy());
+                result.setNonResponseEligibleOwnerCount(nonResponseSettlement.eligibleOwnerCount());
+                result.setNonResponseEligibleArea(nonResponseSettlement.eligibleArea());
+                result.setMajorityChoice(nonResponseSettlement.majorityChoice());
+                result.setNonResponseDerivationHash(nonResponseSettlement.derivationAggregateHash());
+            }
         } catch (VotingEngineRouter.UnsupportedSubjectTypeException e) {
             throw new VotingApplicationException(
                     VotingApplicationException.Reason.SUBJECT_TYPE_NOT_SUPPORTED,
@@ -226,6 +256,15 @@ public class VotingApplicationService {
         appendJson(sb, "againstOwnerCount", result.getAgainstOwnerCount()); sb.append(',');
         appendJson(sb, "abstainArea", result.getAbstainArea() == null ? null : result.getAbstainArea().toPlainString()); sb.append(',');
         appendJson(sb, "abstainOwnerCount", result.getAbstainOwnerCount()); sb.append(',');
+        appendTallyJson(sb, "actual", result.getActualTally());
+        appendTallyJson(sb, "deemed", result.getDeemedTally());
+        appendJson(sb, "nonResponsePolicy", result.getNonResponsePolicy() == null
+                ? null : result.getNonResponsePolicy().name()); sb.append(',');
+        appendJson(sb, "nonResponseEligibleOwnerCount", result.getNonResponseEligibleOwnerCount()); sb.append(',');
+        appendJson(sb, "nonResponseEligibleArea", valueOf(result.getNonResponseEligibleArea())); sb.append(',');
+        appendJson(sb, "majorityChoice", result.getMajorityChoice() == null
+                ? null : result.getMajorityChoice().name()); sb.append(',');
+        appendJson(sb, "nonResponseDerivationHash", result.getNonResponseDerivationHash()); sb.append(',');
         appendJson(sb, "effectivePartyRatioFloor", effectiveRatio.toPlainString()); sb.append(',');
         appendJson(sb, "denominatorSnapshotId", denom.snapshotId()); sb.append(',');
         appendJson(sb, "denominatorAggregateHash", denom.snapshotHash());
@@ -271,6 +310,15 @@ public class VotingApplicationService {
         putIfPresent(payload, "againstOwnerCount", result.getAgainstOwnerCount());
         putIfPresent(payload, "abstainArea", valueOf(result.getAbstainArea()));
         putIfPresent(payload, "abstainOwnerCount", result.getAbstainOwnerCount());
+        putTally(payload, "actual", result.getActualTally());
+        putTally(payload, "deemed", result.getDeemedTally());
+        putIfPresent(payload, "nonResponsePolicy", result.getNonResponsePolicy() == null
+                ? null : result.getNonResponsePolicy().name());
+        putIfPresent(payload, "nonResponseEligibleOwnerCount", result.getNonResponseEligibleOwnerCount());
+        putIfPresent(payload, "nonResponseEligibleArea", valueOf(result.getNonResponseEligibleArea()));
+        putIfPresent(payload, "majorityChoice", result.getMajorityChoice() == null
+                ? null : result.getMajorityChoice().name());
+        putIfPresent(payload, "nonResponseDerivationHash", result.getNonResponseDerivationHash());
         payload.put("effectivePartyRatioFloor", effectiveRatio.toPlainString());
         payload.put("denominatorSnapshotId", denom.snapshotId());
         payload.put("denominatorAggregateHash", denom.snapshotHash());
@@ -292,6 +340,30 @@ public class VotingApplicationService {
         if (value != null) {
             payload.put(key, value);
         }
+    }
+
+    private void appendTallyJson(StringBuilder sb, String prefix, VoteTallyBreakdown tally) {
+        VoteTallyBreakdown value = tally == null ? VoteTallyBreakdown.empty() : tally;
+        appendJson(sb, prefix + "ParticipatingArea", valueOf(value.participatingArea())); sb.append(',');
+        appendJson(sb, prefix + "ParticipatingOwnerCount", value.participatingOwnerCount()); sb.append(',');
+        appendJson(sb, prefix + "SupportArea", valueOf(value.supportArea())); sb.append(',');
+        appendJson(sb, prefix + "SupportOwnerCount", value.supportOwnerCount()); sb.append(',');
+        appendJson(sb, prefix + "AgainstArea", valueOf(value.againstArea())); sb.append(',');
+        appendJson(sb, prefix + "AgainstOwnerCount", value.againstOwnerCount()); sb.append(',');
+        appendJson(sb, prefix + "AbstainArea", valueOf(value.abstainArea())); sb.append(',');
+        appendJson(sb, prefix + "AbstainOwnerCount", value.abstainOwnerCount()); sb.append(',');
+    }
+
+    private void putTally(Map<String, Object> payload, String prefix, VoteTallyBreakdown tally) {
+        VoteTallyBreakdown value = tally == null ? VoteTallyBreakdown.empty() : tally;
+        payload.put(prefix + "ParticipatingArea", valueOf(value.participatingArea()));
+        payload.put(prefix + "ParticipatingOwnerCount", value.participatingOwnerCount());
+        payload.put(prefix + "SupportArea", valueOf(value.supportArea()));
+        payload.put(prefix + "SupportOwnerCount", value.supportOwnerCount());
+        payload.put(prefix + "AgainstArea", valueOf(value.againstArea()));
+        payload.put(prefix + "AgainstOwnerCount", value.againstOwnerCount());
+        payload.put(prefix + "AbstainArea", valueOf(value.abstainArea()));
+        payload.put(prefix + "AbstainOwnerCount", value.abstainOwnerCount());
     }
 
     private String valueOf(BigDecimal value) {
