@@ -574,6 +574,22 @@ class RepairProjectBuildingE2eFlowTest {
         JsonNode ownerAcceptanceTask = getData(
                 "/api/v1/me/repair-projects/" + projectId + "/acceptance", reportingOwnerToken);
         long acceptanceRoomId = ownerAcceptanceTask.path("affectedRoomIds").get(0).asLong();
+        Map<String, Object> outsideOwner = jdbcTemplate.queryForMap("""
+                SELECT owner.uid, owner.account_id
+                FROM c_owner_property property
+                JOIN c_user owner ON owner.uid = property.uid
+                WHERE property.tenant_id = ? AND property.building_id <> ?
+                  AND property.account_status = 1
+                ORDER BY property.opid
+                LIMIT 1
+                """, TENANT, buildingId);
+        String outsideOwnerToken = jwtTokenProvider.generateToken(
+                ((Number) outsideOwner.get("account_id")).longValue(),
+                "C_USER", ((Number) outsideOwner.get("uid")).longValue(), TENANT);
+        mockMvc.perform(get("/api/v1/me/repair-projects/" + projectId + "/acceptance")
+                        .header("Authorization", bearer(outsideOwnerToken)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.msg", is("当前业主不在项目锁定的受影响验收范围内")));
         long ownerAcceptanceAttachmentId = uploadOwnerAcceptanceAttachment(
                 projectId, reportingOwnerToken, "业主现场验收照片.pdf", "owner-acceptance");
         JsonNode ownerAcceptance = postData(
@@ -666,6 +682,16 @@ class RepairProjectBuildingE2eFlowTest {
                 projectId, propertyManagerToken, "工程验收结果.pdf", "acceptance-result");
         JsonNode pendingAcceptanceProject = getData(
                 "/api/v1/admin/repair-projects/" + projectId, propertyManagerToken);
+        mockMvc.perform(post("/api/v1/admin/repair-projects/" + projectId + "/acceptance/finalization")
+                        .header("Authorization", bearer(committeeMemberToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "expectedProjectVersion",
+                                pendingAcceptanceProject.path("project").path("version").asInt(),
+                                "resultAttachmentId", acceptanceResultAttachmentId,
+                                "remark", "非方案约定确认人不能代为确认工程验收结果"))))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.msg", is("当前工作身份不是实施方案约定的验收结论确认人")));
         JsonNode acceptance = postData(
                 "/api/v1/admin/repair-projects/" + projectId + "/acceptance/finalization",
                 propertyManagerToken, Map.of(
