@@ -61,9 +61,9 @@
 | --- | --- | --- | --- |
 | 纸质投票 | `WRITTEN_CONSULTATION` | `PAPER_ONLY` | `NOT_APPLICABLE` |
 | 互联网表决并提供纸质协助 | `INTERNET` | `ONLINE_ONLY` | `NOT_APPLICABLE` |
-| 纸质与线上并行 | `ONLINE_AND_OFFLINE` | `PAPER_AND_ONLINE` | `FIRST_VALID_WINS` |
+| 纸质与线上并行 | `ONLINE_AND_OFFLINE` | `PAPER_AND_ONLINE` | `FIRST_VALID_WINS` / `ONLINE_PREVAILS` / `PAPER_PREVAILS` |
 
-计票使用规则中 `DecisionType.GENERAL` 对应的四个精确阈值。未反馈票按下述统一模型执行；纸票优先或线上优先在当前执行内核尚未支持时仍应阻断，不得降级为首张有效票生效。
+计票使用规则中 `DecisionType.GENERAL` 对应的四个精确阈值。未反馈票按下述统一模型执行；重复票由统一裁决策略执行并保存替代链，不得降级为其他策略。
 
 ### 2.1 未反馈资格
 
