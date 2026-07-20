@@ -1009,7 +1009,8 @@ class OwnersAssemblyFlowTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(onlineBallotRequest(10, packageHash, subjectIds)))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.msg", is("本专有部分已经通过纸质或线上方式完成表决")));
+                .andExpect(jsonPath("$.msg", is(
+                        "本专有部分已有有效票；本小区规则约定保留先形成的有效票，本次材料已留存但不重复计票")));
 
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM t_voting_ballot_record WHERE package_id = ?",

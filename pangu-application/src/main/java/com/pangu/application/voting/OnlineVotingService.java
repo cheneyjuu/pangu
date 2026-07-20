@@ -14,6 +14,7 @@ import com.pangu.domain.model.voting.VotingBallotRecord;
 import com.pangu.domain.model.voting.VotingDeliveryRecord;
 import com.pangu.domain.model.voting.VotingElectorateSnapshot;
 import com.pangu.domain.model.voting.VotingExecutionPackage;
+import com.pangu.domain.policy.voting.DuplicateBallotResolutionPolicy;
 import com.pangu.domain.repository.OnlineVotingRepository;
 import com.pangu.domain.repository.PaperVotingRepository;
 import com.pangu.domain.repository.VotingExecutionRepository;
@@ -45,6 +46,9 @@ import static com.pangu.application.voting.OnlineVotingException.Reason.NOT_FOUN
 @Service
 @RequiredArgsConstructor
 public class OnlineVotingService {
+
+    private static final DuplicateBallotResolutionPolicy DUPLICATE_BALLOT_POLICY =
+            new DuplicateBallotResolutionPolicy();
 
     private final VotingExecutionRepository votingExecutionRepository;
     private final OnlineVotingRepository onlineVotingRepository;
@@ -126,6 +130,18 @@ public class OnlineVotingService {
                         ballotPackage, electorate, owner, choiceManifestHash, clock.instant());
             }
             throw failure;
+        }
+        DuplicateBallotResolutionPolicy.Resolution paperConflict = hasPaperBallot(ballotPackage, electorate)
+                ? DUPLICATE_BALLOT_POLICY.resolve(
+                        ballotPackage.getDuplicateBallotPolicy(), VoteChannel.PAPER, VoteChannel.ONLINE)
+                : null;
+        if (paperConflict != null
+                && paperConflict.decision() == DuplicateBallotResolutionPolicy.Decision.KEEP_EXISTING) {
+            conflictAuditService.recordRejectedOnlineBallot(
+                    ballotPackage, electorate, owner, choiceManifestHash, clock.instant());
+            throw new OnlineVotingException(
+                    ALREADY_SUBMITTED,
+                    "本专有部分已有有效票；" + paperConflict.reason() + "，本次材料已留存但不重复计票");
         }
         if (onlineVotingRepository.findSubmission(
                 ballotPackage.getPackageId(), electorate.snapshotItemId(), ballotPackage.getTenantId()).isPresent()) {
