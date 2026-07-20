@@ -1,11 +1,16 @@
 // 关联业务：实现维修工程合同、施工、材料、结算、项目验收、付款和完工披露仓储端口。
 package com.pangu.infrastructure.repository;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import com.pangu.domain.model.repair.RepairAcceptanceConclusion;
 import com.pangu.domain.model.repair.RepairAcceptancePartyRole;
 import com.pangu.domain.model.repair.RepairProject;
 import com.pangu.domain.model.repair.RepairProjectExecution.AcceptanceParty;
 import com.pangu.domain.model.repair.RepairProjectExecution.AcceptancePolicy;
+import com.pangu.domain.model.repair.RepairProjectExecution.AcceptanceRequirement;
 import com.pangu.domain.model.repair.RepairProjectExecution.AcceptanceRound;
 import com.pangu.domain.model.repair.RepairProjectExecution.AcceptanceStatus;
 import com.pangu.domain.model.repair.RepairProjectExecution.AcceptanceSummary;
@@ -47,12 +52,20 @@ import org.springframework.stereotype.Repository;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 @Repository
 @RequiredArgsConstructor
 public class RepairProjectExecutionRepositoryImpl implements RepairProjectExecutionRepository {
 
     private final RepairProjectExecutionMapper mapper;
+    private final ObjectMapper objectMapper;
+
+    private static final TypeReference<List<AcceptanceRequirement>> ACCEPTANCE_REQUIREMENTS =
+            new TypeReference<>() { };
+    private static final TypeReference<Set<RepairAcceptancePartyRole>> ACCEPTANCE_FINALIZER_ROLES =
+            new TypeReference<>() { };
+    private static final TypeReference<List<Long>> LONG_LIST = new TypeReference<>() { };
 
     @Override
     public CostReview insertCostReview(CostReview review) {
@@ -537,6 +550,11 @@ public class RepairProjectExecutionRepositoryImpl implements RepairProjectExecut
         row.setTenantId(value.tenantId());
         row.setWorkflowType(value.workflowType().name());
         row.setPolicyHash(value.policyHash());
+        row.setAcceptanceMethod(value.acceptanceMethod());
+        row.setRequirementsJson(writeJson(value.requirements()));
+        row.setFinalizerRolesJson(writeJson(value.finalizerRoles()));
+        row.setBasisAttachmentIdsJson(writeJson(value.basisAttachmentIds()));
+        row.setBasisSummary(value.basisSummary());
         row.setAffectedOwnerCount(value.affectedOwnerCount());
         row.setMinimumAffectedOwnerParticipants(value.minimumAffectedOwnerParticipants());
         row.setAffectedOwnerPassRule(value.affectedOwnerPassRule() == null
@@ -548,10 +566,29 @@ public class RepairProjectExecutionRepositoryImpl implements RepairProjectExecut
     private AcceptancePolicy acceptancePolicy(AcceptancePolicyRow row) {
         return new AcceptancePolicy(row.getPolicyId(), row.getProjectId(), row.getPlanId(), row.getTenantId(),
                 RepairWorkflowType.valueOf(row.getWorkflowType()), row.getPolicyHash(),
+                row.getAcceptanceMethod(), readJson(row.getRequirementsJson(), ACCEPTANCE_REQUIREMENTS),
+                readJson(row.getFinalizerRolesJson(), ACCEPTANCE_FINALIZER_ROLES),
+                readJson(row.getBasisAttachmentIdsJson(), LONG_LIST), row.getBasisSummary(),
                 value(row.getAffectedOwnerCount()), value(row.getMinimumAffectedOwnerParticipants()),
                 row.getAffectedOwnerPassRule() == null ? null
                         : RepairProject.AffectedOwnerPassRule.valueOf(row.getAffectedOwnerPassRule()),
                 row.getAffectedOwnerApprovalRatio());
+    }
+
+    private String writeJson(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (JsonProcessingException ex) {
+            throw new IllegalStateException("维修工程验收规则序列化失败", ex);
+        }
+    }
+
+    private <T> T readJson(String value, TypeReference<T> type) {
+        try {
+            return objectMapper.readValue(value, type);
+        } catch (JsonProcessingException ex) {
+            throw new IllegalStateException("维修工程验收规则读取失败", ex);
+        }
     }
 
     private AcceptanceRound acceptanceRound(AcceptanceRoundRow row) {

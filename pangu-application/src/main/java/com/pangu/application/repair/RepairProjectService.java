@@ -18,6 +18,7 @@ import com.pangu.domain.model.repair.RepairProject;
 import com.pangu.domain.model.repair.RepairProject.AttachmentPurpose;
 import com.pangu.domain.model.repair.RepairProject.AllocationBasis;
 import com.pangu.domain.model.repair.RepairProject.AllocationRoom;
+import com.pangu.domain.model.repair.RepairProject.AffectedOwnerPassRule;
 import com.pangu.domain.model.repair.RepairProject.DecisionScope;
 import com.pangu.domain.model.repair.RepairProject.DecisionScopeVerificationStatus;
 import com.pangu.domain.model.repair.RepairProject.ExecutionAuthorityType;
@@ -36,6 +37,8 @@ import com.pangu.domain.model.repair.RepairProject.WorkPoint;
 import com.pangu.domain.model.repair.RepairProject.WorkPointCauseStatus;
 import com.pangu.domain.model.repair.RepairProject.WorkPointLocationType;
 import com.pangu.domain.model.repair.RepairProjectGovernance.GovernanceBasis;
+import com.pangu.domain.model.repair.RepairAcceptancePartyRole;
+import com.pangu.domain.model.repair.RepairProjectExecution.AcceptanceRequirement;
 import com.pangu.domain.model.repair.RepairWorkOrder;
 import com.pangu.domain.model.repair.RepairWorkOrderEvent;
 import com.pangu.domain.model.repair.RepairWorkOrderStatus;
@@ -364,7 +367,13 @@ public class RepairProjectService {
         PlanVersion proposal = plan.withSupplierSelectionTerms(
                 command.supplierSelectionMethod(), command.supplierEvaluationRule(),
                 command.minimumInvitedSupplierCount(), command.minimumValidQuoteCount(),
-                trim(command.nonCompetitiveSelectionBasis()));
+                trim(command.nonCompetitiveSelectionBasis())).withAcceptanceTerms(
+                requireText(command.acceptanceMethod(), "验收方式"),
+                command.acceptanceRequirements(), command.acceptanceFinalizerRoles(),
+                command.acceptanceBasisAttachmentIds(), requireText(command.acceptanceBasisSummary(), "验收依据说明"),
+                trim(command.affectedOwnerScopeDescription()), command.minimumAffectedOwnerAcceptors(),
+                command.affectedOwnerPassRule(), command.affectedOwnerApprovalRatio());
+        validateAcceptanceTerms(proposal, projectId, actor.tenantId());
         List<WorkPoint> workPoints = requireWorkPoints(plan.planId(), actor.tenantId(), "提交实施方案");
         List<AllocationRoom> allocationRooms = projectRepository.snapshotAllocationRooms(
                 plan.planId(), actor.tenantId(), decisionScope.scopeType(),
@@ -376,10 +385,7 @@ public class RepairProjectService {
                 project, decisionScope, determination, proposal, workPoints, allocationRooms, allocationBasis,
                 allocationSnapshotHash);
         if (projectRepository.freezePlanForAuthorization(
-                planId, projectId, actor.tenantId(), authorizationSnapshotHash,
-                proposal.supplierSelectionMethod(), proposal.supplierSelectionEvaluationRule(),
-                proposal.minimumInvitedSupplierCount(), proposal.minimumValidQuoteCount(),
-                proposal.nonCompetitiveSelectionBasis(), actor.userId()) != 1) {
+                proposal, authorizationSnapshotHash, actor.userId()) != 1) {
             throw new RepairWorkOrderApplicationException(INVALID_STATUS, "实施方案提交失败，请刷新后重试");
         }
         if (projectRepository.activateAuthorizationProposal(
@@ -536,8 +542,8 @@ public class RepairProjectService {
                 null, project.projectId(), project.tenantId(), versionNo,
                 narratives.planDescription(),
                 draft.budgetTotal(), null, null, null, null, null, null, null, null, null,
-                null, List.of(), null, null, List.of(), null, null,
-                null, null, null, null, null, null, null, false, List.of(),
+                null, List.of(), null, null, List.of(), List.of(), Set.of(), List.of(), null,
+                null, null, null, null, null, null, null, null, null, false, List.of(),
                 PlanStatus.DRAFT, null, null, null, null,
                 actor.accountId(), actor.userId(), null, null, null));
         narrativeImageService.bindDraftImages(
@@ -905,6 +911,78 @@ public class RepairProjectService {
                     INVALID_STATUS, "维修点位为空，不能" + actionLabel);
         }
         return workPoints;
+    }
+
+    /** 验收要求必须来自方案依据，并在进入表决前一次冻结，不能再按楼栋或小区类型套用固定角色。 */
+    private void validateAcceptanceTerms(PlanVersion proposal, Long projectId, Long tenantId) {
+        List<AcceptanceRequirement> requirements = proposal.acceptanceRequirements();
+        if (requirements.isEmpty()) {
+            throw invalid("请明确工程验收参与方和通过条件");
+        }
+        Set<String> requirementCodes = new LinkedHashSet<>();
+        Set<RepairAcceptancePartyRole> eligibleRoles = new LinkedHashSet<>();
+        for (AcceptanceRequirement requirement : requirements) {
+            if (requirement == null
+                    || trim(requirement.requirementCode()) == null
+                    || trim(requirement.businessName()) == null
+                    || requirement.eligibleRoles().isEmpty()
+                    || requirement.minimumPassingCount() < 1) {
+                throw invalid("工程验收参与方和通过条件不完整");
+            }
+            if (!requirementCodes.add(requirement.requirementCode().trim())) {
+                throw invalid("工程验收要求编号不能重复");
+            }
+            if (!requirement.eligibleRoles().contains(RepairAcceptancePartyRole.AFFECTED_OWNER)
+                    && requirement.minimumPassingCount() > requirement.eligibleRoles().size()) {
+                throw invalid("工程验收要求的最低通过人数超过可参与角色数量");
+            }
+            eligibleRoles.addAll(requirement.eligibleRoles());
+        }
+        if (proposal.acceptanceFinalizerRoles().isEmpty()
+                || !eligibleRoles.containsAll(proposal.acceptanceFinalizerRoles())) {
+            throw invalid("验收结论确认人必须属于本方案的验收参与方");
+        }
+        Set<RepairAcceptancePartyRole> supportedFinalizers = Set.of(
+                RepairAcceptancePartyRole.BUILDING_LEADER,
+                RepairAcceptancePartyRole.COMMITTEE_EXECUTIVE_APPROVER,
+                RepairAcceptancePartyRole.COMMITTEE_SEAL_OPERATOR,
+                RepairAcceptancePartyRole.PROPERTY_TECHNICAL_COSIGNER);
+        if (!supportedFinalizers.containsAll(proposal.acceptanceFinalizerRoles())) {
+            throw invalid("受影响业主或代录的第三方人员不能负责确认最终验收结论");
+        }
+        if (proposal.acceptanceBasisAttachmentIds().isEmpty()
+                || new LinkedHashSet<>(proposal.acceptanceBasisAttachmentIds()).size()
+                != proposal.acceptanceBasisAttachmentIds().size()) {
+            throw invalid("请上传不重复的工程验收依据附件");
+        }
+        for (Long attachmentId : proposal.acceptanceBasisAttachmentIds()) {
+            projectRepository.findAttachment(attachmentId, projectId, tenantId)
+                    .orElseThrow(() -> invalid("工程验收依据附件不存在或不属于当前项目"));
+        }
+        boolean affectedOwnersParticipate = eligibleRoles.contains(RepairAcceptancePartyRole.AFFECTED_OWNER);
+        if (affectedOwnersParticipate) {
+            if (trim(proposal.affectedOwnerScopeDescription()) == null
+                    || proposal.minimumAffectedOwnerAcceptors() == null
+                    || proposal.minimumAffectedOwnerAcceptors() < 1
+                    || proposal.affectedOwnerPassRule() == null) {
+                throw invalid("受影响业主参与验收时，必须明确验收范围、最低人数和通过方式");
+            }
+            if (proposal.affectedOwnerPassRule() == AffectedOwnerPassRule.AT_LEAST_RATIO
+                    && (proposal.affectedOwnerApprovalRatio() == null
+                    || proposal.affectedOwnerApprovalRatio().compareTo(BigDecimal.ZERO) <= 0
+                    || proposal.affectedOwnerApprovalRatio().compareTo(BigDecimal.ONE) > 0)) {
+                throw invalid("按比例通过时，受影响业主同意比例必须大于 0 且不超过 1");
+            }
+            if (proposal.affectedOwnerPassRule() == AffectedOwnerPassRule.ALL
+                    && proposal.affectedOwnerApprovalRatio() != null) {
+                throw invalid("全体通过时不应再填写同意比例");
+            }
+        } else if (proposal.affectedOwnerScopeDescription() != null
+                || proposal.minimumAffectedOwnerAcceptors() != null
+                || proposal.affectedOwnerPassRule() != null
+                || proposal.affectedOwnerApprovalRatio() != null) {
+            throw invalid("方案未安排受影响业主参与验收，不应填写业主验收门槛");
+        }
     }
 
     private int nextResponsibilityDeterminationVersion(Long projectId, Long tenantId) {
@@ -1314,6 +1392,10 @@ public class RepairProjectService {
         snapshot.put("safetyRequirements", plan.safetyRequirements());
         snapshot.put("acceptanceMethod", plan.acceptanceMethod());
         snapshot.put("requiredAcceptanceRoles", plan.requiredAcceptanceRoles());
+        snapshot.put("acceptanceRequirements", plan.acceptanceRequirements());
+        snapshot.put("acceptanceFinalizerRoles", plan.acceptanceFinalizerRoles());
+        snapshot.put("acceptanceBasisAttachmentIds", plan.acceptanceBasisAttachmentIds());
+        snapshot.put("acceptanceBasisSummary", plan.acceptanceBasisSummary());
         snapshot.put("affectedOwnerScopeDescription", plan.affectedOwnerScopeDescription());
         snapshot.put("minimumAffectedOwnerAcceptors", plan.minimumAffectedOwnerAcceptors());
         snapshot.put("affectedOwnerPassRule", plan.affectedOwnerPassRule());

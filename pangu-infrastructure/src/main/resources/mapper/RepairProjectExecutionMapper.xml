@@ -256,14 +256,18 @@
             keyProperty="row.policyId" keyColumn="policy_id">
         INSERT INTO t_repair_acceptance_policy_snapshot (
             work_order_id, project_id, plan_id, tenant_id, workflow_type, policy_hash,
+            acceptance_method, requirements_json, finalizer_roles_json,
+            basis_attachment_ids_json, basis_summary,
             affected_owner_count, minimum_affected_owner_participants,
             minimum_affected_owner_approvals, affected_owner_pass_rule,
             affected_owner_approval_ratio, version, status, locked_by_user_id
         ) VALUES (
             NULL, #{row.projectId}, #{row.planId}, #{row.tenantId}, #{row.workflowType}, #{row.policyHash},
-            #{row.affectedOwnerCount},
-            CASE WHEN #{row.workflowType} = 'BUILDING_REPAIR' THEN #{row.minimumAffectedOwnerParticipants} ELSE NULL END,
-            CASE WHEN #{row.workflowType} = 'BUILDING_REPAIR' THEN #{minimumApprovals} ELSE NULL END,
+            #{row.acceptanceMethod}, CAST(#{row.requirementsJson} AS JSONB),
+            CAST(#{row.finalizerRolesJson} AS JSONB), CAST(#{row.basisAttachmentIdsJson} AS JSONB),
+            #{row.basisSummary}, #{row.affectedOwnerCount},
+            CASE WHEN #{row.affectedOwnerCount} > 0 THEN #{row.minimumAffectedOwnerParticipants} ELSE NULL END,
+            CASE WHEN #{row.affectedOwnerCount} > 0 THEN #{minimumApprovals} ELSE NULL END,
             #{row.affectedOwnerPassRule}, #{row.affectedOwnerApprovalRatio},
             (SELECT COALESCE(MAX(version), 0) + 1
              FROM t_repair_acceptance_policy_snapshot
@@ -276,8 +280,8 @@
         INSERT INTO t_repair_acceptance_affected_owner (
             policy_id, tenant_id, room_id, owner_uid, affected_reason
         )
-        SELECT #{policyId}, #{tenantId}, room_id, owner_uid, affected_reason
-        FROM t_repair_plan_affected_owner
+        SELECT #{policyId}, #{tenantId}, room_id, owner_uid, '实施方案确认的费用承担房屋'
+        FROM t_repair_plan_allocation_room
         WHERE plan_id = #{planId} AND tenant_id = #{tenantId}
     </insert>
 
@@ -296,6 +300,10 @@
     <select id="findAcceptancePolicy"
             resultType="com.pangu.infrastructure.persistence.entity.RepairProjectExecutionRows$AcceptancePolicyRow">
         SELECT policy_id, project_id, plan_id, tenant_id, workflow_type, policy_hash,
+               acceptance_method, requirements_json::TEXT AS requirements_json,
+               finalizer_roles_json::TEXT AS finalizer_roles_json,
+               basis_attachment_ids_json::TEXT AS basis_attachment_ids_json,
+               basis_summary,
                affected_owner_count, COALESCE(minimum_affected_owner_participants, 0)
                    AS minimum_affected_owner_participants,
                affected_owner_pass_rule, affected_owner_approval_ratio
@@ -349,7 +357,6 @@
           ON ao.policy_id = aps.policy_id
          AND ao.tenant_id = aps.tenant_id
         WHERE p.tenant_id = #{tenantId}
-          AND p.workflow_type = 'BUILDING_REPAIR'
           AND p.status = 'PENDING_ACCEPTANCE'
           AND ao.owner_uid = #{ownerUid}
         ORDER BY p.project_id DESC

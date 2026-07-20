@@ -15,13 +15,15 @@ import com.pangu.domain.context.UserContext;
 import com.pangu.domain.model.propertyservice.PropertyServiceEnterprise;
 import com.pangu.domain.model.propertyservice.PropertyServiceOrganization;
 import com.pangu.domain.model.repair.RepairProject.Attachment;
+import com.pangu.domain.model.repair.RepairProject.AllocationRoom;
 import com.pangu.domain.model.repair.RepairProject.EvidenceRequirement;
 import com.pangu.domain.model.repair.RepairProject.EvidenceStage;
-import com.pangu.domain.model.repair.RepairProject.PlanAffectedOwner;
+import com.pangu.domain.model.repair.RepairAcceptancePartyRole;
 import com.pangu.domain.model.repair.RepairProject.ResponsibilityDeterminationStatus;
 import com.pangu.domain.model.repair.RepairProject.ResponsibilityPath;
 import com.pangu.domain.model.repair.RepairProject.Status;
 import com.pangu.domain.model.repair.RepairProjectExecution.AcceptancePolicy;
+import com.pangu.domain.model.repair.RepairProjectExecution.AcceptanceRequirement;
 import com.pangu.domain.model.repair.RepairProjectExecution.Contract;
 import com.pangu.domain.model.repair.RepairProjectExecution.ContractPartyType;
 import com.pangu.domain.model.repair.RepairProjectExecution.ContractSignature;
@@ -52,6 +54,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -402,35 +405,67 @@ public class RepairProjectExecutionService {
     }
 
     private void openAcceptance(Context context, Settlement settlement, UserContext actor) {
-        List<PlanAffectedOwner> affectedOwners = projectRepository.listPlanAffectedOwners(
-                context.plan().planId(), context.project().tenantId());
-        int affectedOwnerCount = context.project().workflowType() == RepairWorkflowType.BUILDING_REPAIR
-                ? Math.toIntExact(affectedOwners.stream().map(PlanAffectedOwner::ownerUid).distinct().count()) : 0;
-        int minimumParticipants = context.project().workflowType() == RepairWorkflowType.BUILDING_REPAIR
+        boolean affectedOwnersParticipate = context.plan().acceptanceRequirements().stream()
+                .map(AcceptanceRequirement::eligibleRoles)
+                .anyMatch(roles -> roles.contains(RepairAcceptancePartyRole.AFFECTED_OWNER));
+        List<AllocationRoom> allocationRooms = affectedOwnersParticipate
+                ? projectRepository.listAllocationRooms(context.plan().planId(), context.project().tenantId())
+                : List.of();
+        int affectedOwnerCount = Math.toIntExact(allocationRooms.stream()
+                .map(AllocationRoom::ownerUid).distinct().count());
+        int minimumParticipants = affectedOwnersParticipate
                 ? context.plan().minimumAffectedOwnerAcceptors() : 0;
-        int minimumApprovals = context.project().workflowType() == RepairWorkflowType.BUILDING_REPAIR
-                ? BigDecimal.valueOf(minimumParticipants)
-                .multiply(context.plan().affectedOwnerApprovalRatio())
-                .setScale(0, RoundingMode.CEILING).intValueExact()
-                : 0;
+        if (affectedOwnersParticipate && (affectedOwnerCount == 0 || minimumParticipants > affectedOwnerCount)) {
+            throw support.invalid("实施方案约定受影响业主参与验收，但费用承担房屋中没有足够的已核验业主");
+        }
+        int minimumApprovals = minimumAffectedOwnerApprovals(context, minimumParticipants);
         String policyHash = sha256(String.join("|",
                 context.plan().snapshotHash(), settlement.settlementId().toString(),
-                context.project().workflowType().name(), Integer.toString(affectedOwnerCount),
+                context.project().workflowType().name(), context.plan().acceptanceMethod(),
+                acceptanceRequirementHashSource(context.plan().acceptanceRequirements()),
+                context.plan().acceptanceFinalizerRoles().stream().map(Enum::name).sorted().toList().toString(),
+                context.plan().acceptanceBasisAttachmentIds().toString(), context.plan().acceptanceBasisSummary(),
+                Integer.toString(affectedOwnerCount),
                 Integer.toString(minimumParticipants),
                 String.valueOf(context.plan().affectedOwnerPassRule()),
                 String.valueOf(context.plan().affectedOwnerApprovalRatio())));
         AcceptancePolicy policy = executionRepository.insertAcceptancePolicy(new AcceptancePolicy(
                 null, context.project().projectId(), context.plan().planId(), context.project().tenantId(),
-                context.project().workflowType(), policyHash, affectedOwnerCount, minimumParticipants,
+                context.project().workflowType(), policyHash, context.plan().acceptanceMethod(),
+                context.plan().acceptanceRequirements(), context.plan().acceptanceFinalizerRoles(),
+                context.plan().acceptanceBasisAttachmentIds(), context.plan().acceptanceBasisSummary(),
+                affectedOwnerCount, minimumParticipants,
                 context.plan().affectedOwnerPassRule(), context.plan().affectedOwnerApprovalRatio()),
                 minimumApprovals, actor.userId());
-        if (context.project().workflowType() == RepairWorkflowType.BUILDING_REPAIR) {
+        if (affectedOwnersParticipate) {
             executionRepository.snapshotAcceptanceAffectedOwners(
                     policy.policyId(), context.plan().planId(), context.project().tenantId());
         }
         executionRepository.startAcceptance(
                 context.project().projectId(), context.project().tenantId(), policy.policyId(),
                 settlement.settlementId(), actor.userId());
+    }
+
+    private int minimumAffectedOwnerApprovals(Context context, int minimumParticipants) {
+        if (minimumParticipants == 0) {
+            return 0;
+        }
+        if (context.plan().affectedOwnerPassRule()
+                == com.pangu.domain.model.repair.RepairProject.AffectedOwnerPassRule.ALL) {
+            return minimumParticipants;
+        }
+        return BigDecimal.valueOf(minimumParticipants)
+                .multiply(context.plan().affectedOwnerApprovalRatio())
+                .setScale(0, RoundingMode.CEILING).intValueExact();
+    }
+
+    private String acceptanceRequirementHashSource(List<AcceptanceRequirement> requirements) {
+        return requirements.stream()
+                .sorted(Comparator.comparing(AcceptanceRequirement::requirementCode))
+                .map(requirement -> requirement.requirementCode() + ":" + requirement.businessName() + ":"
+                        + requirement.eligibleRoles().stream().map(Enum::name).sorted().toList()
+                        + ":" + requirement.minimumPassingCount() + ":" + requirement.evidenceRequired())
+                .toList().toString();
     }
 
     private void assertExecutionEvidenceComplete(Context context) {

@@ -172,7 +172,8 @@ public class RepairProjectExecutionController extends BaseController {
     }
 
     @PostMapping("/acceptance/finalization")
-    @PreAuthorize("hasAnyAuthority('repair:workorder:local-decision','repair:workorder:governance')")
+    @PreAuthorize("hasAnyAuthority('repair:workorder:local-decision','repair:workorder:governance',"
+            + "'repair:workorder:manage','repair:workorder:field')")
     public Result<AcceptanceRound> finalizeAcceptance(
             @PathVariable("projectId") Long projectId,
             @Valid @RequestBody AcceptanceFinalizationRequest request) {

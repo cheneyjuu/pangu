@@ -29,6 +29,10 @@ public class RepairPlanVersionRow {
     private String safetyRequirements;
     private String acceptanceMethod;
     private String requiredAcceptanceRolesJson;
+    private String acceptanceRequirementsJson;
+    private String acceptanceFinalizerRolesJson;
+    private String acceptanceBasisAttachmentIdsJson;
+    private String acceptanceBasisSummary;
     private String affectedOwnerScopeDescription;
     private Integer minimumAffectedOwnerAcceptors;
     private String affectedOwnerPassRule;

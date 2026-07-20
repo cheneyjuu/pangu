@@ -140,6 +140,11 @@ public final class RepairProjectExecutionRows {
         private Long tenantId;
         private String workflowType;
         private String policyHash;
+        private String acceptanceMethod;
+        private String requirementsJson;
+        private String finalizerRolesJson;
+        private String basisAttachmentIdsJson;
+        private String basisSummary;
         private Integer affectedOwnerCount;
         private Integer minimumAffectedOwnerParticipants;
         private String affectedOwnerPassRule;

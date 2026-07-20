@@ -1,9 +1,11 @@
-// 关联业务：验证楼栋/全小区维修验收门槛及维修资金各付款节点的后端强制规则。
+// 关联业务：验证方案约定的工程验收门槛及维修资金各付款节点的后端强制规则。
 package com.pangu.bootstrap.repair;
 
 import com.pangu.domain.model.repair.RepairAcceptanceDecision;
+import com.pangu.domain.model.repair.RepairAcceptancePartyRole;
 import com.pangu.domain.model.repair.RepairProject;
 import com.pangu.domain.model.repair.RepairProjectExecution.AcceptancePolicy;
+import com.pangu.domain.model.repair.RepairProjectExecution.AcceptanceRequirement;
 import com.pangu.domain.model.repair.RepairProjectExecution.AcceptanceSummary;
 import com.pangu.domain.model.repair.RepairWorkflowType;
 import com.pangu.domain.policy.repair.RepairPaymentEligibilityPolicy;
@@ -21,8 +23,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RepairProjectPoliciesTest {
 
-    private final RepairProjectAcceptancePolicy communityAcceptance =
-            new RepairProjectAcceptancePolicy.Community();
+    private final RepairProjectAcceptancePolicy acceptance =
+            new RepairProjectAcceptancePolicy.Configured();
     private final RepairPaymentEligibilityPolicy paymentEligibility =
             new RepairPaymentEligibilityPolicy.Default();
 
@@ -30,32 +32,53 @@ class RepairProjectPoliciesTest {
     void communityAcceptanceRequiresExecutiveSealAndOneProfessionalCosigner() {
         AcceptancePolicy policy = communityPolicy();
 
-        assertIncomplete(policy, communitySummary(false, true, true, false), "主任或副主任");
-        assertIncomplete(policy, communitySummary(true, false, true, false), "公章");
-        assertIncomplete(policy, communitySummary(true, true, false, false), "物业或第三方");
+        assertIncomplete(policy, communitySummary(false, true, true, false), "业委会负责人");
+        assertIncomplete(policy, communitySummary(true, false, true, false), "验收文件用印");
+        assertIncomplete(policy, communitySummary(true, true, false, false), "专业人员共同验收");
 
         assertEquals(RepairAcceptanceDecision.Outcome.PASSED,
-                communityAcceptance.evaluate(policy, communitySummary(true, true, true, false)).outcome());
+                acceptance.evaluate(policy, communitySummary(true, true, true, false)).outcome());
         assertEquals(RepairAcceptanceDecision.Outcome.PASSED,
-                communityAcceptance.evaluate(policy, communitySummary(true, true, false, true)).outcome());
+                acceptance.evaluate(policy, communitySummary(true, true, false, true)).outcome());
     }
 
     @Test
     void buildingAcceptanceUsesLockedMinimumAndApprovalRatio() {
-        RepairProjectAcceptancePolicy building = new RepairProjectAcceptancePolicy.Building();
         AcceptancePolicy policy = new AcceptancePolicy(
                 1L, 2L, 3L, 10001L, RepairWorkflowType.BUILDING_REPAIR, "hash",
+                "楼组长与受影响业主现场验收",
+                List.of(
+                        requirement("BUILDING_LEADER", "楼组长验收", Set.of(
+                                RepairAcceptancePartyRole.BUILDING_LEADER)),
+                        requirement("AFFECTED_OWNER", "受影响业主验收", Set.of(
+                                RepairAcceptancePartyRole.AFFECTED_OWNER))),
+                Set.of(RepairAcceptancePartyRole.BUILDING_LEADER), List.of(10L), "锁定方案约定",
                 4, 3, RepairProject.AffectedOwnerPassRule.AT_LEAST_RATIO, new BigDecimal("0.6667"));
 
         assertEquals(RepairAcceptanceDecision.Outcome.INCOMPLETE,
-                building.evaluate(policy, new AcceptanceSummary(2, 2, 0, true,
+                acceptance.evaluate(policy, new AcceptanceSummary(2, 2, 0, true,
                         false, false, false, false)).outcome());
         assertEquals(RepairAcceptanceDecision.Outcome.INCOMPLETE,
-                building.evaluate(policy, new AcceptanceSummary(3, 2, 0, true,
+                acceptance.evaluate(policy, new AcceptanceSummary(3, 2, 0, true,
                         false, false, false, false)).outcome());
         assertEquals(RepairAcceptanceDecision.Outcome.PASSED,
-                building.evaluate(policy, new AcceptanceSummary(3, 3, 0, true,
+                acceptance.evaluate(policy, new AcceptanceSummary(3, 3, 0, true,
                         false, false, false, false)).outcome());
+    }
+
+    @Test
+    void projectScopeDoesNotInventAcceptanceParticipants() {
+        AcceptancePolicy communityProjectWithPropertyAcceptance = new AcceptancePolicy(
+                1L, 2L, 3L, 10001L, RepairWorkflowType.COMMUNITY_PUBLIC_REPAIR, "hash",
+                "物业按竣工单现场核验",
+                List.of(requirement("PROPERTY", "物业现场验收", Set.of(
+                        RepairAcceptancePartyRole.PROPERTY_TECHNICAL_COSIGNER))),
+                Set.of(RepairAcceptancePartyRole.PROPERTY_TECHNICAL_COSIGNER),
+                List.of(10L), "合同约定", 0, 0, null, null);
+
+        assertEquals(RepairAcceptanceDecision.Outcome.PASSED,
+                acceptance.evaluate(communityProjectWithPropertyAcceptance,
+                        communitySummary(false, false, true, false)).outcome());
     }
 
     @Test
@@ -110,7 +133,22 @@ class RepairProjectPoliciesTest {
 
     private AcceptancePolicy communityPolicy() {
         return new AcceptancePolicy(1L, 2L, 3L, 10001L,
-                RepairWorkflowType.COMMUNITY_PUBLIC_REPAIR, "hash", 0, 0, null, null);
+                RepairWorkflowType.COMMUNITY_PUBLIC_REPAIR, "hash", "多方现场验收",
+                List.of(
+                        requirement("EXECUTIVE", "业委会负责人验收", Set.of(
+                                RepairAcceptancePartyRole.COMMITTEE_EXECUTIVE_APPROVER)),
+                        requirement("SEAL", "验收文件用印", Set.of(
+                                RepairAcceptancePartyRole.COMMITTEE_SEAL_OPERATOR)),
+                        requirement("TECHNICAL", "专业人员共同验收", Set.of(
+                                RepairAcceptancePartyRole.PROPERTY_TECHNICAL_COSIGNER,
+                                RepairAcceptancePartyRole.THIRD_PARTY_TECHNICAL_COSIGNER))),
+                Set.of(RepairAcceptancePartyRole.COMMITTEE_EXECUTIVE_APPROVER),
+                List.of(10L), "业主决定和合同约定", 0, 0, null, null);
+    }
+
+    private AcceptanceRequirement requirement(
+            String code, String businessName, Set<RepairAcceptancePartyRole> roles) {
+        return new AcceptanceRequirement(code, businessName, roles, 1, false);
     }
 
     private AcceptanceSummary communitySummary(
@@ -120,7 +158,7 @@ class RepairProjectPoliciesTest {
     }
 
     private void assertIncomplete(AcceptancePolicy policy, AcceptanceSummary summary, String reasonPart) {
-        RepairAcceptanceDecision decision = communityAcceptance.evaluate(policy, summary);
+        RepairAcceptanceDecision decision = acceptance.evaluate(policy, summary);
         assertEquals(RepairAcceptanceDecision.Outcome.INCOMPLETE, decision.outcome());
         assertTrue(decision.reason().contains(reasonPart));
     }

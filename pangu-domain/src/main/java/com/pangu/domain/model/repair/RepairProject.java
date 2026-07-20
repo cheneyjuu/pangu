@@ -2,11 +2,13 @@
 package com.pangu.domain.model.repair;
 
 import com.pangu.domain.model.repair.RepairProjectGovernance.SupplierSelectionEvaluationRule;
+import com.pangu.domain.model.repair.RepairProjectExecution.AcceptanceRequirement;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Set;
 
 /**
  * 维修工程项目聚合的领域读模型。
@@ -229,6 +231,10 @@ public record RepairProject(
             String safetyRequirements,
             String acceptanceMethod,
             List<String> requiredAcceptanceRoles,
+            List<AcceptanceRequirement> acceptanceRequirements,
+            Set<RepairAcceptancePartyRole> acceptanceFinalizerRoles,
+            List<Long> acceptanceBasisAttachmentIds,
+            String acceptanceBasisSummary,
             String affectedOwnerScopeDescription,
             Integer minimumAffectedOwnerAcceptors,
             AffectedOwnerPassRule affectedOwnerPassRule,
@@ -256,6 +262,15 @@ public record RepairProject(
             requiredAcceptanceRoles = requiredAcceptanceRoles == null
                     ? List.of()
                     : List.copyOf(requiredAcceptanceRoles);
+            acceptanceRequirements = acceptanceRequirements == null
+                    ? List.of()
+                    : List.copyOf(acceptanceRequirements);
+            acceptanceFinalizerRoles = acceptanceFinalizerRoles == null
+                    ? Set.of()
+                    : Set.copyOf(acceptanceFinalizerRoles);
+            acceptanceBasisAttachmentIds = acceptanceBasisAttachmentIds == null
+                    ? List.of()
+                    : List.copyOf(acceptanceBasisAttachmentIds);
             paymentMilestones = paymentMilestones == null ? List.of() : List.copyOf(paymentMilestones);
         }
 
@@ -267,6 +282,8 @@ public record RepairProject(
                     minimumInvitedSupplierCount, minimumValidQuoteCount, nonCompetitiveSelectionBasis,
                     supplierSelectionReason, constructionManagementRequirements,
                     evidenceRequirements, safetyRequirements, acceptanceMethod, requiredAcceptanceRoles,
+                    acceptanceRequirements, acceptanceFinalizerRoles, acceptanceBasisAttachmentIds,
+                    acceptanceBasisSummary,
                     affectedOwnerScopeDescription, minimumAffectedOwnerAcceptors, affectedOwnerPassRule,
                     affectedOwnerApprovalRatio, settlementMethod, plannedStartDate, plannedCompletionDate,
                     warrantyDays, governancePath, priceReviewRequired, paymentMilestones, status,
@@ -289,11 +306,42 @@ public record RepairProject(
                     resolvedNonCompetitiveSelectionBasis,
                     supplierSelectionReason, constructionManagementRequirements,
                     evidenceRequirements, safetyRequirements, acceptanceMethod, requiredAcceptanceRoles,
+                    acceptanceRequirements, acceptanceFinalizerRoles, acceptanceBasisAttachmentIds,
+                    acceptanceBasisSummary,
                     affectedOwnerScopeDescription, minimumAffectedOwnerAcceptors, affectedOwnerPassRule,
                     affectedOwnerApprovalRatio, settlementMethod, plannedStartDate, plannedCompletionDate,
                     warrantyDays, governancePath, priceReviewRequired, paymentMilestones, status,
                     authorizationSnapshotHash, authorizationFrozenByUserId, authorizationFrozenAt, snapshotHash,
                     createdByAccountId, createdByUserId, lockedByUserId, createTime, lockedAt);
+        }
+
+        /** 授权提案冻结时补齐验收依据；草稿阶段不让物业凭空决定验收参与方。 */
+        public PlanVersion withAcceptanceTerms(
+                String resolvedAcceptanceMethod,
+                List<AcceptanceRequirement> resolvedRequirements,
+                Set<RepairAcceptancePartyRole> resolvedFinalizerRoles,
+                List<Long> resolvedBasisAttachmentIds,
+                String resolvedBasisSummary,
+                String resolvedAffectedOwnerScopeDescription,
+                Integer resolvedMinimumAffectedOwnerAcceptors,
+                AffectedOwnerPassRule resolvedAffectedOwnerPassRule,
+                BigDecimal resolvedAffectedOwnerApprovalRatio) {
+            return new PlanVersion(
+                    planId, projectId, tenantId, versionNo, planDescription,
+                    budgetTotal, fundSource, allocationRuleType, allocationRuleDescription,
+                    supplierSelectionMethod, supplierSelectionEvaluationRule,
+                    minimumInvitedSupplierCount, minimumValidQuoteCount,
+                    nonCompetitiveSelectionBasis,
+                    supplierSelectionReason, constructionManagementRequirements,
+                    evidenceRequirements, safetyRequirements, resolvedAcceptanceMethod,
+                    requiredAcceptanceRoles, resolvedRequirements, resolvedFinalizerRoles,
+                    resolvedBasisAttachmentIds, resolvedBasisSummary,
+                    resolvedAffectedOwnerScopeDescription, resolvedMinimumAffectedOwnerAcceptors,
+                    resolvedAffectedOwnerPassRule, resolvedAffectedOwnerApprovalRatio,
+                    settlementMethod, plannedStartDate, plannedCompletionDate,
+                    warrantyDays, governancePath, priceReviewRequired, paymentMilestones, status,
+                    authorizationSnapshotHash, authorizationFrozenByUserId, authorizationFrozenAt,
+                    snapshotHash, createdByAccountId, createdByUserId, lockedByUserId, createTime, lockedAt);
         }
     }
 

@@ -222,13 +222,9 @@ class RepairProjectBuildingE2eFlowTest {
 
         JsonNode frozen = postData(
                 "/api/v1/admin/repair-projects/" + projectId + "/plans/" + planId + "/freeze-for-authorization",
-                propertyManagerToken, Map.of(
-                        "expectedProjectVersion",
+                propertyManagerToken, authorizationFreezeRequest(
                         responsibilityConfirmed.path("project").path("version").asInt(),
-                        "supplierSelectionMethod", "COMPETITIVE_QUOTATION",
-                        "supplierEvaluationRule", "LOWEST_COMPLIANT_QUOTE",
-                        "minimumInvitedSupplierCount", 1,
-                        "minimumValidQuoteCount", 1));
+                        responsibilityAttachmentId));
         assertEquals("AUTHORIZATION_IN_PROGRESS", frozen.path("project").path("status").asText());
         assertEquals("AUTHORIZATION_FROZEN", frozen.path("plans").get(0).path("status").asText());
         assertEquals(64, frozen.path("plans").get(0).path("authorizationSnapshotHash").asText().length());
@@ -892,6 +888,31 @@ class RepairProjectBuildingE2eFlowTest {
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
         return objectMapper.readTree(response).path("data").path("attachmentId").asLong();
+    }
+
+    private Map<String, Object> authorizationFreezeRequest(
+            int expectedVersion, long acceptanceBasisAttachmentId) {
+        Map<String, Object> request = new LinkedHashMap<>();
+        request.put("expectedProjectVersion", expectedVersion);
+        request.put("supplierSelectionMethod", "COMPETITIVE_QUOTATION");
+        request.put("supplierEvaluationRule", "LOWEST_COMPLIANT_QUOTE");
+        request.put("minimumInvitedSupplierCount", 1);
+        request.put("minimumValidQuoteCount", 1);
+        request.put("acceptanceMethod", "物业项目负责人和受影响业主按竣工资料现场验收");
+        request.put("acceptanceRequirements", List.of(
+                Map.of("requirementCode", "PROPERTY", "businessName", "物业现场验收",
+                        "eligibleRoles", List.of("PROPERTY_TECHNICAL_COSIGNER"),
+                        "minimumPassingCount", 1, "evidenceRequired", true),
+                Map.of("requirementCode", "AFFECTED_OWNER", "businessName", "受影响业主验收",
+                        "eligibleRoles", List.of("AFFECTED_OWNER"),
+                        "minimumPassingCount", 1, "evidenceRequired", false)));
+        request.put("acceptanceFinalizerRoles", List.of("PROPERTY_TECHNICAL_COSIGNER"));
+        request.put("acceptanceBasisAttachmentIds", List.of(acceptanceBasisAttachmentId));
+        request.put("acceptanceBasisSummary", "依据工程责任和验收约定，由物业和费用承担房屋业主共同验收");
+        request.put("affectedOwnerScopeDescription", "本实施方案费用承担房屋的已核验业主");
+        request.put("minimumAffectedOwnerAcceptors", 1);
+        request.put("affectedOwnerPassRule", "ALL");
+        return request;
     }
 
     private JsonNode postAction(long workOrderId, String suffix, String token, Object body) throws Exception {

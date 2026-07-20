@@ -16,8 +16,6 @@ import com.pangu.domain.model.repair.RepairProject.PlanAffectedOwner;
 import com.pangu.domain.model.repair.RepairProject.PlanVersion;
 import com.pangu.domain.model.repair.RepairProject.Status;
 import com.pangu.domain.model.repair.RepairProject.WorkPoint;
-import com.pangu.domain.model.repair.RepairProjectGovernance.SupplierSelectionEvaluationRule;
-import com.pangu.domain.model.repair.RepairSupplierSelectionMethod;
 
 import java.util.List;
 import java.util.Optional;
@@ -121,14 +119,8 @@ public interface RepairProjectRepository {
     /**
      * 固定供业主决定或授权审查的提案版本；不会赋予施工、定商、合同或付款资格。
      */
-    int freezePlanForAuthorization(Long planId, Long projectId, Long tenantId,
-                                   String authorizationSnapshotHash,
-                                   RepairSupplierSelectionMethod supplierSelectionMethod,
-                                   SupplierSelectionEvaluationRule supplierEvaluationRule,
-                                   Integer minimumInvitedSupplierCount,
-                                   Integer minimumValidQuoteCount,
-                                   String nonCompetitiveSelectionBasis,
-                                   Long frozenByUserId);
+    int freezePlanForAuthorization(
+            RepairProject.PlanVersion proposal, String authorizationSnapshotHash, Long frozenByUserId);
 
     /** 将冻结提案设为当前待授权方案，并把项目推进到授权办理中。 */
     int activateAuthorizationProposal(Long projectId, Long tenantId, Long planId, Integer expectedVersion);

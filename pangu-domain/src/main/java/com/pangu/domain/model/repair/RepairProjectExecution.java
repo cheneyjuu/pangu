@@ -5,6 +5,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Set;
 
 public final class RepairProjectExecution {
 
@@ -192,11 +193,37 @@ public final class RepairProjectExecution {
             Long tenantId,
             RepairWorkflowType workflowType,
             String policyHash,
+            String acceptanceMethod,
+            List<AcceptanceRequirement> requirements,
+            Set<RepairAcceptancePartyRole> finalizerRoles,
+            List<Long> basisAttachmentIds,
+            String basisSummary,
             int affectedOwnerCount,
             int minimumAffectedOwnerParticipants,
             RepairProject.AffectedOwnerPassRule affectedOwnerPassRule,
             BigDecimal affectedOwnerApprovalRatio
     ) {
+        public AcceptancePolicy {
+            requirements = requirements == null ? List.of() : List.copyOf(requirements);
+            finalizerRoles = finalizerRoles == null ? Set.of() : Set.copyOf(finalizerRoles);
+            basisAttachmentIds = basisAttachmentIds == null ? List.of() : List.copyOf(basisAttachmentIds);
+        }
+    }
+
+    /**
+     * 一项可执行验收要求。eligibleRoles 支持“物业或第三方专业人员任一方”等真实组合，
+     * minimumPassingCount 表示该组合至少需要多少个通过结论。
+     */
+    public record AcceptanceRequirement(
+            String requirementCode,
+            String businessName,
+            Set<RepairAcceptancePartyRole> eligibleRoles,
+            int minimumPassingCount,
+            boolean evidenceRequired
+    ) {
+        public AcceptanceRequirement {
+            eligibleRoles = eligibleRoles == null ? Set.of() : Set.copyOf(eligibleRoles);
+        }
     }
 
     public record AcceptanceRound(
@@ -245,6 +272,20 @@ public final class RepairProjectExecution {
             boolean propertyTechnicalCosigned,
             boolean thirdPartyTechnicalCosigned
     ) {
+        public int passedCount(Set<RepairAcceptancePartyRole> roles) {
+            int count = 0;
+            for (RepairAcceptancePartyRole role : roles) {
+                count += switch (role) {
+                    case AFFECTED_OWNER -> passedAffectedOwnerCount;
+                    case BUILDING_LEADER -> buildingLeaderPassed ? 1 : 0;
+                    case COMMITTEE_EXECUTIVE_APPROVER -> committeeExecutivePassed ? 1 : 0;
+                    case COMMITTEE_SEAL_OPERATOR -> committeeSealApplied ? 1 : 0;
+                    case PROPERTY_TECHNICAL_COSIGNER -> propertyTechnicalCosigned ? 1 : 0;
+                    case THIRD_PARTY_TECHNICAL_COSIGNER -> thirdPartyTechnicalCosigned ? 1 : 0;
+                };
+            }
+            return count;
+        }
     }
 
     public record OwnerAcceptanceTask(

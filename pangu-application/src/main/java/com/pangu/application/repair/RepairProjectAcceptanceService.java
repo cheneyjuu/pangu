@@ -1,4 +1,4 @@
-// 关联业务：分别编排楼栋维修业主验收和全小区维修业委会验收，并登记完工披露与质保期。
+// 关联业务：按锁定实施方案编排工程验收参与、结论确认，并登记后续完工披露与质保期。
 package com.pangu.application.repair;
 
 import com.pangu.application.repair.RepairProjectApplicationSupport.Context;
@@ -15,12 +15,12 @@ import com.pangu.domain.model.repair.RepairProject.Attachment;
 import com.pangu.domain.model.repair.RepairProject.Status;
 import com.pangu.domain.model.repair.RepairProjectExecution.AcceptanceParty;
 import com.pangu.domain.model.repair.RepairProjectExecution.AcceptancePolicy;
+import com.pangu.domain.model.repair.RepairProjectExecution.AcceptanceRequirement;
 import com.pangu.domain.model.repair.RepairProjectExecution.AcceptanceRound;
 import com.pangu.domain.model.repair.RepairProjectExecution.AcceptanceSummary;
 import com.pangu.domain.model.repair.RepairProjectExecution.CompletionDisclosure;
 import com.pangu.domain.model.repair.RepairProjectExecution.OwnerAcceptanceTask;
 import com.pangu.domain.model.repair.RepairProjectExecution.Settlement;
-import com.pangu.domain.model.repair.RepairWorkflowType;
 import com.pangu.domain.policy.repair.RepairProjectAcceptancePolicy;
 import com.pangu.domain.repository.RepairProjectExecutionRepository;
 import com.pangu.domain.repository.RepairProjectGovernanceRepository;
@@ -48,9 +48,8 @@ public class RepairProjectAcceptanceService {
     private static final Set<String> PROPERTY_ROLES = Set.of("PROPERTY_MANAGER", "PROPERTY_STAFF");
     private static final Set<String> THIRD_PARTY_RECORD_ROLES = Set.of(
             "PROPERTY_MANAGER", "COMMITTEE_DIRECTOR", "COMMITTEE_MEMBER");
-    private static final Map<RepairWorkflowType, RepairProjectAcceptancePolicy> POLICIES = Map.of(
-            RepairWorkflowType.BUILDING_REPAIR, new RepairProjectAcceptancePolicy.Building(),
-            RepairWorkflowType.COMMUNITY_PUBLIC_REPAIR, new RepairProjectAcceptancePolicy.Community());
+    private static final RepairProjectAcceptancePolicy ACCEPTANCE_POLICY =
+            new RepairProjectAcceptancePolicy.Configured();
 
     private final RepairProjectApplicationSupport support;
     private final RepairProjectExecutionRepository executionRepository;
@@ -73,11 +72,11 @@ public class RepairProjectAcceptanceService {
 
     private OwnerAcceptanceTask ownerTask(Long projectId, UserContext actor) {
         Context context = support.load(projectId, actor.tenantId());
-        if (context.project().workflowType() != RepairWorkflowType.BUILDING_REPAIR
-                || context.project().status() != Status.PENDING_ACCEPTANCE) {
-            throw support.forbidden("当前业主没有该项目的楼栋验收任务");
+        if (context.project().status() != Status.PENDING_ACCEPTANCE) {
+            throw support.forbidden("当前业主没有该项目的验收任务");
         }
         AcceptancePolicy policy = policy(context);
+        requireRoleConfigured(policy, RepairAcceptancePartyRole.AFFECTED_OWNER);
         AcceptanceRound round = round(context);
         List<Long> roomIds = executionRepository.listAffectedOwnerRoomIds(
                 policy.policyId(), actor.tenantId(), actor.uid());
@@ -100,7 +99,9 @@ public class RepairProjectAcceptanceService {
         UserContext actor = support.requireSysActor(
                 BUILDING_LEADER_ROLES, "仅本楼栋楼组长可提交楼组长验收");
         require(command != null, "验收命令不能为空");
-        Context context = acceptanceContext(projectId, actor.tenantId(), RepairWorkflowType.BUILDING_REPAIR);
+        Context context = acceptanceContext(projectId, actor.tenantId());
+        AcceptancePolicy policy = policy(context);
+        requireRoleConfigured(policy, RepairAcceptancePartyRole.BUILDING_LEADER);
         if (context.project().buildingId() == null
                 || (!actor.authorizedBuildingIds().contains(context.project().buildingId())
                 && actor.authorizedBuildingScopes().stream().noneMatch(scope ->
@@ -114,7 +115,8 @@ public class RepairProjectAcceptanceService {
                 RepairAcceptancePartyRole.BUILDING_LEADER, null, null, actor.accountId(), actor.userId(),
                 requiredText(command.participantName(), "participantName"), null, null,
                 conclusion(command), text(command.opinion()), "ONLINE_SELF",
-                onlineEvidence(context, command.evidenceAttachmentId()), null, actor.userId(), null);
+                evidenceForRole(context, policy, RepairAcceptancePartyRole.BUILDING_LEADER,
+                        command.evidenceAttachmentId()), null, actor.userId(), null);
         executionRepository.insertAcceptanceParty(actor.tenantId(), party);
         support.event(context, actor, "PROJECT_BUILDING_LEADER_ACCEPTANCE", Map.of(
                 "acceptanceId", round.acceptanceId(), "conclusion", party.conclusion().name()));
@@ -124,9 +126,10 @@ public class RepairProjectAcceptanceService {
     @Transactional
     public AcceptanceParty recordOwner(Long projectId, RecordOwnerAcceptance command) {
         UserContext actor = support.requireOwnerActor();
-        Context context = acceptanceContext(projectId, actor.tenantId(), RepairWorkflowType.BUILDING_REPAIR);
+        Context context = acceptanceContext(projectId, actor.tenantId());
         require(command != null && command.roomId() != null, "roomId 必填");
         AcceptancePolicy policy = policy(context);
+        requireRoleConfigured(policy, RepairAcceptancePartyRole.AFFECTED_OWNER);
         if (!executionRepository.affectedOwnerIncluded(
                 policy.policyId(), actor.tenantId(), command.roomId(), actor.uid())) {
             throw support.forbidden("当前业主及房屋不在项目锁定的受影响验收范围内");
@@ -138,7 +141,8 @@ public class RepairProjectAcceptanceService {
                 RepairAcceptancePartyRole.AFFECTED_OWNER, command.roomId(), actor.uid(),
                 actor.accountId(), null, requiredText(command.participantName(), "participantName"),
                 null, null, conclusion, text(command.opinion()), "ONLINE_SELF",
-                onlineEvidence(context, command.evidenceAttachmentId()), null, null, null);
+                evidenceForRole(context, policy, RepairAcceptancePartyRole.AFFECTED_OWNER,
+                        command.evidenceAttachmentId()), null, null, null);
         executionRepository.insertAcceptanceParty(actor.tenantId(), party);
         support.ownerEvent(context, actor, "PROJECT_AFFECTED_OWNER_ACCEPTANCE", Map.of(
                 "acceptanceId", round.acceptanceId(), "roomId", command.roomId(),
@@ -150,8 +154,9 @@ public class RepairProjectAcceptanceService {
     public AcceptanceParty recordCommitteeExecutive(Long projectId, RecordAcceptanceParty command) {
         UserContext actor = support.requireSysActor(COMMITTEE_ROLES, "仅在任业委会主任或副主任可在线验收");
         require(command != null, "验收命令不能为空");
-        Context context = acceptanceContext(
-                projectId, actor.tenantId(), RepairWorkflowType.COMMUNITY_PUBLIC_REPAIR);
+        Context context = acceptanceContext(projectId, actor.tenantId());
+        AcceptancePolicy policy = policy(context);
+        requireRoleConfigured(policy, RepairAcceptancePartyRole.COMMITTEE_EXECUTIVE_APPROVER);
         String position = workOrderRepository.findActiveCommitteePosition(actor.tenantId(), actor.userId())
                 .orElseThrow(() -> support.forbidden("仅在任业委会主任或副主任可在线验收"));
         if (!Set.of("DIRECTOR", "VICE_DIRECTOR").contains(position)) {
@@ -164,7 +169,8 @@ public class RepairProjectAcceptanceService {
                 null, null, actor.accountId(), actor.userId(),
                 requiredText(command.participantName(), "participantName"), null, position,
                 conclusion(command), text(command.opinion()), "ONLINE_SELF",
-                onlineEvidence(context, command.evidenceAttachmentId()), null, actor.userId(), null);
+                evidenceForRole(context, policy, RepairAcceptancePartyRole.COMMITTEE_EXECUTIVE_APPROVER,
+                        command.evidenceAttachmentId()), null, actor.userId(), null);
         executionRepository.insertAcceptanceParty(actor.tenantId(), party);
         support.event(context, actor, "PROJECT_COMMITTEE_EXECUTIVE_ACCEPTANCE", Map.of(
                 "acceptanceId", round.acceptanceId(), "position", position,
@@ -176,8 +182,9 @@ public class RepairProjectAcceptanceService {
     public AcceptanceParty recordPropertyTechnical(Long projectId, RecordAcceptanceParty command) {
         UserContext actor = support.requireSysActor(PROPERTY_ROLES, "仅物业项目负责人可专业共同签署");
         require(command != null, "验收命令不能为空");
-        Context context = acceptanceContext(
-                projectId, actor.tenantId(), RepairWorkflowType.COMMUNITY_PUBLIC_REPAIR);
+        Context context = acceptanceContext(projectId, actor.tenantId());
+        AcceptancePolicy policy = policy(context);
+        requireRoleConfigured(policy, RepairAcceptancePartyRole.PROPERTY_TECHNICAL_COSIGNER);
         AcceptanceRound round = round(context);
         AcceptanceParty party = new AcceptanceParty(
                 null, round.acceptanceId(), "PROPERTY_TECHNICAL:" + actor.userId(),
@@ -186,7 +193,8 @@ public class RepairProjectAcceptanceService {
                 requiredText(command.participantName(), "participantName"),
                 requiredText(command.participantOrganization(), "participantOrganization"), null,
                 conclusion(command), text(command.opinion()), "ONLINE_SELF",
-                onlineEvidence(context, command.evidenceAttachmentId()), null, actor.userId(), null);
+                evidenceForRole(context, policy, RepairAcceptancePartyRole.PROPERTY_TECHNICAL_COSIGNER,
+                        command.evidenceAttachmentId()), null, actor.userId(), null);
         executionRepository.insertAcceptanceParty(actor.tenantId(), party);
         support.event(context, actor, "PROJECT_PROPERTY_TECHNICAL_ACCEPTANCE", Map.of(
                 "acceptanceId", round.acceptanceId(), "conclusion", party.conclusion().name()));
@@ -198,8 +206,9 @@ public class RepairProjectAcceptanceService {
         UserContext actor = support.requireSysActor(
                 THIRD_PARTY_RECORD_ROLES, "仅物业经理或业委会可依据原件登记第三方专业签署");
         require(command != null, "验收命令不能为空");
-        Context context = acceptanceContext(
-                projectId, actor.tenantId(), RepairWorkflowType.COMMUNITY_PUBLIC_REPAIR);
+        Context context = acceptanceContext(projectId, actor.tenantId());
+        AcceptancePolicy policy = policy(context);
+        requireRoleConfigured(policy, RepairAcceptancePartyRole.THIRD_PARTY_TECHNICAL_COSIGNER);
         String participantName = requiredText(command.participantName(), "participantName");
         String organization = requiredText(command.participantOrganization(), "participantOrganization");
         AcceptanceRound round = round(context);
@@ -208,7 +217,8 @@ public class RepairProjectAcceptanceService {
                 RepairAcceptancePartyRole.THIRD_PARTY_TECHNICAL_COSIGNER,
                 null, null, null, null, participantName, organization, null,
                 conclusion(command), text(command.opinion()), "OFFLINE_RECORDED",
-                requiredEvidence(context, command.evidenceAttachmentId()), null, actor.userId(), null);
+                evidenceForRole(context, policy, RepairAcceptancePartyRole.THIRD_PARTY_TECHNICAL_COSIGNER,
+                        command.evidenceAttachmentId()), null, actor.userId(), null);
         executionRepository.insertAcceptanceParty(actor.tenantId(), party);
         support.event(context, actor, "PROJECT_THIRD_PARTY_TECHNICAL_ACCEPTANCE", Map.of(
                 "acceptanceId", round.acceptanceId(), "organization", organization,
@@ -222,15 +232,11 @@ public class RepairProjectAcceptanceService {
         if (!actor.hasPermission("committee:seal:use")) {
             throw support.forbidden("当前业委会成员未获用印权限");
         }
-        Context context = acceptanceContext(
-                projectId, actor.tenantId(), RepairWorkflowType.COMMUNITY_PUBLIC_REPAIR);
+        Context context = acceptanceContext(projectId, actor.tenantId());
+        AcceptancePolicy policy = policy(context);
+        requireRoleConfigured(policy, RepairAcceptancePartyRole.COMMITTEE_SEAL_OPERATOR);
         require(command != null, "验收用印命令不能为空");
         AcceptanceRound round = round(context);
-        AcceptanceSummary summary = executionRepository.summarizeAcceptance(
-                round.acceptanceId(), actor.tenantId());
-        if (!summary.committeeExecutivePassed()) {
-            throw support.invalid("业委会主任或副主任尚未在线同意，禁止办理验收用印");
-        }
         Attachment source = support.attachment(context, command.sourceAttachmentId(), "验收签前文件");
         Attachment sealed = support.attachment(context, command.sealedAttachmentId(), "验收盖章文件");
         Long usageId = governanceRepository.insertProjectSealUsage(
@@ -261,14 +267,14 @@ public class RepairProjectAcceptanceService {
         if (!context.project().version().equals(command.expectedProjectVersion())) {
             throw support.conflict("项目版本已变化，请刷新后重试");
         }
-        assertFinalizer(actor, context);
         AcceptancePolicy policy = policy(context);
+        assertFinalizer(actor, context, policy);
         AcceptanceRound round = round(context);
         Long resultAttachmentId = support.attachment(
                 context, command.resultAttachmentId(), "验收定案文件").attachmentId();
         AcceptanceSummary summary = executionRepository.summarizeAcceptance(
                 round.acceptanceId(), actor.tenantId());
-        RepairAcceptanceDecision decision = POLICIES.get(policy.workflowType()).evaluate(policy, summary);
+        RepairAcceptanceDecision decision = ACCEPTANCE_POLICY.evaluate(policy, summary);
         if (decision.outcome() == RepairAcceptanceDecision.Outcome.INCOMPLETE) {
             throw support.invalid(decision.reason());
         }
@@ -331,14 +337,8 @@ public class RepairProjectAcceptanceService {
         return executionRepository.findCompletionDisclosure(projectId, actor.tenantId()).orElseThrow();
     }
 
-    private Context acceptanceContext(Long projectId, Long tenantId, RepairWorkflowType workflowType) {
-        Context context = support.loadForUpdate(projectId, tenantId, Status.PENDING_ACCEPTANCE);
-        if (context.project().workflowType() != workflowType) {
-            throw support.forbidden(workflowType == RepairWorkflowType.BUILDING_REPAIR
-                    ? "全小区公共维修不由楼组长或受影响业主验收"
-                    : "楼栋维修不由业委会代替业主侧验收");
-        }
-        return context;
+    private Context acceptanceContext(Long projectId, Long tenantId) {
+        return support.loadForUpdate(projectId, tenantId, Status.PENDING_ACCEPTANCE);
     }
 
     private AcceptancePolicy policy(Context context) {
@@ -360,11 +360,9 @@ public class RepairProjectAcceptanceService {
                 .orElseThrow();
     }
 
-    private void assertFinalizer(UserContext actor, Context context) {
-        if (context.project().workflowType() == RepairWorkflowType.BUILDING_REPAIR) {
-            if (!BUILDING_LEADER_ROLES.contains(actor.roleKey())) {
-                throw support.forbidden("仅本楼栋楼组长可完成楼栋验收定案");
-            }
+    private void assertFinalizer(UserContext actor, Context context, AcceptancePolicy policy) {
+        Set<RepairAcceptancePartyRole> actorRoles = new java.util.LinkedHashSet<>();
+        if (BUILDING_LEADER_ROLES.contains(actor.roleKey())) {
             if (context.project().buildingId() == null
                     || (!actor.authorizedBuildingIds().contains(context.project().buildingId())
                     && actor.authorizedBuildingScopes().stream().noneMatch(scope ->
@@ -372,13 +370,42 @@ public class RepairProjectAcceptanceService {
                             && scope.buildingId().equals(context.project().buildingId())))) {
                 throw support.forbidden("当前楼组长不负责本项目楼栋");
             }
-            return;
+            actorRoles.add(RepairAcceptancePartyRole.BUILDING_LEADER);
         }
-        String position = workOrderRepository.findActiveCommitteePosition(actor.tenantId(), actor.userId())
-                .orElse(null);
-        if (!Set.of("DIRECTOR", "VICE_DIRECTOR").contains(position)) {
-            throw support.forbidden("仅业委会主任或副主任可完成全小区维修验收定案");
+        if (COMMITTEE_ROLES.contains(actor.roleKey())) {
+            String position = workOrderRepository.findActiveCommitteePosition(actor.tenantId(), actor.userId())
+                    .orElse(null);
+            if (Set.of("DIRECTOR", "VICE_DIRECTOR").contains(position)) {
+                actorRoles.add(RepairAcceptancePartyRole.COMMITTEE_EXECUTIVE_APPROVER);
+            }
+            if (actor.hasPermission("committee:seal:use")) {
+                actorRoles.add(RepairAcceptancePartyRole.COMMITTEE_SEAL_OPERATOR);
+            }
         }
+        if (PROPERTY_ROLES.contains(actor.roleKey())) {
+            actorRoles.add(RepairAcceptancePartyRole.PROPERTY_TECHNICAL_COSIGNER);
+        }
+        if (actorRoles.stream().noneMatch(policy.finalizerRoles()::contains)) {
+            throw support.forbidden("当前工作身份不是实施方案约定的验收结论确认人");
+        }
+    }
+
+    private void requireRoleConfigured(AcceptancePolicy policy, RepairAcceptancePartyRole role) {
+        boolean configured = policy.requirements().stream()
+                .map(AcceptanceRequirement::eligibleRoles)
+                .anyMatch(roles -> roles.contains(role));
+        if (!configured) {
+            throw support.forbidden("本实施方案未安排当前身份参与验收");
+        }
+    }
+
+    private Long evidenceForRole(
+            Context context, AcceptancePolicy policy,
+            RepairAcceptancePartyRole role, Long attachmentId) {
+        boolean required = policy.requirements().stream()
+                .filter(requirement -> requirement.eligibleRoles().contains(role))
+                .anyMatch(AcceptanceRequirement::evidenceRequired);
+        return required ? requiredEvidence(context, attachmentId) : onlineEvidence(context, attachmentId);
     }
 
     private void completeRound(

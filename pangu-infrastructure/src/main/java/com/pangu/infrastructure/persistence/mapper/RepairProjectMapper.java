@@ -148,6 +148,15 @@ public interface RepairProjectMapper {
                                    @Param("minimumInvitedSupplierCount") Integer minimumInvitedSupplierCount,
                                    @Param("minimumValidQuoteCount") Integer minimumValidQuoteCount,
                                    @Param("nonCompetitiveSelectionBasis") String nonCompetitiveSelectionBasis,
+                                   @Param("acceptanceMethod") String acceptanceMethod,
+                                   @Param("acceptanceRequirementsJson") String acceptanceRequirementsJson,
+                                   @Param("acceptanceFinalizerRolesJson") String acceptanceFinalizerRolesJson,
+                                   @Param("acceptanceBasisAttachmentIdsJson") String acceptanceBasisAttachmentIdsJson,
+                                   @Param("acceptanceBasisSummary") String acceptanceBasisSummary,
+                                   @Param("affectedOwnerScopeDescription") String affectedOwnerScopeDescription,
+                                   @Param("minimumAffectedOwnerAcceptors") Integer minimumAffectedOwnerAcceptors,
+                                   @Param("affectedOwnerPassRule") String affectedOwnerPassRule,
+                                   @Param("affectedOwnerApprovalRatio") java.math.BigDecimal affectedOwnerApprovalRatio,
                                    @Param("frozenByUserId") Long frozenByUserId);
 
     int activateAuthorizationProposal(@Param("projectId") Long projectId,

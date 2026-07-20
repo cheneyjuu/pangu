@@ -21,6 +21,8 @@ import com.pangu.domain.model.repair.RepairProject.PlanVersion;
 import com.pangu.domain.model.repair.RepairProject.Status;
 import com.pangu.domain.model.repair.RepairProject.WorkPoint;
 import com.pangu.domain.model.repair.RepairProjectGovernance.SupplierSelectionEvaluationRule;
+import com.pangu.domain.model.repair.RepairAcceptancePartyRole;
+import com.pangu.domain.model.repair.RepairProjectExecution.AcceptanceRequirement;
 import com.pangu.domain.model.repair.RepairSupplierSelectionMethod;
 import com.pangu.domain.model.repair.RepairWorkflowType;
 import com.pangu.domain.repository.RepairProjectRepository;
@@ -43,6 +45,7 @@ import org.springframework.stereotype.Repository;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 @Repository
 @RequiredArgsConstructor
@@ -51,6 +54,11 @@ public class RepairProjectRepositoryImpl implements RepairProjectRepository {
     private static final TypeReference<List<EvidenceRequirement>> EVIDENCE_REQUIREMENTS_TYPE =
             new TypeReference<>() { };
     private static final TypeReference<List<String>> STRING_LIST_TYPE = new TypeReference<>() { };
+    private static final TypeReference<List<Long>> LONG_LIST_TYPE = new TypeReference<>() { };
+    private static final TypeReference<List<AcceptanceRequirement>> ACCEPTANCE_REQUIREMENTS_TYPE =
+            new TypeReference<>() { };
+    private static final TypeReference<Set<RepairAcceptancePartyRole>> ACCEPTANCE_FINALIZER_ROLES_TYPE =
+            new TypeReference<>() { };
     private static final TypeReference<List<PaymentMilestone>> PAYMENT_MILESTONES_TYPE =
             new TypeReference<>() { };
 
@@ -296,16 +304,19 @@ public class RepairProjectRepositoryImpl implements RepairProjectRepository {
 
     @Override
     public int freezePlanForAuthorization(
-            Long planId, Long projectId, Long tenantId, String authorizationSnapshotHash,
-            RepairSupplierSelectionMethod supplierSelectionMethod,
-            SupplierSelectionEvaluationRule supplierEvaluationRule,
-            Integer minimumInvitedSupplierCount, Integer minimumValidQuoteCount,
-            String nonCompetitiveSelectionBasis, Long frozenByUserId) {
+            PlanVersion proposal, String authorizationSnapshotHash, Long frozenByUserId) {
         return mapper.freezePlanForAuthorization(
-                planId, projectId, tenantId, authorizationSnapshotHash,
-                nameOrNull(supplierSelectionMethod), nameOrNull(supplierEvaluationRule),
-                minimumInvitedSupplierCount, minimumValidQuoteCount,
-                nonCompetitiveSelectionBasis, frozenByUserId);
+                proposal.planId(), proposal.projectId(), proposal.tenantId(), authorizationSnapshotHash,
+                nameOrNull(proposal.supplierSelectionMethod()),
+                nameOrNull(proposal.supplierSelectionEvaluationRule()),
+                proposal.minimumInvitedSupplierCount(), proposal.minimumValidQuoteCount(),
+                proposal.nonCompetitiveSelectionBasis(), proposal.acceptanceMethod(),
+                writeJson(proposal.acceptanceRequirements()),
+                writeJson(proposal.acceptanceFinalizerRoles()),
+                writeJson(proposal.acceptanceBasisAttachmentIds()),
+                proposal.acceptanceBasisSummary(), proposal.affectedOwnerScopeDescription(),
+                proposal.minimumAffectedOwnerAcceptors(), nameOrNull(proposal.affectedOwnerPassRule()),
+                proposal.affectedOwnerApprovalRatio(), frozenByUserId);
     }
 
     @Override
@@ -415,6 +426,10 @@ public class RepairProjectRepositoryImpl implements RepairProjectRepository {
                 readJson(row.getEvidenceRequirementsJson(), EVIDENCE_REQUIREMENTS_TYPE),
                 row.getSafetyRequirements(), row.getAcceptanceMethod(),
                 readJson(row.getRequiredAcceptanceRolesJson(), STRING_LIST_TYPE),
+                readJson(row.getAcceptanceRequirementsJson(), ACCEPTANCE_REQUIREMENTS_TYPE),
+                readJson(row.getAcceptanceFinalizerRolesJson(), ACCEPTANCE_FINALIZER_ROLES_TYPE),
+                readJson(row.getAcceptanceBasisAttachmentIdsJson(), LONG_LIST_TYPE),
+                row.getAcceptanceBasisSummary(),
                 row.getAffectedOwnerScopeDescription(), row.getMinimumAffectedOwnerAcceptors(),
                 enumOrNull(RepairProject.AffectedOwnerPassRule.class, row.getAffectedOwnerPassRule()),
                 row.getAffectedOwnerApprovalRatio(),
@@ -452,6 +467,10 @@ public class RepairProjectRepositoryImpl implements RepairProjectRepository {
         row.setSafetyRequirements(plan.safetyRequirements());
         row.setAcceptanceMethod(plan.acceptanceMethod());
         row.setRequiredAcceptanceRolesJson(writeJson(plan.requiredAcceptanceRoles()));
+        row.setAcceptanceRequirementsJson(writeJson(plan.acceptanceRequirements()));
+        row.setAcceptanceFinalizerRolesJson(writeJson(plan.acceptanceFinalizerRoles()));
+        row.setAcceptanceBasisAttachmentIdsJson(writeJson(plan.acceptanceBasisAttachmentIds()));
+        row.setAcceptanceBasisSummary(plan.acceptanceBasisSummary());
         row.setAffectedOwnerScopeDescription(plan.affectedOwnerScopeDescription());
         row.setMinimumAffectedOwnerAcceptors(plan.minimumAffectedOwnerAcceptors());
         row.setAffectedOwnerPassRule(nameOrNull(plan.affectedOwnerPassRule()));
