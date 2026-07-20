@@ -53,6 +53,12 @@ public class RepairProjectSourcingRepositoryImpl implements RepairProjectSourcin
     }
 
     @Override
+    public Optional<Invitation> findLatestSupplierProjectInvitation(Long projectId, Long supplierDeptId) {
+        return Optional.ofNullable(mapper.findLatestSupplierProjectInvitation(projectId, supplierDeptId))
+                .map(this::toDomain);
+    }
+
+    @Override
     public Optional<Invitation> findSupplierInvitation(
             Long invitationId, Long projectId, Long supplierDeptId) {
         return Optional.ofNullable(mapper.findSupplierInvitation(

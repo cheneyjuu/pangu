@@ -97,8 +97,13 @@ public class RepairProjectExecutionRepositoryImpl implements RepairProjectExecut
     }
 
     @Override
-    public List<Long> listSupplierProjectIds(Long tenantId, Long supplierDeptId) {
-        return mapper.listSupplierProjectIds(tenantId, supplierDeptId);
+    public Optional<Contract> findSupplierContract(Long projectId, Long supplierDeptId) {
+        return Optional.ofNullable(mapper.findSupplierContract(projectId, supplierDeptId)).map(this::contract);
+    }
+
+    @Override
+    public List<Contract> listSupplierContracts(Long supplierDeptId) {
+        return mapper.listSupplierContracts(supplierDeptId).stream().map(this::contract).toList();
     }
 
     @Override

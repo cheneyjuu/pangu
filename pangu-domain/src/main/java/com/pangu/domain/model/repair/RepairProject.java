@@ -315,6 +315,33 @@ public record RepairProject(
                     createdByAccountId, createdByUserId, lockedByUserId, createTime, lockedAt);
         }
 
+        /** 授权提案冻结时补齐施工管理、过程证据、结算口径和实施时间，后续施工只能按该版本办理。 */
+        public PlanVersion withExecutionTerms(
+                String resolvedConstructionManagementRequirements,
+                List<EvidenceRequirement> resolvedEvidenceRequirements,
+                String resolvedSafetyRequirements,
+                SettlementMethod resolvedSettlementMethod,
+                LocalDate resolvedPlannedStartDate,
+                LocalDate resolvedPlannedCompletionDate,
+                Integer resolvedWarrantyDays) {
+            return new PlanVersion(
+                    planId, projectId, tenantId, versionNo, planDescription,
+                    budgetTotal, fundSource, allocationRuleType, allocationRuleDescription,
+                    supplierSelectionMethod, supplierSelectionEvaluationRule,
+                    minimumInvitedSupplierCount, minimumValidQuoteCount,
+                    nonCompetitiveSelectionBasis,
+                    supplierSelectionReason, resolvedConstructionManagementRequirements,
+                    resolvedEvidenceRequirements, resolvedSafetyRequirements, acceptanceMethod,
+                    requiredAcceptanceRoles, acceptanceRequirements, acceptanceFinalizerRoles,
+                    acceptanceBasisAttachmentIds, acceptanceBasisSummary,
+                    affectedOwnerScopeDescription, minimumAffectedOwnerAcceptors, affectedOwnerPassRule,
+                    affectedOwnerApprovalRatio, resolvedSettlementMethod, resolvedPlannedStartDate,
+                    resolvedPlannedCompletionDate, resolvedWarrantyDays, governancePath,
+                    priceReviewRequired, paymentMilestones, status,
+                    authorizationSnapshotHash, authorizationFrozenByUserId, authorizationFrozenAt, snapshotHash,
+                    createdByAccountId, createdByUserId, lockedByUserId, createTime, lockedAt);
+        }
+
         /** 授权提案冻结时补齐验收依据；草稿阶段不让物业凭空决定验收参与方。 */
         public PlanVersion withAcceptanceTerms(
                 String resolvedAcceptanceMethod,

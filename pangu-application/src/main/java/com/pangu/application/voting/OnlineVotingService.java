@@ -22,6 +22,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Clock;
 import java.time.Instant;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -51,6 +52,7 @@ public class OnlineVotingService {
     private final VotingExecutionService votingExecutionService;
     private final VotingConflictAuditService conflictAuditService;
     private final UserContextHolder userContextHolder;
+    private final Clock clock;
 
     @Transactional
     public OnlineVotingAcknowledgement acknowledge(AcknowledgeCommand command) {
@@ -121,7 +123,7 @@ public class OnlineVotingService {
         } catch (OnlineVotingException failure) {
             if (failure.getReason() == ALREADY_SUBMITTED && hasPaperBallot(ballotPackage, electorate)) {
                 conflictAuditService.recordRejectedOnlineBallot(
-                        ballotPackage, electorate, owner, choiceManifestHash, Instant.now());
+                        ballotPackage, electorate, owner, choiceManifestHash, clock.instant());
             }
             throw failure;
         }
@@ -358,7 +360,7 @@ public class OnlineVotingService {
     private VotingExecutionPackage requireOnlineVotingPackage(Long packageId, Long tenantId, String packageHash) {
         VotingExecutionPackage ballotPackage = votingExecutionRepository.findPackage(packageId, tenantId)
                 .orElseThrow(() -> new OnlineVotingException(NOT_FOUND, "正式表决包不存在"));
-        Instant now = Instant.now();
+        Instant now = clock.instant();
         if (ballotPackage.getStatus() != VotingExecutionPackage.Status.VOTING
                 || now.isBefore(ballotPackage.getVoteStartAt()) || !now.isBefore(ballotPackage.getVoteEndAt())) {
             throw new OnlineVotingException(INVALID_STATUS, "当前不在本次表决时间内");

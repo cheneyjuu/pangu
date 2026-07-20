@@ -280,14 +280,8 @@ public class RepairProjectAttachmentService {
             return actor.tenantId();
         }
         if (isSupplier(actor) && actor.deptId() != null) {
-            return sourcingRepository.listSupplierInvitations(actor.deptId()).stream()
-                    .filter(invitation -> invitation.projectId().equals(projectId))
+            return sourcingRepository.findLatestSupplierProjectInvitation(projectId, actor.deptId())
                     .map(Invitation::tenantId)
-                    .distinct()
-                    .reduce((first, second) -> {
-                        throw new RepairWorkOrderApplicationException(
-                                FORBIDDEN, "维修工程邀价所属小区不唯一");
-                    })
                     .orElseThrow(() -> new RepairWorkOrderApplicationException(
                             FORBIDDEN, "当前供应商未获该维修工程邀价"));
         }
@@ -331,11 +325,23 @@ public class RepairProjectAttachmentService {
             if (invitedForDraft && (writing || ownDraftAttachment)) {
                 return;
             }
+            boolean selectedSupplier = project.activePlanId() != null
+                    && sourcingRepository.findCurrentSelection(
+                    project.projectId(), project.activePlanId(), project.tenantId())
+                    .map(selection -> actor.deptId() != null
+                            && actor.deptId().equals(selection.supplierDeptId()))
+                    .orElse(false);
+            if (selectedSupplier && project.status() == Status.AUTHORIZED
+                    && (writing || ownDraftAttachment)) {
+                return;
+            }
             boolean contractSupplier = executionRepository.findContract(project.projectId(), project.tenantId())
                     .map(contract -> actor.deptId() != null && actor.deptId().equals(contract.supplierDeptId()))
                     .orElse(false);
-            boolean executionStage = project.status() == Status.IN_PROGRESS
-                    || (!writing && project.status() == Status.PENDING_ACCEPTANCE);
+            boolean executionStage = Set.of(
+                    Status.CONTRACT_EFFECTIVE, Status.IN_PROGRESS, Status.PENDING_ACCEPTANCE)
+                    .contains(project.status())
+                    || (!writing && project.status() == Status.COMPLETED);
             if (contractSupplier && executionStage) {
                 return;
             }

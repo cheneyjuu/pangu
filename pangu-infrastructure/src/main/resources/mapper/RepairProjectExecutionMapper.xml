@@ -57,17 +57,31 @@
         LIMIT 1
     </select>
 
-    <!-- 供应商工作台只能发现当前租户内由本企业签署生效合同的工程项目。 -->
-    <select id="listSupplierProjectIds" resultType="long">
-        SELECT p.project_id
-        FROM t_repair_project p
-        JOIN t_repair_contract c
-          ON c.project_id = p.project_id
-         AND c.tenant_id = p.tenant_id
-         AND c.status = 'EFFECTIVE'
-        WHERE p.tenant_id = #{tenantId}
-          AND c.supplier_dept_id = #{supplierDeptId}
-        ORDER BY p.update_time DESC, p.project_id DESC
+    <!-- 生效合同同时证明施工单位、工程和租户三者关系，施工端不得自行传入 tenant_id。 -->
+    <select id="findSupplierContract"
+            resultType="com.pangu.infrastructure.persistence.entity.RepairProjectExecutionRows$ContractRow">
+        SELECT contract_id, project_id, plan_id, tenant_id, supplier_dept_id, supplier_name,
+               contract_amount, repair_scope_hash, fund_source, signing_method,
+               contract_attachment_id, contract_file_hash,
+               status, created_by_user_id, effective_at, create_time
+        FROM t_repair_contract
+        WHERE project_id = #{projectId}
+          AND supplier_dept_id = #{supplierDeptId}
+          AND status = 'EFFECTIVE'
+        ORDER BY contract_id DESC
+        LIMIT 1
+    </select>
+
+    <select id="listSupplierContracts"
+            resultType="com.pangu.infrastructure.persistence.entity.RepairProjectExecutionRows$ContractRow">
+        SELECT contract_id, project_id, plan_id, tenant_id, supplier_dept_id, supplier_name,
+               contract_amount, repair_scope_hash, fund_source, signing_method,
+               contract_attachment_id, contract_file_hash,
+               status, created_by_user_id, effective_at, create_time
+        FROM t_repair_contract
+        WHERE supplier_dept_id = #{supplierDeptId}
+          AND status = 'EFFECTIVE'
+        ORDER BY effective_at DESC, contract_id DESC
     </select>
 
     <select id="listContractSignatures"

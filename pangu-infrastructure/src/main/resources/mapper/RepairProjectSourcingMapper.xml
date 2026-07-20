@@ -61,6 +61,20 @@
         ORDER BY invitation.sent_at DESC, invitation.invitation_id DESC
     </select>
 
+    <!-- 邀价一旦形成即是施工单位与工程之间的可信租户关系，不随项目进入中选、合同或施工阶段而失效。 -->
+    <select id="findLatestSupplierProjectInvitation"
+            resultType="com.pangu.infrastructure.persistence.entity.RepairProjectSourcingRows$InvitationRow">
+        SELECT <include refid="invitationColumns"/>
+        FROM t_repair_project_quote_invitation invitation
+        JOIN t_supplier_org_profile supplier
+          ON supplier.supplier_dept_id = invitation.supplier_dept_id
+        WHERE invitation.project_id = #{projectId}
+          AND invitation.supplier_dept_id = #{supplierDeptId}
+          AND invitation.status &lt;&gt; 'CANCELLED'
+        ORDER BY invitation.invitation_round DESC, invitation.invitation_id DESC
+        LIMIT 1
+    </select>
+
     <!-- 供应商工作身份不绑定单一小区，邀价本身是确定租户边界的可信事实。 -->
     <select id="findSupplierInvitation"
             resultType="com.pangu.infrastructure.persistence.entity.RepairProjectSourcingRows$InvitationRow">

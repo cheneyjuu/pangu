@@ -4,10 +4,13 @@ package com.pangu.application.repair.command;
 import com.pangu.domain.model.repair.RepairProjectGovernance.SupplierSelectionEvaluationRule;
 import com.pangu.domain.model.repair.RepairAcceptancePartyRole;
 import com.pangu.domain.model.repair.RepairProject.AffectedOwnerPassRule;
+import com.pangu.domain.model.repair.RepairProject.EvidenceRequirement;
+import com.pangu.domain.model.repair.RepairProject.SettlementMethod;
 import com.pangu.domain.model.repair.RepairProjectExecution.AcceptanceRequirement;
 import com.pangu.domain.model.repair.RepairSupplierSelectionMethod;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Set;
 
@@ -18,6 +21,13 @@ public record FreezeRepairAuthorizationProposalCommand(
         Integer minimumInvitedSupplierCount,
         Integer minimumValidQuoteCount,
         String nonCompetitiveSelectionBasis,
+        String constructionManagementRequirements,
+        List<EvidenceRequirement> evidenceRequirements,
+        String safetyRequirements,
+        SettlementMethod settlementMethod,
+        LocalDate plannedStartDate,
+        LocalDate plannedCompletionDate,
+        Integer warrantyDays,
         String acceptanceMethod,
         List<AcceptanceRequirement> acceptanceRequirements,
         Set<RepairAcceptancePartyRole> acceptanceFinalizerRoles,
@@ -29,6 +39,7 @@ public record FreezeRepairAuthorizationProposalCommand(
         BigDecimal affectedOwnerApprovalRatio
 ) {
     public FreezeRepairAuthorizationProposalCommand {
+        evidenceRequirements = evidenceRequirements == null ? List.of() : List.copyOf(evidenceRequirements);
         acceptanceRequirements = acceptanceRequirements == null ? List.of() : List.copyOf(acceptanceRequirements);
         acceptanceFinalizerRoles = acceptanceFinalizerRoles == null
                 ? Set.of()

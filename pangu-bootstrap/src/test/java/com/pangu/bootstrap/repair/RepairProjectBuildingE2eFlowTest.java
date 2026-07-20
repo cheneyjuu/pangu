@@ -1,9 +1,14 @@
-// 关联业务：端到端验证楼栋维修从勘验、参考询价、统一表决到施工单位确认的真实状态交接。
+// 关联业务：端到端验证一笔楼栋共有维修从业主报修到工程验收通过的真实状态交接。
 package com.pangu.bootstrap.repair;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pangu.domain.model.assembly.OwnersAssemblyRuleConfiguration;
+import com.pangu.domain.model.propertyservice.PropertyServiceContractBasis;
+import com.pangu.domain.model.propertyservice.PropertyServiceEnterprise;
+import com.pangu.domain.model.propertyservice.PropertyServiceOrganization;
+import com.pangu.domain.model.propertyservice.PropertyServiceOrganizationStatus;
+import com.pangu.domain.repository.PropertyServiceOrganizationRepository;
 import com.pangu.domain.repository.RepairEvidenceObjectStorage;
 import com.pangu.interfaces.security.JwtTokenProvider;
 import org.junit.jupiter.api.AfterEach;
@@ -23,11 +28,13 @@ import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.Clock;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.hamcrest.Matchers.is;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -64,21 +71,34 @@ class RepairProjectBuildingE2eFlowTest {
     @Autowired private ObjectMapper objectMapper;
     @Autowired private JwtTokenProvider jwtTokenProvider;
     @Autowired private JdbcTemplate jdbcTemplate;
+    @Autowired private PropertyServiceOrganizationRepository propertyServiceOrganizationRepository;
     @MockBean private RepairEvidenceObjectStorage objectStorage;
+    @MockBean private Clock clock;
 
     private String propertyManagerToken;
     private String propertyStaffToken;
     private String committeeDirectorToken;
     private String committeeMemberToken;
+    private String reportingOwnerToken;
     private long buildingId;
+    private final AtomicReference<Instant> businessNow = new AtomicReference<>();
     private Long createdFundingAccountId;
+    private Long reusedFundingAccountId;
+    private BigDecimal originalFundingTotalBalance;
+    private BigDecimal originalFundingFrozenBalance;
     private Long createdOwnersAssemblyRuleId;
     private Long previousActiveRuleId;
+    private Long temporarySupplierAccountId;
+    private Long temporarySupplierUserId;
+    private Long createdPropertyServiceOrganizationId;
+    private Long createdPropertyServiceEnterpriseId;
     private final Map<Long, Integer> originalVotingDelegates = new LinkedHashMap<>();
     private final Map<Long, Integer> originalOwnerAuthLevels = new LinkedHashMap<>();
 
     @BeforeEach
     void setUp() {
+        businessNow.set(Instant.parse("2026-07-20T00:00:00Z"));
+        when(clock.instant()).thenAnswer(ignored -> businessNow.get());
         propertyManagerToken = jwtTokenProvider.generateToken(
                 ACCOUNT_PROPERTY_MANAGER, "SYS_USER", USER_PROPERTY_MANAGER, TENANT);
         propertyStaffToken = jwtTokenProvider.generateToken(
@@ -87,6 +107,7 @@ class RepairProjectBuildingE2eFlowTest {
                 ACCOUNT_COMMITTEE_DIRECTOR, "SYS_USER", USER_COMMITTEE_DIRECTOR, TENANT);
         committeeMemberToken = jwtTokenProvider.generateToken(
                 ACCOUNT_COMMITTEE_MEMBER, "SYS_USER", USER_COMMITTEE_MEMBER, TENANT);
+        ensureActivePropertyServiceOrganization();
         buildingId = jdbcTemplate.queryForObject("""
                 SELECT building_id
                 FROM c_owner_property
@@ -100,6 +121,19 @@ class RepairProjectBuildingE2eFlowTest {
                 resultSet -> resultSet.next() ? resultSet.getLong(1) : null,
                 TENANT);
         configureUniqueBuildingDelegates();
+        Map<String, Object> reportingOwner = jdbcTemplate.queryForMap("""
+                SELECT owner.uid, owner.account_id
+                FROM c_owner_property property
+                JOIN c_user owner ON owner.uid = property.uid
+                WHERE property.tenant_id = ? AND property.building_id = ?
+                  AND property.account_status = 1 AND property.is_voting_delegate = 1
+                ORDER BY property.opid
+                LIMIT 1
+                """, TENANT, buildingId);
+        long reportingOwnerUid = ((Number) reportingOwner.get("uid")).longValue();
+        long reportingOwnerAccountId = ((Number) reportingOwner.get("account_id")).longValue();
+        reportingOwnerToken = jwtTokenProvider.generateToken(
+                reportingOwnerAccountId, "C_USER", reportingOwnerUid, TENANT);
         when(objectStorage.put(anyString(), any(byte[].class), anyString(), anyString()))
                 .thenAnswer(invocation -> new RepairEvidenceObjectStorage.StoredObjectMetadata(
                         ((byte[]) invocation.getArgument(1)).length,
@@ -116,6 +150,7 @@ class RepairProjectBuildingE2eFlowTest {
                     SELECT project_id FROM t_repair_project WHERE project_name LIKE ?
                 )
                 """, PROJECT_PREFIX + "%");
+        cleanupProjectExecutionArtifacts();
         jdbcTemplate.update("""
                 DELETE FROM t_committee_seal_usage
                 WHERE business_type = 'REPAIR_PROJECT'
@@ -125,9 +160,33 @@ class RepairProjectBuildingE2eFlowTest {
                 """, PROJECT_PREFIX + "%");
         jdbcTemplate.update("DELETE FROM t_repair_project WHERE project_name LIKE ?", PROJECT_PREFIX + "%");
         jdbcTemplate.update("DELETE FROM t_repair_work_order WHERE title LIKE ?", WORK_ORDER_PREFIX + "%");
+        if (temporarySupplierUserId != null) {
+            jdbcTemplate.update("DELETE FROM sys_user_role WHERE user_id = ?", temporarySupplierUserId);
+            jdbcTemplate.update("DELETE FROM sys_user WHERE user_id = ?", temporarySupplierUserId);
+        }
+        if (temporarySupplierAccountId != null) {
+            jdbcTemplate.update("DELETE FROM t_account WHERE account_id = ?", temporarySupplierAccountId);
+        }
+        cleanupSupplierIdentities();
+        if (createdPropertyServiceOrganizationId != null) {
+            jdbcTemplate.update(
+                    "DELETE FROM t_property_service_organization WHERE organization_id = ?",
+                    createdPropertyServiceOrganizationId);
+        }
+        if (createdPropertyServiceEnterpriseId != null) {
+            jdbcTemplate.update(
+                    "DELETE FROM t_property_service_enterprise WHERE enterprise_id = ?",
+                    createdPropertyServiceEnterpriseId);
+        }
         if (createdFundingAccountId != null) {
             jdbcTemplate.update("DELETE FROM t_fund_ledger_entry WHERE account_id = ?", createdFundingAccountId);
             jdbcTemplate.update("DELETE FROM t_maintenance_fund_account WHERE account_id = ?", createdFundingAccountId);
+        } else if (reusedFundingAccountId != null) {
+            jdbcTemplate.update("""
+                    UPDATE t_maintenance_fund_account
+                    SET total_balance = ?, frozen_balance = ?
+                    WHERE account_id = ?
+                    """, originalFundingTotalBalance, originalFundingFrozenBalance, reusedFundingAccountId);
         }
         if (createdOwnersAssemblyRuleId != null) {
             jdbcTemplate.update(
@@ -171,12 +230,12 @@ class RepairProjectBuildingE2eFlowTest {
     }
 
     @Test
-    @DisplayName("Given规则允许书面委托 When维修方案采用线上线下表决 Then代理纸票和业主线上票共同完成授权")
-    void givenWrittenProxyRule_whenRepairUsesMixedVoting_thenCompleteAuthorizationAndSupplierSelection()
+    @DisplayName("Given楼栋共有维修 When线上线下表决后施工验收 Then工程验收通过且不进入付款")
+    void givenOwnerRepair_whenMixedVotingAndConstructionComplete_thenAcceptancePassesWithoutPayment()
             throws Exception {
         activateMixedOwnersAssemblyRule();
         long sourceWorkOrderId = createSurveyedBuildingWorkOrder();
-        createdFundingAccountId = seedBuildingMaintenanceAccount(PLAN_BUDGET);
+        seedBuildingMaintenanceAccount(PLAN_BUDGET);
 
         JsonNode project = postData("/api/v1/admin/repair-projects", propertyManagerToken,
                 projectRequest(sourceWorkOrderId));
@@ -188,16 +247,17 @@ class RepairProjectBuildingE2eFlowTest {
                 "SELECT status FROM t_repair_work_order WHERE work_order_id = ?", String.class, sourceWorkOrderId));
 
         long supplierDeptId = registerVerifiedSupplier();
+        String supplierToken = createSupplierIdentity(supplierDeptId);
         JsonNode invited = postData(sourcingPath(projectId, "/invitations"), propertyManagerToken, Map.of(
                 "supplierDeptIds", List.of(supplierDeptId),
                 "deadline", LocalDateTime.now().plusDays(3)));
         long invitationId = invited.path("invitations").get(0).path("invitationId").asLong();
         long quoteAttachmentId = uploadProjectAttachment(
-                projectId, propertyManagerToken, "参考报价原件.pdf", "reference-quote");
-        JsonNode quote = postData(sourcingPath(projectId, "/quotes"), propertyManagerToken,
-                quoteRequest(supplierDeptId, invitationId, quoteAttachmentId, workPointId));
+                projectId, supplierToken, "施工单位报价原件.pdf", "reference-quote");
+        JsonNode quote = postData("/api/v1/supplier/repair-projects/" + projectId + "/quotes", supplierToken,
+                quoteRequest(invitationId, quoteAttachmentId, workPointId));
         long quoteId = quote.path("quoteId").asLong();
-        assertEquals("OFFLINE_EVIDENCE_VERIFIED", quote.path("confirmationStatus").asText());
+        assertEquals("ONLINE_CONFIRMED", quote.path("confirmationStatus").asText());
         assertEquals(0, QUOTE_AMOUNT.compareTo(quote.path("quoteAmount").decimalValue()));
 
         long responsibilityAttachmentId = uploadProjectAttachment(
@@ -228,6 +288,8 @@ class RepairProjectBuildingE2eFlowTest {
         assertEquals("AUTHORIZATION_IN_PROGRESS", frozen.path("project").path("status").asText());
         assertEquals("AUTHORIZATION_FROZEN", frozen.path("plans").get(0).path("status").asText());
         assertEquals(64, frozen.path("plans").get(0).path("authorizationSnapshotHash").asText().length());
+        assertEquals("ACTUAL_QUANTITY", frozen.path("plans").get(0).path("settlementMethod").asText());
+        assertEquals(4, frozen.path("plans").get(0).path("evidenceRequirements").size());
         assertTrue(jdbcTemplate.queryForObject("""
                 SELECT COUNT(*) > 0
                 FROM t_repair_plan_allocation_room
@@ -245,7 +307,7 @@ class RepairProjectBuildingE2eFlowTest {
 
         long ballotTemplateAttachmentId = uploadProjectAttachment(
                 projectId, committeeDirectorToken, "相关业主表决票模板.pdf", "ballot-template");
-        Instant voteStartAt = Instant.now().plus(2, ChronoUnit.MINUTES);
+        Instant voteStartAt = businessNow.get().plus(2, ChronoUnit.MINUTES);
         JsonNode prepared = postData(
                 "/api/v1/admin/repair-projects/" + projectId + "/voting/prepare",
                 committeeDirectorToken, Map.of(
@@ -257,7 +319,7 @@ class RepairProjectBuildingE2eFlowTest {
         assertEquals("PREPARED", prepared.path("voting").path("status").asText());
         long executionPackageId = prepared.path("executionPackage").path("packageId").asLong();
         long subjectId = prepared.path("subject").path("subjectId").asLong();
-        makeVotingOpenable(executionPackageId, subjectId);
+        businessNow.set(voteStartAt.plusSeconds(1));
         JsonNode opened = postData(
                 "/api/v1/admin/repair-projects/" + projectId + "/voting/open",
                 committeeDirectorToken,
@@ -277,11 +339,8 @@ class RepairProjectBuildingE2eFlowTest {
                 ORDER BY electorate.snapshot_item_id
                 """, executionPackageId);
         assertTrue(voters.size() >= 2);
-        long firstOpid = ((Number) voters.getFirst().get("opid")).longValue();
-        long proxyAuthorizationId = registerConfirmedProxyAuthorization(executionPackageId, firstOpid);
-        long revokedAuthorizationId = registerConfirmedProxyAuthorization(
+        long proxyAuthorizationId = registerConfirmedProxyAuthorization(
                 executionPackageId, ((Number) voters.get(1).get("opid")).longValue());
-        revokeUnusedProxyAuthorization(executionPackageId, revokedAuthorizationId);
         for (int index = 0; index < voters.size(); index++) {
             Map<String, Object> voter = voters.get(index);
             long ownerUid = ((Number) voter.get("owner_uid")).longValue();
@@ -290,6 +349,8 @@ class RepairProjectBuildingE2eFlowTest {
             originalOwnerAuthLevels.putIfAbsent(ownerUid, ((Number) voter.get("auth_level")).intValue());
             jdbcTemplate.update("UPDATE c_user SET auth_level = 3 WHERE uid = ?", ownerUid);
             if (index == 0) {
+                recordPaperBallot(projectId, opid, subjectId, null);
+            } else if (index == 1) {
                 recordPaperBallot(projectId, opid, subjectId, proxyAuthorizationId);
                 continue;
             }
@@ -304,7 +365,7 @@ class RepairProjectBuildingE2eFlowTest {
                     ownerToken, Map.of("opid", opid, "packageHash", packageHash, "confirmed", true));
             postOwnerBallot(projectId, ownerToken, opid, packageHash, subjectId);
         }
-        makeVotingClosable(executionPackageId, subjectId);
+        businessNow.set(voteStartAt.plus(31, ChronoUnit.MINUTES));
         JsonNode settled = postData(
                 "/api/v1/admin/repair-projects/" + projectId + "/voting/settle",
                 committeeDirectorToken,
@@ -316,6 +377,11 @@ class RepairProjectBuildingE2eFlowTest {
                 settled.path("result").path("supportOwnerCount").asLong());
         assertEquals(0L, settled.path("result").path("againstOwnerCount").asLong());
         assertEquals(0L, settled.path("result").path("abstainOwnerCount").asLong());
+        assertEquals(1, jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM t_vote_item
+                WHERE subject_id = ? AND opid = ? AND vote_channel = 2 AND valid_flag = 0
+                """, Integer.class, subjectId, ((Number) voters.getFirst().get("opid")).longValue()));
         Map<String, Object> firstVoter = voters.getFirst();
         String firstOwnerToken = jwtTokenProvider.generateToken(
                 ((Number) firstVoter.get("account_id")).longValue(),
@@ -355,8 +421,8 @@ class RepairProjectBuildingE2eFlowTest {
         JsonNode archivedWorkbench = getData(
                 "/api/v1/admin/repair-projects/" + projectId + "/voting/workbench",
                 committeeDirectorToken);
-        assertEquals(1, archivedWorkbench.path("paper").path("ballots").size());
-        assertEquals("COUNTED", archivedWorkbench.path("paper").path("ballots").get(0)
+        assertEquals(2, archivedWorkbench.path("paper").path("ballots").size());
+        assertEquals("COUNTED", archivedWorkbench.path("paper").path("ballots").get(1)
                 .path("outcomes").get(0).path("status").asText());
         assertEquals(voters.size() - 1,
                 archivedWorkbench.path("online").path("completedPropertyCount").asInt());
@@ -386,6 +452,175 @@ class RepairProjectBuildingE2eFlowTest {
                 FROM t_repair_project_supplier_selection
                 WHERE project_id = ? AND quote_id = ?
                 """, Long.class, projectId, quoteId));
+
+        JsonNode authorizedProject = getData(
+                "/api/v1/admin/repair-projects/" + projectId, propertyManagerToken);
+        long contractAttachmentId = uploadProjectAttachment(
+                projectId, propertyManagerToken, "维修施工合同.pdf", "effective-contract");
+        long propertySignatureAttachmentId = uploadProjectAttachment(
+                projectId, propertyManagerToken, "物业签署页.pdf", "property-signature");
+        long supplierSignatureAttachmentId = uploadProjectAttachment(
+                projectId, supplierToken, "施工单位签署页.pdf", "supplier-signature");
+        JsonNode contract = postData(
+                "/api/v1/admin/repair-projects/" + projectId + "/contract",
+                propertyManagerToken, Map.of(
+                        "expectedProjectVersion", authorizedProject.path("project").path("version").asInt(),
+                        "supplierDeptId", supplierDeptId,
+                        "contractAmount", QUOTE_AMOUNT,
+                        "contractAttachmentId", contractAttachmentId,
+                        "signatures", List.of(
+                                Map.of(
+                                        "partyType", "PROPERTY",
+                                        "signerName", "物业项目负责人",
+                                        "signerUserId", USER_PROPERTY_MANAGER,
+                                        "signatureMethod", "ELECTRONIC",
+                                        "signatureAttachmentId", propertySignatureAttachmentId,
+                                        "signedAt", LocalDateTime.now().minusMinutes(2)),
+                                Map.of(
+                                        "partyType", "SUPPLIER",
+                                        "signerName", "施工单位项目负责人",
+                                        "signerUserId", temporarySupplierUserId,
+                                        "signatureMethod", "ELECTRONIC",
+                                        "signatureAttachmentId", supplierSignatureAttachmentId,
+                                        "signedAt", LocalDateTime.now().minusMinutes(1)))));
+        assertEquals("EFFECTIVE", contract.path("status").asText());
+
+        JsonNode contractProject = getData(
+                "/api/v1/admin/repair-projects/" + projectId, propertyManagerToken);
+        postData(
+                "/api/v1/admin/repair-projects/" + projectId + "/execution/start",
+                propertyManagerToken,
+                Map.of("expectedProjectVersion", contractProject.path("project").path("version").asInt()));
+        assertEquals("IN_PROGRESS", getData(
+                "/api/v1/admin/repair-projects/" + projectId, propertyManagerToken)
+                .path("project").path("status").asText());
+        JsonNode supplierProjects = getData("/api/v1/supplier/repair-projects", supplierToken);
+        assertTrue(supplierProjects.findValues("projectId").stream()
+                .anyMatch(value -> value.asLong() == projectId));
+        JsonNode supplierProject = getData(
+                "/api/v1/supplier/repair-projects/" + projectId, supplierToken);
+        assertEquals(projectId, supplierProject.path("project").path("projectId").asLong());
+        assertEquals(supplierDeptId, supplierProject.path("contract").path("supplierDeptId").asLong());
+
+        for (String stage : List.of("BEFORE_CONSTRUCTION", "MATERIAL_ENTRY", "DURING_CONSTRUCTION", "COMPLETION")) {
+            long evidenceAttachmentId = uploadProjectAttachment(
+                    projectId, supplierToken, stage + "-施工记录.pdf", "execution-" + stage);
+            JsonNode record = postData(
+                    "/api/v1/admin/repair-projects/" + projectId + "/execution-records",
+                    supplierToken, Map.of(
+                            "workPointId", workPointId,
+                            "stage", stage,
+                            "description", stage + "阶段施工记录",
+                            "occurredAt", LocalDateTime.now().minusMinutes(1),
+                            "attachmentIds", List.of(evidenceAttachmentId)));
+            JsonNode verified = postData(
+                    "/api/v1/admin/repair-projects/" + projectId + "/execution-records/"
+                            + record.path("recordId").asLong() + "/verification",
+                    propertyManagerToken, Map.of(
+                            "status", "VERIFIED",
+                            "opinion", "已与现场和实施方案核对一致"));
+            assertEquals("VERIFIED", verified.path("verificationStatus").asText());
+        }
+
+        long qualificationAttachmentId = uploadProjectAttachment(
+                projectId, supplierToken, "材料合格证明.pdf", "material-qualification");
+        long materialPhotoAttachmentId = uploadProjectAttachment(
+                projectId, supplierToken, "材料进场照片.pdf", "material-photo");
+        JsonNode material = postData(
+                "/api/v1/admin/repair-projects/" + projectId + "/material-inspections",
+                supplierToken, Map.of(
+                        "workPointId", workPointId,
+                        "materialName", "耐候密封材料",
+                        "brand", "已核验品牌",
+                        "model", "JW-01",
+                        "specification", "适用于外墙窗框防水节点",
+                        "quantity", 1,
+                        "unit", "批",
+                        "manufacturer", "测试材料生产企业",
+                        "qualificationAttachmentId", qualificationAttachmentId,
+                        "photoAttachmentIds", List.of(materialPhotoAttachmentId)));
+        JsonNode verifiedMaterial = postData(
+                "/api/v1/admin/repair-projects/" + projectId + "/material-inspections/"
+                        + material.path("inspectionId").asLong() + "/verification",
+                propertyManagerToken, Map.of(
+                        "status", "VERIFIED",
+                        "opinion", "合格证明、规格和进场实物一致"));
+        assertEquals("VERIFIED", verifiedMaterial.path("status").asText());
+
+        long settlementAttachmentId = uploadProjectAttachment(
+                projectId, supplierToken, "竣工结算单.pdf", "completion-settlement");
+        JsonNode settlement = postData(
+                "/api/v1/admin/repair-projects/" + projectId + "/settlement",
+                supplierToken, Map.of(
+                        "settlementAttachmentId", settlementAttachmentId,
+                        "taxRate", 9,
+                        "items", List.of(Map.of(
+                                "workPointId", workPointId,
+                                "actualQuantity", 1,
+                                "unit", "项",
+                                "actualUnitPrice", 1000,
+                                "varianceReason", "按合同和现场核验工程量结算"))));
+        assertEquals("SUBMITTED", settlement.path("status").asText());
+        JsonNode inProgressProject = getData(
+                "/api/v1/admin/repair-projects/" + projectId, propertyManagerToken);
+        JsonNode verifiedSettlement = postData(
+                "/api/v1/admin/repair-projects/" + projectId + "/settlement/verification",
+                propertyManagerToken, Map.of(
+                        "expectedProjectVersion", inProgressProject.path("project").path("version").asInt(),
+                        "approved", true,
+                        "opinion", "结算金额、工程量和完工材料核验一致"));
+        assertEquals("VERIFIED", verifiedSettlement.path("status").asText());
+
+        JsonNode ownerAcceptanceTask = getData(
+                "/api/v1/me/repair-projects/" + projectId + "/acceptance", reportingOwnerToken);
+        long acceptanceRoomId = ownerAcceptanceTask.path("affectedRoomIds").get(0).asLong();
+        JsonNode ownerAcceptance = postData(
+                "/api/v1/me/repair-projects/" + projectId + "/acceptance",
+                reportingOwnerToken, Map.of(
+                        "roomId", acceptanceRoomId,
+                        "conclusion", "PASSED",
+                        "participantName", "受影响业主",
+                        "opinion", "现场查看后确认维修结果符合方案"));
+        assertEquals("PASSED", ownerAcceptance.path("conclusion").asText());
+
+        long propertyAcceptanceAttachmentId = uploadProjectAttachment(
+                projectId, propertyManagerToken, "物业现场验收记录.pdf", "property-acceptance");
+        JsonNode propertyAcceptance = postData(
+                "/api/v1/admin/repair-projects/" + projectId + "/acceptance/property-technical",
+                propertyManagerToken, Map.of(
+                        "conclusion", "PASSED",
+                        "participantName", "物业项目负责人",
+                        "participantOrganization", "本小区物业服务项目部",
+                        "opinion", "已核对现场、施工记录、材料和竣工结算",
+                        "evidenceAttachmentId", propertyAcceptanceAttachmentId));
+        assertEquals("PASSED", propertyAcceptance.path("conclusion").asText());
+
+        long acceptanceResultAttachmentId = uploadProjectAttachment(
+                projectId, propertyManagerToken, "工程验收结果.pdf", "acceptance-result");
+        JsonNode pendingAcceptanceProject = getData(
+                "/api/v1/admin/repair-projects/" + projectId, propertyManagerToken);
+        JsonNode acceptance = postData(
+                "/api/v1/admin/repair-projects/" + projectId + "/acceptance/finalization",
+                propertyManagerToken, Map.of(
+                        "expectedProjectVersion", pendingAcceptanceProject.path("project").path("version").asInt(),
+                        "resultAttachmentId", acceptanceResultAttachmentId,
+                        "remark", "实施方案约定的验收条件均已满足，工程验收通过"));
+        assertEquals("PASSED", acceptance.path("status").asText());
+        JsonNode completedProject = getData(
+                "/api/v1/admin/repair-projects/" + projectId, propertyManagerToken);
+        assertEquals("COMPLETED", completedProject.path("project").path("status").asText());
+        assertEquals(0, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_repair_payment_request WHERE project_id = ?", Integer.class, projectId));
+        assertEquals(0, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_repair_completion_disclosure WHERE project_id = ?", Integer.class, projectId));
+        assertEquals(4, jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM t_repair_execution_record
+                WHERE project_id = ? AND verification_status = 'VERIFIED'
+                """, Integer.class, projectId));
+        assertEquals(1, jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM t_repair_acceptance
+                WHERE project_id = ? AND status = 'PASSED'
+                """, Integer.class, projectId));
     }
 
     /** 每个专有部分只保留一个表决代表，避免测试夹具中的历史共有产权数据造成名册歧义。 */
@@ -432,7 +667,7 @@ class RepairProjectBuildingE2eFlowTest {
         configuration.put("votingChannelPolicy", "PAPER_AND_ONLINE");
         configuration.put("onlineIdentityVerificationRequired", true);
         configuration.put("paperBallotSealRequired", true);
-        configuration.put("duplicateVotePolicy", "FIRST_VALID_WINS");
+        configuration.put("duplicateVotePolicy", "ONLINE_PREVAILS");
         configuration.put("countingRules", Map.of(
                 "GENERAL", countingRule(),
                 "MAJOR", countingRule()));
@@ -497,34 +732,6 @@ class RepairProjectBuildingE2eFlowTest {
                     "clause", "第 1 条：" + field.name()));
         }
         return references;
-    }
-
-    /** 测试只推进已经真实冻结的表决包时钟，不绕过生产状态校验。 */
-    private void makeVotingOpenable(long executionPackageId, long subjectId) {
-        jdbcTemplate.update("""
-                UPDATE t_voting_execution_package
-                SET vote_start_at = CURRENT_TIMESTAMP - INTERVAL '1 minute'
-                WHERE package_id = ?
-                """, executionPackageId);
-        jdbcTemplate.update("""
-                UPDATE t_voting_subject
-                SET vote_start_at = CURRENT_TIMESTAMP - INTERVAL '1 minute'
-                WHERE subject_id = ?
-                """, subjectId);
-    }
-
-    /** 测试在完成真实逐户投票后推进截止时间，再调用正式结算服务。 */
-    private void makeVotingClosable(long executionPackageId, long subjectId) {
-        jdbcTemplate.update("""
-                UPDATE t_voting_execution_package
-                SET vote_end_at = CURRENT_TIMESTAMP - INTERVAL '1 second'
-                WHERE package_id = ?
-                """, executionPackageId);
-        jdbcTemplate.update("""
-                UPDATE t_voting_subject
-                SET vote_end_at = CURRENT_TIMESTAMP - INTERVAL '1 second'
-                WHERE subject_id = ?
-                """, subjectId);
     }
 
     private JsonNode getData(String path, String token) throws Exception {
@@ -610,37 +817,23 @@ class RepairProjectBuildingE2eFlowTest {
         return authorizationId;
     }
 
-    /** 尚未用于送达或收票的书面委托可以撤销，撤销后只保留审计记录。 */
-    private void revokeUnusedProxyAuthorization(long packageId, long authorizationId) throws Exception {
-        JsonNode revoked = postData(
-                "/api/v1/admin/voting-packages/" + packageId + "/proxy-authorizations/"
-                        + authorizationId + "/revoke",
-                committeeDirectorToken, Map.of("reason", "业主改为本人在线表决。"));
-        assertEquals("REVOKED", revoked.path("status").asText());
-        assertEquals("REVOKED", jdbcTemplate.queryForObject(
-                "SELECT status FROM t_voting_proxy_authorization WHERE authorization_id = ?",
-                String.class, authorizationId));
-        assertEquals(1, jdbcTemplate.queryForObject("""
-                SELECT COUNT(*)
-                FROM t_voting_execution_audit
-                WHERE package_id = ? AND event_type = 'PROXY_AUTHORIZATION_REVOKED'
-                """, Integer.class, packageId));
-    }
-
     /** 代理纸票仍归入委托业主房屋，纸票录入和复核继续由不同工作人员完成。 */
     private void recordPaperBallot(
-            long projectId, long opid, long subjectId, long proxyAuthorizationId) throws Exception {
+            long projectId, long opid, long subjectId, Long proxyAuthorizationId) throws Exception {
         long deliveryAttachmentId = uploadProjectAttachment(
                 projectId, committeeDirectorToken, "纸质材料送达凭证.pdf", "paper-delivery");
+        Map<String, Object> deliveryRequest = new LinkedHashMap<>();
+        deliveryRequest.put("opid", opid);
+        if (proxyAuthorizationId != null) {
+            deliveryRequest.put("proxyAuthorizationId", proxyAuthorizationId);
+        }
+        deliveryRequest.put("recipientName", proxyAuthorizationId == null ? "业主本人" : "测试代理人");
+        deliveryRequest.put("deliveryMethod", "DOOR_TO_DOOR");
+        deliveryRequest.put("evidenceAttachmentId", deliveryAttachmentId);
+        deliveryRequest.put("deliveredAt", businessNow.get().toString());
         JsonNode delivery = postData(
                 "/api/v1/admin/repair-projects/" + projectId + "/voting/paper-deliveries",
-                committeeDirectorToken, Map.of(
-                        "opid", opid,
-                        "proxyAuthorizationId", proxyAuthorizationId,
-                        "recipientName", "测试代理人",
-                        "deliveryMethod", "DOOR_TO_DOOR",
-                        "evidenceAttachmentId", deliveryAttachmentId,
-                        "deliveredAt", Instant.now().toString()));
+                committeeDirectorToken, deliveryRequest);
         postData(
                 "/api/v1/admin/repair-projects/" + projectId + "/voting/paper-deliveries/"
                         + delivery.path("paperDeliveryId").asLong() + "/review",
@@ -650,14 +843,17 @@ class RepairProjectBuildingE2eFlowTest {
 
         long ballotAttachmentId = uploadProjectAttachment(
                 projectId, committeeDirectorToken, "纸质表决票原件.pdf", "paper-ballot");
+        Map<String, Object> ballotRequest = new LinkedHashMap<>();
+        ballotRequest.put("opid", opid);
+        if (proxyAuthorizationId != null) {
+            ballotRequest.put("proxyAuthorizationId", proxyAuthorizationId);
+        }
+        ballotRequest.put("ballotNumber", "REPAIR-E2E-PAPER-" + projectId + "-" + opid);
+        ballotRequest.put("attachmentId", ballotAttachmentId);
+        ballotRequest.put("receivedAt", businessNow.get().toString());
         JsonNode ballot = postData(
                 "/api/v1/admin/repair-projects/" + projectId + "/voting/paper-ballots",
-                committeeDirectorToken, Map.of(
-                        "opid", opid,
-                        "proxyAuthorizationId", proxyAuthorizationId,
-                        "ballotNumber", "REPAIR-E2E-PAPER-" + projectId + "-" + opid,
-                        "attachmentId", ballotAttachmentId,
-                        "receivedAt", Instant.now().toString()));
+                committeeDirectorToken, ballotRequest);
         long ballotId = ballot.path("paperBallotId").asLong();
         JsonNode entry = postData(
                 "/api/v1/admin/repair-projects/" + projectId + "/voting/paper-ballots/"
@@ -752,15 +948,85 @@ class RepairProjectBuildingE2eFlowTest {
         }
     }
 
+    /**
+     * 项目附件被合同、施工、结算和验收记录引用，测试清理必须先按真实聚合边界删除这些子记录。
+     */
+    private void cleanupProjectExecutionArtifacts() {
+        String projectIds = "SELECT project_id FROM t_repair_project WHERE project_name LIKE ?";
+        jdbcTemplate.update("DELETE FROM t_repair_acceptance_party WHERE acceptance_id IN "
+                + "(SELECT acceptance_id FROM t_repair_acceptance WHERE project_id IN (" + projectIds + "))",
+                PROJECT_PREFIX + "%");
+        jdbcTemplate.update("DELETE FROM t_repair_acceptance WHERE project_id IN (" + projectIds + ")",
+                PROJECT_PREFIX + "%");
+        jdbcTemplate.update("DELETE FROM t_repair_acceptance_affected_owner WHERE policy_id IN "
+                + "(SELECT policy_id FROM t_repair_acceptance_policy_snapshot WHERE project_id IN ("
+                + projectIds + "))", PROJECT_PREFIX + "%");
+        jdbcTemplate.update("DELETE FROM t_repair_acceptance_policy_snapshot WHERE project_id IN ("
+                + projectIds + ")", PROJECT_PREFIX + "%");
+        jdbcTemplate.update("DELETE FROM t_repair_project_settlement_item WHERE settlement_id IN "
+                + "(SELECT settlement_id FROM t_repair_project_settlement WHERE project_id IN ("
+                + projectIds + "))", PROJECT_PREFIX + "%");
+        jdbcTemplate.update("DELETE FROM t_repair_project_settlement WHERE project_id IN (" + projectIds + ")",
+                PROJECT_PREFIX + "%");
+        jdbcTemplate.update("DELETE FROM t_repair_material_photo WHERE inspection_id IN "
+                + "(SELECT inspection_id FROM t_repair_material_inspection WHERE project_id IN ("
+                + projectIds + "))", PROJECT_PREFIX + "%");
+        jdbcTemplate.update("DELETE FROM t_repair_material_inspection WHERE project_id IN (" + projectIds + ")",
+                PROJECT_PREFIX + "%");
+        jdbcTemplate.update("DELETE FROM t_repair_execution_attachment WHERE record_id IN "
+                + "(SELECT record_id FROM t_repair_execution_record WHERE project_id IN ("
+                + projectIds + "))", PROJECT_PREFIX + "%");
+        jdbcTemplate.update("DELETE FROM t_repair_execution_record WHERE project_id IN (" + projectIds + ")",
+                PROJECT_PREFIX + "%");
+        jdbcTemplate.update("DELETE FROM t_repair_contract_signature WHERE contract_id IN "
+                + "(SELECT contract_id FROM t_repair_contract WHERE project_id IN (" + projectIds + "))",
+                PROJECT_PREFIX + "%");
+        jdbcTemplate.update("DELETE FROM t_repair_contract WHERE project_id IN (" + projectIds + ")",
+                PROJECT_PREFIX + "%");
+    }
+
+    /** 清理上一次中断用例留下的施工单位测试身份，避免企业组织被测试账号外键占用。 */
+    private void cleanupSupplierIdentities() {
+        List<Long> accountIds = jdbcTemplate.queryForList("""
+                SELECT u.account_id
+                FROM sys_user u
+                JOIN sys_dept d ON d.dept_id = u.dept_id
+                WHERE d.dept_name LIKE ?
+                """, Long.class, SUPPLIER_PREFIX + "%");
+        jdbcTemplate.update("""
+                DELETE FROM sys_user_role
+                WHERE user_id IN (
+                    SELECT u.user_id
+                    FROM sys_user u
+                    JOIN sys_dept d ON d.dept_id = u.dept_id
+                    WHERE d.dept_name LIKE ?
+                )
+                """, SUPPLIER_PREFIX + "%");
+        jdbcTemplate.update("""
+                DELETE FROM sys_user
+                WHERE dept_id IN (SELECT dept_id FROM sys_dept WHERE dept_name LIKE ?)
+                """, SUPPLIER_PREFIX + "%");
+        accountIds.forEach(accountId -> jdbcTemplate.update(
+                "DELETE FROM t_account WHERE account_id = ?", accountId));
+    }
+
     private long createSurveyedBuildingWorkOrder() throws Exception {
-        JsonNode created = postData("/api/v1/admin/repair-work-orders", propertyManagerToken, Map.of(
+        String title = WORK_ORDER_PREFIX + System.nanoTime();
+        String response = mockMvc.perform(post("/api/v1/me/repairs/public")
+                        .header("Authorization", bearer(reportingOwnerToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
                 "publicAreaScope", "BUILDING",
                 "buildingId", buildingId,
                 "locationText", "楼栋公共外墙窗框交界",
-                "title", WORK_ORDER_PREFIX + System.nanoTime(),
+                "title", title,
                 "description", "现场发现楼栋公共部位渗水，需要完成勘验后纳入维修工程。",
-                "category", "WATERPROOFING"));
-        long workOrderId = created.path("workOrderId").asLong();
+                "category", "WATERPROOFING"))))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.status", is("SUBMITTED")))
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+        long workOrderId = objectMapper.readTree(response).path("data").path("workOrderId").asLong();
+        uploadOwnerReportImage(workOrderId);
         postAction(workOrderId, "/accept", propertyStaffToken, Map.of("remark", "物业受理楼栋公共部位报修"));
         postAction(workOrderId, "/verify-location", propertyStaffToken, Map.of("remark", "现场核验楼栋和公共范围"));
         postAction(workOrderId, "/assign", propertyManagerToken, Map.of(
@@ -778,6 +1044,18 @@ class RepairProjectBuildingE2eFlowTest {
         return workOrderId;
     }
 
+    private void uploadOwnerReportImage(long workOrderId) throws Exception {
+        MockMultipartFile file = new MockMultipartFile(
+                "file", "业主报修现场照片.jpg", "image/jpeg",
+                "owner-report-image".getBytes(StandardCharsets.UTF_8));
+        mockMvc.perform(multipart("/api/v1/me/repairs/" + workOrderId + "/attachments")
+                        .file(file)
+                        .param("contentType", "image/jpeg")
+                        .header("Authorization", bearer(reportingOwnerToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.attachmentKind", is("OWNER_REPORT_IMAGE")));
+    }
+
     private long uploadWorkOrderSurveyImage(long workOrderId) throws Exception {
         MockMultipartFile file = new MockMultipartFile(
                 "file", "楼栋现场勘验照片.jpg", "image/jpeg", "survey-image".getBytes(StandardCharsets.UTF_8));
@@ -793,12 +1071,30 @@ class RepairProjectBuildingE2eFlowTest {
 
     /** 测试夹具只写入与当前楼栋绑定的账簿，不以小区账户替代楼栋维修资金范围。 */
     private long seedBuildingMaintenanceAccount(BigDecimal totalBalance) {
-        return jdbcTemplate.queryForObject("""
+        List<Map<String, Object>> existing = jdbcTemplate.queryForList("""
+                SELECT account_id, total_balance, frozen_balance
+                FROM t_maintenance_fund_account
+                WHERE tenant_id = ? AND account_level = 2 AND reference_id = ?
+                """, TENANT, buildingId);
+        if (!existing.isEmpty()) {
+            Map<String, Object> row = existing.getFirst();
+            reusedFundingAccountId = ((Number) row.get("account_id")).longValue();
+            originalFundingTotalBalance = (BigDecimal) row.get("total_balance");
+            originalFundingFrozenBalance = (BigDecimal) row.get("frozen_balance");
+            jdbcTemplate.update("""
+                    UPDATE t_maintenance_fund_account
+                    SET total_balance = ?, frozen_balance = 0
+                    WHERE account_id = ?
+                    """, totalBalance, reusedFundingAccountId);
+            return reusedFundingAccountId;
+        }
+        createdFundingAccountId = jdbcTemplate.queryForObject("""
                 INSERT INTO t_maintenance_fund_account (
                     tenant_id, account_level, reference_id, ancestors, total_balance, frozen_balance
                 ) VALUES (?, 2, ?, '0', ?, 0)
                 RETURNING account_id
                 """, Long.class, TENANT, buildingId, totalBalance);
+        return createdFundingAccountId;
     }
 
     private long registerVerifiedSupplier() throws Exception {
@@ -847,16 +1143,13 @@ class RepairProjectBuildingE2eFlowTest {
     }
 
     private Map<String, Object> quoteRequest(
-            long supplierDeptId, long invitationId, long attachmentId, long workPointId) {
+            long invitationId, long attachmentId, long workPointId) {
         Map<String, Object> request = new LinkedHashMap<>();
-        request.put("supplierDeptId", supplierDeptId);
         request.put("invitationId", invitationId);
         request.put("quoteAmount", QUOTE_AMOUNT);
         request.put("taxRate", 9);
         request.put("quoteSummary", "报价原件已核对；税率以报价单头为准。");
         request.put("attachmentId", attachmentId);
-        request.put("confirmationStatus", "OFFLINE_EVIDENCE_VERIFIED");
-        request.put("originalSource", "EMAIL_ORIGINAL");
         request.put("constructionPeriodDays", 10);
         request.put("warrantyDays", 365);
         request.put("originalAmountConfirmed", true);
@@ -879,6 +1172,57 @@ class RepairProjectBuildingE2eFlowTest {
         return request;
     }
 
+    /** 施工单位账号只属于本企业组织，报价、施工记录和结算均通过施工单位公开接口提交。 */
+    private String createSupplierIdentity(long supplierDeptId) {
+        String phone = "138" + String.format("%08d", Math.floorMod(System.nanoTime(), 100_000_000));
+        temporarySupplierAccountId = jdbcTemplate.queryForObject("""
+                INSERT INTO t_account (phone, real_name, real_name_verified, status, last_active_identity_type)
+                VALUES (?, '工程施工经办人', 1, 1, 'SYS_USER')
+                RETURNING account_id
+                """, Long.class, phone);
+        temporarySupplierUserId = jdbcTemplate.queryForObject("""
+                INSERT INTO sys_user (account_id, dept_id, user_name, nick_name, status)
+                VALUES (?, ?, ?, '工程施工经办人', '0')
+                RETURNING user_id
+                """, Long.class, temporarySupplierAccountId, supplierDeptId,
+                "repair-e2e-supplier-" + temporarySupplierAccountId);
+        jdbcTemplate.update("""
+                INSERT INTO sys_user_role (user_id, role_id, effective_data_scope, granted_by)
+                SELECT ?, role_id, 'ORG_ONLY', ?
+                FROM sys_role WHERE role_key = 'SERVICE_PROVIDER_STAFF'
+                """, temporarySupplierUserId, USER_PROPERTY_MANAGER);
+        return jwtTokenProvider.generateToken(
+                temporarySupplierAccountId, "SYS_USER", temporarySupplierUserId, null);
+    }
+
+    /** 工程合同以小区已经启用的物业服务企业为签约前提，测试只补齐这一既有基础资料。 */
+    private void ensureActivePropertyServiceOrganization() {
+        Integer activeCount = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM t_property_service_organization
+                WHERE tenant_id = ? AND status = 'ACTIVE'
+                """, Integer.class, TENANT);
+        if (activeCount != null && activeCount > 0) {
+            return;
+        }
+        String creditCode = "91310000" + String.format("%010d", Math.floorMod(System.nanoTime(), 10_000_000_000L));
+        Instant now = Instant.now();
+        PropertyServiceEnterprise enterprise = propertyServiceOrganizationRepository.insertEnterprise(
+                new PropertyServiceEnterprise(
+                        null, null, "端到端测试物业服务企业", creditCode, now, now));
+        createdPropertyServiceEnterpriseId = enterprise.enterpriseId();
+        PropertyServiceOrganization organization = propertyServiceOrganizationRepository.insertOrganization(
+                new PropertyServiceOrganization(
+                        null, TENANT, enterprise.enterpriseId(), 102L, "求是物业项目部",
+                        "物业项目负责人", "13800000000",
+                        PropertyServiceContractBasis.OWNERS_ASSEMBLY_SELECTED,
+                        LocalDate.of(2026, 1, 1), null, PropertyServiceOrganizationStatus.ACTIVE,
+                        ACCOUNT_PROPERTY_MANAGER, USER_PROPERTY_MANAGER, now,
+                        ACCOUNT_COMMITTEE_DIRECTOR, USER_COMMITTEE_DIRECTOR, now,
+                        null, 0, now, now));
+        createdPropertyServiceOrganizationId = organization.organizationId();
+    }
+
     private long uploadProjectAttachment(long projectId, String token, String fileName, String content) throws Exception {
         MockMultipartFile file = new MockMultipartFile(
                 "file", fileName, "application/pdf", content.getBytes(StandardCharsets.UTF_8));
@@ -898,6 +1242,17 @@ class RepairProjectBuildingE2eFlowTest {
         request.put("supplierEvaluationRule", "LOWEST_COMPLIANT_QUOTE");
         request.put("minimumInvitedSupplierCount", 1);
         request.put("minimumValidQuoteCount", 1);
+        request.put("constructionManagementRequirements", "施工单位按已锁定点位组织施工，物业逐阶段核验留存材料。");
+        request.put("evidenceRequirements", List.of(
+                Map.of("stage", "BEFORE_CONSTRUCTION", "description", "施工前现场及保护措施", "required", true),
+                Map.of("stage", "MATERIAL_ENTRY", "description", "主要材料合格证明和进场照片", "required", true),
+                Map.of("stage", "DURING_CONSTRUCTION", "description", "施工过程关键节点照片", "required", true),
+                Map.of("stage", "COMPLETION", "description", "完工现场和竣工资料", "required", true)));
+        request.put("safetyRequirements", "做好高处作业和相邻公共区域防护，施工完成后清场。");
+        request.put("settlementMethod", "ACTUAL_QUANTITY");
+        request.put("plannedStartDate", LocalDate.now().plusDays(1));
+        request.put("plannedCompletionDate", LocalDate.now().plusDays(11));
+        request.put("warrantyDays", 365);
         request.put("acceptanceMethod", "物业项目负责人和受影响业主按竣工资料现场验收");
         request.put("acceptanceRequirements", List.of(
                 Map.of("requirementCode", "PROPERTY", "businessName", "物业现场验收",

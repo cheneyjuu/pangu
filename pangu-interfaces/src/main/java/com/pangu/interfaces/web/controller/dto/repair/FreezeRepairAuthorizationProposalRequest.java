@@ -4,6 +4,9 @@ package com.pangu.interfaces.web.controller.dto.repair;
 import com.pangu.application.repair.command.FreezeRepairAuthorizationProposalCommand;
 import com.pangu.domain.model.repair.RepairAcceptancePartyRole;
 import com.pangu.domain.model.repair.RepairProject.AffectedOwnerPassRule;
+import com.pangu.domain.model.repair.RepairProject.EvidenceRequirement;
+import com.pangu.domain.model.repair.RepairProject.EvidenceStage;
+import com.pangu.domain.model.repair.RepairProject.SettlementMethod;
 import com.pangu.domain.model.repair.RepairProjectGovernance.SupplierSelectionEvaluationRule;
 import com.pangu.domain.model.repair.RepairProjectExecution.AcceptanceRequirement;
 import com.pangu.domain.model.repair.RepairSupplierSelectionMethod;
@@ -18,6 +21,7 @@ import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Set;
 
@@ -28,6 +32,13 @@ public record FreezeRepairAuthorizationProposalRequest(
         @Min(1) Integer minimumInvitedSupplierCount,
         @Min(1) Integer minimumValidQuoteCount,
         String nonCompetitiveSelectionBasis,
+        @NotBlank @Size(max = 2000) String constructionManagementRequirements,
+        @NotEmpty @Size(max = 12) List<@Valid EvidenceRequirementRequest> evidenceRequirements,
+        @NotBlank @Size(max = 1000) String safetyRequirements,
+        @NotNull SettlementMethod settlementMethod,
+        @NotNull LocalDate plannedStartDate,
+        @NotNull LocalDate plannedCompletionDate,
+        @NotNull @Positive Integer warrantyDays,
         @NotBlank @Size(max = 1000) String acceptanceMethod,
         @NotEmpty @Size(max = 12) List<@Valid AcceptanceRequirementRequest> acceptanceRequirements,
         @NotEmpty Set<@NotNull RepairAcceptancePartyRole> acceptanceFinalizerRoles,
@@ -43,11 +54,24 @@ public record FreezeRepairAuthorizationProposalRequest(
         return new FreezeRepairAuthorizationProposalCommand(
                 expectedProjectVersion, supplierSelectionMethod, supplierEvaluationRule,
                 minimumInvitedSupplierCount, minimumValidQuoteCount, nonCompetitiveSelectionBasis,
+                constructionManagementRequirements,
+                evidenceRequirements.stream().map(EvidenceRequirementRequest::toDomain).toList(),
+                safetyRequirements, settlementMethod, plannedStartDate, plannedCompletionDate, warrantyDays,
                 acceptanceMethod,
                 acceptanceRequirements.stream().map(AcceptanceRequirementRequest::toDomain).toList(),
                 acceptanceFinalizerRoles, acceptanceBasisAttachmentIds, acceptanceBasisSummary,
                 affectedOwnerScopeDescription, minimumAffectedOwnerAcceptors,
                 affectedOwnerPassRule, affectedOwnerApprovalRatio);
+    }
+
+    public record EvidenceRequirementRequest(
+            @NotNull EvidenceStage stage,
+            @NotBlank @Size(max = 500) String description,
+            boolean required
+    ) {
+        private EvidenceRequirement toDomain() {
+            return new EvidenceRequirement(stage, description, required);
+        }
     }
 
     public record AcceptanceRequirementRequest(

@@ -34,8 +34,8 @@ public class RepairSupplierProjectService {
     @Transactional(readOnly = true)
     public List<SupplierProjectSummary> listAssignedProjects() {
         SupplierActor actor = supplierActor();
-        return executionRepository.listSupplierProjectIds(actor.context().tenantId(), actor.supplierDeptId()).stream()
-                .map(projectId -> summary(projectId, actor))
+        return executionRepository.listSupplierContracts(actor.supplierDeptId()).stream()
+                .map(contract -> summary(contract, actor))
                 .toList();
     }
 
@@ -43,42 +43,42 @@ public class RepairSupplierProjectService {
     public SupplierProjectDetails details(Long projectId) {
         SupplierActor actor = supplierActor();
         Contract contract = contract(projectId, actor);
-        RepairProject project = projectRepository.findProject(projectId, actor.context().tenantId())
+        Long tenantId = contract.tenantId();
+        RepairProject project = projectRepository.findProject(projectId, tenantId)
                 .orElseThrow(() -> support.notFound("维修工程项目不存在"));
-        PlanVersion storedPlan = projectRepository.listPlans(projectId, actor.context().tenantId()).stream()
+        PlanVersion storedPlan = projectRepository.listPlans(projectId, tenantId).stream()
                 .filter(candidate -> candidate.planId().equals(project.activePlanId())
                         && candidate.status() == PlanStatus.LOCKED)
                 .findFirst()
                 .orElseThrow(() -> support.conflict("项目缺少已锁定实施方案"));
         PlanVersion plan = storedPlan.withPlanDescription(narrativeImageService.resolveForPlan(
-                storedPlan.planId(), actor.context().tenantId(), storedPlan.planDescription()));
+                storedPlan.planId(), tenantId, storedPlan.planDescription()));
         return new SupplierProjectDetails(
                 project,
                 plan,
-                projectRepository.listWorkPoints(plan.planId(), actor.context().tenantId()),
-                projectRepository.listAttachments(projectId, actor.context().tenantId()),
+                projectRepository.listWorkPoints(plan.planId(), tenantId),
+                projectRepository.listAttachments(projectId, tenantId),
                 contract,
                 executionService.details(projectId));
     }
 
-    private SupplierProjectSummary summary(Long projectId, SupplierActor actor) {
-        Contract contract = contract(projectId, actor);
-        RepairProject project = projectRepository.findProject(projectId, actor.context().tenantId())
+    private SupplierProjectSummary summary(Contract contract, SupplierActor actor) {
+        if (!actor.supplierDeptId().equals(contract.supplierDeptId())) {
+            throw support.forbidden("当前施工单位没有该维修工程合同");
+        }
+        RepairProject project = projectRepository.findProject(contract.projectId(), contract.tenantId())
                 .orElseThrow(() -> support.notFound("维修工程项目不存在"));
         return new SupplierProjectSummary(project, contract);
     }
 
     private Contract contract(Long projectId, SupplierActor actor) {
-        Contract contract = executionRepository.findContract(projectId, actor.context().tenantId())
+        return executionRepository.findSupplierContract(projectId, actor.supplierDeptId())
                 .orElseThrow(() -> support.forbidden("当前施工单位没有该维修工程合同"));
-        if (!actor.supplierDeptId().equals(contract.supplierDeptId())) {
-            throw support.forbidden("当前施工单位没有该维修工程合同");
-        }
-        return contract;
     }
 
     private SupplierActor supplierActor() {
-        UserContext actor = support.requireSysActor(SUPPLIER_ROLES, "仅施工单位账号可访问供应商工程工作台");
+        UserContext actor = support.requireGlobalSysActor(
+                SUPPLIER_ROLES, "仅施工单位账号可访问供应商工程工作台");
         if (actor.deptId() == null) {
             throw support.forbidden("当前施工单位账号未绑定企业组织");
         }

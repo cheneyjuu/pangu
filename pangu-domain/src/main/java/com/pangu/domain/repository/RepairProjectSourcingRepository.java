@@ -16,6 +16,12 @@ public interface RepairProjectSourcingRepository {
 
     List<Invitation> listSupplierInvitations(Long supplierDeptId);
 
+    /**
+     * 施工单位工作身份不绑定单一小区，通过其真实邀价关系解析工程所属租户。
+     * 该查询不受项目后续状态影响，避免中选后因邀价不再出现在机会列表而失去合同及施工附件权限。
+     */
+    Optional<Invitation> findLatestSupplierProjectInvitation(Long projectId, Long supplierDeptId);
+
     Optional<Invitation> findSupplierInvitation(
             Long invitationId, Long projectId, Long supplierDeptId);
 

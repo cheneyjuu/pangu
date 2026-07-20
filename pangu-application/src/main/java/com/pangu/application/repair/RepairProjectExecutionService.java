@@ -14,10 +14,16 @@ import com.pangu.application.repair.command.RepairProjectExecutionCommands.Verif
 import com.pangu.domain.context.UserContext;
 import com.pangu.domain.model.propertyservice.PropertyServiceEnterprise;
 import com.pangu.domain.model.propertyservice.PropertyServiceOrganization;
+import com.pangu.domain.model.repair.RepairProject;
 import com.pangu.domain.model.repair.RepairProject.Attachment;
 import com.pangu.domain.model.repair.RepairProject.AllocationRoom;
+import com.pangu.domain.model.repair.RepairProject.DecisionScope;
 import com.pangu.domain.model.repair.RepairProject.EvidenceRequirement;
 import com.pangu.domain.model.repair.RepairProject.EvidenceStage;
+import com.pangu.domain.model.repair.RepairProject.FundSource;
+import com.pangu.domain.model.repair.RepairProject.FundingSlice;
+import com.pangu.domain.model.repair.RepairProject.FundingSliceVerificationStatus;
+import com.pangu.domain.model.repair.RepairProject.FundingSourceType;
 import com.pangu.domain.model.repair.RepairAcceptancePartyRole;
 import com.pangu.domain.model.repair.RepairProject.ResponsibilityDeterminationStatus;
 import com.pangu.domain.model.repair.RepairProject.ResponsibilityPath;
@@ -159,7 +165,7 @@ public class RepairProjectExecutionService {
         Contract contract = executionRepository.insertContract(new Contract(
                 null, projectId, context.plan().planId(), actor.tenantId(), command.supplierDeptId(),
                 legalName, command.contractAmount().setScale(2, RoundingMode.HALF_UP),
-                context.plan().snapshotHash(), context.project().fundSource(), signingMethod(signatures),
+                context.plan().snapshotHash(), contractFundSource(context), signingMethod(signatures),
                 contractAttachment.attachmentId(), contractAttachment.sha256(),
                 ContractStatus.EFFECTIVE, actor.userId(), null, null));
         List<ContractSignature> bound = signatures.stream()
@@ -209,9 +215,12 @@ public class RepairProjectExecutionService {
 
     @Transactional
     public ExecutionRecord submitExecutionRecord(Long projectId, SubmitExecutionRecord command) {
-        UserContext actor = support.requireSysActor(EXECUTION_SUBMIT_ROLES, "当前角色无权提交施工过程记录");
+        SubmissionActor submissionActor = submissionActor(
+                projectId, EXECUTION_SUBMIT_ROLES, "当前角色无权提交施工过程记录");
+        UserContext actor = submissionActor.context();
+        Long tenantId = submissionActor.tenantId();
         require(command != null && command.stage() != null, "stage 必填");
-        Context context = support.loadForUpdate(projectId, actor.tenantId(), Status.IN_PROGRESS);
+        Context context = support.loadForUpdate(projectId, tenantId, Status.IN_PROGRESS);
         assertSupplierMatchesContract(actor, context);
         support.workPoint(context, command.workPointId());
         String description = requiredText(command.description(), "description");
@@ -221,18 +230,18 @@ public class RepairProjectExecutionService {
         }
         support.attachments(context, command.attachmentIds(), "施工阶段原始证据");
         ExecutionRecord record = executionRepository.insertExecutionRecord(new ExecutionRecord(
-                null, projectId, context.plan().planId(), command.workPointId(), actor.tenantId(),
+                null, projectId, context.plan().planId(), command.workPointId(), tenantId,
                 command.stage(), description, occurredAt, actor.userId(), null,
                 VerificationStatus.PENDING, null, null, command.attachmentIds(), null));
         executionRepository.insertExecutionAttachments(
-                record.recordId(), actor.tenantId(), command.attachmentIds());
+                record.recordId(), tenantId, command.attachmentIds());
         Map<String, Object> event = new LinkedHashMap<>();
         event.put("recordId", record.recordId());
         event.put("workPointId", command.workPointId());
         event.put("stage", command.stage().name());
         event.put("attachmentCount", command.attachmentIds().size());
         support.event(context, actor, "PROJECT_EXECUTION_RECORDED", event);
-        return executionRepository.findExecutionRecord(record.recordId(), projectId, actor.tenantId()).orElseThrow();
+        return executionRepository.findExecutionRecord(record.recordId(), projectId, tenantId).orElseThrow();
     }
 
     @Transactional
@@ -261,9 +270,12 @@ public class RepairProjectExecutionService {
     @Transactional
     public MaterialInspection submitMaterialInspection(
             Long projectId, SubmitMaterialInspection command) {
-        UserContext actor = support.requireSysActor(EXECUTION_SUBMIT_ROLES, "当前角色无权提交材料进场记录");
+        SubmissionActor submissionActor = submissionActor(
+                projectId, EXECUTION_SUBMIT_ROLES, "当前角色无权提交材料进场记录");
+        UserContext actor = submissionActor.context();
+        Long tenantId = submissionActor.tenantId();
         require(command != null, "材料进场记录不能为空");
-        Context context = support.loadForUpdate(projectId, actor.tenantId(), Status.IN_PROGRESS);
+        Context context = support.loadForUpdate(projectId, tenantId, Status.IN_PROGRESS);
         assertSupplierMatchesContract(actor, context);
         support.workPoint(context, command.workPointId());
         requirePositive(command.quantity(), "quantity");
@@ -272,7 +284,7 @@ public class RepairProjectExecutionService {
         document(qualification, "材料合格证明");
         support.attachments(context, command.photoAttachmentIds(), "材料进场照片");
         MaterialInspection inspection = executionRepository.insertMaterialInspection(new MaterialInspection(
-                null, projectId, context.plan().planId(), command.workPointId(), actor.tenantId(),
+                null, projectId, context.plan().planId(), command.workPointId(), tenantId,
                 requiredText(command.materialName(), "materialName"), requiredText(command.brand(), "brand"),
                 requiredText(command.model(), "model"), requiredText(command.specification(), "specification"),
                 command.quantity(), requiredText(command.unit(), "unit"),
@@ -280,14 +292,14 @@ public class RepairProjectExecutionService {
                 command.photoAttachmentIds(), actor.userId(), VerificationStatus.PENDING,
                 null, null, null, null));
         executionRepository.insertMaterialPhotos(
-                inspection.inspectionId(), actor.tenantId(), command.photoAttachmentIds());
+                inspection.inspectionId(), tenantId, command.photoAttachmentIds());
         Map<String, Object> event = new LinkedHashMap<>();
         event.put("inspectionId", inspection.inspectionId());
         event.put("workPointId", command.workPointId());
         event.put("materialName", inspection.materialName());
         support.event(context, actor, "PROJECT_MATERIAL_SUBMITTED", event);
         return executionRepository.findMaterialInspection(
-                inspection.inspectionId(), projectId, actor.tenantId()).orElseThrow();
+                inspection.inspectionId(), projectId, tenantId).orElseThrow();
     }
 
     @Transactional
@@ -317,14 +329,17 @@ public class RepairProjectExecutionService {
 
     @Transactional
     public Settlement submitSettlement(Long projectId, SubmitSettlement command) {
-        UserContext actor = support.requireSysActor(EXECUTION_SUBMIT_ROLES, "当前角色无权提交竣工结算");
+        SubmissionActor submissionActor = submissionActor(
+                projectId, EXECUTION_SUBMIT_ROLES, "当前角色无权提交竣工结算");
+        UserContext actor = submissionActor.context();
+        Long tenantId = submissionActor.tenantId();
         require(command != null, "结算命令不能为空");
-        Context context = support.loadForUpdate(projectId, actor.tenantId(), Status.IN_PROGRESS);
+        Context context = support.loadForUpdate(projectId, tenantId, Status.IN_PROGRESS);
         assertSupplierMatchesContract(actor, context);
-        if (executionRepository.findActiveSettlement(projectId, actor.tenantId()).isPresent()) {
+        if (executionRepository.findActiveSettlement(projectId, tenantId).isPresent()) {
             throw support.conflict("项目已有待核验或已核验结算");
         }
-        Contract contract = executionRepository.findContract(projectId, actor.tenantId())
+        Contract contract = executionRepository.findContract(projectId, tenantId)
                 .orElseThrow(() -> support.conflict("项目没有已生效合同"));
         assertExecutionEvidenceComplete(context);
         Attachment settlementAttachment = support.attachment(
@@ -340,15 +355,15 @@ public class RepairProjectExecutionService {
             throw support.invalid("实际结算超过合同金额，必须先完成变更审批或补充协议");
         }
         Settlement settlement = executionRepository.insertSettlement(new Settlement(
-                null, projectId, context.plan().planId(), contract.contractId(), actor.tenantId(),
-                executionRepository.nextSettlementVersion(projectId, actor.tenantId()),
+                null, projectId, context.plan().planId(), contract.contractId(), tenantId,
+                executionRepository.nextSettlementVersion(projectId, tenantId),
                 SettlementStatus.SUBMITTED, subtotal, taxRate, tax, total, settlementAttachment.attachmentId(),
                 actor.userId(), null, null, null, null, items));
         executionRepository.insertSettlementItems(settlement.settlementId(), items);
         support.event(context, actor, "PROJECT_SETTLEMENT_SUBMITTED", Map.of(
                 "settlementId", settlement.settlementId(), "detailCount", items.size(),
                 "taxRate", taxRate, "totalAmount", total));
-        return executionRepository.findActiveSettlement(projectId, actor.tenantId()).orElseThrow();
+        return executionRepository.findActiveSettlement(projectId, tenantId).orElseThrow();
     }
 
     @Transactional
@@ -385,23 +400,28 @@ public class RepairProjectExecutionService {
 
     @Transactional(readOnly = true)
     public Details details(Long projectId) {
-        UserContext actor = support.requireActor();
-        Context context = support.load(projectId, actor.tenantId());
-        Contract contract = executionRepository.findContract(projectId, actor.tenantId()).orElse(null);
-        var acceptance = executionRepository.findLatestAcceptance(projectId, actor.tenantId()).orElse(null);
+        SubmissionActor submissionActor = submissionActor(
+                projectId,
+                Set.of("PROPERTY_MANAGER", "PROPERTY_STAFF", "COMMITTEE_DIRECTOR", "COMMITTEE_MEMBER",
+                        "OWNER_REPRESENTATIVE", "SERVICE_PROVIDER_MANAGER", "SERVICE_PROVIDER_STAFF"),
+                "当前角色无权查看工程履行记录");
+        Long tenantId = submissionActor.tenantId();
+        Context context = support.load(projectId, tenantId);
+        Contract contract = executionRepository.findContract(projectId, tenantId).orElse(null);
+        var acceptance = executionRepository.findLatestAcceptance(projectId, tenantId).orElse(null);
         return new Details(
                 contract,
                 contract == null ? List.of() : executionRepository.listContractSignatures(contract.contractId()),
-                executionRepository.findCostReview(projectId, context.plan().planId(), actor.tenantId()).orElse(null),
-                executionRepository.listExecutionRecords(projectId, actor.tenantId()),
-                executionRepository.listMaterialInspections(projectId, actor.tenantId()),
-                executionRepository.findActiveSettlement(projectId, actor.tenantId()).orElse(null),
-                executionRepository.findAcceptancePolicy(projectId, actor.tenantId()).orElse(null),
+                executionRepository.findCostReview(projectId, context.plan().planId(), tenantId).orElse(null),
+                executionRepository.listExecutionRecords(projectId, tenantId),
+                executionRepository.listMaterialInspections(projectId, tenantId),
+                executionRepository.findActiveSettlement(projectId, tenantId).orElse(null),
+                executionRepository.findAcceptancePolicy(projectId, tenantId).orElse(null),
                 acceptance,
                 acceptance == null ? List.of() : executionRepository.listAcceptanceParties(
-                        acceptance.acceptanceId(), actor.tenantId()),
-                executionRepository.listPaymentRequests(projectId, actor.tenantId()),
-                executionRepository.findCompletionDisclosure(projectId, actor.tenantId()).orElse(null));
+                        acceptance.acceptanceId(), tenantId),
+                executionRepository.listPaymentRequests(projectId, tenantId),
+                executionRepository.findCompletionDisclosure(projectId, tenantId).orElse(null));
     }
 
     private void openAcceptance(Context context, Settlement settlement, UserContext actor) {
@@ -573,6 +593,29 @@ public class RepairProjectExecutionService {
                 .orElseThrow(() -> support.invalid("当前物业服务组织缺少已核验企业主体，不能签署合同"));
     }
 
+    /**
+     * 新建项目的费用来源以锁定时生成的资金承担快照为准；项目主表 fundSource 仅保留历史数据兼容。
+     */
+    private FundSource contractFundSource(Context context) {
+        if (context.project().fundSource() != null) {
+            return context.project().fundSource();
+        }
+        DecisionScope decisionScope = projectRepository.findDecisionScope(
+                        context.project().projectId(), context.project().tenantId())
+                .orElseThrow(() -> support.invalid("当前工程缺少已确认的费用承担范围，不能签署合同"));
+        List<FundingSlice> slices = projectRepository.listFundingSlices(
+                decisionScope.decisionScopeId(), context.project().tenantId());
+        boolean specialMaintenanceFundConfirmed = !slices.isEmpty() && slices.stream().allMatch(slice ->
+                slice.sourceType() == FundingSourceType.SPECIAL_MAINTENANCE_LEDGER
+                        && slice.verificationStatus() == FundingSliceVerificationStatus.CONFIRMED);
+        if (!specialMaintenanceFundConfirmed) {
+            throw support.invalid("当前工程费用来源尚未形成可用于合同的确认记录");
+        }
+        return decisionScope.scopeType() == RepairProject.ScopeType.COMMUNITY
+                ? FundSource.COMMUNITY_MAINTENANCE_FUND
+                : FundSource.BUILDING_MAINTENANCE_FUND;
+    }
+
     private void assertSignerIdentity(
             RecordContract.Signature signature, UserContext actor, Long supplierDeptId) {
         Long signerUserId = signature.signerUserId();
@@ -649,6 +692,22 @@ public class RepairProjectExecutionService {
         }
     }
 
+    /**
+     * 施工单位账号没有单一小区上下文，必须用当前工程的生效合同确定租户；物业账号仍使用登录工作身份。
+     */
+    private SubmissionActor submissionActor(Long projectId, Set<String> roles, String message) {
+        UserContext actor = support.requireGlobalSysActor(roles, message);
+        if (actor.tenantId() != null) {
+            return new SubmissionActor(actor, actor.tenantId());
+        }
+        if (!SUPPLIER_ROLES.contains(actor.roleKey()) || actor.deptId() == null) {
+            throw support.forbidden(message);
+        }
+        Contract contract = executionRepository.findSupplierContract(projectId, actor.deptId())
+                .orElseThrow(() -> support.forbidden("当前施工单位没有该维修工程合同"));
+        return new SubmissionActor(actor, contract.tenantId());
+    }
+
     private void requireVersion(Context context, Integer expectedVersion) {
         if (!context.project().version().equals(expectedVersion)) {
             throw support.conflict("项目版本已变化，请刷新后重试");
@@ -714,5 +773,8 @@ public class RepairProjectExecutionService {
         } catch (java.security.NoSuchAlgorithmException ex) {
             throw new IllegalStateException("JVM 缺少 SHA-256", ex);
         }
+    }
+
+    private record SubmissionActor(UserContext context, Long tenantId) {
     }
 }

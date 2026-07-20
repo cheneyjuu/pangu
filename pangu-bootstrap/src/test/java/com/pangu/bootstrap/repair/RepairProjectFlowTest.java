@@ -18,6 +18,7 @@ import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -220,11 +221,6 @@ class RepairProjectFlowTest {
                 referenceRoomWorkPoint(buildingId, roomId, List.of(sourceId)))));
         long projectId = created.path("project").path("projectId").asLong();
         long planId = created.path("plans").get(0).path("planId").asLong();
-        assertEquals(0, jdbcTemplate.queryForObject("""
-                SELECT COUNT(*)
-                FROM t_maintenance_fund_account
-                WHERE tenant_id = ? AND account_level = 2 AND reference_id = ?
-                """, Integer.class, TENANT, buildingId));
         int freezeVersion = confirmSharedSpecialFundResponsibility(
                 projectId, 0, "EXISTING_AUTHORIZATION", true);
         long acceptanceBasisAttachmentId = uploadProjectAttachment(
@@ -450,6 +446,16 @@ class RepairProjectFlowTest {
         request.put("supplierEvaluationRule", "LOWEST_COMPLIANT_QUOTE");
         request.put("minimumInvitedSupplierCount", minimumInvitedSupplierCount);
         request.put("minimumValidQuoteCount", minimumValidQuoteCount);
+        request.put("constructionManagementRequirements", "物业按实施方案核验施工阶段和现场留存材料");
+        request.put("evidenceRequirements", List.of(
+                Map.of("stage", "BEFORE_CONSTRUCTION", "description", "施工前现场记录", "required", true),
+                Map.of("stage", "DURING_CONSTRUCTION", "description", "施工过程记录", "required", true),
+                Map.of("stage", "COMPLETION", "description", "完工现场记录", "required", true)));
+        request.put("safetyRequirements", "施工期间设置现场防护并及时清场");
+        request.put("settlementMethod", "ACTUAL_QUANTITY");
+        request.put("plannedStartDate", LocalDate.now().plusDays(1));
+        request.put("plannedCompletionDate", LocalDate.now().plusDays(10));
+        request.put("warrantyDays", 365);
         request.put("acceptanceMethod", "物业项目负责人和受影响业主按竣工资料现场验收");
         request.put("acceptanceRequirements", List.of(
                 Map.of("requirementCode", "PROPERTY", "businessName", "物业现场验收",

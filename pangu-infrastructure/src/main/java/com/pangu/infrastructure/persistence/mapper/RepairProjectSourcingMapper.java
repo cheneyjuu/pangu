@@ -23,6 +23,10 @@ public interface RepairProjectSourcingMapper {
     List<InvitationRow> listSupplierInvitations(
             @Param("supplierDeptId") Long supplierDeptId);
 
+    InvitationRow findLatestSupplierProjectInvitation(
+            @Param("projectId") Long projectId,
+            @Param("supplierDeptId") Long supplierDeptId);
+
     InvitationRow findSupplierInvitation(
             @Param("invitationId") Long invitationId,
             @Param("projectId") Long projectId,

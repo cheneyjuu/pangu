@@ -153,7 +153,7 @@ class RepairProjectExecutionFlowTest {
                           'COMPETITIVE_QUOTATION', '已完成原有定商程序',
                           '按已授权方案实施', '[]'::JSONB,
                           '按现场安全措施施工', '按已授权验收规则执行', '[]'::JSONB,
-                          '既有决定范围内业主', 1, 'ALL', 1.0000, 'ACTUAL_QUANTITY',
+                          '既有决定范围内业主', 1, 'ALL', NULL, 'ACTUAL_QUANTITY',
                           CURRENT_DATE, CURRENT_DATE + 30, 365, 'BUILDING_REPAIR_DECISION',
                           0, '[]'::JSONB, 'LOCKED', ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 RETURNING plan_id

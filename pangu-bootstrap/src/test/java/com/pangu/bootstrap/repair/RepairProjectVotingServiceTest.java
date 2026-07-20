@@ -33,6 +33,7 @@ import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 
 import java.math.BigDecimal;
+import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -73,7 +74,7 @@ class RepairProjectVotingServiceTest {
         service = new RepairProjectVotingService(
                 projectRepository, votingRepository, governanceRepository, ruleRepository,
                 subjectRepository, resultRepository, new VotingDecisionResultProjector(objectMapper),
-                votingExecutionService, rulePolicy, userContextHolder, objectMapper);
+                votingExecutionService, rulePolicy, userContextHolder, objectMapper, Clock.systemUTC());
         UserContext actor = new UserContext(
                 9001L, UserContext.IdentityType.SYS_USER, 800101L, 10001L,
                 10L, UserContext.DeptCategory.B, 1, DataScopeType.ALL_COMMUNITY,

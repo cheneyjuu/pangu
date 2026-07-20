@@ -22,6 +22,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -50,6 +51,7 @@ public class OwnerRepairProjectVotingService {
     private final VotingDecisionResultProjector votingDecisionResultProjector;
     private final OnlineVotingService onlineVotingService;
     private final UserContextHolder userContextHolder;
+    private final Clock clock;
 
     @Transactional(readOnly = true)
     public List<RepairProjectVoting.OwnerTask> listTasks() {
@@ -113,7 +115,7 @@ public class OwnerRepairProjectVotingService {
         try {
             return onlineVotingService.acknowledge(new OnlineVotingService.AcknowledgeCommand(
                     resolved.executionPackage().getPackageId(), resolved.owner().tenantId(), opid,
-                    packageHash, confirmed, Instant.now()));
+                    packageHash, confirmed, clock.instant()));
         } catch (OnlineVotingException ex) {
             throw translate(ex);
         }
@@ -131,7 +133,7 @@ public class OwnerRepairProjectVotingService {
         try {
             return onlineVotingService.submit(new OnlineVotingService.SubmitCommand(
                     resolved.executionPackage().getPackageId(), resolved.owner().tenantId(), opid,
-                    packageHash, confirmed, idempotencyKey, decisions, Instant.now()));
+                    packageHash, confirmed, idempotencyKey, decisions, clock.instant()));
         } catch (OnlineVotingException ex) {
             throw translate(ex);
         }
@@ -144,7 +146,7 @@ public class OwnerRepairProjectVotingService {
         try {
             return onlineVotingService.requestPaperAssistance(new OnlineVotingService.PaperAssistanceCommand(
                     resolved.executionPackage().getPackageId(), resolved.owner().tenantId(), opid,
-                    packageHash, Instant.now()));
+                    packageHash, clock.instant()));
         } catch (OnlineVotingException ex) {
             throw translate(ex);
         }
@@ -157,7 +159,7 @@ public class OwnerRepairProjectVotingService {
         try {
             return onlineVotingService.withdrawPaperAssistance(
                     resolved.executionPackage().getPackageId(), requestId, resolved.owner().tenantId(), opid,
-                    packageHash, Instant.now());
+                    packageHash, clock.instant());
         } catch (OnlineVotingException ex) {
             throw translate(ex);
         }

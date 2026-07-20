@@ -37,9 +37,11 @@ public interface RepairProjectExecutionMapper {
 
     ContractRow findContract(@Param("projectId") Long projectId, @Param("tenantId") Long tenantId);
 
-    List<Long> listSupplierProjectIds(
-            @Param("tenantId") Long tenantId,
+    ContractRow findSupplierContract(
+            @Param("projectId") Long projectId,
             @Param("supplierDeptId") Long supplierDeptId);
+
+    List<ContractRow> listSupplierContracts(@Param("supplierDeptId") Long supplierDeptId);
 
     List<ContractSignatureRow> listContractSignatures(@Param("contractId") Long contractId);
 

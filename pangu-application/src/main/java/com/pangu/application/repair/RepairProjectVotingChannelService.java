@@ -25,6 +25,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
@@ -53,6 +54,7 @@ public class RepairProjectVotingChannelService {
     private final PaperVotingService paperVotingService;
     private final OnlineVotingService onlineVotingService;
     private final UserContextHolder userContextHolder;
+    private final Clock clock;
 
     @Transactional
     public PaperVotingDelivery recordDelivery(Long projectId, RecordDeliveryCommand command) {
@@ -84,7 +86,7 @@ public class RepairProjectVotingChannelService {
         try {
             return paperVotingService.reviewDelivery(new PaperVotingService.ReviewDeliveryCommand(
                     context.executionPackage().getPackageId(), deliveryId, context.project().tenantId(),
-                    command.decision(), command.reviewNote(), context.actor().userId(), Instant.now()));
+                    command.decision(), command.reviewNote(), context.actor().userId(), clock.instant()));
         } catch (PaperVotingException ex) {
             throw translate(ex);
         }
@@ -118,7 +120,7 @@ public class RepairProjectVotingChannelService {
         try {
             return paperVotingService.voidBallot(new PaperVotingService.VoidBallotCommand(
                     context.executionPackage().getPackageId(), ballotId, context.project().tenantId(),
-                    requireText(reason, "作废原因"), context.actor().userId(), Instant.now()));
+                    requireText(reason, "作废原因"), context.actor().userId(), clock.instant()));
         } catch (PaperVotingException ex) {
             throw translate(ex);
         }
@@ -134,7 +136,7 @@ public class RepairProjectVotingChannelService {
         try {
             return paperVotingService.submitEntry(new PaperVotingService.SubmitEntryCommand(
                     context.executionPackage().getPackageId(), ballotId, context.project().tenantId(),
-                    requireTemplateHash(context), items, context.actor().userId(), Instant.now()));
+                    requireTemplateHash(context), items, context.actor().userId(), clock.instant()));
         } catch (PaperVotingException ex) {
             throw translate(ex);
         }
@@ -152,7 +154,7 @@ public class RepairProjectVotingChannelService {
         try {
             return paperVotingService.reviewEntry(new PaperVotingService.ReviewEntryCommand(
                     context.executionPackage().getPackageId(), ballotId, entryId, context.project().tenantId(),
-                    command.decision(), command.reviewNote(), context.actor().userId(), Instant.now()));
+                    command.decision(), command.reviewNote(), context.actor().userId(), clock.instant()));
         } catch (PaperVotingException ex) {
             throw translate(ex);
         }

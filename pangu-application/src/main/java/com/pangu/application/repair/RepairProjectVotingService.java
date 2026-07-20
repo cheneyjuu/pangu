@@ -35,6 +35,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.Clock;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -74,6 +75,7 @@ public class RepairProjectVotingService {
     private final FormalVotingRulePolicy rulePolicy;
     private final UserContextHolder userContextHolder;
     private final ObjectMapper objectMapper;
+    private final Clock clock;
 
     /**
      * 确认本次办理安排并一次性冻结规则、提案和精确表决人名册。
@@ -101,7 +103,7 @@ public class RepairProjectVotingService {
         }
         OwnersAssemblyRule rule = ruleRepository.findActive(project.tenantId())
                 .orElseThrow(() -> conflict("本小区尚未启用可用于维修事项的议事规则"));
-        Instant preparedAt = Instant.now();
+        Instant preparedAt = clock.instant();
         try {
             rulePolicy.requireExecutable(rule, command.collectionMode(), preparedAt, command.voteStartAt());
         } catch (FormalVotingRulePolicy.UnsupportedRuleException ex) {
@@ -181,7 +183,7 @@ public class RepairProjectVotingService {
         requireFrozenPlan(project);
         OwnersAssemblyRule rule = ruleRepository.findActive(project.tenantId())
                 .orElseThrow(() -> conflict("本小区尚未启用可用于维修事项的议事规则"));
-        FormalVotingRulePolicy.PreparationOptions options = rulePolicy.preparationOptions(rule, Instant.now());
+        FormalVotingRulePolicy.PreparationOptions options = rulePolicy.preparationOptions(rule, clock.instant());
         return new PreparationOptions(
                 rule.ruleName(), rule.ruleVersion(), options.ready(), options.blockingItems(),
                 options.allowedModes(), options.earliestVoteStartAt(), options.validDeliveryMethods(),
@@ -202,7 +204,7 @@ public class RepairProjectVotingService {
         }
         OwnersAssemblyRule rule = requireFrozenRule(link);
         VotingExecutionPackage executionPackage = requireExecutionPackage(link);
-        Instant openedAt = Instant.now();
+        Instant openedAt = clock.instant();
         votingExecutionService.open(executionPackage.getPackageId(), project.tenantId(), actor.userId(), openedAt);
         if (votingRepository.markVoting(
                 link.linkId(), project.tenantId(), actor.userId(), openedAt, link.version()) != 1) {
@@ -236,7 +238,7 @@ public class RepairProjectVotingService {
         } catch (FormalVotingRulePolicy.UnsupportedRuleException ex) {
             throw conflict(ex.getMessage(), ex);
         }
-        Instant settledAt = Instant.now();
+        Instant settledAt = clock.instant();
         VotingExecutionPackage settledPackage = votingExecutionService.closeAndSettle(
                 link.executionPackageId(), project.tenantId(), actor.userId(), settledAt,
                 ignored -> settlementPolicy);

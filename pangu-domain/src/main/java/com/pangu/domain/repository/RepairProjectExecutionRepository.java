@@ -32,7 +32,11 @@ public interface RepairProjectExecutionRepository {
 
     Optional<Contract> findContract(Long projectId, Long tenantId);
 
-    List<Long> listSupplierProjectIds(Long tenantId, Long supplierDeptId);
+    /** 施工单位没有单一小区上下文，生效合同是其访问工程的可信租户边界。 */
+    Optional<Contract> findSupplierContract(Long projectId, Long supplierDeptId);
+
+    /** 返回施工单位跨小区承接的全部生效维修合同。 */
+    List<Contract> listSupplierContracts(Long supplierDeptId);
 
     List<ContractSignature> listContractSignatures(Long contractId);
 

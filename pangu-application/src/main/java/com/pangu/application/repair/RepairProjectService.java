@@ -367,12 +367,17 @@ public class RepairProjectService {
         PlanVersion proposal = plan.withSupplierSelectionTerms(
                 command.supplierSelectionMethod(), command.supplierEvaluationRule(),
                 command.minimumInvitedSupplierCount(), command.minimumValidQuoteCount(),
-                trim(command.nonCompetitiveSelectionBasis())).withAcceptanceTerms(
+                trim(command.nonCompetitiveSelectionBasis())).withExecutionTerms(
+                requireText(command.constructionManagementRequirements(), "施工管理要求"),
+                command.evidenceRequirements(), requireText(command.safetyRequirements(), "施工安全要求"),
+                command.settlementMethod(), command.plannedStartDate(), command.plannedCompletionDate(),
+                command.warrantyDays()).withAcceptanceTerms(
                 requireText(command.acceptanceMethod(), "验收方式"),
                 command.acceptanceRequirements(), command.acceptanceFinalizerRoles(),
                 command.acceptanceBasisAttachmentIds(), requireText(command.acceptanceBasisSummary(), "验收依据说明"),
                 trim(command.affectedOwnerScopeDescription()), command.minimumAffectedOwnerAcceptors(),
                 command.affectedOwnerPassRule(), command.affectedOwnerApprovalRatio());
+        validateExecutionTerms(proposal);
         validateAcceptanceTerms(proposal, projectId, actor.tenantId());
         List<WorkPoint> workPoints = requireWorkPoints(plan.planId(), actor.tenantId(), "提交实施方案");
         List<AllocationRoom> allocationRooms = projectRepository.snapshotAllocationRooms(
@@ -982,6 +987,40 @@ public class RepairProjectService {
                 || proposal.affectedOwnerPassRule() != null
                 || proposal.affectedOwnerApprovalRatio() != null) {
             throw invalid("方案未安排受影响业主参与验收，不应填写业主验收门槛");
+        }
+    }
+
+    /** 施工过程要求由实施方案明确，服务端只校验其完整性，不按项目类型补造固定证据。 */
+    private void validateExecutionTerms(PlanVersion proposal) {
+        if (proposal.settlementMethod() == null
+                || proposal.plannedStartDate() == null
+                || proposal.plannedCompletionDate() == null
+                || proposal.warrantyDays() == null
+                || proposal.warrantyDays() < 1) {
+            throw invalid("请完整填写施工时间、结算方式和质保期限");
+        }
+        if (proposal.plannedCompletionDate().isBefore(proposal.plannedStartDate())) {
+            throw invalid("计划完工日期不能早于计划开工日期");
+        }
+        if (proposal.evidenceRequirements().isEmpty()) {
+            throw invalid("请明确施工过程需要留存并核验的材料");
+        }
+        Set<RepairProject.EvidenceStage> stages = new LinkedHashSet<>();
+        boolean hasRequiredEvidence = false;
+        for (RepairProject.EvidenceRequirement requirement : proposal.evidenceRequirements()) {
+            if (requirement == null || requirement.stage() == null || trim(requirement.description()) == null) {
+                throw invalid("施工过程留存要求不完整");
+            }
+            if (requirement.stage() == RepairProject.EvidenceStage.ACCEPTANCE) {
+                throw invalid("工程验收材料应填写在验收要求中，不能混入施工过程留存要求");
+            }
+            if (!stages.add(requirement.stage())) {
+                throw invalid("同一施工阶段只能配置一项留存要求");
+            }
+            hasRequiredEvidence |= requirement.required();
+        }
+        if (!hasRequiredEvidence) {
+            throw invalid("施工过程至少需要一项必需留存材料");
         }
     }
 
