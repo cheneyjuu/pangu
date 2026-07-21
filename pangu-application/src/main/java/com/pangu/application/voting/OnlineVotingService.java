@@ -4,7 +4,6 @@ package com.pangu.application.voting;
 import com.pangu.application.support.PayloadHasher;
 import com.pangu.domain.context.UserContext;
 import com.pangu.domain.context.UserContextHolder;
-import com.pangu.domain.model.user.AuthenticationLevel;
 import com.pangu.domain.model.voting.OnlineBallotSubmission;
 import com.pangu.domain.model.voting.OnlinePaperAssistanceRequest;
 import com.pangu.domain.model.voting.OnlineVotingAcknowledgement;
@@ -14,6 +13,8 @@ import com.pangu.domain.model.voting.VotingBallotRecord;
 import com.pangu.domain.model.voting.VotingDeliveryRecord;
 import com.pangu.domain.model.voting.VotingElectorateSnapshot;
 import com.pangu.domain.model.voting.VotingExecutionPackage;
+import com.pangu.domain.policy.AbacPolicyEngine;
+import com.pangu.domain.policy.EvaluationResult;
 import com.pangu.domain.policy.voting.DuplicateBallotResolutionPolicy;
 import com.pangu.domain.repository.OnlineVotingRepository;
 import com.pangu.domain.repository.PaperVotingRepository;
@@ -55,13 +56,14 @@ public class OnlineVotingService {
     private final PaperVotingRepository paperVotingRepository;
     private final VotingExecutionService votingExecutionService;
     private final VotingConflictAuditService conflictAuditService;
+    private final AbacPolicyEngine abacPolicyEngine;
     private final UserContextHolder userContextHolder;
     private final Clock clock;
 
     @Transactional
     public OnlineVotingAcknowledgement acknowledge(AcknowledgeCommand command) {
         Objects.requireNonNull(command, "command 不能为空");
-        UserContext owner = requireL3Owner(command.tenantId());
+        UserContext owner = requireCommonDecisionOwner(command.tenantId());
         VotingExecutionPackage ballotPackage = requireOnlineVotingPackage(
                 command.packageId(), command.tenantId(), command.packageHash());
         if (!Boolean.TRUE.equals(command.confirmed())) {
@@ -102,7 +104,7 @@ public class OnlineVotingService {
     @Transactional
     public OnlineBallotSubmission submit(SubmitCommand command) {
         Objects.requireNonNull(command, "command 不能为空");
-        UserContext owner = requireL3Owner(command.tenantId());
+        UserContext owner = requireCommonDecisionOwner(command.tenantId());
         VotingExecutionPackage ballotPackage = requireOnlineVotingPackage(
                 command.packageId(), command.tenantId(), command.packageHash());
         if (!Boolean.TRUE.equals(command.confirmed())) {
@@ -354,10 +356,19 @@ public class OnlineVotingService {
         return ballots.isEmpty() ? "NOT_RECEIVED" : "VOIDED";
     }
 
-    private UserContext requireL3Owner(Long tenantId) {
+    private UserContext requireCommonDecisionOwner(Long tenantId) {
         UserContext owner = requireOwner(tenantId);
-        if (owner.authLevel() == null || owner.authLevel().getValue() < AuthenticationLevel.L3.getValue()) {
-            throw new OnlineVotingException(AUTHENTICATION_REQUIRED, "在线表决前请先完成人脸实名核验");
+        EvaluationResult evaluation = abacPolicyEngine.evaluateVoting(
+                owner.uid(),
+                tenantId,
+                AbacPolicyEngine.VotingPurpose.COMMON_DECISION,
+                owner.authLevel());
+        if (!evaluation.isAllowed()) {
+            throw new OnlineVotingException(
+                    AUTHENTICATION_REQUIRED,
+                    evaluation.getMessage() == null
+                            ? "在线表决前请先完成 L2 实名认证"
+                            : evaluation.getMessage());
         }
         return owner;
     }

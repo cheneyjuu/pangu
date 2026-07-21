@@ -5,9 +5,11 @@ import com.pangu.application.voting.VoteSubmissionService;
 import com.pangu.application.voting.VotingApplicationException;
 import com.pangu.application.voting.VotingExecutionService;
 import com.pangu.application.voting.command.CastVoteCommand;
+import com.pangu.domain.context.UserContext;
 import com.pangu.domain.context.UserContextHolder;
 import com.pangu.domain.gateway.VoteCastMonitorGateway;
 import com.pangu.domain.model.asset.OwnerPropertyVotingView;
+import com.pangu.domain.model.user.AuthenticationLevel;
 import com.pangu.domain.model.voting.Candidate;
 import com.pangu.domain.model.voting.CandidateStatus;
 import com.pangu.domain.model.voting.SubjectStatus;
@@ -16,6 +18,7 @@ import com.pangu.domain.model.voting.VoteChoice;
 import com.pangu.domain.model.voting.VotingScope;
 import com.pangu.domain.model.voting.VotingSubject;
 import com.pangu.domain.policy.AbacPolicyEngine;
+import com.pangu.domain.policy.EvaluationResult;
 import com.pangu.domain.repository.ElectionCandidateRegistry;
 import com.pangu.domain.repository.OwnerPropertyVotingRepository;
 import com.pangu.domain.repository.VoteItemRepository;
@@ -48,6 +51,7 @@ import static org.mockito.Mockito.when;
  * <ul>
  *   <li>缺 targetId → ELECTION_TARGET_REQUIRED；</li>
  *   <li>候选人不存在 / 不属本议题 / 非 APPROVED / 非 SUPPORT → CANDIDATE_NOT_VOTABLE；</li>
+ *   <li>线上选举投票未完成 L3 活体实名 → ELECTION_AUTH_LEVEL_INSUFFICIENT；</li>
  *   <li>已投满 maxWinners → VOTE_LIMIT_EXCEEDED；</li>
  *   <li>正向：候选人 APPROVED + 未投满 → 返回 voteId。</li>
  * </ul>
@@ -119,6 +123,32 @@ public class ElectionVoteSubmissionTest {
                 new BigDecimal("85.00"), true, 1);
     }
 
+    private UserContext ownerContext(AuthenticationLevel level) {
+        return new UserContext(999913L, UserContext.IdentityType.C_USER, UID, TENANT,
+                null, null, null, null, level, null, null, null);
+    }
+
+    @Test
+    public void onlineElectionWithL2Rejected() {
+        when(subjectRepository.findById(SUBJECT_ID)).thenReturn(Optional.of(electionVoting()));
+        when(electionCandidateRegistry.findById(CANDIDATE_ID))
+                .thenReturn(Optional.of(candidate(SUBJECT_ID, CandidateStatus.APPROVED)));
+        when(userContextHolder.current()).thenReturn(ownerContext(AuthenticationLevel.L2));
+        when(abacPolicyEngine.evaluateVoting(
+                UID, TENANT, AbacPolicyEngine.VotingPurpose.COMMITTEE_ELECTION, AuthenticationLevel.L2))
+                .thenReturn(EvaluationResult.denied(
+                        "业委会选举投票前请先完成人脸实名认证",
+                        "L3_ELECTION_REQUIRED",
+                        "LIMIT_ELECTION_VOTE",
+                        true));
+
+        VotingApplicationException ex = assertThrows(VotingApplicationException.class,
+                () -> service.cast(cmd(CANDIDATE_ID, VoteChoice.SUPPORT)));
+
+        assertEquals(VotingApplicationException.Reason.ELECTION_AUTH_LEVEL_INSUFFICIENT, ex.getReason());
+        verify(voteItemRepository, never()).insert(anyLong(), any(), any());
+    }
+
     @Test
     public void missingTargetRejected() {
         when(subjectRepository.findById(SUBJECT_ID)).thenReturn(Optional.of(electionVoting()));
@@ -171,6 +201,10 @@ public class ElectionVoteSubmissionTest {
         when(subjectRepository.findById(SUBJECT_ID)).thenReturn(Optional.of(electionVoting()));
         when(electionCandidateRegistry.findById(CANDIDATE_ID))
                 .thenReturn(Optional.of(candidate(SUBJECT_ID, CandidateStatus.APPROVED)));
+        when(userContextHolder.current()).thenReturn(ownerContext(AuthenticationLevel.L3));
+        when(abacPolicyEngine.evaluateVoting(
+                UID, TENANT, AbacPolicyEngine.VotingPurpose.COMMITTEE_ELECTION, AuthenticationLevel.L3))
+                .thenReturn(EvaluationResult.allowed());
         when(ownerPropertyVotingRepository.findByOpid(OPID)).thenReturn(Optional.of(validView()));
         // 已投满 maxWinners(=2)
         when(electionCandidateRegistry.countSupportByOpid(SUBJECT_ID, OPID)).thenReturn((long) MAX_WINNERS);
@@ -185,6 +219,10 @@ public class ElectionVoteSubmissionTest {
         when(subjectRepository.findById(SUBJECT_ID)).thenReturn(Optional.of(electionVoting()));
         when(electionCandidateRegistry.findById(CANDIDATE_ID))
                 .thenReturn(Optional.of(candidate(SUBJECT_ID, CandidateStatus.APPROVED)));
+        when(userContextHolder.current()).thenReturn(ownerContext(AuthenticationLevel.L3));
+        when(abacPolicyEngine.evaluateVoting(
+                UID, TENANT, AbacPolicyEngine.VotingPurpose.COMMITTEE_ELECTION, AuthenticationLevel.L3))
+                .thenReturn(EvaluationResult.allowed());
         when(ownerPropertyVotingRepository.findByOpid(OPID)).thenReturn(Optional.of(validView()));
         when(electionCandidateRegistry.countSupportByOpid(SUBJECT_ID, OPID)).thenReturn(1L);
         when(voteItemRepository.insert(eq(SUBJECT_ID), any(), any())).thenReturn(777L);

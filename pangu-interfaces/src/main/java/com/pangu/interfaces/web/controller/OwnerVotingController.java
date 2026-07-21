@@ -1,3 +1,4 @@
+// 关联业务：向业主端提供议题查询、共同决定与业委会选举的投票入口。
 package com.pangu.interfaces.web.controller;
 
 import com.pangu.application.voting.ElectionCandidateService;
@@ -45,7 +46,7 @@ import java.util.Set;
  *
  * <p>{@code c_user} 没有 sys_role 链路，因此 endpoint 一律使用
  * {@code @PreAuthorize("isAuthenticated()")}（沿用 M2-3 异议救济的降级方案）；
- * 真正的 ABAC 校验（L3 face-auth / opid 归属 / scope 范围 / 重复投票）由
+ * 真正的 ABAC 校验（共同决定 L2、业委会选举 L3、opid 归属、scope 范围和重复投票）由
  * {@link VoteSubmissionService} 与 {@link ProposalLifecycleService#findVisibleForOwner} 在 service 层执行。
  */
 @Slf4j

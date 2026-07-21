@@ -1,3 +1,4 @@
+// 关联业务：提供业主表决议题的结算结果查询。
 package com.pangu.interfaces.web.controller;
 
 import com.pangu.application.voting.VotingApplicationException;
@@ -21,9 +22,8 @@ import org.springframework.web.bind.annotation.RestController;
  *       拉取结果快照（含司法链 stub 的 attestation_tx_hash）。</li>
  * </ul>
  *
- * <p>投票提交端点（{@code POST /api/v1/elections/{subjectId}/votes}）暂不在本期实现：
- * 计划中的 ABAC L3 + face-auth 校验链路依赖未完成的 vote-submission application service，
- * 推迟到下一个里程碑；本期 e2e 流程通过测试 fixture 直接 INSERT 投票数据驱动。
+ * <p>投票提交由业主端控制器和 application service 承担。本控制器不承载提交逻辑，
+ * 避免结果查询与身份、专有部分资格及重复票校验混在同一接口边界。
  */
 @RestController
 @RequestMapping("/api/v1")
@@ -31,7 +31,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class VotingController extends BaseController {
 
     private final VotingResultRepository votingResultRepository;
-    @SuppressWarnings("unused") // 预留：后续 vote 提交场景注入
+    @SuppressWarnings("unused") // 保留既有应用服务依赖，供结果查询编排扩展使用
     private final VotingApplicationService votingApplicationService;
 
     /**

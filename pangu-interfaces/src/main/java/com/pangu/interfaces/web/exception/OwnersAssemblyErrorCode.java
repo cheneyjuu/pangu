@@ -9,7 +9,7 @@ public enum OwnersAssemblyErrorCode implements ErrorCode {
     INVALID_STATUS(42604, "业主大会表决状态不允许该动作", 409, ErrorType.BIZ, false),
     NOTICE_NOT_COMPLETED(42605, "业主大会公示期或投票开始时间未满足", 409, ErrorType.BIZ, false),
     DELIVERY_REQUIRED(42606, "投票前必须完成送达留痕", 409, ErrorType.BIZ, false),
-    AUTH_LEVEL_INSUFFICIENT(42607, "线上表决需要完成人脸实名认证", 403, ErrorType.BIZ, false),
+    AUTH_LEVEL_INSUFFICIENT(42607, "在线表决前请先完成 L2 实名认证", 403, ErrorType.BIZ, false),
     OPID_NOT_OWNED(42608, "该房产身份不属于当前用户", 403, ErrorType.BIZ, false),
     OPID_OUT_OF_SCOPE(42609, "该房产不在本表决范围内或不具备投票资格", 403, ErrorType.BIZ, false),
     VOTE_ALREADY_CAST(42610, "该房产已有有效票，不能重复投票", 409, ErrorType.BIZ, false),

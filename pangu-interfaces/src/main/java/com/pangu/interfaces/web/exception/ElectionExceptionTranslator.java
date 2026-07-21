@@ -73,6 +73,7 @@ public final class ElectionExceptionTranslator {
             case CANCEL_FORBIDDEN -> ElectionErrorCode.CANCEL_FORBIDDEN;
             case CONCURRENT_LIFECYCLE_MODIFICATION -> ElectionErrorCode.LIFECYCLE_CONCURRENT_MODIFICATION;
             case AUTH_LEVEL_INSUFFICIENT -> ElectionErrorCode.AUTH_LEVEL_INSUFFICIENT;
+            case ELECTION_AUTH_LEVEL_INSUFFICIENT -> ElectionErrorCode.ELECTION_AUTH_LEVEL_INSUFFICIENT;
             case OPID_NOT_OWNED -> ElectionErrorCode.OPID_NOT_OWNED;
             case OPID_OUT_OF_SCOPE -> ElectionErrorCode.OPID_OUT_OF_SCOPE;
             case VOTE_ALREADY_CAST -> ElectionErrorCode.VOTE_ALREADY_CAST;

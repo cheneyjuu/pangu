@@ -1,3 +1,4 @@
+// 关联业务：在管理端和业主端请求链路中传递可信身份、租户、数据范围与实名等级。
 package com.pangu.domain.context;
 
 import com.pangu.domain.model.user.AuthenticationLevel;
@@ -24,7 +25,7 @@ import java.util.stream.Collectors;
  * @param deptCategory         所属部门端归属：{@link DeptCategory#G}/{@link DeptCategory#B}/{@link DeptCategory#S}（C 端为 null）
  * @param deptType             所属部门类型（C 端为 null）；对齐 {@code sys_dept.dept_type}
  * @param dataScopeType        行级数据权限范围（{@link DataScopeType#ALL_COMMUNITY}/{@link DataScopeType#OWNER_GROUP}/{@link DataScopeType#ORG_ONLY}）
- * @param authLevel            认证等级（C 端 L1/L3 实名状态；管理端通常 L1）
+ * @param authLevel            认证等级（C 端 L1/L2/L3 实名状态；管理端通常 L1）
  * @param roleKey              角色 key；C 端为 null
  * @param permissions          能力点 key 集合；@PreAuthorize 取此集合
  * @param authorizedBuildingIds OWNER_GROUP 时由用户责任田或网格节点范围反查得到的楼栋 ID 集合；兼容旧调用

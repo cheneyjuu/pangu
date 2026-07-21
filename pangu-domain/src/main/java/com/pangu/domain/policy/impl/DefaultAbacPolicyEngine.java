@@ -1,3 +1,4 @@
+// 关联业务：执行业主参选与线上表决的默认认证等级和资格策略。
 package com.pangu.domain.policy.impl;
 
 import com.pangu.domain.model.user.AuthenticationLevel;
@@ -42,13 +43,27 @@ public class DefaultAbacPolicyEngine implements AbacPolicyEngine {
     }
 
     @Override
-    public EvaluationResult evaluateVoting(Long uid, Long tenantId, AuthenticationLevel currentLevel) {
-        // 电子大表决强制要求 L3 级（刷脸实名）极其以上
-        if (currentLevel == null || currentLevel.getValue() < AuthenticationLevel.L3.getValue()) {
+    public EvaluationResult evaluateVoting(
+            Long uid,
+            Long tenantId,
+            VotingPurpose purpose,
+            AuthenticationLevel currentLevel) {
+        AuthenticationLevel requiredLevel = purpose == VotingPurpose.COMMITTEE_ELECTION
+                ? AuthenticationLevel.L3
+                : AuthenticationLevel.L2;
+        if (currentLevel == null || currentLevel.getValue() < requiredLevel.getValue()) {
+            if (requiredLevel == AuthenticationLevel.L3) {
+                return EvaluationResult.denied(
+                        "业委会选举投票前请先完成人脸实名认证",
+                        "L3_ELECTION_REQUIRED",
+                        "LIMIT_ELECTION_VOTE",
+                        true
+                );
+            }
             return EvaluationResult.denied(
-                    "拦截限制：重大事项电子表决需要确保为产权人本人操作。根据法效力合规要求，请先完成 L3 级实名活体认证（人脸识别），或转由线下兜底渠道核销。",
-                    "L3_REQUIREMENT",
-                    "LIMIT_VOTE_SUBMIT",
+                    "在线表决前请先完成 L2 实名认证",
+                    "L2_COMMON_DECISION_REQUIRED",
+                    "LIMIT_COMMON_DECISION_VOTE",
                     true
             );
         }

@@ -38,7 +38,7 @@ import java.time.Instant;
  * <ol>
  *   <li>读取议题，校验 status=VOTING 且 subjectType ∈ {GENERAL, MAJOR}（ELECTION 本期不开放投票）；</li>
  *   <li>校验 tenant 一致；</li>
- *   <li>对 MAJOR 议题调用 {@link AbacPolicyEngine#evaluateVoting} 强制 L3 face-auth；</li>
+ *   <li>线上表决统一调用 {@link AbacPolicyEngine#evaluateVoting}：共同决定要求 L2，业委会选举要求 L3；</li>
  *   <li>校验 opid 归属 + scope=BUILDING 时 building_id 范围；</li>
  *   <li>INSERT t_vote_item，UNIQUE 冲突 → {@link VotingApplicationException.Reason#VOTE_ALREADY_CAST}。</li>
  * </ol>
@@ -112,14 +112,22 @@ public class VoteSubmissionService {
 
         VoteChannel voteChannel = VoteChannel.defaultIfNull(cmd.voteChannel());
 
-        // 2. MAJOR 线上票强制 L3 face-auth；纸票/线下代录走线下凭证，不复用 C 端人脸认证闸门。
-        if (subject.getSubjectType() == SubjectType.MAJOR && voteChannel == VoteChannel.ONLINE) {
+        // 2. C 端线上票按业务目的校验实名等级；纸票/线下代录由原件与复核证明身份。
+        if (voteChannel == VoteChannel.ONLINE) {
             UserContext ctx = userContextHolder.current();
             AuthenticationLevel currentLevel = ctx == null ? null : ctx.authLevel();
-            EvaluationResult eval = abacPolicyEngine.evaluateVoting(cmd.uid(), cmd.tenantId(), currentLevel);
+            AbacPolicyEngine.VotingPurpose purpose = subject.getSubjectType() == SubjectType.ELECTION
+                    ? AbacPolicyEngine.VotingPurpose.COMMITTEE_ELECTION
+                    : AbacPolicyEngine.VotingPurpose.COMMON_DECISION;
+            EvaluationResult eval = abacPolicyEngine.evaluateVoting(
+                    cmd.uid(), cmd.tenantId(), purpose, currentLevel);
             if (!eval.isAllowed()) {
+                VotingApplicationException.Reason reason = purpose
+                        == AbacPolicyEngine.VotingPurpose.COMMITTEE_ELECTION
+                        ? VotingApplicationException.Reason.ELECTION_AUTH_LEVEL_INSUFFICIENT
+                        : VotingApplicationException.Reason.AUTH_LEVEL_INSUFFICIENT;
                 throw new VotingApplicationException(
-                        VotingApplicationException.Reason.AUTH_LEVEL_INSUFFICIENT,
+                        reason,
                         eval.getMessage() == null ? "当前认证等级不足" : eval.getMessage());
             }
         }

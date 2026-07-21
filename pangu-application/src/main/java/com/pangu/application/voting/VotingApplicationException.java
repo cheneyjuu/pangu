@@ -1,3 +1,4 @@
+// 关联业务：表达议题、选举、投票提交和结算用例的稳定失败原因。
 package com.pangu.application.voting;
 
 /**
@@ -32,7 +33,7 @@ public class VotingApplicationException extends RuntimeException {
         OPID_OUT_OF_SCOPE,
         /** UNIQUE(subject_id, opid, target) 冲突；前端回 409。 */
         VOTE_ALREADY_CAST,
-        /** 当前认证等级不足（MAJOR 议题要求 L3 face-auth）。 */
+        /** 非选举线上表决未达到 L2 实名认证。 */
         AUTH_LEVEL_INSUFFICIENT,
         /** 撤回行为被拒（DRAFT 阶段非本人 / PUBLISHED 阶段非政府 / VOTING+ 一律拒）。 */
         CANCEL_FORBIDDEN,
@@ -44,6 +45,8 @@ public class VotingApplicationException extends RuntimeException {
         ELECTION_MAX_WINNERS_REQUIRED,
         /** ELECTION 投票缺 candidateId（targetId）。 */
         ELECTION_TARGET_REQUIRED,
+        /** ELECTION 线上投票未达到 L3 活体实名认证。 */
+        ELECTION_AUTH_LEVEL_INSUFFICIENT,
         /** 候选人不存在。 */
         CANDIDATE_NOT_FOUND,
         /** 候选人不可被投票（不属于本议题 / 非 APPROVED）。 */

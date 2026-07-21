@@ -672,7 +672,7 @@ class OwnersAssemblyFlowTest {
                 WHERE package_id = ? ORDER BY subject_id
                 """, Long.class, legacyPackageId);
         assertThat(subjectIds).hasSize(2);
-        jdbcTemplate.update("UPDATE c_user SET auth_level = 2 WHERE uid = ?", USER_OWNER);
+        jdbcTemplate.update("UPDATE c_user SET auth_level = 1 WHERE uid = ?", USER_OWNER);
         String ownerToken = ownerToken();
         String disclosure = mockMvc.perform(get("/api/v1/me/owners-assembly-disclosures/" + legacyPackageId)
                         .header("Authorization", "Bearer " + ownerToken))
@@ -692,9 +692,9 @@ class OwnersAssemblyFlowTest {
                                 "packageHash", packageHash,
                                 "confirmed", true))))
                 .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.msg", is("在线表决前请先完成人脸实名核验")));
+                .andExpect(jsonPath("$.msg", is("在线表决前请先完成 L2 实名认证")));
 
-        jdbcTemplate.update("UPDATE c_user SET auth_level = 3 WHERE uid = ?", USER_OWNER);
+        jdbcTemplate.update("UPDATE c_user SET auth_level = 2 WHERE uid = ?", USER_OWNER);
 
         mockMvc.perform(post("/api/v1/me/owners-assembly-disclosures/" + legacyPackageId + "/online-ballots")
                         .header("Authorization", "Bearer " + ownerToken)

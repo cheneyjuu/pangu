@@ -61,7 +61,8 @@ public enum ElectionErrorCode implements ErrorCode {
     PROPOSE_FROZEN_HANDOVER(40926, "换届选举进行中，新议题立项已熔断", 409, ErrorType.BIZ, false),
 
     // ============ M3-2 投票提交（AUTHZ / 403 + BUSINESS / 409） ============
-    AUTH_LEVEL_INSUFFICIENT(40330, "当前认证等级不足，请先完成人脸实名认证", 403, ErrorType.BIZ, false),
+    AUTH_LEVEL_INSUFFICIENT(40330, "在线表决前请先完成 L2 实名认证", 403, ErrorType.BIZ, false),
+    ELECTION_AUTH_LEVEL_INSUFFICIENT(40333, "业委会选举投票前请先完成人脸实名认证", 403, ErrorType.BIZ, false),
     OPID_NOT_OWNED(40331, "该房产身份不属于当前用户", 403, ErrorType.BIZ, false),
     OPID_OUT_OF_SCOPE(40332, "该房产不在本议题表决范围内", 403, ErrorType.BIZ, false),
     VOTE_ALREADY_CAST(40930, "您已对该议题投过票，无法重复投票", 409, ErrorType.BIZ, false),

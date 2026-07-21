@@ -23,6 +23,7 @@ import com.pangu.domain.repository.OwnerPropertyVotingRepository;
 import com.pangu.domain.repository.VoteItemRepository;
 import com.pangu.domain.repository.VotingSubjectRepository;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
@@ -50,7 +51,7 @@ import static org.mockito.Mockito.when;
  * <p>覆盖 cast 流水线上每一道闸门：
  * <ul>
  *   <li>议题不存在 / 非 VOTING / ELECTION 缺 targetId / 租户不一致；</li>
- *   <li>MAJOR 议题 L3 face-auth 不足 → AUTH_LEVEL_INSUFFICIENT；</li>
+ *   <li>GENERAL / MAJOR 线上表决仅要求 L2 实名，L1 → AUTH_LEVEL_INSUFFICIENT；</li>
  *   <li>opid 不存在 / 非本人 → OPID_NOT_OWNED；</li>
  *   <li>账户欠费冻结 / BUILDING scope 不匹配 → OPID_OUT_OF_SCOPE；</li>
  *   <li>UNIQUE 冲突 → VOTE_ALREADY_CAST；</li>
@@ -121,6 +122,17 @@ public class VoteSubmissionServiceTest {
                 null, null, null, null, level, null, null, null);
     }
 
+    @BeforeEach
+    public void allowL2CommonDecisionByDefault() {
+        when(userContextHolder.current()).thenReturn(ctx(AuthenticationLevel.L2));
+        when(abacPolicyEngine.evaluateVoting(
+                anyLong(),
+                anyLong(),
+                eq(AbacPolicyEngine.VotingPurpose.COMMON_DECISION),
+                any(AuthenticationLevel.class)))
+                .thenReturn(EvaluationResult.allowed());
+    }
+
     // ===== 议题级闸门 =====
 
     @Test
@@ -161,19 +173,37 @@ public class VoteSubmissionServiceTest {
         assertEquals(VotingApplicationException.Reason.OPID_OUT_OF_SCOPE, ex.getReason());
     }
 
-    // ===== MAJOR L3 闸门 =====
+    // ===== 非选举事项 L2 闸门 =====
 
     @Test
-    public void majorWithInsufficientAuthLevel() {
+    public void generalOnlineWithL1Rejected() {
         when(subjectRepository.findById(SUBJECT_ID))
-                .thenReturn(Optional.of(votingSubject(SubjectType.MAJOR, VotingScope.COMMUNITY, null)));
+                .thenReturn(Optional.of(votingSubject(SubjectType.GENERAL, VotingScope.COMMUNITY, null)));
         when(userContextHolder.current()).thenReturn(ctx(AuthenticationLevel.L1));
-        when(abacPolicyEngine.evaluateVoting(eq(UID), eq(TENANT), eq(AuthenticationLevel.L1)))
-                .thenReturn(EvaluationResult.denied("需 L3 人脸实名", "L3_REQUIRED", "LIMIT_MAJOR_VOTE", true));
+        when(abacPolicyEngine.evaluateVoting(
+                eq(UID), eq(TENANT), eq(AbacPolicyEngine.VotingPurpose.COMMON_DECISION),
+                eq(AuthenticationLevel.L1)))
+                .thenReturn(EvaluationResult.denied("需 L2 实名认证", "L2_REQUIRED", "LIMIT_COMMON_VOTE", true));
         VotingApplicationException ex = assertThrows(VotingApplicationException.class,
                 () -> service.cast(cmd()));
         assertEquals(VotingApplicationException.Reason.AUTH_LEVEL_INSUFFICIENT, ex.getReason());
         verify(voteItemRepository, never()).insert(anyLong(), any(), any());
+    }
+
+    @Test
+    public void majorOnlineWithL2Accepted() {
+        when(subjectRepository.findById(SUBJECT_ID))
+                .thenReturn(Optional.of(votingSubject(SubjectType.MAJOR, VotingScope.COMMUNITY, null)));
+        when(userContextHolder.current()).thenReturn(ctx(AuthenticationLevel.L2));
+        when(abacPolicyEngine.evaluateVoting(
+                eq(UID), eq(TENANT), eq(AbacPolicyEngine.VotingPurpose.COMMON_DECISION),
+                eq(AuthenticationLevel.L2)))
+                .thenReturn(EvaluationResult.allowed());
+        when(ownerPropertyVotingRepository.findByOpid(OPID))
+                .thenReturn(Optional.of(view(UID, TENANT, BUILDING, true, 1)));
+        when(voteItemRepository.insert(eq(SUBJECT_ID), any(), any())).thenReturn(554L);
+
+        assertEquals(554L, service.cast(cmd()));
     }
 
     // ===== opid 归属 / scope 闸门 =====
@@ -243,17 +273,22 @@ public class VoteSubmissionServiceTest {
     // ===== 正向 =====
 
     @Test
-    public void generalHappyPath_noAbac_returnsVoteId() {
+    public void generalHappyPath_withL2_returnsVoteId() {
         when(subjectRepository.findById(SUBJECT_ID))
                 .thenReturn(Optional.of(votingSubject(SubjectType.GENERAL, VotingScope.COMMUNITY, null)));
+        when(userContextHolder.current()).thenReturn(ctx(AuthenticationLevel.L2));
+        when(abacPolicyEngine.evaluateVoting(
+                eq(UID), eq(TENANT), eq(AbacPolicyEngine.VotingPurpose.COMMON_DECISION),
+                eq(AuthenticationLevel.L2)))
+                .thenReturn(EvaluationResult.allowed());
         when(ownerPropertyVotingRepository.findByOpid(OPID))
                 .thenReturn(Optional.of(view(UID, TENANT, BUILDING, true, 1)));
         when(voteItemRepository.insert(eq(SUBJECT_ID), any(), any())).thenReturn(555L);
 
         long voteId = service.cast(cmd());
         assertEquals(555L, voteId);
-        // GENERAL 议题不触发 L3 face-auth
-        verify(abacPolicyEngine, never()).evaluateVoting(anyLong(), anyLong(), any());
+        verify(abacPolicyEngine).evaluateVoting(
+                UID, TENANT, AbacPolicyEngine.VotingPurpose.COMMON_DECISION, AuthenticationLevel.L2);
         verify(voteCastMonitorGateway).recordCast(any());
     }
 
@@ -297,7 +332,7 @@ public class VoteSubmissionServiceTest {
     }
 
     @Test
-    public void majorOfflineProxyVote_skipsOnlineL3GateAndRecordsPaperLike() {
+    public void majorOfflineProxyVote_skipsOnlineAuthenticationGateAndRecordsPaperLike() {
         when(subjectRepository.findById(SUBJECT_ID))
                 .thenReturn(Optional.of(votingSubject(SubjectType.MAJOR, VotingScope.COMMUNITY, null)));
         when(ownerPropertyVotingRepository.findByOpid(OPID))
@@ -307,7 +342,7 @@ public class VoteSubmissionServiceTest {
         long voteId = service.cast(cmd(VoteChannel.OFFLINE_PROXY));
 
         assertEquals(558L, voteId);
-        verify(abacPolicyEngine, never()).evaluateVoting(anyLong(), anyLong(), any());
+        verify(abacPolicyEngine, never()).evaluateVoting(anyLong(), anyLong(), any(), any());
         org.mockito.ArgumentCaptor<VoteCastMonitorGateway.VoteCastEvent> eventCaptor =
                 forClass(VoteCastMonitorGateway.VoteCastEvent.class);
         verify(voteCastMonitorGateway).recordCast(eventCaptor.capture());
