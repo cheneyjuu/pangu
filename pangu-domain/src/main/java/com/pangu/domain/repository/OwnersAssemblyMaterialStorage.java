@@ -9,6 +9,8 @@ public interface OwnersAssemblyMaterialStorage {
 
     StoredObjectMetadata put(String objectKey, byte[] content, String contentType, String contentMd5Base64);
 
+    byte[] read(String objectKey);
+
     /** 为已获授权的公告、方案或选票模板临时生成下载地址，不持久化 URL。 */
     URL createDownloadUrl(String objectKey, Duration validity);
 

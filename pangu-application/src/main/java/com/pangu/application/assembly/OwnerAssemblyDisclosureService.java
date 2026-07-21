@@ -2,6 +2,7 @@
 package com.pangu.application.assembly;
 
 import com.pangu.application.support.PayloadHasher;
+import com.pangu.application.support.OwnerAccessibleFile;
 import com.pangu.application.voting.OnlineVotingService;
 import com.pangu.application.voting.VotingDecisionResultProjector;
 import com.pangu.domain.context.UserContext;
@@ -31,6 +32,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
@@ -75,12 +79,7 @@ public class OwnerAssemblyDisclosureService {
 
     @Transactional(readOnly = true)
     public OwnerAssemblyMaterialDownloadTicket createMaterialDownloadTicket(Long packageId, Long materialId) {
-        VisibleAssembly visible = loadVisibleAssembly(packageId);
-        OwnersAssemblyMaterial material = visible.materials().stream()
-                .filter(candidate -> candidate.materialId().equals(materialId))
-                .filter(candidate -> DOWNLOADABLE_MATERIAL_TYPES.contains(candidate.materialType()))
-                .findFirst()
-                .orElseThrow(this::notVisible);
+        OwnersAssemblyMaterial material = findVisibleMaterial(packageId, materialId);
         Instant expiresAt = Instant.now().plus(DOWNLOAD_VALIDITY);
         try {
             return new OwnerAssemblyMaterialDownloadTicket(
@@ -93,6 +92,45 @@ public class OwnerAssemblyDisclosureService {
         } catch (RuntimeException ex) {
             throw new OwnersAssemblyApplicationException(
                     STORAGE_UNAVAILABLE, "生成业主大会材料下载地址失败", ex);
+        }
+    }
+
+    /** 通过当前小程序 API 域名交付已锁定材料，并再次核对上传时固化的大小和摘要。 */
+    @Transactional(readOnly = true)
+    public OwnerAccessibleFile readMaterial(Long packageId, Long materialId) {
+        OwnersAssemblyMaterial material = findVisibleMaterial(packageId, materialId);
+        byte[] content;
+        try {
+            content = materialStorage.read(material.objectKey());
+        } catch (RuntimeException ex) {
+            throw new OwnersAssemblyApplicationException(
+                    STORAGE_UNAVAILABLE, "读取业主大会材料失败", ex);
+        }
+        if (content == null
+                || material.fileSize() == null
+                || material.fileSize() != content.length
+                || material.contentSha256() == null
+                || !material.contentSha256().equals(sha256Hex(content))) {
+            throw new OwnersAssemblyApplicationException(
+                    STORAGE_UNAVAILABLE, "业主大会材料内容与登记记录不一致");
+        }
+        return new OwnerAccessibleFile(material.originalFileName(), material.contentType(), content);
+    }
+
+    private OwnersAssemblyMaterial findVisibleMaterial(Long packageId, Long materialId) {
+        VisibleAssembly visible = loadVisibleAssembly(packageId);
+        return visible.materials().stream()
+                .filter(candidate -> candidate.materialId().equals(materialId))
+                .filter(candidate -> DOWNLOADABLE_MATERIAL_TYPES.contains(candidate.materialType()))
+                .findFirst()
+                .orElseThrow(this::notVisible);
+    }
+
+    private String sha256Hex(byte[] content) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(content));
+        } catch (NoSuchAlgorithmException ex) {
+            throw new IllegalStateException("JVM 缺少 SHA-256 文件摘要算法", ex);
         }
     }
 

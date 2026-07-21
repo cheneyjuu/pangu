@@ -38,6 +38,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest
@@ -373,6 +374,21 @@ class OwnersAssemblyFlowTest {
                 .andExpect(jsonPath("$.data.subjects[0].status", is("PUBLISHED")))
                 .andExpect(jsonPath("$.data.subjects[0].choice").doesNotExist())
                 .andExpect(jsonPath("$.data.publicNotice.objectKey").doesNotExist());
+
+        Long planMaterialId = jdbcTemplate.queryForObject("""
+                SELECT material_id
+                FROM t_owners_assembly_material
+                WHERE session_id = ? AND material_type = 'PLAN_ATTACHMENT'
+                ORDER BY material_id DESC
+                LIMIT 1
+                """, Long.class, sessionId);
+        when(objectStorage.read(anyString())).thenReturn("plan".getBytes(StandardCharsets.UTF_8));
+        mockMvc.perform(get("/api/v1/me/owners-assembly-disclosures/" + packageId
+                        + "/materials/" + planMaterialId + "/content")
+                        .header("Authorization", "Bearer " + ownerToken()))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType(MediaType.APPLICATION_PDF_VALUE))
+                .andExpect(content().bytes("plan".getBytes(StandardCharsets.UTF_8)));
     }
 
     @Test

@@ -48,6 +48,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @AutoConfigureMockMvc
@@ -341,6 +342,13 @@ class RepairProjectBuildingE2eFlowTest {
         assertTrue(java.util.stream.StreamSupport.stream(ownerVotingTasks.spliterator(), false)
                 .anyMatch(task -> task.path("projectId").asLong() == projectId
                         && "VOTING".equals(task.path("status").asText())));
+        when(objectStorage.read(anyString())).thenReturn("ballot-template".getBytes(StandardCharsets.UTF_8));
+        mockMvc.perform(get("/api/v1/me/repair-projects/" + projectId + "/voting/attachments/"
+                        + ballotTemplateAttachmentId + "/content")
+                        .header("Authorization", bearer(reportingOwnerToken)))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType(MediaType.APPLICATION_PDF_VALUE))
+                .andExpect(content().bytes("ballot-template".getBytes(StandardCharsets.UTF_8)));
 
         List<Map<String, Object>> voters = jdbcTemplate.queryForList("""
                 SELECT electorate.representative_uid AS owner_uid,

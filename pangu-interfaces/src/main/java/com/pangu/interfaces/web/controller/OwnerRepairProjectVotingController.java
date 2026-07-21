@@ -55,6 +55,15 @@ public class OwnerRepairProjectVotingController extends BaseController {
         return success(attachmentService.createOwnerVotingDownloadTicket(projectId, attachmentId));
     }
 
+    @GetMapping("/{projectId}/voting/attachments/{attachmentId}/content")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<byte[]> attachmentContent(
+            @PathVariable Long projectId,
+            @PathVariable Long attachmentId) {
+        return OwnerAccessibleFileResponse.inline(
+                attachmentService.readOwnerVotingAttachment(projectId, attachmentId));
+    }
+
     @PostMapping("/{projectId}/voting/acknowledgements")
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<Result<OnlineVotingAcknowledgementResponse>> acknowledge(

@@ -28,6 +28,11 @@ public class OwnersAssemblyMaterialStorageAdapter implements OwnersAssemblyMater
     }
 
     @Override
+    public byte[] read(String objectKey) {
+        return delegate.read(objectKey);
+    }
+
+    @Override
     public void delete(String objectKey) {
         delegate.delete(objectKey);
     }

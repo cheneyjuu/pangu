@@ -18,6 +18,7 @@ import com.pangu.interfaces.web.controller.dto.repair.SubmitOwnerRepairProjectDe
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -57,6 +58,15 @@ public class OwnerRepairProjectController extends BaseController {
                 attachmentService.createOwnerDownloadTicket(workOrderId, attachmentId)));
     }
 
+    @GetMapping("/by-work-order/{workOrderId}/attachments/{attachmentId}/content")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<byte[]> attachmentContent(
+            @PathVariable("workOrderId") Long workOrderId,
+            @PathVariable("attachmentId") Long attachmentId) {
+        return OwnerAccessibleFileResponse.inline(
+                attachmentService.readOwnerDownloadAttachment(workOrderId, attachmentId));
+    }
+
     @GetMapping("/decisions")
     @PreAuthorize("isAuthenticated()")
     public Result<List<OwnerDecisionTask>> decisionTasks() {
@@ -91,6 +101,15 @@ public class OwnerRepairProjectController extends BaseController {
             @PathVariable("attachmentId") Long attachmentId) {
         return success(RepairAttachmentDownloadTicketResponse.from(
                 attachmentService.createOwnerDecisionDownloadTicket(decisionId, attachmentId)));
+    }
+
+    @GetMapping("/decisions/{decisionId}/attachments/{attachmentId}/content")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<byte[]> decisionAttachmentContent(
+            @PathVariable("decisionId") Long decisionId,
+            @PathVariable("attachmentId") Long attachmentId) {
+        return OwnerAccessibleFileResponse.inline(
+                attachmentService.readOwnerDecisionAttachment(decisionId, attachmentId));
     }
 
     @GetMapping("/acceptance-tasks")

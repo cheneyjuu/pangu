@@ -4,6 +4,7 @@ package com.pangu.application.repair;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pangu.application.repair.command.UploadRepairProjectAttachmentCommand;
+import com.pangu.application.support.OwnerAccessibleFile;
 import com.pangu.domain.context.UserContext;
 import com.pangu.domain.context.UserContextHolder;
 import com.pangu.domain.model.repair.RepairProject;
@@ -148,6 +149,15 @@ public class RepairProjectAttachmentService {
 
     @Transactional(readOnly = true)
     public RepairAttachmentDownloadTicket createOwnerDownloadTicket(Long workOrderId, Long attachmentId) {
+        return createTicket(findOwnerDownloadAttachment(workOrderId, attachmentId));
+    }
+
+    @Transactional(readOnly = true)
+    public OwnerAccessibleFile readOwnerDownloadAttachment(Long workOrderId, Long attachmentId) {
+        return readContent(findOwnerDownloadAttachment(workOrderId, attachmentId));
+    }
+
+    private Attachment findOwnerDownloadAttachment(Long workOrderId, Long attachmentId) {
         OwnerRepairProjectDisclosure disclosure = ownerProjectQueryService.findPublishedByWorkOrder(workOrderId)
                 .orElseThrow(() -> new RepairWorkOrderApplicationException(
                         NOT_FOUND, "关联维修工程尚无可披露的锁定方案"));
@@ -156,17 +166,25 @@ public class RepairProjectAttachmentService {
         if (!published) {
             throw new RepairWorkOrderApplicationException(NOT_FOUND, "维修工程附件不在当前披露方案中");
         }
-        UserContext owner = userContextHolder.current();
-        Attachment attachment = projectRepository.findAttachment(
+        UserContext owner = requireOwner();
+        return projectRepository.findAttachment(
                         attachmentId, disclosure.projectId(), owner.tenantId())
                 .orElseThrow(() -> new RepairWorkOrderApplicationException(
                         NOT_FOUND, "维修工程附件不存在"));
-        return createTicket(attachment);
     }
 
     @Transactional(readOnly = true)
     public RepairAttachmentDownloadTicket createOwnerDecisionDownloadTicket(
             Long decisionId, Long attachmentId) {
+        return createTicket(findOwnerDecisionAttachment(decisionId, attachmentId));
+    }
+
+    @Transactional(readOnly = true)
+    public OwnerAccessibleFile readOwnerDecisionAttachment(Long decisionId, Long attachmentId) {
+        return readContent(findOwnerDecisionAttachment(decisionId, attachmentId));
+    }
+
+    private Attachment findOwnerDecisionAttachment(Long decisionId, Long attachmentId) {
         OwnerRepairProjectDisclosure disclosure = ownerProjectQueryService.findPublishedByDecision(decisionId)
                 .orElseThrow(() -> new RepairWorkOrderApplicationException(
                         NOT_FOUND, "在线表决不存在、已结束或当前业主无权查看方案"));
@@ -175,30 +193,57 @@ public class RepairProjectAttachmentService {
         if (!published) {
             throw new RepairWorkOrderApplicationException(NOT_FOUND, "维修工程附件不在当前披露方案中");
         }
-        UserContext owner = userContextHolder.current();
-        Attachment attachment = projectRepository.findAttachment(
+        UserContext owner = requireOwner();
+        return projectRepository.findAttachment(
                         attachmentId, disclosure.projectId(), owner.tenantId())
                 .orElseThrow(() -> new RepairWorkOrderApplicationException(
                         NOT_FOUND, "维修工程附件不存在"));
-        return createTicket(attachment);
     }
 
     /** 表决期间只允许下载本次冻结方案已经列出的附件。 */
     @Transactional(readOnly = true)
     public RepairAttachmentDownloadTicket createOwnerVotingDownloadTicket(
             Long projectId, Long attachmentId) {
+        return createTicket(findOwnerVotingAttachment(projectId, attachmentId));
+    }
+
+    /** 表决期间通过已备案 API 域名返回原文件，避免小程序依赖私有 OSS 域名。 */
+    @Transactional(readOnly = true)
+    public OwnerAccessibleFile readOwnerVotingAttachment(Long projectId, Long attachmentId) {
+        return readContent(findOwnerVotingAttachment(projectId, attachmentId));
+    }
+
+    private Attachment findOwnerVotingAttachment(Long projectId, Long attachmentId) {
         OwnerRepairProjectVotingService.Disclosure disclosure = ownerVotingService.disclosure(projectId);
         boolean published = disclosure.attachments().stream()
                 .anyMatch(attachment -> attachment.attachmentId().equals(attachmentId));
         if (!published) {
             throw new RepairWorkOrderApplicationException(NOT_FOUND, "维修工程附件不在本次表决方案中");
         }
-        UserContext owner = userContextHolder.current();
-        Attachment attachment = projectRepository.findAttachment(
+        UserContext owner = requireOwner();
+        return projectRepository.findAttachment(
                         attachmentId, disclosure.projectId(), owner.tenantId())
                 .orElseThrow(() -> new RepairWorkOrderApplicationException(
                         NOT_FOUND, "维修工程附件不存在"));
-        return createTicket(attachment);
+    }
+
+    private OwnerAccessibleFile readContent(Attachment attachment) {
+        byte[] content;
+        try {
+            content = objectStorage.read(attachment.objectKey());
+        } catch (RuntimeException ex) {
+            throw new RepairWorkOrderApplicationException(STORAGE_UNAVAILABLE, "读取维修工程附件失败", ex);
+        }
+        if (content == null
+                || attachment.fileSize() == null
+                || attachment.fileSize() != content.length
+                || attachment.sha256() == null
+                || !attachment.sha256().equals(digestHex("SHA-256", content))) {
+            throw new RepairWorkOrderApplicationException(
+                    STORAGE_UNAVAILABLE, "维修工程附件内容与上传记录不一致");
+        }
+        return new OwnerAccessibleFile(
+                attachment.originalFileName(), attachment.contentType(), content);
     }
 
     private RepairAttachmentDownloadTicket createTicket(Attachment attachment) {
@@ -311,6 +356,14 @@ public class RepairProjectAttachmentService {
             throw new RepairWorkOrderApplicationException(FORBIDDEN, "未识别到当前小区管理端工作身份");
         }
         return actor;
+    }
+
+    private UserContext requireOwner() {
+        UserContext owner = userContextHolder.current();
+        if (owner == null || !owner.isCUser() || owner.uid() == null || owner.tenantId() == null) {
+            throw new RepairWorkOrderApplicationException(FORBIDDEN, "未识别到当前业主身份");
+        }
+        return owner;
     }
 
     private Long resolveTenant(UserContext actor, Long projectId) {

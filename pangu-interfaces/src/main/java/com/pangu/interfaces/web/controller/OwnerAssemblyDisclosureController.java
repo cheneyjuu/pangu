@@ -53,6 +53,14 @@ public class OwnerAssemblyDisclosureController extends BaseController {
                 service.createMaterialDownloadTicket(packageId, materialId)));
     }
 
+    @GetMapping("/{packageId}/materials/{materialId}/content")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<byte[]> materialContent(
+            @PathVariable Long packageId,
+            @PathVariable Long materialId) {
+        return OwnerAccessibleFileResponse.inline(service.readMaterial(packageId, materialId));
+    }
+
     @PostMapping("/{packageId}/online-acknowledgements")
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<Result<OnlineVotingAcknowledgementResponse>> acknowledgeMaterials(
