@@ -112,7 +112,15 @@ public class VoteSubmissionService {
 
         VoteChannel voteChannel = VoteChannel.defaultIfNull(cmd.voteChannel());
 
-        // 2. C 端线上票按业务目的校验实名等级；纸票/线下代录由原件与复核证明身份。
+        // 2. 正式共同决定必须先引导到整包确认入口；错误入口不能被认证提示遮蔽。
+        var formalPackage = votingExecutionService.findPackageBySubjectId(cmd.subjectId());
+        if (formalPackage.isPresent()) {
+            throw new VotingApplicationException(
+                    VotingApplicationException.Reason.SUBJECT_NOT_VOTING_CASTABLE,
+                    "该事项属于正式共同决定，请从本次业主大会表决页面核对全部事项后统一提交");
+        }
+
+        // 3. C 端线上票按业务目的校验实名等级；纸票/线下代录由原件与复核证明身份。
         if (voteChannel == VoteChannel.ONLINE) {
             UserContext ctx = userContextHolder.current();
             AuthenticationLevel currentLevel = ctx == null ? null : ctx.authLevel();
@@ -132,15 +140,7 @@ public class VoteSubmissionService {
             }
         }
 
-        // 正式共同决定必须通过整包确认入口提交，禁止单事项接口产生部分票或接受客户端签名摘要。
-        var formalPackage = votingExecutionService.findPackageBySubjectId(cmd.subjectId());
-        if (formalPackage.isPresent()) {
-            throw new VotingApplicationException(
-                    VotingApplicationException.Reason.SUBJECT_NOT_VOTING_CASTABLE,
-                    "该事项属于正式共同决定，请从本次业主大会表决页面核对全部事项后统一提交");
-        }
-
-        // 3. opid 归属 + scope 范围校验
+        // 4. opid 归属 + scope 范围校验
         OwnerPropertyVotingView view = ownerPropertyVotingRepository.findByOpid(cmd.opid())
                 .orElseThrow(() -> new VotingApplicationException(
                         VotingApplicationException.Reason.OPID_NOT_OWNED,
