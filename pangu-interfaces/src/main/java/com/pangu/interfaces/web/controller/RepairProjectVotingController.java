@@ -72,6 +72,13 @@ public class RepairProjectVotingController extends BaseController {
         return success(service.find(projectId));
     }
 
+    @GetMapping("/progress")
+    @PreAuthorize("hasAuthority('repair:workorder:read')")
+    public Result<RepairProjectVotingChannelService.VotingProgress> progress(
+            @PathVariable("projectId") Long projectId) {
+        return success(channelService.progress(projectId));
+    }
+
     @PostMapping("/paper-deliveries")
     @PreAuthorize("hasAuthority('voting:subject:audit')")
     public Result<PaperVotingDeliveryResponse> recordPaperDelivery(

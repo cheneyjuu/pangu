@@ -337,6 +337,17 @@ class RepairProjectBuildingE2eFlowTest {
                 "/api/v1/admin/repair-projects/" + projectId + "/voting",
                 committeeDirectorToken);
         assertEquals("VOTING", opened.path("voting").path("status").asText());
+        JsonNode initialProgress = getData(
+                "/api/v1/admin/repair-projects/" + projectId + "/voting/progress",
+                propertyManagerToken);
+        assertTrue(initialProgress.path("eligiblePropertyCount").asLong() >= 2);
+        assertEquals(0L, initialProgress.path("onlineSubmittedPropertyCount").asLong());
+        assertEquals(0L, initialProgress.path("completedPaperBallotCount").asLong());
+        assertTrue(initialProgress.path("electorate").isMissingNode());
+        assertTrue(initialProgress.path("paper").isMissingNode());
+        mockMvc.perform(get("/api/v1/admin/repair-projects/" + projectId + "/voting/workbench")
+                        .header("Authorization", bearer(propertyManagerToken)))
+                .andExpect(status().isForbidden());
         JsonNode ownerVotingTasks = getData(
                 "/api/v1/me/repair-projects/voting-tasks", reportingOwnerToken);
         assertTrue(java.util.stream.StreamSupport.stream(ownerVotingTasks.spliterator(), false)
@@ -389,6 +400,13 @@ class RepairProjectBuildingE2eFlowTest {
                     ownerToken, Map.of("opid", opid, "packageHash", packageHash, "confirmed", true));
             postOwnerBallot(projectId, ownerToken, opid, packageHash, subjectId);
         }
+        JsonNode managerProgress = getData(
+                "/api/v1/admin/repair-projects/" + projectId + "/voting/progress",
+                propertyManagerToken);
+        assertEquals(voters.size(), managerProgress.path("eligiblePropertyCount").asInt());
+        assertEquals(voters.size() - 1,
+                managerProgress.path("onlineSubmittedPropertyCount").asInt());
+        assertEquals(2, managerProgress.path("completedPaperBallotCount").asInt());
         businessNow.set(voteStartAt.plus(31, ChronoUnit.MINUTES));
         JsonNode settled = postData(
                 "/api/v1/admin/repair-projects/" + projectId + "/voting/settle",

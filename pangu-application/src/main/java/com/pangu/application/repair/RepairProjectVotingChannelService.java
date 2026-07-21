@@ -10,6 +10,7 @@ import com.pangu.domain.model.assembly.OwnersAssemblyRule;
 import com.pangu.domain.model.assembly.OwnersAssemblyRuleConfiguration;
 import com.pangu.domain.model.repair.RepairProject;
 import com.pangu.domain.model.repair.RepairProjectVoting;
+import com.pangu.domain.model.voting.OnlinePaperAssistanceRequest;
 import com.pangu.domain.model.voting.PaperBallot;
 import com.pangu.domain.model.voting.PaperBallotEntry;
 import com.pangu.domain.model.voting.PaperVotingDelivery;
@@ -195,6 +196,40 @@ public class RepairProjectVotingChannelService {
                 context.actor().userId());
     }
 
+    /**
+     * 向项目经办人员提供不含逐户身份、票面选择和纸票原件的办理进度。
+     * 详细纸票工作台仍由专门权限保护，避免为了展示数量而扩大敏感材料的可见范围。
+     */
+    @Transactional(readOnly = true)
+    public VotingProgress progress(Long projectId) {
+        Context context = context(projectId);
+        long eligiblePropertyCount = votingExecutionRepository.findElectorateSnapshot(
+                        context.executionPackage().getElectorateSnapshotId(), context.project().tenantId())
+                .map(snapshot -> (long) snapshot.items().size())
+                .orElse(0L);
+        PaperVotingService.Workbench paperWorkbench;
+        try {
+            paperWorkbench = paperVotingService.getWorkbench(
+                    context.executionPackage().getPackageId(), context.project().tenantId());
+        } catch (PaperVotingException ex) {
+            throw translate(ex);
+        }
+        long completedPaperBallotCount = paperWorkbench.ballots().stream()
+                .filter(item -> item.ballot().status() == PaperBallot.Status.COMPLETED)
+                .count();
+        OnlineVotingService.ManagementProgress onlineProgress = onlineVotingService.managementProgress(
+                context.executionPackage().getPackageId(), context.project().tenantId());
+        long activePaperAssistanceRequestCount = onlineVotingService.listPaperAssistanceRequests(
+                        context.executionPackage().getPackageId(), context.project().tenantId()).stream()
+                .filter(item -> item.status() != OnlinePaperAssistanceRequest.Status.WITHDRAWN)
+                .count();
+        return new VotingProgress(
+                eligiblePropertyCount,
+                onlineProgress.completedPropertyCount(),
+                completedPaperBallotCount,
+                activePaperAssistanceRequestCount);
+    }
+
     private ElectorateWorkbenchItem toElectorateWorkbenchItem(
             VotingElectorateSnapshot.Item item, Long tenantId) {
         PropertyBindingRepository.Roster roster = propertyBindingRepository.findRosterById(item.rosterId());
@@ -345,6 +380,14 @@ public class RepairProjectVotingChannelService {
                     ? List.of() : List.copyOf(paperAssistanceRequests);
             validDeliveryMethods = validDeliveryMethods == null ? Set.of() : Set.copyOf(validDeliveryMethods);
         }
+    }
+
+    public record VotingProgress(
+            long eligiblePropertyCount,
+            long onlineSubmittedPropertyCount,
+            long completedPaperBallotCount,
+            long activePaperAssistanceRequestCount
+    ) {
     }
 
     public record ElectorateWorkbenchItem(
